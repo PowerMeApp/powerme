@@ -29,6 +29,16 @@ echo "▶ Repo: $REPO"
 echo
 
 # ---------------------------------------------------------------------------
+# 0. Thay OWNER/REPO trong link mẫu issue
+# ---------------------------------------------------------------------------
+CFG=".github/ISSUE_TEMPLATE/config.yml"
+if [ -f "$CFG" ] && grep -q "OWNER/REPO" "$CFG"; then
+  sed -i.bak "s#OWNER/REPO#$REPO#g" "$CFG" && rm -f "$CFG.bak"
+  echo "▶ Đã thay OWNER/REPO trong $CFG — nhớ commit thay đổi này."
+  echo
+fi
+
+# ---------------------------------------------------------------------------
 # 1. Nhãn
 # ---------------------------------------------------------------------------
 echo "▶ Tạo nhãn..."
