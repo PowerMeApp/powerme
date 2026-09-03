@@ -1,0 +1,84 @@
+# Hạ tầng phát triển cục bộ cho PowerMe.
+#
+# ⚠️ Mọi image đều GHIM PHIÊN BẢN CỤ THỂ. Không dùng `latest` — SteVe và SAP simulator
+#    biến động nhanh, để `latest` là tự chuốc rắc rối vào tháng 10.
+#
+#   npm run infra:up      bật
+#   npm run infra:down    tắt, giữ dữ liệu
+#   npm run infra:reset   tắt và xoá sạch volume
+
+name: powerme
+
+services:
+  postgres:
+    image: postgres:16.4-alpine
+    container_name: powerme-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-powerme}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-powerme}
+      POSTGRES_DB: ${POSTGRES_DB:-powerme}
+    ports:
+      - '${POSTGRES_PORT:-5432}:5432'
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-powerme}']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7.4-alpine
+    container_name: powerme-redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    ports:
+      - '${REDIS_PORT:-6379}:6379'
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ---------------------------------------------------------------------------
+  # CSMS đối chứng. Chạy tiến trình riêng để SO SÁNH HÀNH VI với CSMS của nhóm.
+  # KHÔNG fork, KHÔNG copy code — chạy riêng thì câu hỏi giấy phép không phát sinh.
+  # Bật bằng: docker compose --profile reference up -d
+  # ---------------------------------------------------------------------------
+  steve-db:
+    image: mysql:8.0
+    container_name: powerme-steve-db
+    profiles: ['reference']
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${STEVE_DB_PASSWORD:-changeme}
+      MYSQL_DATABASE: stevedb
+      MYSQL_USER: steve
+      MYSQL_PASSWORD: ${STEVE_DB_PASSWORD:-changeme}
+    volumes:
+      - stevedata:/var/lib/mysql
+
+  steve:
+    # ⚠️ Ghim tag của bản release đã xác nhận (3.14.1, 12/08/2026).
+    #    Nếu image công khai không có tag này, build cục bộ từ commit đã ghim và
+    #    ghi lại số commit ở docs/adr/.
+    image: steve:3.14.1
+    container_name: powerme-steve
+    profiles: ['reference']
+    restart: unless-stopped
+    depends_on: [steve-db]
+    ports:
+      - '${STEVE_HTTP_PORT:-8180}:8180' # giao diện web
+      - '${STEVE_WS_PORT:-8181}:8181' # điểm cuối WebSocket OCPP-J
+    environment:
+      DB_HOST: steve-db
+      DB_USERNAME: steve
+      DB_PASSWORD: ${STEVE_DB_PASSWORD:-changeme}
+
+volumes:
+  pgdata:
+  redisdata:
+  stevedata:

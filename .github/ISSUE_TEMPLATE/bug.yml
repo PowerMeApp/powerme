@@ -1,0 +1,61 @@
+name: Lỗi
+description: Có gì đó chạy sai
+title: '[BUG] '
+labels: ['bug']
+body:
+  - type: dropdown
+    id: thanh-phan
+    attributes:
+      label: Thành phần
+      options:
+        - csms (backend OCPP)
+        - dashboard
+        - mobile
+        - shared
+        - simulator
+        - infra / CI
+    validations:
+      required: true
+
+  - type: textarea
+    id: hien-tuong
+    attributes:
+      label: Hiện tượng
+      description: Mong đợi gì, thực tế xảy ra gì.
+    validations:
+      required: true
+
+  - type: textarea
+    id: tai-hien
+    attributes:
+      label: Các bước tái hiện
+      value: |
+        1. 
+        2. 
+        3.
+    validations:
+      required: true
+
+  - type: textarea
+    id: log-ocpp
+    attributes:
+      label: Log bản tin OCPP
+      description: Bắt buộc nếu lỗi nằm ở CSMS hoặc simulator. Dán frame thô, đừng mô tả lại.
+      render: json
+
+  - type: input
+    id: moi-truong
+    attributes:
+      label: Môi trường
+      placeholder: 'local / staging · SteVe 3.14.1 · simulator commit abc1234'
+
+  - type: dropdown
+    id: muc-do
+    attributes:
+      label: Mức độ
+      options:
+        - Chặn cột mốc
+        - Nặng — có đường vòng
+        - Nhẹ
+    validations:
+      required: true

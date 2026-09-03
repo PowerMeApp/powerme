@@ -1,0 +1,42 @@
+name: PR title
+
+on:
+  pull_request_target:
+    types: [opened, edited, synchronize, reopened]
+
+permissions:
+  pull-requests: read
+
+jobs:
+  conventional-commit:
+    name: Tiêu đề PR theo Conventional Commits
+    runs-on: ubuntu-latest
+    steps:
+      # Tiêu đề PR trở thành commit message trên main (squash merge),
+      # nên nó phải đúng quy ước ngay từ đầu — xem CONTRIBUTING.md mục 3.
+      - uses: amannn/action-semantic-pull-request@v5
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          types: |
+            feat
+            fix
+            refactor
+            test
+            docs
+            chore
+            perf
+          scopes: |
+            csms
+            dashboard
+            mobile
+            shared
+            simulator
+            infra
+            docs
+            repo
+          requireScope: false
+          subjectPattern: ^(?![A-Z]).+$
+          subjectPatternError: |
+            Phần mô tả của tiêu đề PR ("{subject}") không được viết hoa chữ đầu.
+            Ví dụ đúng: feat(csms): state machine cho tru dual gun  [BE-05]

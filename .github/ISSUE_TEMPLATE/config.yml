@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Kế hoạch 13 tuần
+    url: https://github.com/OWNER/REPO/blob/main/docs/KE-HOACH-POWERME.md
+    about: Bảng phân rã công việc, cột mốc M1–M6, danh sách phạm vi đã cắt
+  - name: Quy ước làm việc
+    url: https://github.com/OWNER/REPO/blob/main/CONTRIBUTING.md
+    about: Quy trình git, định nghĩa hoàn thành, cách viết ADR

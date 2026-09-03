@@ -1,0 +1,15 @@
+* text=auto eol=lf
+*.sh   text eol=lf
+*.ps1  text eol=crlf
+*.bat  text eol=crlf
+
+# Nhị phân — không diff, không đổi eol
+*.png  binary
+*.jpg  binary
+*.pdf  binary
+*.whl  binary
+*.zip  binary
+
+# File sinh tự động — gập lại trong diff của PR
+package-lock.json linguist-generated=true -diff
+packages/shared/src/api/generated/** linguist-generated=true -diff

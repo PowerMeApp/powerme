@@ -1,0 +1,32 @@
+{
+  "name": "powerme",
+  "version": "0.1.0",
+  "private": true,
+  "description": "PowerMe — Nền tảng CSMS OCPP 1.6J cho trạm sạc DC D1 / YJ-EU Series",
+  "engines": {
+    "node": ">=22.0.0",
+    "npm": ">=10.0.0"
+  },
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "csms": "npm run -w @powerme/csms",
+    "dashboard": "npm run -w @powerme/dashboard",
+    "mobile": "npm run -w @powerme/mobile",
+    "build": "npm run build --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "lint": "npm run lint --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "infra:up": "docker compose -f infra/docker-compose.yml up -d",
+    "infra:down": "docker compose -f infra/docker-compose.yml down",
+    "infra:logs": "docker compose -f infra/docker-compose.yml logs -f",
+    "infra:reset": "docker compose -f infra/docker-compose.yml down -v"
+  },
+  "devDependencies": {
+    "prettier": "^3.4.2"
+  }
+}

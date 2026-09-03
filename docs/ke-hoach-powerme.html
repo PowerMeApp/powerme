@@ -1,0 +1,707 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lộ trình PowerMe</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500&family=Source+Sans+3:ital,wght@0,400;0,600;1,400&display=swap">
+<style>
+:root{
+  --paper:#F4F5F6; --surface:#FFFFFF; --surface-2:#EBEEF0;
+  --ink:#14191D; --ink-2:#39444B; --muted:#5D6A73;
+  --line:#DBDFE3; --line-strong:#C0C7CC;
+  --accent:#8F6100; --accent-mark:#E0A100;
+  --ok:#0F7A55; --info:#1F6FEB; --warn:#B26A00; --crit:#B4322A; --idle:#78868F;
+  --shadow:0 1px 2px rgba(20,25,29,.06), 0 8px 24px -16px rgba(20,25,29,.28);
+  --display:"Archivo","Helvetica Neue",Arial,sans-serif;
+  --body:"Source Sans 3","Segoe UI",system-ui,sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,Consolas,monospace;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --paper:#0E1215; --surface:#151B20; --surface-2:#1B2329;
+    --ink:#E7EBEE; --ink-2:#C2CBD1; --muted:#8E9BA4;
+    --line:#252E34; --line-strong:#3A454D;
+    --accent:#F0B429; --accent-mark:#F0B429;
+    --ok:#3DBE8B; --info:#5B9BFF; --warn:#E3A13C; --crit:#F0705F; --idle:#8E9BA4;
+    --shadow:0 1px 2px rgba(0,0,0,.4), 0 10px 30px -20px rgba(0,0,0,.9);
+  }
+}
+:root[data-theme="dark"]{
+  --paper:#0E1215; --surface:#151B20; --surface-2:#1B2329;
+  --ink:#E7EBEE; --ink-2:#C2CBD1; --muted:#8E9BA4;
+  --line:#252E34; --line-strong:#3A454D;
+  --accent:#F0B429; --accent-mark:#F0B429;
+  --ok:#3DBE8B; --info:#5B9BFF; --warn:#E3A13C; --crit:#F0705F; --idle:#8E9BA4;
+  --shadow:0 1px 2px rgba(0,0,0,.4), 0 10px 30px -20px rgba(0,0,0,.9);
+}
+*{box-sizing:border-box}
+body{
+  margin:0; background:var(--paper); color:var(--ink);
+  font-family:var(--body); font-size:17px; line-height:1.62;
+  -webkit-font-smoothing:antialiased;
+}
+.wrap{max-width:1140px; margin:0 auto; padding:0 28px 110px}
+h1,h2,h3,h4{font-family:var(--display); text-wrap:balance; margin:0; letter-spacing:-.015em}
+p{margin:0}
+a{color:var(--accent)}
+code{font-family:var(--mono); font-size:.88em; background:var(--surface-2); padding:1px 5px; border-radius:3px}
+:focus-visible{outline:2px solid var(--accent-mark); outline-offset:3px; border-radius:2px}
+
+.masthead{border-bottom:1px solid var(--line); padding:56px 0 32px; margin-bottom:52px}
+.eyebrow{
+  font-family:var(--mono); font-size:12px; letter-spacing:.14em; text-transform:uppercase;
+  color:var(--muted); display:flex; align-items:center; gap:14px; margin-bottom:22px;
+}
+.eyebrow::after{content:""; flex:1; height:1px; background:var(--line-strong)}
+h1{font-size:clamp(42px,7vw,74px); font-weight:700; line-height:.98; letter-spacing:-.03em}
+h1 .volt{color:var(--accent-mark)}
+.lede{font-size:19.5px; color:var(--ink-2); margin-top:20px; max-width:64ch}
+.facts{display:flex; flex-wrap:wrap; margin-top:32px; border-top:1px solid var(--line)}
+.fact{padding:16px 26px 14px 0; margin-right:26px; border-right:1px solid var(--line)}
+.fact:last-child{border-right:0}
+.fact dt{font-family:var(--mono); font-size:11px; letter-spacing:.12em; text-transform:uppercase; color:var(--muted)}
+.fact dd{margin:5px 0 0; font-family:var(--display); font-size:19px; font-weight:600; font-variant-numeric:tabular-nums}
+
+section{margin-top:74px}
+.sec-head{display:flex; align-items:baseline; gap:16px}
+.sec-head::before{content:""; width:26px; height:3px; background:var(--accent-mark); flex:none; transform:translateY(-7px)}
+h2{font-size:clamp(25px,3.3vw,33px); font-weight:700}
+.sec-note{color:var(--muted); font-size:16px; margin:12px 0 28px; max-width:76ch}
+.sec-note em{color:var(--ink-2)}
+h3{font-size:19px; font-weight:600; margin-bottom:6px}
+
+.grid{display:grid; gap:16px}
+.g2{grid-template-columns:repeat(auto-fit,minmax(330px,1fr))}
+.g3{grid-template-columns:repeat(auto-fit,minmax(285px,1fr))}
+.card{
+  background:var(--surface); border:1px solid var(--line); border-radius:4px;
+  padding:22px; box-shadow:var(--shadow);
+}
+.card p{font-size:15.5px; color:var(--ink-2); margin-top:8px}
+.card .src{
+  font-family:var(--mono); font-size:11.5px; color:var(--muted);
+  margin-top:14px; padding-top:12px; border-top:1px dashed var(--line-strong);
+}
+.dec{border-left:3px solid var(--accent-mark)}
+.dec .verdict{
+  font-size:15.5px; color:var(--ink); background:var(--surface-2);
+  border-radius:3px; padding:11px 13px; margin-top:13px;
+}
+.dec .verdict b{font-family:var(--display); color:var(--accent); font-weight:600}
+
+.lane{
+  background:var(--surface); border:1px solid var(--line); border-radius:4px;
+  padding:22px; display:flex; flex-direction:column; gap:11px; box-shadow:var(--shadow);
+}
+.wp{font-family:var(--mono); font-size:12px; font-weight:500; letter-spacing:.12em; color:var(--accent)}
+.lane h3{margin:0}
+.role{font-size:14.5px; color:var(--muted); font-style:italic}
+.lane ul{margin:0; padding-left:18px; font-size:15.5px; color:var(--ink-2)}
+.lane ul li{margin-bottom:5px}
+.owns{
+  font-family:var(--mono); font-size:11px; letter-spacing:.07em; text-transform:uppercase;
+  color:var(--muted); border-top:1px solid var(--line); padding-top:12px; margin-top:auto;
+}
+
+.rail{list-style:none; margin:0; padding:0 0 0 36px; position:relative}
+.rail::before{content:""; position:absolute; left:7px; top:12px; bottom:12px; width:2px; background:var(--line-strong)}
+.ms{position:relative; padding-bottom:36px}
+.ms::before{
+  content:""; position:absolute; left:-36px; top:6px; width:16px; height:16px; border-radius:50%;
+  background:var(--paper); border:3px solid var(--line-strong);
+}
+.ms.key::before{border-color:var(--accent-mark); background:var(--accent-mark)}
+.ms-head{display:flex; align-items:center; gap:12px; flex-wrap:wrap}
+.ms-id{
+  font-family:var(--mono); font-weight:500; font-size:13px; letter-spacing:.06em;
+  color:var(--paper); background:var(--ink); padding:2px 9px; border-radius:3px;
+}
+.ms.key .ms-id{background:var(--accent-mark); color:#14191D}
+.ms-date{font-family:var(--mono); font-size:13px; color:var(--muted); font-variant-numeric:tabular-nums}
+.gate{
+  font-family:var(--mono); font-size:11px; letter-spacing:.09em; text-transform:uppercase;
+  padding:2px 8px; border-radius:3px; border:1px solid currentColor;
+}
+.gate.hard{color:var(--crit)}
+.gate.soft{color:var(--info)}
+.ms h3{margin-top:9px; font-size:20px}
+.ms>p{font-size:15.5px; color:var(--ink-2); margin-top:4px; max-width:74ch}
+.exit{margin:13px 0 0; padding:0; list-style:none; display:grid; gap:6px}
+.exit li{font-size:15.5px; color:var(--ink-2); padding-left:23px; position:relative; max-width:74ch}
+.exit li::before{
+  content:""; position:absolute; left:2px; top:.6em; width:8px; height:8px;
+  border:2px solid var(--accent-mark); border-radius:1px;
+}
+
+.tbl-wrap{overflow-x:auto; border:1px solid var(--line); border-radius:4px; background:var(--surface); box-shadow:var(--shadow)}
+table{border-collapse:collapse; width:100%; min-width:760px; font-size:15px}
+th,td{text-align:left; padding:11px 14px; border-bottom:1px solid var(--line); vertical-align:top}
+thead th{
+  font-family:var(--mono); font-size:11px; letter-spacing:.1em; text-transform:uppercase;
+  color:var(--muted); font-weight:500; background:var(--surface-2); white-space:nowrap;
+}
+tbody tr:last-child td{border-bottom:0}
+td.id,td.num{font-family:var(--mono); font-size:13.5px; font-variant-numeric:tabular-nums; white-space:nowrap; color:var(--ink-2)}
+td.num{text-align:right}
+td.wk{font-family:var(--mono); font-size:13px; color:var(--muted); white-space:nowrap; font-variant-numeric:tabular-nums}
+tbody tr.tet td{background:color-mix(in srgb, var(--warn) 12%, transparent)}
+tbody tr.gaterow td{background:color-mix(in srgb, var(--accent-mark) 11%, transparent)}
+
+.chip{
+  display:inline-block; font-family:var(--mono); font-size:11px; letter-spacing:.05em;
+  padding:1px 7px; border-radius:3px; white-space:nowrap; border:1px solid;
+}
+.m{color:var(--crit); border-color:color-mix(in srgb,var(--crit) 45%,transparent); background:color-mix(in srgb,var(--crit) 9%,transparent)}
+.s{color:var(--info); border-color:color-mix(in srgb,var(--info) 45%,transparent); background:color-mix(in srgb,var(--info) 9%,transparent)}
+.c{color:var(--idle); border-color:color-mix(in srgb,var(--idle) 48%,transparent); background:color-mix(in srgb,var(--idle) 10%,transparent)}
+
+.wbs{margin-bottom:32px}
+.wbs-head{display:flex; align-items:baseline; gap:14px; flex-wrap:wrap; margin-bottom:11px}
+.wbs-head h3{margin:0; font-size:20px}
+.wbs-head .budget{font-family:var(--mono); font-size:12.5px; color:var(--muted); margin-left:auto}
+
+.risk{border-left:3px solid var(--line-strong)}
+.risk.hi{border-left-color:var(--crit)}
+.risk.mid{border-left-color:var(--warn)}
+.risk .lvl{font-family:var(--mono); font-size:11px; letter-spacing:.1em; text-transform:uppercase; color:var(--muted)}
+.risk h3{font-size:17.5px; margin-top:5px}
+.risk .fix{font-size:15.5px; color:var(--ink-2); margin-top:11px}
+.risk .fix b{font-family:var(--display); font-size:11.5px; letter-spacing:.08em; text-transform:uppercase; color:var(--accent); display:block; margin-bottom:1px}
+
+.rules{display:grid; gap:20px; grid-template-columns:repeat(auto-fit,minmax(270px,1fr))}
+.rule{border-top:2px solid var(--ink); padding-top:14px}
+.rule h4{font-size:15.5px; margin-bottom:7px}
+.rule p, .rule ul{font-size:15.5px; color:var(--ink-2)}
+.rule ul{margin:0; padding-left:17px}
+.rule ul li{margin-bottom:4px}
+
+footer{margin-top:78px; padding-top:26px; border-top:1px solid var(--line); color:var(--muted); font-size:14.5px; max-width:76ch}
+@media (max-width:640px){
+  body{font-size:16px}
+  .wrap{padding:0 18px 80px}
+  .fact{border-right:0; padding-right:0; margin-right:0; width:50%}
+}
+</style>
+
+<div class="wrap">
+
+<header class="masthead">
+  <div class="eyebrow">Capstone SE · FPT University · 24/08/2026 – 22/11/2026</div>
+  <h1>Lộ trình <span class="volt">PowerMe</span></h1>
+  <p class="lede">Kế hoạch thực thi 13 tuần cho 5 thành viên: CSMS theo OCPP 1.6J, app tài xế và dashboard vận hành cho dòng trạm sạc DC <strong>D1 Series</strong> và <strong>YJ-EU Series</strong>. Phần cứng mô phỏng hoàn toàn bằng simulator.</p>
+  <dl class="facts">
+    <div class="fact"><dt>Thời lượng</dt><dd>13 tuần</dd></div>
+    <div class="fact"><dt>Nhịp sprint</dt><dd>6 × 2 tuần</dd></div>
+    <div class="fact"><dt>Quỹ công sức</dt><dd>132 ngày công</dd></div>
+    <div class="fact"><dt>Cột mốc</dt><dd>M1 → M6</dd></div>
+    <div class="fact"><dt>Bảo vệ</dt><dd>22/11/2026</dd></div>
+  </dl>
+</header>
+
+<section id="delta">
+  <div class="sec-head"><h2>Bản này thay thế kế hoạch 26 tuần</h2></div>
+  <p class="sec-note">Thời lượng rút từ 6 tháng xuống 3 tháng. Quỹ công sức giảm từ 290 xuống 132 ngày công, nên khoảng một nửa phạm vi đã bị cắt <em>có chủ ý</em> — danh sách cắt ở cuối trang. Bộ công cụ và cách định vị phần nghiên cứu đã được cập nhật theo kết quả nghiên cứu nền ngày 18/08/2026.</p>
+
+  <div class="grid g3">
+    <div class="card dec">
+      <h3>Simulator thành sản phẩm bàn giao</h3>
+      <p>Không còn là công cụ lấp chỗ trống khi chưa có trụ thật. Giờ nó là thứ duy nhất chứng minh nhóm đã đọc hiểu SRS phần cứng — và với doanh nghiệp, một simulator trung thực với thiết bị của họ thuyết phục không kém gì CSMS.</p>
+    </div>
+    <div class="card dec">
+      <h3>Đối chứng nghiên cứu đổi sang ablation</h3>
+      <p>Không có trụ thật thì không truy cập được cloud của hãng. So chính CSMS khi bật engine đối soát với khi tắt engine — cô lập đúng một biến, cho kết luận nhân quả thay vì tương quan.</p>
+    </div>
+    <div class="card dec">
+      <h3>Có thước đo công nghiệp để tự chấm</h3>
+      <p>Tài liệu OCTT của Open Charge Alliance có đúng 76 ca <code>TC_*_CSMS</code> dành cho Central System. Tự chấm và báo cáo đạt bao nhiêu, kèm lý do các ca chưa làm, mạnh hơn nhiều so với không có thước đo nào.</p>
+    </div>
+  </div>
+</section>
+
+<section id="hardware">
+  <div class="sec-head"><h2>Sáu ràng buộc từ SRS phần cứng</h2></div>
+  <p class="sec-note">Tài liệu SRS D1 &amp; YJ-EU là đặc tả <em>thiết bị</em>, không phải đặc tả phần mềm. Nó chốt sẵn sáu điều mà nếu phát hiện muộn thì phải làm lại kiến trúc.</p>
+
+  <div class="grid g2">
+    <div class="card dec">
+      <h3>Một trụ là hai connector, không phải một</h3>
+      <p>Cả D1 và YJ-EU đều là dual gun, module công suất đánh địa chỉ lẻ cho súng A, chẵn cho súng B.</p>
+      <div class="verdict"><b>Chốt.</b> Khoá nghiệp vụ là <code>(chargePointId, connectorId)</code>. <code>connectorId = 0</code> dành cho trạng thái toàn trụ theo đúng OCPP 1.6.</div>
+      <div class="src">SRS §2 cấu hình súng sạc · §4 quy tắc đánh địa chỉ</div>
+    </div>
+
+    <div class="card dec">
+      <h3>Chỉ OCPP 1.6J — bỏ 2.0.1 khỏi phạm vi</h3>
+      <p>Phần cứng chỉ khai báo 1.6J. Làm 2.0.1 là làm một thứ không có thiết bị nào để kiểm chứng.</p>
+      <div class="verdict"><b>Chốt.</b> Làm 1.6J Core + Remote Trigger. ISO 15118 và DIN 70121 nằm ở tầng xe–trụ, <b>ngoài phạm vi phần mềm</b>.</div>
+      <div class="src">SRS §3 giao thức và tiêu chuẩn tuân thủ</div>
+    </div>
+
+    <div class="card dec">
+      <h3>Trụ có pricing engine riêng — CSMS là nguồn sự thật</h3>
+      <p>Trụ tự tính tiền theo khung giờ Sharp / Peak / Shoulder / Off-peak và tự hiện màn Settlement. OCPP 1.6J không có lệnh chuẩn để đẩy biểu giá xuống trụ.</p>
+      <div class="verdict"><b>Chốt.</b> CSMS tính tiền từ <code>MeterValues</code> và là nguồn sự thật cho hoá đơn. Giá trên trụ chỉ để hiển thị. Mọi lệch so với Settlement phải sinh bản ghi đối soát.</div>
+      <div class="src">SRS §6 pricing engine · §5.3 settlement</div>
+    </div>
+
+    <div class="card dec">
+      <h3>Ba đường xác thực, chỉ một đường đi qua app</h3>
+      <p>Quét QR trên màn hình trụ, quẹt RFID, hoặc nhập mật khẩu trên HMI. Hai đường sau bắt đầu phiên mà app không biết.</p>
+      <div class="verdict"><b>Chốt.</b> CSMS phải nhận <code>StartTransaction</code> với <code>idTag</code> lạ và ghi nhận thành phiên vãng lai. Đây là hành vi spec quy định — OCPP 1.6 §9.1.12, §9.1.13, §9.1.1.</div>
+      <div class="src">SRS §5.1 · OCPP 1.6 §9.1 configuration keys</div>
+    </div>
+
+    <div class="card dec">
+      <h3>Bốn chế độ sạc — bản 3 tháng chỉ làm một</h3>
+      <p>Qua OCPP 1.6J, app không có lệnh chuẩn để đặt hạn mức kWh hay hạn mức tiền khi remote start. Cần hạn mức mềm phía CSMS, tốn 4 ngày công cho một tính năng khó demo.</p>
+      <div class="verdict"><b>Chốt.</b> Chỉ làm chế độ sạc đầy tự động. Ba chế độ còn lại chuyển sang chương hướng phát triển.</div>
+      <div class="src">SRS §5.2 lựa chọn chế độ sạc</div>
+    </div>
+
+    <div class="card dec">
+      <h3>Onboarding luôn có người ở hiện trường</h3>
+      <p>Server URL, Port và SN gõ tay trên HMI, bắt buộc reboot mới có hiệu lực. Không có zero-touch provisioning.</p>
+      <div class="verdict"><b>Chốt.</b> Vòng đời thiết bị <code>Đã đăng ký → Chờ kết nối → Trực tuyến</code>. Mật khẩu admin mặc định <code>115200</code> là một phát hiện bảo mật đáng đưa vào báo cáo.</div>
+      <div class="src">SRS §6 cấu hình mạng và xác thực quản trị</div>
+    </div>
+  </div>
+</section>
+
+<section id="tools">
+  <div class="sec-head"><h2>Bộ công cụ đã chốt</h2></div>
+  <p class="sec-note">Dựa trên nghiên cứu nền ngày 18/08/2026 — 23 nguồn, 21 claim qua kiểm chứng đối kháng ba phiếu. Cơ sở và nguồn dẫn đầy đủ nằm trong tài liệu nghiên cứu nền đi kèm.</p>
+
+  <div class="tbl-wrap">
+    <table>
+      <thead><tr><th>Vai trò</th><th>Công cụ</th><th>Giấy phép</th><th>Vì sao chọn</th></tr></thead>
+      <tbody>
+        <tr>
+          <td><strong>Charge point mô phỏng</strong></td>
+          <td>SAP e-mobility-charging-stations-simulator</td>
+          <td class="id">Apache-2.0</td>
+          <td>Mặc định OCPP 1.6J, đủ 16 message Core. Có sẵn template DC hai súng 50 kW với MeterValues SoC, điện áp, dòng, công suất, điện năng. Scale nhiều trạm bằng worker pool. Có buffer message khi mất WebSocket và thủ tục chủ động cắt kết nối.</td>
+        </tr>
+        <tr>
+          <td><strong>CSMS đối chứng</strong></td>
+          <td>SteVe, chạy tiến trình riêng</td>
+          <td class="id">⚠ phải tự kiểm</td>
+          <td>CSMS 1.6J-native tốt nhất để so hành vi. <b>Không fork, không copy code</b> — chạy riêng thì câu hỏi giấy phép không phát sinh.</td>
+        </tr>
+        <tr>
+          <td><strong>Load test</strong></td>
+          <td>Mẫu k6 của MaEVe</td>
+          <td class="id">Apache-2.0</td>
+          <td>1 virtual user = 1 trạm sạc, khung OCPP 1.6J thật, kèm Prometheus và Grafana. Chứng minh chịu tải nhiều trụ mà không cần một mảnh phần cứng nào. Repo đã archived nhưng mẫu load test còn dùng tốt.</td>
+        </tr>
+        <tr>
+          <td><strong>Checklist tuân thủ</strong></td>
+          <td>76 ca <code>TC_*_CSMS</code> trong tài liệu OCTT của OCA</td>
+          <td class="id">công khai</td>
+          <td>Bề mặt tuân thủ đếm được để tự chấm. Trích bản 2026-03 là mới nhất đã xác nhận.</td>
+        </tr>
+        <tr>
+          <td><strong>Backend · Dashboard · App</strong></td>
+          <td>NestJS + PostgreSQL + Redis · React + Vite · React Native</td>
+          <td class="id">—</td>
+          <td>Một ngôn ngữ cho cả ba đầu ra, giúp 5 người đọc được code của nhau trong 13 tuần.</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="grid g2" style="margin-top:20px">
+    <div class="card risk hi">
+      <div class="lvl">Việc bắt buộc</div>
+      <h3>Phải patch simulator</h3>
+      <p>Nhánh 1.6 của SAP simulator <strong>không hỗ trợ</strong> <code>LocalAuthorizeOffline</code>, <code>LocalPreAuthorize</code>, <code>TransactionMessageAttempts</code>, <code>TransactionMessageRetryInterval</code>. Đây chính xác là những key mà thí nghiệm nghiên cứu cần.</p>
+      <p class="fix"><b>Hệ quả</b>Task QA-02, 4 ngày công, làm ở S2 chứ không để tới S6. Patch một dự án Apache-2.0 rẻ hơn nhiều so với tự viết simulator từ đầu — và nếu đóng góp ngược lên upstream thì đó là điểm rất mạnh khi nói chuyện với doanh nghiệp.</p>
+    </div>
+
+    <div class="card risk hi">
+      <div class="lvl">Ba câu không được viết sai</div>
+      <h3>Sai trước hội đồng có người trong ngành là mất điểm nặng</h3>
+      <p><strong>1.</strong> “Chạy qua kịch bản OCTT” <em>không phải</em> “được chứng nhận OCPP” — chứng nhận cần test lab độc lập của OCA cộng form PICS.</p>
+      <p><strong>2.</strong> Chứng chỉ OCA của Powerfill <em>không</em> lan sang SteVe open-source.</p>
+      <p><strong>3.</strong> “CitrineOS compliant OCPP 1.6” là tự khai, <em>không phải</em> chứng nhận.</p>
+    </div>
+  </div>
+</section>
+
+<section id="milestones">
+  <div class="sec-head"><h2>Sáu cột mốc</h2></div>
+  <p class="sec-note">Mốc chỉ tính là đạt khi <em>toàn bộ</em> tiêu chí nghiệm thu đã xong. Trong 13 tuần không có chỗ cho “gần xong”, và không có sprint đệm để bù.</p>
+
+  <ol class="rail">
+    <li class="ms key">
+      <div class="ms-head"><span class="ms-id">M1</span><span class="ms-date">06/09/2026 · cuối S1</span><span class="gate hard">Cổng cứng</span></div>
+      <h3>Đặc tả chốt, simulator chạy</h3>
+      <p>Trong 3 tháng không có thời gian làm đặc tả đầy đủ như một đồ án 6 tháng. Mục tiêu là đủ để bốn WP code song song mà không giẫm chân nhau.</p>
+      <ul class="exit">
+        <li>SRS phần mềm rút gọn: use case chính, yêu cầu chức năng, NFR có ngưỡng đo được</li>
+        <li>SDD: sơ đồ kiến trúc, ERD, đặc tả OpenAPI đã sinh mock server</li>
+        <li>Wireframe cho luồng chính của app và dashboard, không cần prototype bấm được</li>
+        <li>SAP simulator đã dựng, chạy template trụ D1/YJ-EU hai súng, gửi MeterValues DC</li>
+        <li>Đã đọc file <code>LICENSE</code> của SteVe và ghi lại kết luận bằng văn bản</li>
+        <li>Đã gọi hỏi VNPay và ít nhất một nhà cung cấp hoá đơn điện tử về điều kiện sandbox</li>
+        <li>GVHD duyệt bằng văn bản: bỏ 2.0.1, chấp nhận simulator, đổi đường đối chứng sang ablation</li>
+      </ul>
+    </li>
+
+    <li class="ms key">
+      <div class="ms-head"><span class="ms-id">M2</span><span class="ms-date">04/10/2026 · cuối S3</span><span class="gate soft">Cổng kỹ thuật</span></div>
+      <h3>OCPP Core chạy thông với simulator</h3>
+      <p>Trái tim kỹ thuật. Mốc này chứng minh CSMS thực sự nói được OCPP chứ không phải một CRUD gắn mác OCPP.</p>
+      <ul class="exit">
+        <li>Trọn bộ Core Profile hai chiều: <code>BootNotification</code>, <code>Heartbeat</code>, <code>StatusNotification</code>, <code>Authorize</code>, <code>StartTransaction</code>, <code>MeterValues</code>, <code>StopTransaction</code></li>
+        <li>Lệnh xuống trụ: <code>RemoteStartTransaction</code>, <code>RemoteStopTransaction</code>, <code>Reset</code>, <code>UnlockConnector</code>, <code>GetConfiguration</code>, <code>ChangeConfiguration</code>, <code>TriggerMessage</code></li>
+        <li>State machine giữ đúng trạng thái độc lập cho từng súng của một trụ dual gun</li>
+        <li>MeterValues DC lưu được SoC, điện áp, dòng, kWh cộng dồn</li>
+        <li>Simulator đã patch xong, mô phỏng được <code>LocalAuthorizeOffline</code> và <code>LocalPreAuthorize</code></li>
+        <li>Khảo sát tài liệu học thuật đã xong — biết đóng góp của nhóm đứng ở đâu</li>
+      </ul>
+    </li>
+
+    <li class="ms">
+      <div class="ms-head"><span class="ms-id">M3</span><span class="ms-date">18/10/2026 · cuối S4</span></div>
+      <h3>Demo xuyên suốt một phiên sạc</h3>
+      <p>Một mạch liền: mở app, tìm trụ, quét QR, bắt đầu sạc, xem số liệu chạy, dừng, ra chi phí.</p>
+      <ul class="exit">
+        <li>Kịch bản E2E chạy từ đầu đến cuối trên staging, không phải trên máy cá nhân</li>
+        <li>App hiển thị SoC và kWh cập nhật trong vòng vài giây kể từ khi simulator gửi <code>MeterValues</code></li>
+        <li>Dashboard hiện đúng trạng thái hai súng của cùng một trụ theo thời gian thực</li>
+        <li>Trình xem bản tin OCPP thô hoạt động — đây là thứ người trong ngành nhìn vào đầu tiên</li>
+      </ul>
+    </li>
+
+    <li class="ms">
+      <div class="ms-head"><span class="ms-id">M4</span><span class="ms-date">01/11/2026 · cuối S5</span></div>
+      <h3>Tính tiền và vận hành thông</h3>
+      <ul class="exit">
+        <li>Tính tiền theo bốn khung giờ Sharp / Peak / Shoulder / Off-peak, cấu hình được từ dashboard</li>
+        <li>Đối chiếu được bản tính của CSMS với Settlement mà trụ báo</li>
+        <li>Thanh toán VNPay sandbox chạy trọn vòng, hoặc mock service nếu không xin được sandbox</li>
+        <li>Sinh được XML hoá đơn đúng cấu trúc Nghị định 123/2020 và Thông tư 78/2021</li>
+        <li>Trung tâm cảnh báo bắt được bốn mã lỗi trong SRS và hiện đúng hướng xử lý</li>
+        <li>Trụ mất kết nối quá ngưỡng heartbeat tự sinh cảnh báo</li>
+      </ul>
+    </li>
+
+    <li class="ms key">
+      <div class="ms-head"><span class="ms-id">M5</span><span class="ms-date">15/11/2026 · cuối S6</span><span class="gate hard">Đóng băng tính năng</span></div>
+      <h3>Đối soát và nghiên cứu xong</h3>
+      <ul class="exit">
+        <li>Engine đối soát chạy: phát lại hàng đợi offline, phát hiện replay theo timestamp, chống trùng giao dịch, phát hiện lỗ hổng chuỗi meter</li>
+        <li>Thí nghiệm ablation đã chạy đủ ma trận, tối thiểu 30 phiên mỗi kịch bản</li>
+        <li>Có số liệu cho bốn chỉ số: tỉ lệ mất dữ liệu, độ đầy đủ bản ghi phiên, độ trễ đối soát, sai lệch kWh và tiền</li>
+        <li>Load test k6 đã chạy, có số liệu về số trụ đồng thời CSMS chịu được</li>
+        <li>Đã tự chấm theo 76 ca <code>TC_*_CSMS</code>, báo cáo đạt bao nhiêu và các ca chưa làm kèm lý do</li>
+        <li>Sau mốc này không nhận thêm tính năng mới</li>
+      </ul>
+    </li>
+
+    <li class="ms key">
+      <div class="ms-head"><span class="ms-id">M6</span><span class="ms-date">22/11/2026 · tuần 13</span><span class="gate hard">Bảo vệ</span></div>
+      <h3>Gói bảo vệ hoàn chỉnh</h3>
+      <ul class="exit">
+        <li>Báo cáo đầy đủ: SRS, SDD, báo cáo kiểm thử, hướng dẫn sử dụng, chương nghiên cứu kèm phân tích số liệu</li>
+        <li>Môi trường demo dựng sẵn, có phương án dự phòng khi mạng hội đồng hỏng</li>
+        <li>Slide xong, đã tập ít nhất hai lượt đủ 5 người</li>
+        <li>Chuẩn bị sẵn câu trả lời: vì sao bỏ 2.0.1, vì sao CSMS tính tiền chứ không phải trụ, simulator có đủ tin cậy không, ba ca offline mandatory của OCA là gì</li>
+      </ul>
+    </li>
+  </ol>
+</section>
+
+<section id="sprints">
+  <div class="sec-head"><h2>Sáu sprint</h2></div>
+  <p class="sec-note">Sprint hai tuần, bắt đầu thứ Hai 24/08/2026. Không vướng Tết, nhưng cũng <em>không có sprint đệm</em> — một sprint trượt là trượt cả mốc kế tiếp.</p>
+
+  <div class="tbl-wrap">
+    <table>
+      <thead><tr><th>Sprint</th><th>Ngày</th><th>Mục tiêu</th><th>Việc chính</th><th>Mốc</th></tr></thead>
+      <tbody>
+        <tr class="gaterow"><td class="id">S1</td><td class="wk">24/08 – 06/09</td><td>Khởi động và đặc tả</td><td>Dựng repo, CI, docker compose · SRS rút gọn · SDD và OpenAPI · dựng SAP simulator · gọi hỏi sandbox · chốt với GVHD</td><td class="id">M1</td></tr>
+        <tr><td class="id">S2</td><td class="wk">07/09 – 20/09</td><td>Nền móng</td><td>Auth và RBAC · sổ đăng ký thiết bị · khung WebSocket OCPP · khung app và dashboard · patch simulator</td><td></td></tr>
+        <tr class="gaterow"><td class="id">S3</td><td class="wk">21/09 – 04/10</td><td>OCPP Core Profile</td><td>Trọn bộ bản tin vào và ra · state machine dual gun · lưu MeterValues DC · khảo sát tài liệu học thuật</td><td class="id">M2</td></tr>
+        <tr class="gaterow"><td class="id">S4</td><td class="wk">05/10 – 18/10</td><td>Phiên sạc E2E</td><td>Fanout realtime · quét QR ghép phiên · màn hình sạc · giám sát dashboard · trình xem bản tin OCPP</td><td class="id">M3</td></tr>
+        <tr class="gaterow"><td class="id">S5</td><td class="wk">19/10 – 01/11</td><td>Tiền và vận hành</td><td>Engine tính tiền khung giờ · VNPay sandbox · XML hoá đơn · trung tâm cảnh báo · biểu giá</td><td class="id">M4</td></tr>
+        <tr class="gaterow"><td class="id">S6</td><td class="wk">02/11 – 15/11</td><td>Đối soát và nghiên cứu</td><td>Engine đối soát · chạy thí nghiệm ablation · load test k6 · tự chấm theo OCTT</td><td class="id">M5</td></tr>
+        <tr class="gaterow"><td class="id">W13</td><td class="wk">16/11 – 22/11</td><td>Bảo vệ</td><td>Hoàn thiện báo cáo · chương nghiên cứu · slide · dựng môi trường demo · tập hai lượt</td><td class="id">M6</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section id="wbs">
+  <div class="sec-head"><h2>Phân rã công việc — 132 ngày công</h2></div>
+  <p class="sec-note">Ước lượng bằng ngày công của một người, giả định 20 giờ mỗi tuần và trừ 20% cho họp, tài liệu, làm lại. Mỗi người khoảng 26 ngày công thực làm trong 13 tuần.</p>
+
+  <div class="wbs">
+    <div class="wbs-head"><span class="wp">WP1</span><h3>Quản lý dự án &amp; Phân tích nghiệp vụ</h3><span class="budget">26 ngày công</span></div>
+    <div class="tbl-wrap">
+      <table>
+        <thead><tr><th>Mã</th><th>Công việc</th><th>Ngày</th><th>Sprint</th></tr></thead>
+        <tbody>
+          <tr><td class="id">PM-01</td><td>Quy ước nhóm, công cụ, quy trình git, định nghĩa hoàn thành</td><td class="num">1</td><td class="wk">S1</td></tr>
+          <tr><td class="id">PM-02</td><td>Nghiên cứu OCPP 1.6J: bộ bản tin, §3.7 hành vi offline, mã lỗi, configuration key</td><td class="num">3</td><td class="wk">S1</td></tr>
+          <tr><td class="id">PM-03</td><td>Bóc tách SRS phần cứng D1/YJ-EU thành ràng buộc phần mềm</td><td class="num">2</td><td class="wk">S1</td></tr>
+          <tr><td class="id">PM-04</td><td>SRS phần mềm rút gọn: use case, yêu cầu chức năng, NFR có ngưỡng đo được</td><td class="num">5</td><td class="wk">S1</td></tr>
+          <tr><td class="id">PM-05</td><td>SDD: sơ đồ kiến trúc, ERD, OpenAPI sinh mock server</td><td class="num">5</td><td class="wk">S1–S2</td></tr>
+          <tr><td class="id">PM-06</td><td>Wireframe cho luồng chính của app và dashboard</td><td class="num">3</td><td class="wk">S1–S2</td></tr>
+          <tr><td class="id">PM-07</td><td>Điều hành sprint, biên bản GVHD, sổ rủi ro</td><td class="num">3</td><td class="wk">S1–S6</td></tr>
+          <tr><td class="id">PM-08</td><td>Khảo sát tài liệu học thuật về OCPP data loss và reconciliation</td><td class="num">2</td><td class="wk">S2–S3</td></tr>
+          <tr><td class="id">PM-09</td><td>Chủ biên báo cáo và slide</td><td class="num">2</td><td class="wk">W13</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="wbs">
+    <div class="wbs-head"><span class="wp">WP2</span><h3>CSMS OCPP &amp; Đối soát</h3><span class="budget">27 ngày công</span></div>
+    <div class="tbl-wrap">
+      <table>
+        <thead><tr><th>Mã</th><th>Công việc</th><th>Ngày</th><th>Sprint</th></tr></thead>
+        <tbody>
+          <tr><td class="id">BE-01</td><td>Khung backend, CI, docker compose, WSS/TLS trên staging</td><td class="num">2</td><td class="wk">S2</td></tr>
+          <tr><td class="id">BE-02</td><td>Máy chủ WebSocket OCPP-J 1.6, định danh trụ theo SN trên đường dẫn</td><td class="num">3</td><td class="wk">S2</td></tr>
+          <tr><td class="id">BE-03</td><td>Bản tin từ trụ lên: Boot, Heartbeat, StatusNotification, Authorize, Start, MeterValues, Stop</td><td class="num">6</td><td class="wk">S3</td></tr>
+          <tr><td class="id">BE-04</td><td>Lệnh xuống trụ: RemoteStart, RemoteStop, Reset, UnlockConnector, Get/ChangeConfiguration, TriggerMessage</td><td class="num">3</td><td class="wk">S3</td></tr>
+          <tr><td class="id">BE-05</td><td>State machine trụ và connector cho cấu hình súng đôi, lưu bền và khôi phục</td><td class="num">3</td><td class="wk">S3</td></tr>
+          <tr><td class="id">BE-06</td><td>Lưu trữ MeterValues DC: SoC, điện áp, dòng, kWh</td><td class="num">2</td><td class="wk">S3</td></tr>
+          <tr><td class="id">BE-07</td><td><strong>Engine đối soát:</strong> phát lại hàng đợi offline, phát hiện replay theo timestamp, chống trùng giao dịch, phát hiện lỗ hổng chuỗi meter</td><td class="num">6</td><td class="wk">S4, S6</td></tr>
+          <tr><td class="id">BE-08</td><td>Fanout realtime qua Redis pub/sub tới app và dashboard</td><td class="num">2</td><td class="wk">S4</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="wbs">
+    <div class="wbs-head"><span class="wp">WP3</span><h3>App tài xế</h3><span class="budget">26 ngày công</span></div>
+    <div class="tbl-wrap">
+      <table>
+        <thead><tr><th>Mã</th><th>Công việc</th><th>Ngày</th><th>Sprint</th></tr></thead>
+        <tbody>
+          <tr><td class="id">MB-01</td><td>Khởi tạo app, hệ thống thiết kế, đa ngôn ngữ Việt và Anh</td><td class="num">3</td><td class="wk">S2</td></tr>
+          <tr><td class="id">MB-02</td><td>Đăng ký và đăng nhập OTP, hồ sơ người dùng, quản lý xe</td><td class="num">4</td><td class="wk">S2</td></tr>
+          <tr><td class="id">MB-03</td><td>Bản đồ tìm trụ, bộ lọc, trạng thái realtime tới từng súng</td><td class="num">6</td><td class="wk">S3–S4</td></tr>
+          <tr><td class="id">MB-04</td><td>Quét QR trên màn hình trụ để ghép phiên, remote start và stop</td><td class="num">4</td><td class="wk">S4</td></tr>
+          <tr><td class="id">MB-05</td><td>Màn hình sạc realtime: SoC, kWh, điện áp, dòng, thời gian, chi phí</td><td class="num">5</td><td class="wk">S4</td></tr>
+          <tr><td class="id">MB-06</td><td>Lịch sử phiên, xem hoá đơn, báo lỗi trụ</td><td class="num">4</td><td class="wk">S5</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="wbs">
+    <div class="wbs-head"><span class="wp">WP4</span><h3>Dashboard vận hành</h3><span class="budget">26 ngày công</span></div>
+    <div class="tbl-wrap">
+      <table>
+        <thead><tr><th>Mã</th><th>Công việc</th><th>Ngày</th><th>Sprint</th></tr></thead>
+        <tbody>
+          <tr><td class="id">FE-01</td><td>Khởi tạo web, đăng nhập, phân quyền theo vai trò</td><td class="num">3</td><td class="wk">S2</td></tr>
+          <tr><td class="id">FE-02</td><td>Onboarding trụ: SN, connector, site, vòng đời Đã đăng ký → Chờ kết nối → Trực tuyến</td><td class="num">3</td><td class="wk">S2</td></tr>
+          <tr><td class="id">FE-03</td><td>Giám sát realtime: trạng thái từng súng, danh sách phiên đang chạy</td><td class="num">6</td><td class="wk">S4</td></tr>
+          <tr><td class="id">FE-04</td><td>Trung tâm cảnh báo: ánh xạ mã lỗi OCPP sang hướng xử lý lấy từ SRS phần cứng</td><td class="num">4</td><td class="wk">S5</td></tr>
+          <tr><td class="id">FE-05</td><td>Điều khiển từ xa: start, stop, reset, mở khoá súng</td><td class="num">2</td><td class="wk">S5</td></tr>
+          <tr><td class="id">FE-06</td><td>Biểu giá bốn khung giờ Sharp, Peak, Shoulder, Off-peak</td><td class="num">4</td><td class="wk">S5</td></tr>
+          <tr><td class="id">FE-07</td><td>Analytics cơ bản: doanh thu và tỉ lệ sử dụng</td><td class="num">2</td><td class="wk">S5</td></tr>
+          <tr><td class="id">FE-08</td><td><strong>Trình xem bản tin OCPP thô</strong> — thứ người trong ngành nhìn vào đầu tiên</td><td class="num">2</td><td class="wk">S4</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="wbs">
+    <div class="wbs-head"><span class="wp">WP5</span><h3>Simulator, Tính tiền &amp; Nghiên cứu</h3><span class="budget">27 ngày công</span></div>
+    <div class="tbl-wrap">
+      <table>
+        <thead><tr><th>Mã</th><th>Công việc</th><th>Ngày</th><th>Sprint</th></tr></thead>
+        <tbody>
+          <tr><td class="id">QA-01</td><td>Dựng SAP simulator, viết template trụ D1/YJ-EU hai súng DC theo đúng SRS phần cứng</td><td class="num">3</td><td class="wk">S1</td></tr>
+          <tr><td class="id">QA-02</td><td><strong>Patch nhánh 1.6 của simulator:</strong> thêm <code>LocalAuthorizeOffline</code>, <code>LocalPreAuthorize</code>, <code>TransactionMessageAttempts</code>, <code>TransactionMessageRetryInterval</code></td><td class="num">4</td><td class="wk">S2</td></tr>
+          <tr><td class="id">QA-03</td><td>Engine tính tiền theo khung giờ, làm tròn, thuế, đối chiếu Settlement của trụ</td><td class="num">4</td><td class="wk">S5</td></tr>
+          <tr><td class="id">QA-04</td><td>Thanh toán VNPay sandbox, hoặc mock service nếu không xin được</td><td class="num">4</td><td class="wk">S5</td></tr>
+          <tr><td class="id">QA-05</td><td>Sinh XML hoá đơn theo Nghị định 123/2020 và Thông tư 78/2021, mô phỏng khâu phát hành</td><td class="num">3</td><td class="wk">S5</td></tr>
+          <tr><td class="id">QA-06</td><td>Tự chấm theo 76 ca <code>TC_*_CSMS</code> của OCTT, lập báo cáo đạt/chưa đạt kèm lý do</td><td class="num">2</td><td class="wk">S6</td></tr>
+          <tr><td class="id">QA-07</td><td>Load test k6 theo mẫu MaEVe, 1 VU = 1 trạm, đo số trụ đồng thời chịu được</td><td class="num">2</td><td class="wk">S6</td></tr>
+          <tr><td class="id">QA-08</td><td><strong>Chạy thí nghiệm ablation:</strong> ma trận kịch bản, thu số liệu, phân tích</td><td class="num">5</td><td class="wk">S6</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<section id="research">
+  <div class="sec-head"><h2>Nhánh nghiên cứu</h2></div>
+  <p class="sec-note">Nghiên cứu nền đã xác minh hai điều từ chính spec OCPP và tài liệu của Open Charge Alliance. Chúng biến phần nghiên cứu từ “nhóm em thử nghiệm đối soát” thành một luận điểm có chỗ đứng.</p>
+
+  <div class="grid g2">
+    <div class="card dec">
+      <h3>Khoảng trống có thật ở tầng giao thức</h3>
+      <p>OCPP 1.6 thừa nhận Central System <strong>không có bất kỳ dấu hiệu nào ở tầng giao thức</strong> để phân biệt message replay từ hàng đợi offline với message thời gian thực — chỉ suy đoán được qua timestamp quá khứ.</p>
+      <div class="verdict">Chính OCA đã vá lỗ hổng này ở <b>OCPP 2.0.1</b> bằng trường boolean <code>offline</code> và trường <code>seqNo</code> bắt buộc trong <code>TransactionEventRequest</code>.</div>
+      <div class="src">OCPP 1.6 edition 2 §3.7 (mục normative) · schema v201 của OCA</div>
+    </div>
+
+    <div class="card dec">
+      <h3>Đây là yêu cầu mức chứng nhận, không phải tính năng tuỳ chọn</h3>
+      <p>Trong OCA “Test Procedure &amp; Test Plans” v2.4.1, ba ca <code>TC_037_1</code>, <code>TC_037_3</code> và <code>TC_039</code> — về xử lý giao dịch offline replay — được đánh dấu <strong>M (Mandatory)</strong> ở cột Central System, trong khi chỉ là C (Conditional) cho Charging Station.</p>
+      <div class="verdict">Đây là câu trả lời trực tiếp cho câu hỏi <b>“tại sao nhóm chọn nghiên cứu đối soát dữ liệu offline”</b>: vì OCA bắt buộc, không phải vì nhóm thấy hay.</div>
+      <div class="src">OCA Compliancy Test Tool — Test Case Document, bản 2026-03</div>
+    </div>
+  </div>
+
+  <div class="card risk mid" style="margin-top:16px">
+    <div class="lvl">Cảnh báo</div>
+    <h3>Khoảng trống ở spec không tự động là tính mới học thuật</h3>
+    <p>Đã xác minh chắc chắn rằng OCPP 1.6 thiếu marker phân biệt replay. Nhưng <strong>chưa có khảo sát nào chứng minh chưa ai công bố về vấn đề này.</strong> Nguồn học thuật duy nhất chạm chủ đề lại bị phát hiện đếm sai số test case so với tài liệu gốc — chất lượng nguồn thứ cấp trong lĩnh vực này thấp.</p>
+    <p class="fix"><b>Việc phải làm</b>Task PM-08: tự khảo sát IEEE Xplore, ScienceDirect, Google Scholar trước M2. Nếu phát hiện đã có người làm, điều chỉnh cách phát biểu đóng góp thay vì giấu.</p>
+  </div>
+
+  <h3 style="margin-top:30px; margin-bottom:12px">Thiết kế thí nghiệm — ablation</h3>
+  <p class="sec-note" style="margin-top:0">Câu hỏi nghiên cứu giữ nguyên, đường đối chứng đổi: so chính CSMS khi <em>bật</em> engine đối soát với khi <em>tắt</em> engine. Ablation cô lập đúng một biến nên cho kết luận nhân quả, trong khi so với cloud của hãng có quá nhiều biến nhiễu cùng lúc. Đổi lại mất khả năng khẳng định “tốt hơn nền tảng thương mại” — ghi rõ thành giới hạn ngay trong phần phương pháp.</p>
+
+  <div class="tbl-wrap">
+    <table>
+      <thead><tr><th>Thành phần</th><th>Thiết kế</th></tr></thead>
+      <tbody>
+        <tr><td><strong>Biến độc lập</strong></td><td>Thời điểm ngắt: trước <code>StartTransaction</code>, giữa chuỗi <code>MeterValues</code>, ngay trước <code>StopTransaction</code> · Thời lượng ngắt: 10 giây, 60 giây, 5 phút, 30 phút · Số trụ đồng thời: 1, 5, 20, 50</td></tr>
+        <tr><td><strong>Biến phụ thuộc</strong></td><td>Tỉ lệ mất dữ liệu (%) · Độ đầy đủ bản ghi phiên (%) · Độ trễ đối soát (giây) · Sai lệch kWh và tiền (%) so với giá trị thật của simulator</td></tr>
+        <tr><td><strong>Điều kiện đối chứng</strong></td><td>Cùng CSMS, cùng kịch bản, engine đối soát <strong>tắt</strong></td></tr>
+        <tr><td><strong>Cỡ mẫu</strong></td><td>Tối thiểu 30 phiên mỗi tổ hợp, sinh tự động bằng simulator để tái lập được</td></tr>
+        <tr><td><strong>Kịch bản riêng của phần cứng này</strong></td><td>Phiên mở bằng RFID hoặc mật khẩu HMI trong lúc trụ đang offline — cần simulator đã patch <code>LocalAuthorizeOffline</code> và <code>LocalPreAuthorize</code></td></tr>
+        <tr><td><strong>Đầu ra</strong></td><td>Bộ dữ liệu thô, script phân tích, biểu đồ so sánh, mô tả phương pháp đối soát đủ chi tiết để tái lập</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section id="cuts">
+  <div class="sec-head"><h2>Danh sách cắt</h2></div>
+  <p class="sec-note">Rút từ 6 tháng xuống 3 tháng nghĩa là mất hơn một nửa quỹ công sức. Những phần sau <em>đã cắt có chủ ý</em> và chuyển sang chương hướng phát triển của báo cáo — cắt bây giờ, không phải cắt lúc chậm tiến độ.</p>
+
+  <div class="tbl-wrap">
+    <table>
+      <thead><tr><th>Phần bị cắt</th><th>Lý do</th></tr></thead>
+      <tbody>
+        <tr><td>Loyalty và membership</td><td>Không phụ thuộc OCPP, không thể hiện năng lực kỹ thuật lõi</td></tr>
+        <tr><td>Đặt chỗ trước</td><td>Nghiệp vụ độc lập, thêm nhiều trạng thái phải test</td></tr>
+        <tr><td>Bảo trì định kỳ và phiếu ticket</td><td>Giữ cảnh báo sự cố — đó mới là phần gắn với OCPP</td></tr>
+        <tr><td>Admin console đầy đủ</td><td>Chỉ giữ quản lý người dùng và sổ thiết bị</td></tr>
+        <tr><td>Chọn chế độ sạc theo kWh và theo tiền</td><td>Cần hạn mức mềm phía CSMS, tốn 4 ngày công cho một tính năng khó demo</td></tr>
+        <tr><td>Thông báo đẩy</td><td>Thay bằng thông báo trong app</td></tr>
+        <tr><td>MoMo và ZaloPay</td><td>Làm sâu VNPay có giá trị hơn làm nông ba cổng</td></tr>
+        <tr><td>Smart charging profile</td><td>Ngoài phạm vi Core</td></tr>
+        <tr><td>Nhật ký kiểm toán</td><td>Trình xem bản tin OCPP thô là đủ cho demo</td></tr>
+        <tr><td>Analytics sâu</td><td>Còn hai biểu đồ cơ bản</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="card risk hi" style="margin-top:16px">
+    <div class="lvl">Nguyên tắc</div>
+    <h3>Khi chậm tiếp thì cắt gì</h3>
+    <p>Thứ tự cắt tiếp theo: analytics → onboarding nâng cao → điều khiển từ xa.</p>
+    <p class="fix"><b>Không bao giờ cắt</b>OCPP Core · engine đối soát · thí nghiệm nghiên cứu. Đó là ba thứ làm nên đồ án này.</p>
+  </div>
+</section>
+
+<section id="risks">
+  <div class="sec-head"><h2>Rủi ro</h2></div>
+
+  <div class="grid g2">
+    <div class="card risk hi">
+      <div class="lvl">Cao · WP5</div>
+      <h3>Patch simulator khó hơn dự kiến</h3>
+      <p>Thí nghiệm nghiên cứu phụ thuộc vào việc simulator mô phỏng được <code>LocalAuthorizeOffline</code> và <code>LocalPreAuthorize</code>, mà nhánh 1.6 của SAP simulator không có sẵn.</p>
+      <p class="fix"><b>Đối phó</b>Làm patch ở S2, không để tới S6. Đã kiểm tra năm công cụ thay thế ngày 03/09/2026 — <strong>không có đường tắt</strong>. Dự phòng đã xác định: <code>ocpp-virtual-charge-point</code> (Apache-2.0, Node/TS), nhưng nó thiếu hàng đợi offline mà SAP đã có sẵn, nên chuyển sang là đổi việc dễ lấy việc khó.</p>
+    </div>
+
+    <div class="card risk hi">
+      <div class="lvl">Cao · WP5</div>
+      <h3>Không xin được sandbox thanh toán và hoá đơn điện tử</h3>
+      <p>Nghiên cứu nền <strong>không tìm được dữ liệu nào</strong> về điều kiện sandbox cho nhóm sinh viên không pháp nhân. Đây là không có dữ liệu, không phải không khả thi.</p>
+      <p class="fix"><b>Đối phó</b>Gọi trực tiếp trong tuần 1, song song ít nhất hai nhà cung cấp, xin giấy giới thiệu của trường. Dự phòng: mock service cho thanh toán, và tự sinh XML đúng chuẩn Nghị định 123/2020 cho hoá đơn.</p>
+    </div>
+
+    <div class="card risk hi">
+      <div class="lvl">Cao · Cả nhóm</div>
+      <h3>13 tuần không có sprint đệm</h3>
+      <p>Một sprint trượt là trượt cả mốc kế tiếp, không có chỗ bù.</p>
+      <p class="fix"><b>Đối phó</b>Buổi ghép nối chung cuối mỗi sprint từ S3 trở đi, chạy trên staging. Chậm quá hai ngày phải báo ngay, không đợi tới review.</p>
+    </div>
+
+    <div class="card risk mid">
+      <div class="lvl">Trung bình · WP1</div>
+      <h3>Giấy phép SteVe chưa chốt</h3>
+      <p>Một claim nói GPL-3.0 kèm nghĩa vụ copyleft đã bị bác, một verifier khác lại ghi nhận “upstream SteVe remains GPL”.</p>
+      <p class="fix"><b>Đối phó</b>Đọc file <code>LICENSE</code> ở master trong tuần 1. Và chạy SteVe như tiến trình riêng, không fork không copy code — khi đó câu hỏi giấy phép không phát sinh.</p>
+    </div>
+
+    <div class="card risk mid">
+      <div class="lvl">Trung bình · WP1</div>
+      <h3>Khoảng trống spec không tự động là tính mới</h3>
+      <p>Đã xác minh OCPP 1.6 thiếu marker phân biệt replay, nhưng chưa chứng minh được chưa ai công bố về vấn đề này.</p>
+      <p class="fix"><b>Đối phó</b>Task PM-08 khảo sát tài liệu học thuật, xong trước M2. Nếu phát hiện đã có người làm, điều chỉnh cách phát biểu đóng góp thay vì giấu.</p>
+    </div>
+
+    <div class="card risk mid">
+      <div class="lvl">Trung bình · Công cụ</div>
+      <h3>Hai dự án biến động nhanh</h3>
+      <p>SteVe release 3.14.1 ngày 12/08/2026, SAP simulator push ngày 17/08/2026 — một ngày trước khi nghiên cứu nền chạy.</p>
+      <p class="fix"><b>Đối phó</b>Ghim version cụ thể trong <code>package.json</code> và docker compose ngay từ S1. Kiểm lại thông tin công cụ trước khi nộp báo cáo.</p>
+    </div>
+  </div>
+</section>
+
+<section id="rules">
+  <div class="sec-head"><h2>Quy tắc làm việc</h2></div>
+  <p class="sec-note">Thống nhất ở tuần đầu, không tranh luận lại ở tuần thứ tám.</p>
+
+  <div class="rules">
+    <div class="rule">
+      <h4>Nhịp họp</h4>
+      <ul>
+        <li>Cập nhật ngắn trên nhóm chat mỗi ngày</li>
+        <li>Lập kế hoạch sprint sáng thứ Hai tuần lẻ</li>
+        <li>Review và rút kinh nghiệm chiều thứ Sáu tuần chẵn</li>
+        <li>Họp GVHD hằng tuần, biên bản gửi trong 24 giờ</li>
+      </ul>
+    </div>
+    <div class="rule">
+      <h4>Quy trình mã nguồn</h4>
+      <ul>
+        <li>Nhánh tính năng, gộp qua pull request</li>
+        <li>Mỗi PR cần một approve và CI xanh</li>
+        <li>PR nhỏ dưới 400 dòng thay đổi</li>
+        <li>main luôn triển khai được lên staging</li>
+      </ul>
+    </div>
+    <div class="rule">
+      <h4>Định nghĩa hoàn thành</h4>
+      <ul>
+        <li>Code đã gộp, CI xanh, có unit test cho nhánh logic chính</li>
+        <li>Tài liệu API cập nhật cùng lúc</li>
+        <li>Demo được trên staging, không phải máy tác giả</li>
+        <li>Không còn lỗi mức chặn</li>
+      </ul>
+    </div>
+    <div class="rule">
+      <h4>Khi chậm</h4>
+      <ul>
+        <li>Cắt theo thứ tự đã định, không cắt ba phần lõi</li>
+        <li>Không dời mốc — cắt phạm vi thay vì dời ngày</li>
+        <li>Chậm quá hai ngày phải báo ngay</li>
+        <li>Mọi thay đổi phạm vi ghi vào sổ kèm lý do</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<footer>
+  Kế hoạch xây dựng từ Phiếu đăng ký đề tài Capstone PowerMe, tài liệu SRS hợp nhất dòng trạm sạc D1 &amp; YJ-EU, và nghiên cứu nền ngày 18/08/2026 — 23 nguồn, 115 claim trích xuất, 21 claim qua kiểm chứng đối kháng ba phiếu. Bản này thay thế kế hoạch 26 tuần; cơ sở và nguồn dẫn đầy đủ nằm trong tài liệu nghiên cứu nền đi kèm.
+</footer>
+
+</div>
+</html>

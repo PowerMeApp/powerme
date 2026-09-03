@@ -1,0 +1,33 @@
+# CODEOWNERS — ai bị tự động gắn review khi PR chạm vào vùng nào.
+#
+# ⚠️ THAY placeholder bằng GitHub username thật của từng thành viên (giữ dấu @).
+#    Nếu dùng GitHub Organization, thay bằng team: @powerme-capstone/wp2 ...
+#    File chỉ có hiệu lực khi nhánh main đã bật "Require review from Code Owners".
+
+# Mặc định: PM duyệt mọi thứ không thuộc vùng nào bên dưới
+*                       @WP1-PM
+
+# WP1 — Đặc tả, kiến trúc, tài liệu
+/docs/                  @WP1-PM
+/docs/adr/              @WP1-PM @WP2-BACKEND
+
+# WP2 — CSMS OCPP, state machine, đối soát
+/apps/csms/             @WP2-BACKEND
+
+# WP3 — App tài xế
+/apps/mobile/           @WP3-MOBILE
+
+# WP4 — Dashboard vận hành
+/apps/dashboard/        @WP4-FULLSTACK
+
+# WP5 — Simulator, tính tiền, thanh toán, nghiên cứu
+/simulator/             @WP5-QA
+/infra/k6/              @WP5-QA
+
+# Hợp đồng API dùng chung — đổi ở đây là đổi cho cả ba đầu ra, cần hai người duyệt
+/packages/shared/       @WP1-PM @WP2-BACKEND
+
+# Hạ tầng và CI — chạm vào là ảnh hưởng cả nhóm
+/infra/                 @WP2-BACKEND @WP1-PM
+/.github/               @WP1-PM @WP2-BACKEND
+/package.json           @WP1-PM @WP2-BACKEND

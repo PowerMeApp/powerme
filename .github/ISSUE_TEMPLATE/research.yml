@@ -1,0 +1,38 @@
+name: Câu hỏi nghiên cứu / rủi ro
+description: Điều chưa biết cần làm rõ trước khi code, hoặc rủi ro cần theo dõi
+title: '[NC] '
+labels: ['research']
+body:
+  - type: textarea
+    id: cau-hoi
+    attributes:
+      label: Câu hỏi
+      description: Điều gì đang chưa biết, và quyết định nào đang bị nó chặn?
+    validations:
+      required: true
+
+  - type: textarea
+    id: vi-sao-quan-trong
+    attributes:
+      label: Vì sao quan trọng
+      description: Nếu đoán sai thì hỏng cái gì, tốn bao nhiêu?
+    validations:
+      required: true
+
+  - type: textarea
+    id: cach-tra-loi
+    attributes:
+      label: Cách trả lời
+      description: Đọc spec mục nào, chạy thí nghiệm gì, hỏi ai.
+
+  - type: input
+    id: han
+    attributes:
+      label: Cần câu trả lời trước ngày
+      placeholder: '04/10/2026 (M2)'
+
+  - type: textarea
+    id: ket-luan
+    attributes:
+      label: Kết luận
+      description: Điền khi đã trả lời xong. Kèm nguồn dẫn — spec mục nào, log nào, ai nói.

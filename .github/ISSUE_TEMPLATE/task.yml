@@ -1,0 +1,65 @@
+name: Task theo kế hoạch
+description: Một task có sẵn mã trong bảng phân rã công việc (PM-, BE-, MB-, FE-, QA-)
+title: '[XX-00] '
+labels: ['task']
+body:
+  - type: input
+    id: ma-task
+    attributes:
+      label: Mã task
+      description: Đúng mã trong docs/KE-HOACH-POWERME.md
+      placeholder: BE-05
+    validations:
+      required: true
+
+  - type: dropdown
+    id: work-package
+    attributes:
+      label: Work package
+      options:
+        - WP1 — PM / BA
+        - WP2 — Backend / IoT (CSMS OCPP)
+        - WP3 — Mobile
+        - WP4 — Full-stack (Dashboard)
+        - WP5 — Backend / QA (Simulator, tính tiền, nghiên cứu)
+    validations:
+      required: true
+
+  - type: dropdown
+    id: sprint
+    attributes:
+      label: Sprint
+      options: ['S1', 'S2', 'S3', 'S4', 'S5', 'S6', 'W13']
+    validations:
+      required: true
+
+  - type: textarea
+    id: pham-vi
+    attributes:
+      label: Phạm vi
+      description: Làm gì, và rõ ràng là không làm gì.
+    validations:
+      required: true
+
+  - type: textarea
+    id: nghiem-thu
+    attributes:
+      label: Tiêu chí nghiệm thu
+      description: Điều kiện kiểm chứng được. Tránh "chạy ổn", "hoạt động tốt".
+      value: |
+        - [ ] 
+        - [ ]
+    validations:
+      required: true
+
+  - type: input
+    id: ngay-cong
+    attributes:
+      label: Ước lượng (ngày công)
+      placeholder: '3'
+
+  - type: textarea
+    id: phu-thuoc
+    attributes:
+      label: Phụ thuộc
+      description: Task nào phải xong trước? Ai bị chặn nếu task này trễ?

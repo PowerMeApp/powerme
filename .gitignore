@@ -1,0 +1,70 @@
+# ---- Dependencies ----
+node_modules/
+.pnp
+.pnp.js
+.yarn/*
+!.yarn/patches
+!.yarn/releases
+
+# ---- Build output ----
+dist/
+build/
+out/
+.next/
+.expo/
+.expo-shared/
+*.tsbuildinfo
+
+# ---- Test & coverage ----
+coverage/
+.nyc_output/
+test-results/
+playwright-report/
+*.lcov
+
+# ---- Môi trường: KHÔNG BAO GIỜ commit secret ----
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.keystore
+google-services.json
+GoogleService-Info.plist
+
+# ---- Log OCPP & dữ liệu chạy thử ----
+*.log
+logs/
+ocpp-traces/
+*.pcap
+k6-results/
+simulator/dist/
+simulator/logs/
+
+# ---- Python (nghiên cứu / phân tích số liệu) ----
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.ipynb_checkpoints/
+
+# ---- Cơ sở dữ liệu cục bộ ----
+*.sqlite
+*.sqlite3
+pgdata/
+redisdata/
+
+# ---- IDE & OS ----
+.idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.shared.json
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ---- Tạm ----
+tmp/
+.cache/
+.turbo/

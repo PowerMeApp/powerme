@@ -1,0 +1,7 @@
+{
+  "name": "@powerme/shared",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Kieu du lieu dung chung, hang so OCPP, client sinh tu OpenAPI",
+  "scripts": {}
+}

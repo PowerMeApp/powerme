@@ -1,0 +1,12 @@
+node_modules/
+dist/
+build/
+coverage/
+package-lock.json
+packages/shared/src/api/generated/
+ocppdl/
+
+# Tài liệu viết tay — bảng và xuống dòng là chủ ý của người viết,
+# để Prettier reflow chỉ tạo diff rác và làm hỏng căn bảng tiếng Việt.
+**/*.md
+docs/
