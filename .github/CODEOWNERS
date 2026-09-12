@@ -1,33 +1,35 @@
 # CODEOWNERS — ai bị tự động gắn review khi PR chạm vào vùng nào.
 #
-# ⚠️ THAY placeholder bằng GitHub username thật của từng thành viên (giữ dấu @).
-#    Nếu dùng GitHub Organization, thay bằng team: @powerme-capstone/wp2 ...
-#    File chỉ có hiệu lực khi nhánh main đã bật "Require review from Code Owners".
+# Dùng team của org PowerMeApp. Thêm/bớt người thì đổi thành viên team,
+# KHÔNG sửa file này — https://github.com/orgs/PowerMeApp/teams
+#
+# ⚠️ Chỉ có hiệu lực khi nhánh main bật "Require review from Code Owners".
+#    Org gói Free + repo private hiện chưa bật được — xem README mục "Bảo vệ nhánh".
 
 # Mặc định: PM duyệt mọi thứ không thuộc vùng nào bên dưới
-*                       @WP1-PM
+*                       @PowerMeApp/wp1
 
 # WP1 — Đặc tả, kiến trúc, tài liệu
-/docs/                  @WP1-PM
-/docs/adr/              @WP1-PM @WP2-BACKEND
+/docs/                  @PowerMeApp/wp1
+/docs/adr/              @PowerMeApp/wp1 @PowerMeApp/wp2
 
 # WP2 — CSMS OCPP, state machine, đối soát
-/apps/csms/             @WP2-BACKEND
+/apps/csms/             @PowerMeApp/wp2
 
 # WP3 — App tài xế
-/apps/mobile/           @WP3-MOBILE
+/apps/mobile/           @PowerMeApp/wp3
 
 # WP4 — Dashboard vận hành
-/apps/dashboard/        @WP4-FULLSTACK
+/apps/dashboard/        @PowerMeApp/wp4
 
 # WP5 — Simulator, tính tiền, thanh toán, nghiên cứu
-/simulator/             @WP5-QA
-/infra/k6/              @WP5-QA
+/simulator/             @PowerMeApp/wp5
+/infra/k6/              @PowerMeApp/wp5
 
 # Hợp đồng API dùng chung — đổi ở đây là đổi cho cả ba đầu ra, cần hai người duyệt
-/packages/shared/       @WP1-PM @WP2-BACKEND
+/packages/shared/       @PowerMeApp/wp1 @PowerMeApp/wp2
 
 # Hạ tầng và CI — chạm vào là ảnh hưởng cả nhóm
-/infra/                 @WP2-BACKEND @WP1-PM
-/.github/               @WP1-PM @WP2-BACKEND
-/package.json           @WP1-PM @WP2-BACKEND
+/infra/                 @PowerMeApp/wp2 @PowerMeApp/wp1
+/.github/               @PowerMeApp/wp1 @PowerMeApp/wp2
+/package.json           @PowerMeApp/wp1 @PowerMeApp/wp2
