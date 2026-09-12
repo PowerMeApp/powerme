@@ -1,0 +1,70 @@
+name: Canh gac main
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  direct-push:
+    name: Phát hiện commit không đi qua Pull Request
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      # GitHub không chặn được push thẳng vào main trên org gói Free.
+      # Chặn thì không, nhưng để lại dấu vết công khai thì được — và một dấu vết
+      # mà cả nhóm nhìn thấy đủ sức thay phần lớn tác dụng của rào chắn thật.
+      - name: Kiểm tra commit có gắn với PR nào không
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SHA: ${{ github.sha }}
+          REPO: ${{ github.repository }}
+          ACTOR: ${{ github.actor }}
+        run: |
+          set -euo pipefail
+
+          COUNT=$(gh api "repos/$REPO/commits/$SHA/pulls" --jq 'length')
+
+          if [ "$COUNT" -gt 0 ]; then
+            echo "✓ Commit $SHA đến từ Pull Request. Không có gì phải báo."
+            exit 0
+          fi
+
+          echo "✗ Commit $SHA KHÔNG gắn với PR nào — đây là push thẳng vào main."
+
+          SUBJECT=$(gh api "repos/$REPO/commits/$SHA" --jq '.commit.message' | head -1)
+
+          gh issue create \
+            --repo "$REPO" \
+            --title "Push thẳng vào main: ${SUBJECT}" \
+            --label "chore" \
+            --label "p1:quan-trong" \
+            --assignee "$ACTOR" \
+            --body "$(cat <<BODY
+          Commit [\`${SHA}\`](https://github.com/${REPO}/commit/${SHA}) vào thẳng \`main\`, không đi qua Pull Request.
+
+          | | |
+          |---|---|
+          | Người push | @${ACTOR} |
+          | Nội dung | ${SUBJECT} |
+
+          Theo CONTRIBUTING.md mục 2, mọi thay đổi phải đi qua PR có ít nhất một approve.
+
+          GitHub hiện **không chặn** được việc này: org \`PowerMeApp\` ở gói Free nên branch
+          protection không có hiệu lực trên repo private. Issue này là dấu vết thay thế.
+
+          **Cần làm:**
+
+          - [ ] Xác nhận thay đổi này đúng và không cần review, **hoặc** mở PR bổ sung để người khác xem lại
+          - [ ] Nếu là do gõ nhầm: chạy \`npm run setup:hooks\` để bật hook \`pre-push\` chặn từ máy
+          - [ ] Đóng issue kèm một dòng giải thích
+
+          _Issue do workflow \`Canh gac main\` tạo tự động._
+          BODY
+          )"
+
+          echo "Đã tạo issue. Job này cố ý fail để dấu đỏ hiện ngay trên trang repo."
+          exit 1

@@ -12,6 +12,8 @@
     "packages/*"
   ],
   "scripts": {
+    "prepare": "sh scripts/setup-hooks.sh",
+    "setup:hooks": "sh scripts/setup-hooks.sh",
     "csms": "npm run -w @powerme/csms",
     "dashboard": "npm run -w @powerme/dashboard",
     "mobile": "npm run -w @powerme/mobile",

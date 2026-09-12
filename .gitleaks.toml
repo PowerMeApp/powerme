@@ -1,0 +1,26 @@
+# Cấu hình gitleaks — thay cho Secret scanning của GitHub, thứ mà org gói Free
+# không cho bật trên repo private (API trả 422 "not available for this repository").
+#
+# Chạy trong CI ở .github/workflows/security.yml, trên mọi PR và mọi push vào main.
+
+title = "PowerMe — quét bí mật lộ trong mã nguồn"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Những chỗ chắc chắn là giá trị giả, không phải bí mật thật"
+paths = [
+  # Giá trị mẫu, cố ý để lộ, cố ý vô hại
+  '''infra/\.env\.example''',
+  # File sinh tự động, chỉ chứa hash của gói
+  '''package-lock\.json''',
+  # Tài liệu và tệp nhị phân tham khảo
+  '''ocppdl/.*''',
+  '''docs/.*\.(pdf|html)''',
+]
+regexes = [
+  # Mật khẩu admin mặc định của trụ D1/YJ-EU. Đây là một PHÁT HIỆN BẢO MẬT
+  # được ghi vào báo cáo, không phải bí mật của nhóm bị lộ.
+  '''115200''',
+]

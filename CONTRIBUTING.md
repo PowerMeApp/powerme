@@ -24,6 +24,14 @@ Mỗi task trong [kế hoạch](docs/KE-HOACH-POWERME.md) có một mã cố đ�
 `main` là nhánh duy nhất tồn tại lâu dài, luôn ở trạng thái deploy được lên staging.
 **Không ai push thẳng vào `main`.** Mọi thay đổi đi qua Pull Request.
 
+> GitHub hiện **không chặn** được việc này — org ở gói Free nên branch protection không có hiệu lực
+> trên repo private. Nhóm dùng ba rào chắn thay thế; xem mục 10. Việc đầu tiên khi clone repo về máy:
+>
+> ```bash
+> npm install          # tự bật hook pre-push
+> npm run setup:hooks  # chạy nếu nghi ngờ hook chưa bật
+> ```
+
 ```
 main
  └── wp2/be-04-lenh-xuong-tru
@@ -115,6 +123,8 @@ Lý do: hội đồng bảo vệ sẽ hỏi "vì sao chọn cách này". Ghi lú
 ## 7. Bí mật và cấu hình
 
 - **Không commit `.env`, khoá riêng, chứng chỉ, credential VNPay.** `.gitignore` đã chặn, nhưng chặn được không có nghĩa là được phép thử.
+- CI quét `gitleaks` trên mọi PR và mọi push vào `main`. Phát hiện bí mật là **fail PR**, không phải cảnh báo suông.
+- Báo động nhầm thì thêm đường dẫn hoặc mẫu vào `[allowlist]` trong `.gitleaks.toml`, **kèm một dòng giải thích vì sao nó vô hại**. Không thêm im lặng.
 - Thêm biến môi trường mới thì cập nhật `infra/.env.example` trong cùng PR, để giá trị giả.
 - Lỡ commit secret: **coi như đã lộ**. Thu hồi và cấp lại khoá trước, dọn lịch sử git sau.
 
@@ -138,3 +148,50 @@ Phiên bản đang dùng ghi trong [infra/docker-compose.yml](infra/docker-compo
 | Retro | Cuối mỗi sprint, ba câu: giữ gì, bỏ gì, thử gì |
 
 Việc cả năm người cùng chịu: review code lẫn nhau, tự viết test cho phần mình, cập nhật tài liệu trong sprint, có mặt đủ ở M3 và M6.
+
+---
+
+## 10. Ba rào chắn thay cho branch protection
+
+Org `PowerMeApp` ở gói Free. GitHub chỉ thực thi branch protection và ruleset trên repo public
+hoặc gói trả phí, nên với repo private này **máy không chặn ai cả**. Ba thứ dưới đây lấp chỗ trống.
+
+### 10.1. Hook `pre-push` — chặn ngay trên máy
+
+`npm install` tự trỏ git sang `.githooks/`. Từ đó, `git push` vào `main` bị từ chối ngay tại máy,
+trước khi chạm tới GitHub, kèm hướng dẫn chuyển commit sang nhánh mới.
+
+Trường hợp thật sự cần push thẳng — hiếm, và phải báo nhóm trước:
+
+```bash
+POWERME_ALLOW_MAIN_PUSH=1 git push origin main
+```
+
+### 10.2. `gitleaks` — thay Secret scanning
+
+GitHub không cho bật Secret scanning trên repo private của org Free (API trả `422`). CI chạy
+`gitleaks` quét **toàn bộ lịch sử** trên mọi PR. Quét cả lịch sử chứ không chỉ commit mới, vì một
+bí mật lỡ commit rồi xoá ở commit sau vẫn nằm nguyên trong lịch sử và vẫn phải coi là đã lộ.
+
+Đây là rào chắn quan trọng nhất trong ba cái. Mất rào `main` thì cùng lắm phải revert; commit nhầm
+khoá VNPay lên GitHub thì phải đi thu hồi khoá với nhà cung cấp.
+
+### 10.3. Cảnh gác `main` — để lại dấu vết
+
+Mỗi commit vào `main` không gắn với PR nào sẽ tự sinh một issue gán cho người push, gắn nhãn
+`p1:quan-trong`, và job hiện dấu đỏ trên trang repo.
+
+Nó **không chặn** được gì. Tác dụng của nó là làm việc đó không thể diễn ra lặng lẽ — và với một
+nhóm năm người ngồi cùng lớp thì thế là đủ.
+
+### Giới hạn cần hiểu đúng
+
+Hook nằm trên máy từng người: ai xoá `core.hooksPath` là vượt được. Cảnh gác `main` chỉ ghi nhận
+sau khi việc đã xảy ra. Ba rào này chặn **lỗi bất cẩn**, không chặn **ý định**.
+
+Cách sửa tận gốc là nâng org lên GitHub Team — miễn phí qua
+[GitHub Education](https://education.github.com/discount_requests/application) — rồi chạy:
+
+```bash
+bash scripts/setup-github.sh PowerMeApp/powerme
+```

@@ -64,6 +64,8 @@ cp infra/.env.example infra/.env    # điền giá trị cho máy của bạn
 npm run infra:up                    # PostgreSQL + Redis + SteVe (CSMS đối chứng)
 ```
 
+`npm install` tự bật hook `pre-push` của dự án. Nếu nghi ngờ chưa bật, chạy `npm run setup:hooks`.
+
 | Lệnh | Việc |
 |---|---|
 | `npm run infra:up` | Bật PostgreSQL, Redis, SteVe |
@@ -81,11 +83,22 @@ npm run infra:up                    # PostgreSQL + Redis + SteVe (CSMS đối ch
 
 - Nhánh `main` được bảo vệ — **không push thẳng**, mọi thay đổi đi qua Pull Request.
 
-> ⚠️ **Bảo vệ nhánh đang TẠM THỜI không được GitHub thực thi.** Org `PowerMeApp` ở gói Free, và
-> GitHub không cho bật branch protection hay ruleset trên repo private của org Free. Quy tắc
-> "không push thẳng vào main, mỗi PR một approve" vì vậy hiện chỉ là thoả thuận của nhóm, máy
-> không chặn. Bật lại được bằng cách nâng org lên GitHub Team (miễn phí qua GitHub Education),
-> sau đó chạy `bash scripts/setup-github.sh PowerMeApp/powerme`.
+> ⚠️ **GitHub không thực thi bảo vệ nhánh trên repo này.** Org `PowerMeApp` ở gói Free, mà GitHub
+> chỉ cho branch protection và ruleset hoạt động trên repo public hoặc gói trả phí. Nâng org lên
+> GitHub Team (miễn phí qua GitHub Education) rồi chạy `bash scripts/setup-github.sh PowerMeApp/powerme`
+> là có lại. Trong lúc chờ, nhóm dùng ba rào chắn thay thế dưới đây.
+
+### Ba rào chắn thay cho branch protection
+
+| Rào | Ở đâu | Chặn được gì |
+|---|---|---|
+| Hook `pre-push` | [.githooks/pre-push](.githooks/pre-push) — bật qua `npm run setup:hooks` | Chặn `git push` vào `main` **ngay trên máy**, trước khi lệnh chạm tới GitHub |
+| Quét bí mật `gitleaks` | [.github/workflows/security.yml](.github/workflows/security.yml) | Fail PR nếu có token, khoá, mật khẩu lọt vào mã nguồn. Thay cho Secret scanning — thứ gói Free không bật được trên repo private |
+| Cảnh gác `main` | [.github/workflows/main-push-guard.yml](.github/workflows/main-push-guard.yml) | Không chặn, nhưng mỗi commit vào `main` không qua PR sẽ tự sinh một issue gán cho người push |
+
+Hiểu đúng giới hạn: hook nằm trên máy nên người cố tình vẫn vượt được, và cảnh gác `main` chỉ ghi
+nhận sau khi việc đã xảy ra. Chúng chặn **lỗi bất cẩn**, không chặn **ý định**. Với một nhóm đồ án
+thì gần như toàn bộ sự cố thuộc loại thứ nhất.
 - Đặt tên nhánh: `wp<số>/<mã-task>-<mô-tả-ngắn>` — ví dụ `wp2/be-04-state-machine-dual-gun`.
 - Mỗi PR cần **ít nhất một approve** và CI xanh.
 - Commit theo [Conventional Commits](https://www.conventionalcommits.org/).
