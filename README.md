@@ -56,7 +56,7 @@ Ba đầu ra TypeScript nằm chung một npm workspace để dùng chung kiểu
 **Yêu cầu:** Node.js ≥ 22 (xem [.nvmrc](.nvmrc)) · Docker Desktop · Git
 
 ```bash
-git clone <URL-KHO-MA>
+git clone https://github.com/PowerMeApp/powerme.git
 cd powerme
 npm install
 
@@ -80,6 +80,12 @@ npm run infra:up                    # PostgreSQL + Redis + SteVe (CSMS đối ch
 Đọc [CONTRIBUTING.md](CONTRIBUTING.md) trước khi mở nhánh đầu tiên. Tóm tắt:
 
 - Nhánh `main` được bảo vệ — **không push thẳng**, mọi thay đổi đi qua Pull Request.
+
+> ⚠️ **Bảo vệ nhánh đang TẠM THỜI không được GitHub thực thi.** Org `PowerMeApp` ở gói Free, và
+> GitHub không cho bật branch protection hay ruleset trên repo private của org Free. Quy tắc
+> "không push thẳng vào main, mỗi PR một approve" vì vậy hiện chỉ là thoả thuận của nhóm, máy
+> không chặn. Bật lại được bằng cách nâng org lên GitHub Team (miễn phí qua GitHub Education),
+> sau đó chạy `bash scripts/setup-github.sh PowerMeApp/powerme`.
 - Đặt tên nhánh: `wp<số>/<mã-task>-<mô-tả-ngắn>` — ví dụ `wp2/be-04-state-machine-dual-gun`.
 - Mỗi PR cần **ít nhất một approve** và CI xanh.
 - Commit theo [Conventional Commits](https://www.conventionalcommits.org/).
