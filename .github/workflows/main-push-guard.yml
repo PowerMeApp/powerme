@@ -7,6 +7,10 @@ on:
 permissions:
   contents: read
   issues: write
+  # Bắt buộc: bước dưới gọi repos/{repo}/commits/{sha}/pulls để biết commit có
+  # đến từ PR không. Thiếu quyền này API trả 403 và cả job chết trước khi kịp
+  # tạo issue — tức rào chắn im lặng hỏng, đúng kiểu hỏng tệ nhất.
+  pull-requests: read
 
 jobs:
   direct-push:
@@ -26,7 +30,20 @@ jobs:
         run: |
           set -euo pipefail
 
-          COUNT=$(gh api "repos/$REPO/commits/$SHA/pulls" --jq 'length')
+          # GitHub gắn commit với PR không tức thì. Ngay sau khi gộp, truy vấn đầu
+          # tiên có thể trả rỗng dù commit đến từ PR thật. Thử lại vài lượt để
+          # không vu oan cho người vừa gộp PR đúng quy trình.
+          COUNT=0
+          for attempt in 1 2 3; do
+            COUNT=$(gh api "repos/$REPO/commits/$SHA/pulls" --jq 'length')
+            if [ "$COUNT" -gt 0 ]; then
+              break
+            fi
+            if [ "$attempt" -lt 3 ]; then
+              echo "Lượt $attempt: chưa thấy PR nào gắn với commit. Đợi 15s rồi thử lại."
+              sleep 15
+            fi
+          done
 
           if [ "$COUNT" -gt 0 ]; then
             echo "✓ Commit $SHA đến từ Pull Request. Không có gì phải báo."
