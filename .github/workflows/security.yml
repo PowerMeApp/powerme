@@ -1,0 +1,66 @@
+name: Security
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: security-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  gitleaks:
+    name: Quét bí mật lộ trong mã nguồn
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Quét cả lịch sử, không chỉ commit mới nhất — bí mật lỡ commit rồi
+          # xoá ở commit sau vẫn nằm nguyên trong lịch sử và vẫn coi như đã lộ.
+          fetch-depth: 0
+
+      # Cài gitleaks từ bản release đã ghim, KHÔNG dùng gitleaks-action:
+      # action đó đòi giấy phép trả phí khi chạy trong GitHub Organization.
+      - name: Cài gitleaks
+        env:
+          GITLEAKS_VERSION: 8.18.4
+        run: |
+          curl -sSfL -o /tmp/gitleaks.tar.gz \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          tar -xzf /tmp/gitleaks.tar.gz -C /tmp gitleaks
+          sudo install /tmp/gitleaks /usr/local/bin/gitleaks
+          gitleaks version
+
+      - name: Quét
+        run: |
+          gitleaks detect \
+            --source . \
+            --config .gitleaks.toml \
+            --redact \
+            --verbose \
+            --exit-code 1
+
+      - name: Hướng dẫn khi phát hiện bí mật
+        if: failure()
+        run: |
+          cat >> "$GITHUB_STEP_SUMMARY" <<'MSG'
+          ## 🔑 Phát hiện bí mật trong mã nguồn
+
+          **Coi như đã lộ, kể cả khi PR này chưa được gộp.** Làm theo đúng thứ tự:
+
+          1. **Thu hồi và cấp lại khoá** ở phía nhà cung cấp — VNPay, JWT, khoá ký.
+             Đây là việc đầu tiên, không phải việc cuối cùng.
+          2. Chuyển giá trị thật sang biến môi trường, cập nhật `infra/.env.example`
+             bằng một giá trị giả.
+          3. Dọn lịch sử git nếu bí mật đã nằm trong commit cũ.
+          4. Nếu đây là **báo động nhầm**, thêm đường dẫn hoặc mẫu vào `[allowlist]`
+             trong `.gitleaks.toml`, kèm một dòng giải thích vì sao nó vô hại.
+
+          Chi tiết ở CONTRIBUTING.md mục 7.
+          MSG
