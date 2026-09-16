@@ -22,7 +22,7 @@ Chạy lại: `node lab/mini-csms.mjs` (từ `apps/csms`), rồi `NODE_ENV=produ
 | 14:20:27 → 57 | MeterValues E = 796 → 873 → 922 → **1042** Wh | live | **0,0** | tx 3 vẫn đang sạc |
 | 14:20:57 | StatusNotification c1 `Finishing` | — | — | |
 | 14:20:58 | **StopTransaction** `meterStop = 242`, reason Local | **14:18:52** | **125,3** | mâu thuẫn với 1042 Wh ở trên |
-| 14:20:59 → 21:1x | MeterValues E = 303, 354, 367, 386 Wh | 14:18:57 → 19:27 | 104–122 | **phát lại**, đến *sau* StopTransaction |
+| 14:20 → 14:21:54 | MeterValues E = 303, 354, 367, 386, 513, 538 Wh | 14:18:57 → 14:19:47 | 127–122 | **phát lại**, 6 mẫu, đến *sau* StopTransaction | **phát lại**, đến *sau* StopTransaction |
 
 Phía trụ (log SAP): trong lúc mất mạng đã đưa **8** MeterValues vào buffer; sau khi nối lại chỉ **6** được gửi, **2** mất không có dòng log nào. Nối lại **không gửi `BootNotification`**. Thử lại kết nối mỗi **30 s cố định** (tuyến tính, khớp spec 1.6).
 
