@@ -302,7 +302,7 @@ footer{margin-top:78px; padding-top:26px; border-top:1px solid var(--line); colo
         </tr>
         <tr>
           <td><strong>Backend · Dashboard · App</strong></td>
-          <td>NestJS + PostgreSQL + Redis · React + Vite · React Native</td>
+          <td>NestJS + PostgreSQL + Redis · React + Vite · Flutter</td>
           <td class="id">—</td>
           <td>Một ngôn ngữ cho cả ba đầu ra, giúp 5 người đọc được code của nhau trong 13 tuần.</td>
         </tr>
@@ -464,13 +464,13 @@ footer{margin-top:78px; padding-top:26px; border-top:1px solid var(--line); colo
         <thead><tr><th>Mã</th><th>Công việc</th><th>Ngày</th><th>Sprint</th></tr></thead>
         <tbody>
           <tr><td class="id">BE-01</td><td>Khung backend, CI, docker compose, WSS/TLS trên staging</td><td class="num">2</td><td class="wk">S2</td></tr>
-          <tr><td class="id">BE-02</td><td>Máy chủ WebSocket OCPP-J 1.6, định danh trụ theo SN trên đường dẫn</td><td class="num">3</td><td class="wk">S2</td></tr>
+          <tr><td class="id">BE-02</td><td>Máy chủ WebSocket OCPP-J 1.6 dùng <code>ocpp-rpc</code>, tuần tự hoá chiều vào theo từng trụ, đóng phiên cũ khi trụ nối lại</td><td class="num">3</td><td class="wk">S2</td></tr>
           <tr><td class="id">BE-03</td><td>Bản tin từ trụ lên: Boot, Heartbeat, StatusNotification, Authorize, Start, MeterValues, Stop</td><td class="num">6</td><td class="wk">S3</td></tr>
           <tr><td class="id">BE-04</td><td>Lệnh xuống trụ: RemoteStart, RemoteStop, Reset, UnlockConnector, Get/ChangeConfiguration, TriggerMessage</td><td class="num">3</td><td class="wk">S3</td></tr>
           <tr><td class="id">BE-05</td><td>State machine trụ và connector cho cấu hình súng đôi, lưu bền và khôi phục</td><td class="num">3</td><td class="wk">S3</td></tr>
           <tr><td class="id">BE-06</td><td>Lưu trữ MeterValues DC: SoC, điện áp, dòng, kWh</td><td class="num">2</td><td class="wk">S3</td></tr>
           <tr><td class="id">BE-07</td><td><strong>Engine đối soát:</strong> phát lại hàng đợi offline, phát hiện replay theo timestamp, chống trùng giao dịch, phát hiện lỗ hổng chuỗi meter</td><td class="num">6</td><td class="wk">S4, S6</td></tr>
-          <tr><td class="id">BE-08</td><td>Fanout realtime qua Redis pub/sub tới app và dashboard</td><td class="num">2</td><td class="wk">S4</td></tr>
+          <tr><td class="id">BE-08</td><td>Fanout realtime tới app và dashboard qua Socket.IO — Redis pub/sub <strong>chỉ cho giao diện</strong>, không bao giờ trên đường đi của giao dịch</td><td class="num">2</td><td class="wk">S4</td></tr>
         </tbody>
       </table>
     </div>
