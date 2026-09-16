@@ -1,0 +1,11 @@
+{
+  "$schemaVersion": 1,
+  "supervisionUrls": ["ws://localhost:9000/ocpp"],
+  "supervisionUrlDistribution": "round-robin",
+  "log": { "file": "logs/combined.log", "errorFile": "logs/error.log", "maxFiles": 3, "statisticsInterval": 0 },
+  "worker": { "processType": "workerSet" },
+  "performanceStorage": { "enabled": false, "type": "none" },
+  "uiServer": { "enabled": false },
+  "persistState": false,
+  "stationTemplateUrls": [ { "file": "powerme-d1.station-template.json", "numberOfStations": 1 } ]
+}
