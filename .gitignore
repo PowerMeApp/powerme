@@ -68,3 +68,6 @@ desktop.ini
 tmp/
 .cache/
 .turbo/
+
+# ---- Ngữ cảnh cá nhân cho phiên AI — không đưa lên repo chung ----
+HANDOFF.md
