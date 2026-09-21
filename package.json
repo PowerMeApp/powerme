@@ -29,6 +29,6 @@
     "infra:reset": "docker compose -f infra/docker-compose.yml down -v"
   },
   "devDependencies": {
-    "prettier": "^3.4.2"
+    "prettier": "^3.9.8"
   }
 }
