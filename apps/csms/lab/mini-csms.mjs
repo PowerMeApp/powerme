@@ -68,7 +68,11 @@ server.on('client', (client) => {
   });
 
   // Câu trả lời tối thiểu hợp schema OCPP 1.6
-  client.handle('BootNotification', () => ({ status: 'Accepted', currentTime: now(), interval: 60 }));
+  client.handle('BootNotification', () => ({
+    status: 'Accepted',
+    currentTime: now(),
+    interval: 60,
+  }));
   client.handle('Heartbeat', () => ({ currentTime: now() }));
   client.handle('StatusNotification', () => ({}));
   client.handle('Authorize', () => ({ idTagInfo: { status: 'Accepted' } }));
