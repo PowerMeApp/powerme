@@ -71,3 +71,4 @@ tmp/
 
 # ---- Ngữ cảnh cá nhân cho phiên AI — không đưa lên repo chung ----
 HANDOFF.md
+.demo-data/
