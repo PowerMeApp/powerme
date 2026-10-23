@@ -15,5 +15,7 @@ module.exports = {
   transform: {
     '^.+\\.ts$': ['ts-jest', { tsconfig: '<rootDir>/tsconfig.jest.json' }],
   },
+  // Hai test tích hợp cùng DROP SCHEMA public trên một DATABASE_URL nên không được chạy song song.
+  maxWorkers: 1,
   testTimeout: 120000,
 };

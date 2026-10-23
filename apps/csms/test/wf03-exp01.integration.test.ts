@@ -80,6 +80,9 @@ const CONFIG: CsmsConfig = {
   meterValueSampleIntervalS: 10,
   reconcileGapFactor: 3,
   reconcileEnergyToleranceWh: 1,
+  consoleEnabled: false,
+  consoleHost: '127.0.0.1',
+  consolePort: 0,
 };
 
 class StubClient implements OcppClientLike {
