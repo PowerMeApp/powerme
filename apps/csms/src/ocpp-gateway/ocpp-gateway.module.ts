@@ -1,0 +1,22 @@
+/**
+ * Module `ocpp-gateway` — tầng giao thức OCPP-J: socket, registry, log frame, tuần tự hoá, handler.
+ *
+ * Nhập SessionsModule (handler gọi nghiệp vụ) và ReconciliationModule (ReplayDetector). Không
+ * module nào nhập ngược lại gateway (chỉ có import kiểu `InboundContext`).
+ */
+import { Module } from '@nestjs/common';
+import { DbModule } from '../db/db.module.js';
+import { ReconciliationModule } from '../reconciliation/reconciliation.module.js';
+import { SessionsModule } from '../sessions/sessions.module.js';
+import { ConnectionRegistry } from './connection-registry.js';
+import { InboundSerializer } from './inbound-serializer.js';
+import { OcppHandlers } from './ocpp-handlers.js';
+import { OcppMessageLogger } from './ocpp-message-logger.js';
+import { OcppServer } from './ocpp-server.js';
+
+@Module({
+  imports: [DbModule, SessionsModule, ReconciliationModule],
+  providers: [ConnectionRegistry, InboundSerializer, OcppMessageLogger, OcppHandlers, OcppServer],
+  exports: [OcppServer, ConnectionRegistry],
+})
+export class OcppGatewayModule {}
