@@ -11,7 +11,7 @@
 1. WP2 có **13 PR mở** với CI xanh (trừ #9 đỏ vì định dạng, đã sửa trong #11): bàn thí nghiệm OCPP, lớp điều khiển tương tác, hai thí nghiệm có log thật, tài liệu kiến trúc với 12 ADR tách file, thiết kế CSDL vật lý 32 bảng có migration, state machine đã xác nhận, package diagram, WF-03 nháp, bảng công nghệ, báo cáo hiện trạng repo.
 2. **Chưa PR nào được merge.** Nguyên nhân gốc phát hiện ngày 23/10: bốn thành viên còn lại chỉ có quyền *đọc* repo, team CODEOWNERS không có ai ngoài Trí — **đã sửa cùng ngày**, cả nhóm giờ có quyền write.
 3. **Kết quả nghiên cứu sơ bộ đã có bằng chứng thật** (EXP-01): sau 81 s mất kết nối, trụ phát lại 6/8 mẫu *sau* lệnh dừng, `meterStop` báo 242 Wh trong khi chuỗi đo live đã 1042 Wh; tín hiệu phân biệt duy nhất là chênh lệch hai đồng hồ. Đúng khoảng trống của OCPP 1.6 mà đề tài nhắm tới.
-4. Iteration 1 gọi đúng tên là **"xác minh giao thức và dụng cụ đo"**: chưa có backend NestJS chạy được trên `main`. Code sản phẩm đầu tiên (gateway + state machine + đối soát + test phát lại trace thật) đang được dựng — T33.
+4. **Iteration 1 đã có code sản phẩm đầu tiên** (#19, CI xanh): gateway OCPP trên NestJS, state machine phiên 22 chuyển, engine đối soát, 96 unit test + 19 test tích hợp phát lại trace thật EXP-01. Nhưng **chưa nằm trên `main`** — phải merge chuỗi #18 → #19 trước; chưa có API, realtime, billing.
 5. Trước Review 2 cần: merge chuỗi PR theo thứ tự ở mục 3, chốt 6 quyết định ở mục 8.
 
 ---
@@ -26,7 +26,7 @@
 | 17/09 | Gặp GVHD lần đầu — thầy định hướng: trụ giả lập tương tác được, demo nói lên chất lượng, hoàn thiện docs trước | — |
 | 08/10 | Lớp điều khiển `csms-ctl`: 12 lệnh chiều xuống qua HTTP, cắt kết nối theo lệnh, `epoch` trong trace, đóng socket cũ khi trụ nối lại. **EXP-02** đặt chỗ: 9/9 hành vi đạt, phát hiện tính duy nhất đang nhờ thư viện chứ không nhờ CSMS | #11, `lab/EXP-02-dat-cho.md` |
 | 23/10 | Báo cáo hiện trạng repo (T63), phát hiện và sửa sự cố quyền truy cập, bảng công nghệ (T18), package diagram (T19), xác nhận state machine (T13), tách 12 ADR, thiết kế CSDL vật lý + migration (T11), WF-03 class + sequence (T24) | #12–#18 |
-| 23/10 → | Iteration 1: gateway + state machine + đối soát + test phát lại trace EXP-01 (T33) | #19, đang chạy CI |
+| 23/10 | **Iteration 1 có code**: gateway + state machine + đối soát; test tích hợp phát lại trace thật EXP-01 qua đúng đường xử lý của gateway, chạy trên Postgres của CI | #19, CI xanh |
 
 ---
 
@@ -45,7 +45,7 @@
 | 9 | #16 | Xác nhận state machine T13 — STM-1 9 trạng thái / 22 chuyển, STM-2 phản chiếu OCPP, STM-3 sửa theo EXP-01 | ~180 | ✅ |
 | 10 | #18 | Thiết kế CSDL vật lý T11 — 32 bảng, 28 enum, 94 index, 36 CHECK, migration SQL 774 dòng, mô tả bảng | 2.661 | ✅ |
 | 11 | #17 | WF-03 class + sequence diagram T24 (nháp, chờ T62) | 460 | ✅ |
-| 12 | #19 → #18 | Iteration 1 — gateway OCPP, state machine phiên, đối soát; test phát lại trace EXP-01 (T33) | — | đang chạy CI |
+| 12 | #19 → #18 | **Iteration 1** — gateway OCPP (`ocpp-rpc`, tuần tự hoá theo trụ, epoch từ DB), state machine phiên 22 chuyển, đối soát, **96 unit test + 19 test tích hợp phát lại 75 frame EXP-01** (T33) | ~9.800 | ✅ |
 
 Độc lập với nhau: #13, #14, #15, #16, #17 (đều từ `main`). Xếp tầng: #8 → #12; #9 → #11; #18 → T33.
 
@@ -105,7 +105,8 @@
 
 | Thiếu | Hệ quả | Kế hoạch |
 |---|---|---|
-| **Backend NestJS trên `main`** | Chưa có gì "chạy được" theo nghĩa sản phẩm | T33 đang dựng; cần merge #18 trước |
+| **Backend NestJS trên `main`** | Code đã có ở #19 nhưng `main` vẫn trống | Merge #8 → #12 → #18 → #19 |
+| Job nền (hard cap 24 h, start timeout, 900 s im lặng), RemoteStart/Stop kích hoạt thật, operator giải quyết `review` | 5/22 chuyển STM-1 chưa có đường kích hoạt (xem `ITERATION-1-WF03.md` §4) | Iteration 2 |
 | **0 PR merged, 0 review** | T50 "tài liệu đã có trong repo" chưa đúng | Quyền đã sửa; Ân → #7/#8, Khang → #9/#11 |
 | API tìm trạm cho WP3 | Sơn bị chặn từ 16/09 | Sau T33, 2 ngày |
 | TLS/Caddy, Security Profile 2 | Chưa có | BE-01 còn lại |
@@ -131,7 +132,7 @@
 ## 9. Kế hoạch 48 giờ tới (→ 25/10)
 
 1. Review và merge theo thứ tự mục 3 — mục tiêu `main` có tài liệu, ADR, lab, schema trước thứ Hai.
-2. T33 lên PR với CI xanh; test tích hợp phát lại trace EXP-01 chạy trên CI.
+2. ~~T33 lên PR với CI xanh~~ — đã xong (#19); sau khi #18 merge, đổi base của #19 sang `main`.
 3. Chốt 6 quyết định mục 8 trong họp nhóm.
 4. Gửi 5 câu Ruihua qua thầy.
 5. Xuất PDF các tài liệu cho T55 theo tên quy định.
