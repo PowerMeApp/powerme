@@ -51,3 +51,14 @@ Ranh giới sở hữu giữa năm work package được thực thi bằng [CODE
 | Mỗi WP một kho mã riêng | Type dùng chung phải publish package hoặc copy tay. Với nhịp 2 tuần một sprint và cột mốc M3 đòi E2E liền mạch, chi phí đồng bộ vượt xa lợi ích về ranh giới sở hữu. |
 | Monorepo dùng Nx hoặc Turborepo | Thêm một lớp công cụ phải học, trong khi lợi ích chính (cache, task graph) chỉ đáng giá khi CI đã chậm. Chưa chậm thì chưa cần. Có thể thêm sau mà không phải đổi cấu trúc thư mục. |
 | Monorepo dùng pnpm workspaces | pnpm tốt hơn về đĩa và tốc độ, nhưng Expo / Metro có tiền sử trục trặc với symlink của pnpm. Không đáng đổi lấy rủi ro ở WP3 trong đồ án 13 tuần. |
+
+## Phụ lục 10/2026 — app tài xế là Flutter
+
+*Ghi ngày 23/10/2026 bởi Ngô Văn Minh Trí (WP2). Không đổi trạng thái ADR; chỉ ghi nhận thực tế đã lệch so với giả định lúc viết.*
+
+Nhóm đã chốt app tài xế viết bằng **Flutter (Dart)**, không còn là React Native / Expo. Giả định "cả ba đầu ra viết bằng TypeScript" ở mục Bối cảnh không còn đúng. Cập nhật:
+
+- `apps/mobile` vẫn nằm **trong monorepo** để giữ một dòng lịch sử git và một lần checkout cho review chéo, nhưng **ngoài npm workspaces** — Flutter có hệ thống build riêng (`pub`), không tham gia `npm install` / `npm run build --workspaces`.
+- `packages/shared` phục vụ **backend + dashboard** (TypeScript). App không import được package này.
+- Hợp đồng API giữa CSMS và app đi qua **`openapi.json` sinh từ NestJS**; phía app sinh client Dart từ file đó. Sự kiện Socket.IO có hợp đồng riêng.
+- Dòng "Mất" về Expo / Metro và dòng loại pnpm vì Metro ở trên không còn áp dụng; lý do giữ npm workspaces giờ là tính đơn giản và việc nhóm đã commit theo nó.

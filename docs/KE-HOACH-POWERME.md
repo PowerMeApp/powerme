@@ -60,9 +60,9 @@ Dựa trên nghiên cứu nền ngày 18/08/2026. Chi tiết và nguồn dẫn �
 | CSMS đối chứng | **SteVe**, chạy tiến trình riêng | ⚠️ phải tự kiểm | **Không fork, không copy code** — chạy riêng để so hành vi thì câu hỏi giấy phép không phát sinh |
 | Load test | Mẫu **k6** của MaEVe | Apache-2.0 | 1 virtual user = 1 trạm sạc, khung OCPP 1.6J thật. MaEVe đã archived nhưng mẫu load test còn dùng được |
 | Checklist tuân thủ | **76 ca `TC_*_CSMS`** trong tài liệu OCTT của OCA | công khai | Bản 2026-03 là mới nhất đã xác nhận |
-| Backend | NestJS + TypeScript, PostgreSQL, Redis | | Một ngôn ngữ cho cả ba đầu ra |
+| Backend | NestJS + TypeScript, PostgreSQL, Redis | | Một ngôn ngữ cho backend, dashboard và simulator; `packages/shared` phục vụ hai bên TS |
 | Dashboard | React + Vite + TypeScript | | |
-| App | React Native / Expo | | |
+| App | Flutter | | Hợp đồng API qua `openapi.json` sinh từ NestJS; sự kiện Socket.IO có hợp đồng riêng |
 
 ### ⚠️ Việc bắt buộc: patch simulator
 
@@ -200,13 +200,13 @@ Không vướng Tết. Không có sprint đệm — đây là hệ quả trực 
 | Mã | Công việc | Ngày | Sprint |
 |---|---|---|---|
 | BE-01 | Khung backend, CI, docker compose, WSS/TLS trên staging | 2 | S2 |
-| BE-02 | Máy chủ WebSocket OCPP-J 1.6, định danh trụ theo SN trên đường dẫn | 3 | S2 |
+| BE-02 | Máy chủ WebSocket OCPP-J 1.6 dùng `ocpp-rpc`, tuần tự hoá chiều vào theo từng trụ, đóng phiên cũ khi trụ nối lại — xem [WP2-KIEN-TRUC-TECHSTACK.md](WP2-KIEN-TRUC-TECHSTACK.md) | 3 | S2 |
 | BE-03 | Bản tin từ trụ lên: Boot, Heartbeat, StatusNotification, Authorize, Start, MeterValues, Stop | 6 | S3 |
 | BE-04 | Lệnh xuống trụ: RemoteStart, RemoteStop, Reset, UnlockConnector, Get/ChangeConfiguration, TriggerMessage | 3 | S3 |
 | BE-05 | State machine trụ và connector cho cấu hình súng đôi, lưu bền và khôi phục | 3 | S3 |
 | BE-06 | Lưu trữ MeterValues DC: SoC, điện áp, dòng, kWh | 2 | S3 |
 | BE-07 | **Engine đối soát: phát lại hàng đợi offline, phát hiện replay theo timestamp, chống trùng giao dịch, phát hiện lỗ hổng chuỗi meter** | 6 | S4, S6 |
-| BE-08 | Fanout realtime qua Redis pub/sub tới app và dashboard | 2 | S4 |
+| BE-08 | Fanout realtime tới app và dashboard qua Socket.IO — Redis pub/sub **chỉ cho giao diện**, không bao giờ trên đường đi của giao dịch | 2 | S4 |
 
 ### WP3 — App tài xế (26 ngày công)
 

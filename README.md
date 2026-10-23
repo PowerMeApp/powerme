@@ -24,7 +24,7 @@ powerme/
 ├── apps/
 │   ├── csms/          WP2 — CSMS: WebSocket OCPP 1.6J, state machine, engine đối soát (NestJS)
 │   ├── dashboard/     WP4 — Dashboard vận hành: giám sát, cảnh báo, biểu giá (React + Vite)
-│   └── mobile/        WP3 — App tài xế: quét QR, màn hình sạc realtime (React Native / Expo)
+│   └── mobile/        WP3 — App tài xế: quét QR, màn hình sạc realtime (Flutter)
 ├── packages/
 │   └── shared/        Kiểu dữ liệu dùng chung, client sinh từ OpenAPI, hằng số OCPP
 ├── simulator/         WP5 — SAP simulator + bản patch nhánh 1.6 (task QA-02)
@@ -43,7 +43,7 @@ Ba đầu ra TypeScript nằm chung một npm workspace để dùng chung kiểu
 |---|---|
 | Backend CSMS | NestJS + TypeScript · PostgreSQL · Redis |
 | Dashboard | React + Vite + TypeScript |
-| App | React Native / Expo |
+| App | Flutter — hợp đồng API qua `openapi.json` sinh từ NestJS |
 | Charge point mô phỏng | [SAP e-mobility-charging-stations-simulator](https://github.com/SAP/e-mobility-charging-stations-simulator) (Apache-2.0) |
 | CSMS đối chứng | [SteVe](https://github.com/steve-community/steve) — **chạy tiến trình riêng, không fork, không copy code** |
 | Load test | k6 |

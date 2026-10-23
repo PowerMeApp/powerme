@@ -3,9 +3,9 @@ name: Security
 on:
   push:
     branches: [main]
+  # KHÔNG lọc theo nhánh đích: PR xếp tầng (nhánh này dựa trên nhánh kia)
+  # cũng phải được kiểm. Lọc [main] khiến chúng không chạy check nào.
   pull_request:
-    # PR xếp tầng (base là nhánh wp*/…) cũng phải qua CI, không chỉ PR vào main.
-    branches: [main, 'wp*/**']
 
 concurrency:
   group: security-${{ github.ref }}

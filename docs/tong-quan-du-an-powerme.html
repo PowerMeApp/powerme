@@ -1,0 +1,583 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PowerMe — Tổng quan dự án &amp; lộ trình hiểu OCPP</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=Source+Sans+3:ital,wght@0,400;0,600;1,400&display=swap">
+<style>
+:root{
+  --paper:#F4F5F6; --surface:#FFFFFF; --surface-2:#EBEEF0;
+  --ink:#14191D; --ink-2:#39444B; --muted:#5D6A73;
+  --line:#DBDFE3; --line-strong:#C0C7CC;
+  --accent:#8F6100; --accent-mark:#E0A100;
+  --ok:#0F7A55; --info:#1F6FEB; --warn:#B26A00; --crit:#B4322A; --idle:#78868F;
+  --display:"Archivo","Helvetica Neue",Arial,sans-serif;
+  --body:"Source Sans 3","Segoe UI",system-ui,sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,Consolas,monospace;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--paper);color:var(--ink);font-family:var(--body);font-size:16.5px;line-height:1.6;-webkit-font-smoothing:antialiased}
+.wrap{max-width:1080px;margin:0 auto;padding:0 30px 90px}
+h1,h2,h3,h4{font-family:var(--display);margin:0;letter-spacing:-.015em;text-wrap:balance}
+p{margin:0 0 12px}
+ul,ol{margin:0 0 12px;padding-left:22px}
+li{margin:0 0 5px}
+a{color:var(--accent)}
+code{font-family:var(--mono);font-size:.86em;background:var(--surface-2);padding:1px 5px;border-radius:3px}
+pre{font-family:var(--mono);font-size:12px;line-height:1.55;background:var(--surface);border:1px solid var(--line);border-left:3px solid var(--accent-mark);border-radius:4px;padding:12px 14px;margin:0 0 12px;white-space:pre-wrap;word-break:break-word}
+pre code{background:none;padding:0}
+
+.masthead{border-bottom:1px solid var(--line);padding:50px 0 28px;margin-bottom:38px}
+.eyebrow{font-family:var(--mono);font-size:11.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted);display:flex;align-items:center;gap:14px;margin-bottom:18px}
+.eyebrow::after{content:"";flex:1;height:1px;background:var(--line-strong)}
+h1{font-size:clamp(36px,6vw,60px);font-weight:700;line-height:1;letter-spacing:-.03em}
+h1 .volt{color:var(--accent-mark)}
+.lede{font-size:18px;color:var(--ink-2);margin-top:16px;max-width:66ch}
+.facts{display:flex;flex-wrap:wrap;margin-top:26px;border-top:1px solid var(--line);padding-top:16px}
+.fact{flex:1 1 150px;padding-right:18px;border-right:1px solid var(--line);margin-right:18px}
+.fact:last-child{border-right:none}
+.fact .k{font-family:var(--mono);font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);display:block;margin-bottom:3px}
+.fact .v{font-family:var(--display);font-size:15px;font-weight:600}
+
+section{margin-bottom:42px}
+h2{font-size:27px;font-weight:700;margin:0 0 6px;padding-top:8px}
+.h2num{font-family:var(--mono);font-size:12px;color:var(--accent);letter-spacing:.12em;display:block;margin-bottom:6px;text-transform:uppercase}
+.h2rule{height:2px;background:var(--ink);width:44px;margin:12px 0 20px}
+h3{font-size:19px;font-weight:600;margin:24px 0 8px}
+h4{font-size:15.5px;font-weight:600;margin:16px 0 6px;color:var(--ink-2)}
+
+.box{background:var(--surface);border:1px solid var(--line);border-radius:5px;padding:16px 18px;margin:0 0 16px}
+.box.warn{border-left:3px solid var(--warn);background:#FFFBF3}
+.box.crit{border-left:3px solid var(--crit);background:#FEF6F5}
+.box.ok{border-left:3px solid var(--ok);background:#F3FAF7}
+.box.info{border-left:3px solid var(--info);background:#F4F8FE}
+.box .bt{font-family:var(--display);font-weight:600;font-size:15px;margin-bottom:6px;display:block}
+.box p:last-child,.box ul:last-child,.box ol:last-child{margin-bottom:0}
+
+table{width:100%;border-collapse:collapse;margin:0 0 16px;font-size:14.5px}
+th,td{text-align:left;padding:7px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+th{font-family:var(--display);font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);border-bottom:1px solid var(--line-strong);font-weight:600}
+tbody tr:nth-child(even){background:var(--surface)}
+td code{font-size:12.5px}
+
+.seq{border-left:2px solid var(--line-strong);margin:0 0 16px;list-style:none;padding-left:0}
+.seq li{position:relative;padding:0 0 16px 22px;margin:0}
+.seq li::before{content:"";position:absolute;left:-6px;top:7px;width:10px;height:10px;border-radius:50%;background:var(--accent-mark);border:2px solid var(--paper)}
+.seq .dir{font-family:var(--mono);font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);display:block}
+.seq .msg{font-family:var(--display);font-weight:600;font-size:16px}
+
+.tier{border:1px solid var(--line);border-radius:5px;overflow:hidden;margin:0 0 14px;background:var(--surface)}
+.tier .th2{display:flex;align-items:baseline;gap:12px;padding:11px 16px;background:var(--surface-2);border-bottom:1px solid var(--line)}
+.tier .tn{font-family:var(--mono);font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--accent)}
+.tier .tt{font-family:var(--display);font-weight:600;font-size:16.5px}
+.tier .tw{margin-left:auto;font-family:var(--mono);font-size:11.5px;color:var(--muted);white-space:nowrap}
+.tier .tb{padding:14px 16px}
+
+.pill{display:inline-block;font-family:var(--mono);font-size:10.5px;letter-spacing:.07em;text-transform:uppercase;padding:2px 7px;border-radius:3px;border:1px solid var(--line-strong);color:var(--muted);vertical-align:1px}
+.pill.must{border-color:var(--crit);color:var(--crit)}
+.pill.skip{border-color:var(--line-strong);color:var(--idle);text-decoration:line-through}
+
+.qz{counter-reset:q;list-style:none;padding:0}
+.qz li{counter-increment:q;position:relative;padding:9px 0 9px 40px;border-bottom:1px dashed var(--line);margin:0}
+.qz li::before{content:counter(q,decimal-leading-zero);position:absolute;left:0;top:9px;font-family:var(--mono);font-size:12px;color:var(--accent);font-weight:600}
+
+dl.gloss{margin:0}
+dl.gloss div{padding:8px 0;border-bottom:1px solid var(--line);display:grid;grid-template-columns:210px 1fr;gap:16px}
+dl.gloss dt{font-family:var(--mono);font-size:13px;font-weight:600;color:var(--ink)}
+dl.gloss dd{margin:0;font-size:14.5px;color:var(--ink-2)}
+
+.foot{border-top:1px solid var(--line-strong);padding-top:14px;margin-top:40px;font-size:13px;color:var(--muted);font-family:var(--mono)}
+
+@media print{
+  @page{size:A4;margin:15mm 13mm 16mm}
+  body{background:#fff;font-size:10.2pt;line-height:1.5}
+  .wrap{max-width:none;padding:0}
+  *{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  .masthead{padding-top:0}
+  h1{font-size:31pt}
+  .lede{font-size:11.5pt}
+  h2{font-size:17pt}
+  h3{font-size:12.5pt}
+  h4{font-size:11pt}
+  pre{font-size:8.1pt;page-break-inside:avoid}
+  table{font-size:9pt}
+  th{font-size:8pt}
+  section{margin-bottom:26px}
+  h2,h3,h4{page-break-after:avoid}
+  .box,.tier,.seq li,tr{page-break-inside:avoid}
+  dl.gloss div{page-break-inside:avoid;grid-template-columns:170px 1fr}
+  .pagebreak{page-break-before:always}
+}
+@media (max-width:620px){
+  dl.gloss div{grid-template-columns:1fr;gap:3px}
+  .fact{border-right:none;flex:1 1 100%;margin-bottom:10px}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="masthead">
+  <div class="eyebrow">Capstone FA26SE187 · WP2 · Tài liệu định hướng</div>
+  <h1>Power<span class="volt">Me</span><br>Hiểu dự án từ số 0</h1>
+  <p class="lede">Tổng quan dự án, giải thích OCPP cho người chưa từng đọc spec, và lộ trình những gì bạn còn phải học — xếp theo thứ tự cần dùng, không theo thứ tự sách giáo khoa.</p>
+  <div class="facts">
+    <div class="fact"><span class="k">Người đọc</span><span class="v">Ngô Văn Minh Trí · SE191045</span></div>
+    <div class="fact"><span class="k">Vai trò</span><span class="v">WP2 owner · Team Leader</span></div>
+    <div class="fact"><span class="k">Phần phụ trách</span><span class="v">CSMS OCPP 1.6J · Đối soát</span></div>
+    <div class="fact"><span class="k">Ngày soạn</span><span class="v">12/09/2026</span></div>
+  </div>
+</header>
+
+<div class="box warn">
+  <span class="bt">Cách dùng tài liệu này — đọc trước khi đọc tiếp</span>
+  <p>Đây là tài liệu <strong>để hiểu</strong>, không phải tài liệu <strong>để trích dẫn</strong>. Mọi số hiệu mục trong spec, mọi giá trị enum, mọi hành vi cụ thể của firmware — phải đối chiếu lại với bản OCPP 1.6 gốc và JSON schema trước khi đưa vào Report hay khẳng định trước hội đồng.</p>
+  <p>Lý do không phải hình thức: dự án này đã nhiều lần phải sửa kết luận vì tin nguồn thứ cấp. Chính tài liệu này cũng là nguồn thứ cấp. Xem mục 07.</p>
+</div>
+
+<section>
+  <span class="h2num">01</span>
+  <h2>Dự án này thực ra là gì</h2>
+  <div class="h2rule"></div>
+
+  <h3>Bài toán có thật</h3>
+  <p>Một doanh nghiệp mua trụ sạc xe điện DC nhập khẩu — dòng <strong>D1 Series</strong> và <strong>YJ-EU Series</strong>, 60–160 kW, súng đôi, của hãng Jiangxi Ruihua (Trung Quốc). Mỗi trụ đi kèm phần mềm quản lý mặc định của hãng. Phần mềm đó là hộp đen: không sửa được, không tích hợp được với hệ thống thanh toán Việt Nam, không xuất được dữ liệu theo cách doanh nghiệp cần.</p>
+  <p><strong>PowerMe thay thế lớp phần mềm đó.</strong> Trụ vẫn là trụ của hãng; cái nhóm xây là phần "bộ não" ở phía server nói chuyện với trụ, cộng app cho tài xế và dashboard cho người vận hành.</p>
+
+  <div class="box info">
+    <span class="bt">Vì sao thay được mà không cần đụng vào phần cứng</span>
+    <p>Vì trụ nói một <strong>giao thức mở</strong> tên là OCPP. Bất kỳ server nào nói đúng giao thức đó đều điều khiển được trụ. Kỹ thuật viên chỉ cần vào màn hình HMI của trụ, gõ lại địa chỉ server trỏ về PowerMe thay vì về server của hãng, rồi khởi động lại. Toàn bộ dự án đứng được là nhờ tính chất này của OCPP.</p>
+  </div>
+
+  <h3>Bốn thành phần</h3>
+  <table>
+    <thead><tr><th style="width:20%">Thành phần</th><th style="width:14%">WP</th><th>Làm gì</th></tr></thead>
+    <tbody>
+      <tr><td><strong>CSMS</strong></td><td><strong>WP2 — bạn</strong></td><td>Charging Station Management System. Server nói OCPP với trụ, giữ trạng thái từng súng sạc, ghi nhận giao dịch, đối soát số liệu. <strong>Đây là lõi kỹ thuật của đồ án.</strong></td></tr>
+      <tr><td>App tài xế</td><td>WP3</td><td>Tìm trạm, quét QR bắt đầu sạc, xem tiến trình, thanh toán VNPay</td></tr>
+      <tr><td>Dashboard</td><td>WP4</td><td>Người vận hành theo dõi trụ, xử lý sự cố, quản trị</td></tr>
+      <tr><td>Billing + Simulator</td><td>WP5</td><td>Tính tiền, loyalty, và trụ ảo để kiểm thử</td></tr>
+    </tbody>
+  </table>
+
+  <div class="box crit">
+    <span class="bt">Ràng buộc lớn nhất: không có trụ vật lý</span>
+    <p>Nhóm không có trụ thật để cắm vào. Toàn bộ kiểm thử chạy trên <strong>simulator</strong> — một chương trình giả làm trụ sạc, nói đúng OCPP nhưng không có điện. Đây là rủi ro đã chấp nhận (mã <code>R-H01</code>), không phải thiếu sót.</p>
+    <p>Hệ quả phải nhớ suốt dự án: <strong>simulator trả lời theo cách người viết simulator nghĩ trụ sẽ trả lời.</strong> Mọi câu hỏi dạng "firmware thật gửi gì" — simulator không trả lời được. Phải hỏi hãng.</p>
+  </div>
+
+  <h3>Câu hỏi nghiên cứu — thứ phân biệt đồ án với một sản phẩm</h3>
+  <p>Một đồ án Capstone không chỉ cần chạy được, mà cần trả lời một câu hỏi chưa có sẵn đáp án. Câu hỏi của bạn:</p>
+  <div class="box ok">
+    <p style="font-size:17px;font-family:var(--display);font-weight:600;margin:0">Một CSMS tự xây đối soát dữ liệu giao dịch và đo đếm <em>chính xác tới đâu</em> khi đường truyền tới trụ chập chờn?</p>
+  </div>
+  <p>Mục 04 giải thích vì sao câu này khó và vì sao nó đáng hỏi. Cần hiểu mục 02 trước.</p>
+</section>
+
+<section class="pagebreak">
+  <span class="h2num">02</span>
+  <h2>OCPP, giải thích từ số 0</h2>
+  <div class="h2rule"></div>
+
+  <h3>2.1 · Vấn đề OCPP sinh ra để giải</h3>
+  <p>Trước khi có chuẩn chung, mỗi hãng trụ sạc dùng giao thức riêng. Doanh nghiệp mua trụ của ba hãng thì phải chạy ba phần mềm quản lý, không gộp được. Đổi hãng nghĩa là vứt bỏ toàn bộ phần mềm.</p>
+  <p><strong>OCPP — Open Charge Point Protocol</strong>, do tổ chức <strong>Open Charge Alliance (OCA)</strong> ban hành — là bộ quy ước chung: trụ và server nói chuyện bằng những bản tin có tên và cấu trúc cố định. Hãng nào cũng hiểu.</p>
+  <p>Phiên bản dự án dùng là <strong>OCPP 1.6</strong>, bản phổ biến nhất trong thực tế hiện nay. <strong>2.0.1</strong> mới hơn, vá được vài điểm yếu của 1.6 (mục 4.2) nhưng trụ Ruihua chỉ hỗ trợ 1.6 — nên 1.6 không phải lựa chọn, mà là bắt buộc.</p>
+
+  <h3>2.2 · Hai nhân vật, và ai gọi ai</h3>
+  <table>
+    <thead><tr><th style="width:28%">Tên trong spec</th><th style="width:24%">Trong dự án</th><th>Vai</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Charge Point</strong> (CP)</td><td>Trụ sạc D1 / YJ-EU<br>(hoặc simulator)</td><td>Thiết bị ngoài hiện trường. Cắm điện vào xe, đo điện năng, có màn hình HMI</td></tr>
+      <tr><td><strong>Central System</strong> (CS)</td><td><strong>CSMS của bạn</strong></td><td>Server. Biết mọi trụ, lưu mọi giao dịch, ra lệnh cho trụ</td></tr>
+    </tbody>
+  </table>
+  <div class="box">
+    <span class="bt">Điểm dễ nhầm nhất với người mới</span>
+    <p><strong>Trụ là bên chủ động kết nối, không phải server.</strong> Trụ nằm sau router 4G hoặc mạng nội bộ, thường không có IP công khai — server không thể "gọi" trụ trước được. Nên trụ tự mở kết nối tới server và <strong>giữ kết nối đó mở liên tục</strong>. Mọi lệnh server gửi xuống đều đi qua ống đã mở sẵn đó.</p>
+    <p>Vì vậy: <strong>mất kết nối là mất cả hai chiều.</strong> Không chỉ server không biết trụ đang làm gì, mà server cũng không ra lệnh được. Đây là gốc rễ của câu hỏi nghiên cứu.</p>
+  </div>
+
+  <h3>2.3 · Chữ "J" trong 1.6J</h3>
+  <p>OCPP 1.6 có hai cách truyền: <strong>SOAP</strong> (cũ, nặng, XML) và <strong>JSON over WebSocket</strong> — viết tắt là <strong>OCPP-J</strong>, chữ J đó. Dự án dùng bản J.</p>
+  <ul>
+    <li><strong>WebSocket</strong> là kiểu kết nối giữ mở hai chiều, khác HTTP thông thường (hỏi – đáp rồi đóng). Khi đã mở, cả hai bên đều gửi được bất cứ lúc nào.</li>
+    <li>Trụ kết nối tới URL dạng <code>wss://server/ocpp/&lt;định-danh-trụ&gt;</code>. <strong>Đoạn cuối URL chính là danh tính của trụ</strong> — server đọc đoạn đó để biết trụ nào vừa vào. Trong dự án này, định danh là <strong>số serial</strong> của trụ (ADR-0009).</li>
+    <li>Có trường <code>Sec-WebSocket-Protocol</code> báo phiên bản, giá trị <code>ocpp1.6</code>.</li>
+    <li><code>wss://</code> là bản mã hoá TLS. ADR-0011 chọn Security Profile 2 = TLS + Basic Auth riêng từng trụ.</li>
+  </ul>
+
+  <h3>2.4 · Hình dạng một bản tin</h3>
+  <p>Mọi bản tin OCPP-J là <strong>một mảng JSON</strong>. Phần tử đầu tiên là con số cho biết đây là loại gì.</p>
+  <table>
+    <thead><tr><th style="width:12%">Số</th><th style="width:24%">Tên</th><th>Cấu trúc</th></tr></thead>
+    <tbody>
+      <tr><td><code>2</code></td><td><strong>CALL</strong></td><td><code>[2, "id", "TênHànhĐộng", { tham số }]</code> — một yêu cầu</td></tr>
+      <tr><td><code>3</code></td><td><strong>CALLRESULT</strong></td><td><code>[3, "id", { kết quả }]</code> — trả lời thành công</td></tr>
+      <tr><td><code>4</code></td><td><strong>CALLERROR</strong></td><td><code>[4, "id", "MãLỗi", "Mô tả", { chi tiết }]</code> — trả lời lỗi</td></tr>
+    </tbody>
+  </table>
+  <p><code>"id"</code> là chuỗi do bên gửi tự đặt, duy nhất. Bên trả lời <strong>phải chép lại đúng id đó</strong> — đó là cách ghép câu trả lời với câu hỏi khi nhiều bản tin đan xen nhau.</p>
+<pre><code>→ [2,"19223201","BootNotification",{"chargePointVendor":"Ruihua",
+     "chargePointModel":"D1-120","chargePointSerialNumber":"RH24D1120001"}]
+
+← [3,"19223201",{"status":"Accepted","currentTime":"2026-09-12T03:14:07Z",
+     "interval":300}]</code></pre>
+  <p>Đọc được đoạn trên là đọc được OCPP. Phần còn lại chỉ là học tên các hành động và ý nghĩa tham số.</p>
+  <div class="box info">
+    <span class="bt">Luật một-CALL-một-lúc</span>
+    <p>Mỗi chiều chỉ được có <strong>một CALL đang chờ trả lời</strong>. Gửi CALL thứ hai khi cái thứ nhất chưa có CALLRESULT là sai spec. Đây là lý do thư viện <code>ocpp-rpc</code> đặt <code>callConcurrency = 1</code> mặc định, với chú thích ngay trong mã nguồn: <em>"OCPP requires this to be set to 1"</em>.</p>
+    <p>Nhưng luật này chỉ ràng buộc <strong>bên gửi</strong>. Nó không ngăn trụ bắn liên tiếp nhiều CALL vào server. Xử lý phía nhận vẫn phải tự tuần tự hoá — xem mục 05, tầng 2.</p>
+  </div>
+
+  <h3>2.5 · Các bản tin cần biết</h3>
+  <p>OCPP 1.6 chia bản tin thành <strong>profile</strong> (nhóm chức năng): Core, Firmware Management, Local Auth List, Reservation, Smart Charging, Remote Trigger. Dự án tập trung <strong>Core</strong> — nhóm bắt buộc mọi trụ phải hỗ trợ.</p>
+  <table>
+    <thead><tr><th style="width:34%">Trụ → Server</th><th>Nghĩa</th></tr></thead>
+    <tbody>
+      <tr><td><code>BootNotification</code></td><td>"Tôi vừa khởi động, đây là model / serial của tôi". Server trả về nhịp heartbeat</td></tr>
+      <tr><td><code>Heartbeat</code></td><td>"Tôi còn sống". Gửi định kỳ khi không có gì khác để nói</td></tr>
+      <tr><td><code>StatusNotification</code></td><td>"Súng số N vừa đổi trạng thái". Bản tin quan trọng nhất để theo dõi trụ</td></tr>
+      <tr><td><code>Authorize</code></td><td>"Thẻ này có được sạc không?"</td></tr>
+      <tr><td><code>StartTransaction</code></td><td>"Bắt đầu sạc rồi, chỉ số đồng hồ lúc này là X"</td></tr>
+      <tr><td><code>MeterValues</code></td><td>"Số đo hiện tại: điện năng, dòng, áp, phần trăm pin xe…"</td></tr>
+      <tr><td><code>StopTransaction</code></td><td>"Dừng rồi, chỉ số cuối là Y, lý do dừng là Z"</td></tr>
+      <tr><td><code>DataTransfer</code></td><td>Ống thoát cho dữ liệu riêng của hãng, ngoài chuẩn</td></tr>
+    </tbody>
+  </table>
+  <table>
+    <thead><tr><th style="width:34%">Server → Trụ</th><th>Nghĩa</th></tr></thead>
+    <tbody>
+      <tr><td><code>RemoteStartTransaction</code></td><td>"Bắt đầu sạc súng N cho thẻ này" — đường của app QR</td></tr>
+      <tr><td><code>RemoteStopTransaction</code></td><td>"Dừng giao dịch số N" — cách CSMS thực thi hạn mức</td></tr>
+      <tr><td><code>ChangeConfiguration</code> / <code>GetConfiguration</code></td><td>Đọc và ghi cấu hình của trụ</td></tr>
+      <tr><td><code>Reset</code></td><td>Khởi động lại trụ (mềm hoặc cứng)</td></tr>
+      <tr><td><code>UnlockConnector</code></td><td>Nhả khoá súng khi bị kẹt</td></tr>
+      <tr><td><code>ChangeAvailability</code></td><td>Đưa trụ / súng vào trạng thái ngừng phục vụ</td></tr>
+      <tr><td><code>ClearCache</code></td><td>Xoá bộ nhớ đệm thẻ đã xác thực trong trụ</td></tr>
+    </tbody>
+  </table>
+
+  <h3>2.6 · Sáu từ vựng phải thuộc</h3>
+  <dl class="gloss">
+    <div><dt>chargePointId</dt><dd>Định danh một trụ. Lấy từ đoạn cuối URL WebSocket. Dự án dùng số serial.</dd></div>
+    <div><dt>connectorId</dt><dd>Số hiệu súng sạc <em>trong</em> một trụ. <strong><code>0</code> = cả trụ · <code>1</code> = súng A · <code>2</code> = súng B.</strong> Khoá nghiệp vụ của hệ thống là cặp <code>(chargePointId, connectorId)</code>, không bao giờ chỉ riêng trụ.</dd></div>
+    <div><dt>idTag</dt><dd>Chuỗi định danh người sạc. Có thể là số thẻ RFID, hoặc mã do app sinh ra khi quét QR. Đây là thứ OCPP dùng để hỏi "ai đang sạc".</dd></div>
+    <div><dt>transactionId</dt><dd>Số nguyên <strong>do server cấp</strong> khi trả lời <code>StartTransaction</code>. Mọi bản tin sau đó của phiên sạc đều mang số này. Trụ không tự đặt.</dd></div>
+    <div><dt>meterStart / meterStop</dt><dd>Chỉ số công tơ tích luỹ của súng, lúc bắt đầu và lúc kết thúc. <strong>Đơn vị là Wh, không phải kWh.</strong> Điện năng bán ra = hiệu hai số.</dd></div>
+    <div><dt>measurand</dt><dd>Loại đại lượng trong <code>MeterValues</code>. Mặc định khi không ghi rõ là <code>Energy.Active.Import.Register</code> (Wh). Ngoài ra có <code>SoC</code> (% pin xe), <code>Voltage</code>, <code>Current.Import</code>, <code>Power.Active.Import</code>, <code>Temperature</code>.</dd></div>
+  </dl>
+
+  <h3>2.7 · Một phiên sạc trọn vẹn</h3>
+  <p>Đây là phần nên đọc kỹ nhất trong tài liệu này. Kịch bản: tài xế quét QR trên app.</p>
+  <ol class="seq">
+    <li><span class="dir">Trụ → Server · lúc trụ mới bật</span><span class="msg">BootNotification</span>
+      <p>Trụ báo danh. Server trả <code>status: "Accepted"</code>, kèm <code>currentTime</code> (để trụ chỉnh đồng hồ) và <code>interval: 300</code> (gửi heartbeat mỗi 300 giây).</p></li>
+    <li><span class="dir">Trụ → Server</span><span class="msg">StatusNotification · Available</span>
+      <p>Mỗi súng báo trạng thái rỗi. Từ lúc này server biết trụ sẵn sàng.</p></li>
+    <li><span class="dir">Server → Trụ · sau khi tài xế bấm nút trên app</span><span class="msg">RemoteStartTransaction</span>
+<pre><code>→ [2,"cs-8891","RemoteStartTransaction",
+     {"connectorId":1,"idTag":"APP-USER-10237"}]
+← [3,"cs-8891",{"status":"Accepted"}]</code></pre>
+      <div class="box crit" style="margin-top:8px"><p style="margin:0"><strong>Bẫy cho người mới:</strong> <code>"Accepted"</code> ở đây chỉ nghĩa là <em>trụ đã nhận lệnh</em>. Nó <strong>không</strong> nghĩa là phiên sạc đã bắt đầu. Phiên chỉ thực sự bắt đầu khi trụ gửi <code>StartTransaction</code> ở bước 6. Nhầm hai cái này là app báo "đang sạc" trong khi xe chưa cắm.</p></div></li>
+    <li><span class="dir">Trụ → Server</span><span class="msg">StatusNotification · Preparing</span>
+      <p>Trụ chuyển sang chờ cắm súng.</p></li>
+    <li><span class="dir">Trụ → Server</span><span class="msg">Authorize</span>
+<pre><code>→ [2,"19223203","Authorize",{"idTag":"APP-USER-10237"}]
+← [3,"19223203",{"idTagInfo":{"status":"Accepted"}}]</code></pre>
+      <p><code>idTagInfo.status</code> có thể là <code>Accepted</code>, <code>Blocked</code>, <code>Expired</code>, <code>Invalid</code>, <code>ConcurrentTx</code>.</p></li>
+    <li><span class="dir">Trụ → Server · đây mới là điểm bắt đầu thật</span><span class="msg">StartTransaction</span>
+<pre><code>→ [2,"19223204","StartTransaction",{"connectorId":1,
+     "idTag":"APP-USER-10237","meterStart":1842300,
+     "timestamp":"2026-09-12T03:14:31Z"}]
+← [3,"19223204",{"transactionId":80412,
+     "idTagInfo":{"status":"Accepted"}}]</code></pre>
+      <p><code>meterStart: 1842300</code> là <strong>1.842,3 kWh</strong> — công tơ tích luỹ cả đời của súng, tính bằng Wh. Server cấp <code>transactionId: 80412</code>.</p></li>
+    <li><span class="dir">Trụ → Server · lặp lại suốt phiên</span><span class="msg">MeterValues</span>
+<pre><code>→ [2,"19223205","MeterValues",{"connectorId":1,"transactionId":80412,
+     "meterValue":[{"timestamp":"2026-09-12T03:15:31Z","sampledValue":[
+       {"value":"1843250","measurand":"Energy.Active.Import.Register","unit":"Wh"},
+       {"value":"62","measurand":"SoC","unit":"Percent"},
+       {"value":"398.4","measurand":"Voltage","unit":"V"},
+       {"value":"118.6","measurand":"Current.Import","unit":"A"}]}]}]</code></pre>
+      <p>Đây là nguồn dữ liệu cho thanh tiến trình trong app, và là <strong>dữ liệu gốc cho engine đối soát</strong>.</p></li>
+    <li><span class="dir">Trụ → Server</span><span class="msg">StopTransaction</span>
+<pre><code>→ [2,"19223260","StopTransaction",{"transactionId":80412,
+     "meterStop":1871400,"timestamp":"2026-09-12T03:47:02Z",
+     "reason":"Remote"}]</code></pre>
+      <p>Điện năng bán = 1.871.400 − 1.842.300 = <strong>29.100 Wh = 29,1 kWh</strong>. Đây là con số ra hoá đơn.</p></li>
+    <li><span class="dir">Trụ → Server</span><span class="msg">StatusNotification · Finishing → Available</span>
+      <p>Súng nhả, trụ về rỗi. Vòng đời khép lại.</p></li>
+  </ol>
+
+  <h3>2.8 · Chín trạng thái của một súng sạc</h3>
+  <p><code>StatusNotification</code> báo súng đang ở trạng thái nào. Toàn bộ state machine phải xây trong CSMS xoay quanh chín giá trị này:</p>
+  <table>
+    <thead><tr><th style="width:24%">Trạng thái</th><th>Nghĩa</th></tr></thead>
+    <tbody>
+      <tr><td><code>Available</code></td><td>Rỗi, sẵn sàng</td></tr>
+      <tr><td><code>Preparing</code></td><td>Đã nhận lệnh / đã quẹt thẻ, đang chờ cắm súng</td></tr>
+      <tr><td><code>Charging</code></td><td>Đang truyền điện</td></tr>
+      <tr><td><code>SuspendedEV</code></td><td>Tạm dừng vì <strong>xe</strong> không nhận nữa (pin đầy, BMS ngắt)</td></tr>
+      <tr><td><code>SuspendedEVSE</code></td><td>Tạm dừng vì <strong>trụ</strong> không cấp (quá tải, quá nhiệt)</td></tr>
+      <tr><td><code>Finishing</code></td><td>Đã dừng, chờ rút súng</td></tr>
+      <tr><td><code>Reserved</code></td><td>Đã đặt trước <span class="pill skip">ngoài phạm vi</span></td></tr>
+      <tr><td><code>Unavailable</code></td><td>Chủ động ngừng phục vụ</td></tr>
+      <tr><td><code>Faulted</code></td><td>Lỗi</td></tr>
+    </tbody>
+  </table>
+  <div class="box"><p style="margin:0">Phân biệt <code>SuspendedEV</code> và <code>SuspendedEVSE</code> là một trong những chỗ hay bị hỏi khi bảo vệ, vì nó cho thấy bạn hiểu trụ hay chỉ chép spec. <strong>EV = xe từ chối. EVSE = trụ từ chối.</strong></p></div>
+</section>
+
+<section class="pagebreak">
+  <span class="h2num">03</span>
+  <h2>OCPP của dự án này khác sách giáo khoa ở đâu</h2>
+  <div class="h2rule"></div>
+  <p>Sáu đặc điểm của phần cứng Ruihua, đọc từ manual gốc. Mỗi cái đẻ ra một yêu cầu kỹ thuật mà tài liệu OCPP chung không nói.</p>
+  <table>
+    <thead><tr><th style="width:32%">Đặc điểm phần cứng</th><th>Hệ quả phải xử lý</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Một trụ = hai súng</strong></td><td>Hai giao dịch hoàn toàn độc lập chạy song song <em>trên cùng một kết nối WebSocket</em>. Mọi bảng dữ liệu, mọi state machine phải khoá theo <code>(chargePointId, connectorId)</code></td></tr>
+      <tr><td><strong>Trụ có bảng giá riêng</strong> (Sharp / Peak / Shoulder / Off-peak, đồng bộ NTP) và tự hiện màn Settlement</td><td>OCPP 1.6J <strong>không có lệnh chuẩn để đẩy giá xuống trụ</strong>. Nghĩa là trụ và CSMS có thể tính ra hai số tiền khác nhau. Quyết định: <strong>CSMS là nguồn sự thật</strong> cho bản ghi phiên và bản tính giá</td></tr>
+      <tr><td><strong>Ba đường xác thực:</strong> QR qua app · RFID · mật khẩu trên HMI</td><td>Chỉ đường QR đi qua <code>RemoteStartTransaction</code>. Hai đường kia trụ tự gửi <code>Authorize</code> — <strong>phiên mở ra mà app hoàn toàn không biết</strong>. CSMS phải xử lý được phiên "từ trên trời rơi xuống"</td></tr>
+      <tr><td><strong>Bốn chế độ sạc</strong></td><td>Chỉ chế độ "sạc đầy tự động" là trụ tự dừng. Các chế độ theo thời gian / theo kWh / theo số tiền đều buộc <strong>CSMS phải theo dõi <code>MeterValues</code> rồi chủ động bắn <code>RemoteStopTransaction</code></strong>. Nếu CSMS mất kết nối đúng lúc đó, hạn mức không được thực thi</td></tr>
+      <tr><td><strong>"Wallet ID card"</strong> — thẻ trả trước, <strong>trụ tự trừ tiền trên thẻ kể cả khi offline</strong></td><td>Nếu billing thu tiếp qua VNPay thì <strong>khách bị trừ hai lần</strong>. Giải pháp (ADR-0012): tách <code>origin</code> (phiên bắt đầu thế nào) khỏi <code>payment_mode</code> (ai thu tiền). Phiên <code>station_wallet</code> vẫn tính giá để đối soát nhưng không bao giờ thu qua VNPay</td></tr>
+      <tr><td><strong>Kết nối Ethernet hoặc router 4G</strong></td><td>Mất kết nối là chuyện thường ngày, không phải trường hợp hiếm. Đây là <strong>động cơ có thật</strong> cho câu hỏi nghiên cứu, không phải tình huống bịa ra</td></tr>
+    </tbody>
+  </table>
+  <div class="box warn">
+    <span class="bt">Hai chỗ dễ hiểu sai trong manual Ruihua</span>
+    <p><strong>"plug-and-charge"</strong> trong manual nghĩa là <em>cắm vào là sạc, không cần xác thực</em>. Đây <strong>không phải</strong> Plug &amp; Charge theo chuẩn ISO 15118 (chứng thư số trong xe). Trong mọi tài liệu của nhóm, gọi tính năng này là <strong>free vend</strong>.</p>
+    <p><strong>Mật khẩu admin mặc định của HMI là <code>115200</code></strong> — đây là một phát hiện bảo mật, nên đưa vào báo cáo như một finding, không bỏ qua.</p>
+  </div>
+</section>
+
+<section>
+  <span class="h2num">04</span>
+  <h2>Câu hỏi nghiên cứu, giải thích cho người mới</h2>
+  <div class="h2rule"></div>
+
+  <h3>4.1 · Chuyện gì xảy ra khi trụ mất mạng giữa phiên sạc</h3>
+  <p>Xe vẫn đang sạc — điện vẫn chảy, công tơ vẫn quay. Chỉ có đường truyền tới server là đứt. Trụ không vứt bản tin đi; nó <strong>xếp hàng trong bộ nhớ</strong> và gửi dồn khi nối lại được.</p>
+  <p>Nghe thì ổn. Vấn đề nằm ở phía server.</p>
+
+  <h3>4.2 · Server không phân biệt được "vừa xảy ra" với "xảy ra 20 phút trước"</h3>
+  <p>Khi trụ nối lại, server nhận một loạt bản tin dồn về. Trong đó có thể lẫn cả bản tin thời gian thực. Server cần biết cái nào là cái nào — để tính tiền đúng, để hiển thị đúng, để không tạo giao dịch trùng.</p>
+  <div class="box crit">
+    <span class="bt">Khoảng trống đã xác minh trong spec</span>
+    <p>OCPP 1.6 <strong>thừa nhận</strong> rằng Central System <strong>không có dấu hiệu nào ở tầng giao thức</strong> để phân biệt bản tin phát lại từ hàng đợi offline với bản tin thời gian thực. Server chỉ có thể <strong>suy đoán qua timestamp</strong> — mà timestamp lại do đồng hồ của trụ sinh ra, và đồng hồ trụ có thể lệch.</p>
+    <p>OCA đã vá lỗ hổng này ở <strong>2.0.1</strong> bằng cách thêm trường <code>offline</code> và <code>seqNo</code>. Nhưng trụ của dự án chỉ chạy 1.6.</p>
+  </div>
+  <p>Đây chính là chỗ đóng góp của bạn nằm: <strong>xây một engine đối soát bù đắp cho thứ giao thức không cung cấp</strong>, rồi <strong>đo xem nó chính xác tới đâu</strong>.</p>
+
+  <h3>4.3 · Vì sao thiết kế hệ thống phải theo câu hỏi này</h3>
+  <p>Ba quyết định kiến trúc sinh trực tiếp từ đây, và phải giải thích được khi bị hỏi:</p>
+  <table>
+    <thead><tr><th style="width:14%">ADR</th><th>Quyết định và lý do</th></tr></thead>
+    <tbody>
+      <tr><td><strong>0005</strong></td><td><strong>Ghi nhật ký bản tin OCPP <em>trước khi</em> xử lý</strong>, vào bảng chỉ-thêm-không-sửa. Vừa chống mất dữ liệu khi xử lý lỗi, vừa tạo ra <strong>ground truth</strong> — bộ dữ liệu gốc để so sánh trong thí nghiệm. Không có nó thì không đo được gì</td></tr>
+      <tr><td><strong>0009</strong></td><td>Lưu <strong>cả hai</strong> mốc thời gian: <code>cp_timestamp</code> (đồng hồ trụ — không tin được) và <code>received_at</code> (đồng hồ server — tin được). Chênh lệch giữa hai cái chính là <strong>tín hiệu để phát hiện bản tin phát lại</strong></td></tr>
+      <tr><td><strong>0006</strong></td><td><strong>Không dùng Redis pub/sub trên đường đi của giao dịch.</strong> Pub/sub mất bản tin khi không có subscriber — tức là nó sẽ <em>tự gây ra</em> đúng loại mất dữ liệu mà đề tài đang đo. Pub/sub chỉ dùng cho cập nhật giao diện</td></tr>
+    </tbody>
+  </table>
+  <div class="box warn">
+    <span class="bt">Điều phải trung thực khi viết Report</span>
+    <p>Khoảng trống trong spec <strong>không tự động là tính mới học thuật</strong>. Có thể đã có người công bố về vấn đề này. Trước khi tuyên bố đóng góp, phải khảo sát IEEE / ScienceDirect / Google Scholar. <em>"Không tìm được bằng chứng"</em> khác <em>"đã chứng minh là chưa ai làm"</em> — viết đúng cái mình có.</p>
+  </div>
+</section>
+
+<section class="pagebreak">
+  <span class="h2num">05</span>
+  <h2>Còn phải học gì — xếp theo thứ tự cần dùng</h2>
+  <div class="h2rule"></div>
+  <p>Xếp theo thứ tự <strong>sẽ dùng tới</strong>, không theo thứ tự sách giáo khoa. Nguyên tắc xuyên suốt: <strong>chạy trước, đọc sau.</strong> Đọc spec khi chưa thấy bản tin thật chạy qua màn hình thì chữ không dính.</p>
+
+  <div class="tier">
+    <div class="th2"><span class="tn">Tầng 0</span><span class="tt">Nền tảng — thiếu cái này thì mọi thứ sau đều mơ hồ</span><span class="tw">~4–5 ngày</span></div>
+    <div class="tb">
+      <h4><span class="pill must">Bắt buộc</span> WebSocket, đủ sâu để gỡ lỗi</h4>
+      <ul>
+        <li>Khác gì HTTP: bắt tay một lần rồi giữ mở, hai chiều, không có khái niệm "request thất bại" như HTTP</li>
+        <li><strong>Ping / pong</strong> ở tầng giao thức — cách phát hiện kết nối chết mà chưa đóng. <code>ocpp-rpc</code> đặt <code>pingIntervalMs = 30000</code></li>
+        <li><strong>Half-open connection:</strong> một bên tưởng còn kết nối, bên kia đã mất. Đây là tình huống thật của trụ 4G và là nguồn của nhiều lỗi khó tái hiện</li>
+        <li>Reconnect và backoff. <em>Lưu ý: spec OCPP quy định backoff <strong>tuyến tính</strong>, nhiều nguồn thứ cấp viết nhầm thành exponential — kiểm lại spec gốc trước khi trích</em></li>
+      </ul>
+      <h4><span class="pill must">Bắt buộc</span> State machine</h4>
+      <ul><li>Trạng thái, chuyển trạng thái, chuyển trạng thái hợp lệ và không hợp lệ. Bạn sẽ viết state machine cho 9 trạng thái ở mục 2.8, nhân hai súng. Vẽ ra giấy trước khi viết code</li></ul>
+      <h4><span class="pill must">Bắt buộc</span> Thời gian trong hệ phân tán</h4>
+      <ul>
+        <li>UTC, múi giờ, kiểu <code>timestamptz</code> của PostgreSQL</li>
+        <li><strong>Lệch đồng hồ (clock skew):</strong> vì sao không bao giờ được tin đồng hồ của thiết bị ngoài hiện trường</li>
+        <li>Vì sao ADR-0009 lưu cả hai mốc thời gian — hiểu lý do, không chỉ nhớ quy tắc</li>
+      </ul>
+      <h4><span class="pill must">Bắt buộc</span> SQL và PostgreSQL ở mức vận hành</h4>
+      <ul>
+        <li>Transaction, <code>COMMIT</code> / <code>ROLLBACK</code>, ý nghĩa của isolation level</li>
+        <li><strong>Ràng buộc <code>UNIQUE</code> nhiều cột</strong> — cơ chế thực thi idempotency của ADR-0010</li>
+        <li>Chỉ mục, và vì sao <code>MeterValues</code> cần partition theo tháng (ADR-0007)</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="tier">
+    <div class="th2"><span class="tn">Tầng 1</span><span class="tt">OCPP — chỉ đọc phần sẽ dùng</span><span class="tw">~5–7 ngày</span></div>
+    <div class="tb">
+      <p>Spec OCPP 1.6 rất dài. Đọc tuần tự từ đầu là cách chắc chắn nhất để bỏ cuộc. Chia ba mức:</p>
+      <h4><span class="pill must">Phải thuộc</span></h4>
+      <ul>
+        <li>Cấu trúc CALL / CALLRESULT / CALLERROR và quy tắc <code>uniqueId</code></li>
+        <li>Toàn bộ <strong>Core Profile</strong> — bảng ở mục 2.5, cả hai chiều</li>
+        <li>Chín trạng thái connector và các chuyển đổi hợp lệ</li>
+        <li>Cấu trúc <code>MeterValues</code>: <code>sampledValue</code>, <code>measurand</code>, <code>unit</code>, <code>context</code></li>
+        <li><strong>Hành vi offline:</strong> hàng đợi bản tin, và bốn khoá cấu hình <code>LocalAuthorizeOffline</code>, <code>LocalPreAuthorize</code>, <code>TransactionMessageAttempts</code>, <code>TransactionMessageRetryInterval</code></li>
+      </ul>
+      <h4><span class="pill">Chỉ cần tra được khi dùng</span></h4>
+      <ul><li>Danh sách mã lỗi CALLERROR · Firmware Management · Local Auth List · Remote Trigger · <code>DataTransfer</code></li></ul>
+      <h4><span class="pill skip">Bỏ hẳn</span></h4>
+      <ul><li>SOAP binding · Smart Charging profile · Reservation · toàn bộ OCPP 2.0.1 (chỉ đọc đúng phần <code>offline</code> / <code>seqNo</code> để trích trong chương nghiên cứu)</li></ul>
+      <div class="box info" style="margin-top:12px"><p style="margin:0"><strong>Mẹo đọc nhanh gấp nhiều lần:</strong> đọc <strong>JSON schema</strong> của từng bản tin thay vì đọc văn xuôi. Schema cho biết chính xác trường nào bắt buộc, kiểu gì, giá trị enum nào hợp lệ — trong 20 dòng thay vì 3 trang. Thư mục <code>ocppdl/</code> trong repo có sẵn schema để tra <em>(chỉ để tra, không phải dependency)</em>.</p></div>
+    </div>
+  </div>
+
+  <div class="tier">
+    <div class="th2"><span class="tn">Tầng 2</span><span class="tt">Ngăn xếp kỹ thuật của CSMS</span><span class="tw">~7–10 ngày</span></div>
+    <div class="tb">
+      <h4><span class="pill must">Bắt buộc</span> TypeScript strict + NestJS</h4>
+      <ul>
+        <li>TypeScript ở chế độ strict (ADR-0003): kiểu rời rạc, narrowing, vì sao <code>any</code> làm hỏng giá trị của <code>packages/shared</code></li>
+        <li>NestJS: module, provider, dependency injection, vòng đời. Đủ để hiểu vì sao ADR-0002 chọn <strong>modular monolith</strong> — một tiến trình, ranh giới module rõ ràng, không microservices</li>
+      </ul>
+      <h4><span class="pill must">Bắt buộc</span> <code>ocpp-rpc</code> và ba việc nó không làm</h4>
+      <p>Thư viện lo tầng vận chuyển: đóng gói bản tin, khớp <code>uniqueId</code>, parse Basic Auth, validate schema, timeout 60s, ping 30s. <strong>Ba việc nó không làm và bạn phải tự viết:</strong></p>
+      <ol>
+        <li><strong>Tuần tự hoá xử lý theo từng trụ.</strong> Thư viện không giới hạn đồng thời cho CALL <em>chiều vào</em>. Nếu xử lý song song, bản ghi vào DB sai thứ tự và dữ liệu đối soát hỏng — đúng thứ đồ án đang đo</li>
+        <li><strong>Trụ nối lại khi phiên cũ còn treo.</strong> Cùng một định danh mở kết nối mới trong khi kết nối cũ chưa đóng hẳn. Phải tự phát hiện và đóng phiên cũ</li>
+        <li><strong>Toàn bộ logic nghiệp vụ OCPP.</strong> Thư viện không biết <code>StartTransaction</code> nghĩa là gì</li>
+      </ol>
+      <h4><span class="pill">Nên có</span> Drizzle ORM · Docker Compose · kiểm thử</h4>
+      <ul>
+        <li>Drizzle: schema bằng TypeScript, migration (ADR-0008 — <em>đang chờ chốt cùng WP5</em>)</li>
+        <li>Docker Compose: đã có sẵn trong repo. Cần hiểu đủ để sửa, không cần thành thạo</li>
+        <li>Kiểm thử code giao thức: dựng bản tin giả, kiểm tra state machine, kiểm tra idempotency. Đây là phần dễ bị bỏ và bị hỏi khi bảo vệ</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="tier">
+    <div class="th2"><span class="tn">Tầng 3</span><span class="tt">Phương pháp nghiên cứu — phần nâng điểm</span><span class="tw">~3–4 ngày, song song</span></div>
+    <div class="tb">
+      <ul>
+        <li><strong>Thiết kế thí nghiệm:</strong> biến độc lập (thời điểm và độ dài lần ngắt kết nối), biến phụ thuộc (sai lệch điện năng, giao dịch trùng, giao dịch mất), nhóm đối chứng (phiên không bị ngắt)</li>
+        <li><strong>Ground truth:</strong> lấy đâu ra "đáp án đúng" để so? Chính là log bản tin thô của ADR-0005 cộng với log phía simulator</li>
+        <li><strong>Chỉ số đo:</strong> định nghĩa trước khi chạy, không định nghĩa sau khi nhìn kết quả</li>
+        <li><strong>Tính tái lập:</strong> script chạy lại được, dữ liệu thô giữ nguyên, mô tả đủ để người khác làm lại</li>
+        <li><strong>Khảo sát tài liệu:</strong> IEEE Xplore, ScienceDirect, Google Scholar — trước khi tuyên bố đóng góp (mục 4.3)</li>
+      </ul>
+      <div class="box"><p style="margin:0">Phần này <strong>không phụ thuộc ngôn ngữ backend</strong>. Script phân tích dữ liệu viết bằng Python (pandas / matplotlib) hoàn toàn được, dù CSMS chạy Node.</p></div>
+    </div>
+  </div>
+
+  <div class="box ok">
+    <span class="bt">Việc đầu tiên nên làm, trước cả khi học xong tầng 0</span>
+    <p><strong>Dựng bàn thí nghiệm OCPP.</strong> SteVe (một CSMS mã nguồn mở, dùng làm mốc đối chiếu) + SAP simulator + một WebSocket proxy khoảng 50 dòng đứng giữa, ghi lại mọi frame đi qua.</p>
+    <p>Rồi chạy một phiên sạc, và <strong>tự tay vẽ lại sequence diagram từ log của chính mình</strong> — không copy từ tài liệu nào. Đây là bài tập đổi nhiều giờ đọc spec lấy một buổi chiều, và là cách duy nhất để những thứ ở mục 2.7 chuyển từ "đã đọc" sang "đã hiểu".</p>
+    <p>Sau đó ngắt kết nối theo ba kịch bản: <strong>giữa chuỗi MeterValues</strong> · <strong>ngay trước StopTransaction</strong> · <strong>mở phiên mới khi đang offline</strong>. Ghi lại log thô. Đó là dữ liệu nền cho chương nghiên cứu.</p>
+  </div>
+</section>
+
+<section>
+  <span class="h2num">06</span>
+  <h2>Tự kiểm — trả lời được 14 câu này là đã hiểu</h2>
+  <div class="h2rule"></div>
+  <p>Không tra tài liệu. Câu nào ngắc ngứ thì đó là chỗ cần quay lại.</p>
+  <ol class="qz">
+    <li>Vì sao trụ là bên mở kết nối, không phải server? Hệ quả gì khi mất mạng?</li>
+    <li>Trong <code>[2,"abc","Authorize",{…}]</code>, mỗi phần tử nghĩa là gì? Nếu số đầu là <code>3</code> thì cấu trúc khác thế nào?</li>
+    <li><code>connectorId = 0</code> nghĩa là gì? Vì sao khoá nghiệp vụ không thể chỉ là <code>chargePointId</code>?</li>
+    <li>Ai cấp <code>transactionId</code> — trụ hay server? Vào thời điểm nào?</li>
+    <li><code>meterStart</code> đơn vị gì? Nhầm đơn vị thì hoá đơn sai bao nhiêu lần?</li>
+    <li>Trụ trả <code>RemoteStartTransaction</code> = <code>Accepted</code>. Xe đã bắt đầu sạc chưa? Làm sao biết chắc?</li>
+    <li>Phân biệt <code>SuspendedEV</code> và <code>SuspendedEVSE</code>. Cho một tình huống thật của mỗi loại.</li>
+    <li>Tài xế quẹt RFID thay vì dùng app. App có biết phiên này không? Vì sao?</li>
+    <li>Trụ mất mạng giữa phiên rồi nối lại. Server nhận được gì, và vì sao không phân biệt được bản tin nào là phát lại?</li>
+    <li>Vì sao ADR-0010 khoá <code>UNIQUE</code> trên <code>(charge_point_id, connector_id, id_tag, meter_start_wh, cp_timestamp)</code>? Không có nó thì hỏng thế nào?</li>
+    <li>Vì sao lưu cả <code>cp_timestamp</code> lẫn <code>received_at</code>? Nếu chỉ giữ một thì mất khả năng gì?</li>
+    <li>Vì sao Redis pub/sub bị cấm trên đường đi của giao dịch nhưng được dùng cho giao diện?</li>
+    <li>Khách dùng "Wallet ID card". Ai đã thu tiền? CSMS được phép làm gì và không được làm gì?</li>
+    <li>Tài xế chọn sạc theo số tiền. Ai chịu trách nhiệm dừng phiên, và chuyện gì xảy ra nếu CSMS mất kết nối đúng lúc đó?</li>
+  </ol>
+</section>
+
+<section>
+  <span class="h2num">07</span>
+  <h2>Chín câu dễ viết sai — kiểm lại trước khi đưa vào Report</h2>
+  <div class="h2rule"></div>
+  <table>
+    <thead><tr><th style="width:44%">Đừng viết</th><th>Sự thật</th></tr></thead>
+    <tbody>
+      <tr><td>"Hệ thống đã được chứng nhận OCPP"</td><td>Chạy qua kịch bản OCTT <strong>không phải</strong> chứng nhận. Chứng nhận cần test lab độc lập của OCA và form PICS</td></tr>
+      <tr><td>"SteVe đã được OCA chứng nhận"</td><td>Chứng chỉ thuộc về Powerfill — một sản phẩm thương mại phái sinh. Nó <strong>không lan sang</strong> SteVe mã nguồn mở</td></tr>
+      <tr><td>"CitrineOS compliant OCPP 1.6"</td><td>Là marketing tự khai, không phải chứng nhận</td></tr>
+      <tr><td>"plug-and-charge của trụ = ISO 15118"</td><td>Sai hoàn toàn. Gọi là <strong>free vend</strong></td></tr>
+      <tr><td>"backoff exponential"</td><td>Spec ghi <strong>tuyến tính</strong>. Nhiều nguồn thứ cấp chép sai</td></tr>
+      <tr><td>"<code>meterStart</code> tính bằng kWh"</td><td><strong>Wh.</strong> Nhầm là sai hoá đơn 1.000 lần</td></tr>
+      <tr><td>"EVerest đã chết"</td><td>Chỉ repo <code>EVerest/libocpp</code> bị archive 27/04/2026. <code>everest-core</code> vẫn hoạt động</td></tr>
+      <tr><td>"MaEVe dùng EVerest làm simulator"</td><td>Claim này đã bị bác 0–3. Không viết</td></tr>
+      <tr><td>Fork hoặc copy code SteVe</td><td>Giấy phép chưa chốt. Chạy SteVe như tiến trình riêng thì không phát sinh câu hỏi pháp lý</td></tr>
+    </tbody>
+  </table>
+  <div class="box warn"><p style="margin:0">Thêm một ràng buộc giấy phép: thư viện <code>ocpp-rpc</code> là MIT, <strong>nhưng bộ schema OCA đi kèm là CC BY-ND 4.0</strong> — dùng nguyên văn, không được sửa.</p></div>
+</section>
+
+<section>
+  <span class="h2num">08</span>
+  <h2>Đọc tiếp ở đâu, và những gì chưa ai biết</h2>
+  <div class="h2rule"></div>
+
+  <h3>Trong repo</h3>
+  <table>
+    <thead><tr><th style="width:42%">Tệp</th><th>Đọc khi nào</th></tr></thead>
+    <tbody>
+      <tr><td><code>docs/WP2-KIEN-TRUC-TECHSTACK.md</code></td><td>Sau tài liệu này. Chi tiết đầy đủ 11 ADR, mô hình dữ liệu, hợp đồng với WP3 / 4 / 5</td></tr>
+      <tr><td><code>docs/WP2-LO-TRINH-KY-THUAT.md</code></td><td>Song song với mục 05. Đó là bản thực hành theo ngày <em>(lưu ý: neo theo lịch cũ, ngày tháng cần dời)</em></td></tr>
+      <tr><td><code>docs/NGHIEN-CUU-NEN-TANG.md</code></td><td>Khi cần nguồn cho một khẳng định — 21 claim đã kiểm chứng đối kháng</td></tr>
+      <tr><td><code>docs/PHAN-TICH-TAI-LIEU-WP1.md</code></td><td>Trước họp nhóm</td></tr>
+      <tr><td><code>ocppdl/</code></td><td>Tra JSON schema của từng bản tin. <strong>Chỉ để tra, không phải dependency</strong></td></tr>
+      <tr><td><code>CONTRIBUTING.md</code></td><td>Trước PR đầu tiên: nhánh <code>wp2/be-04-…</code>, Conventional Commits kèm mã task, PR &lt; 400 dòng, một approve + CI xanh</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Ngoài repo</h3>
+  <ul>
+    <li><strong>OCPP 1.6 Specification + JSON schema</strong> — bản gốc từ Open Charge Alliance. Nguồn duy nhất đáng trích dẫn về hành vi giao thức</li>
+    <li><strong>Manual gốc D1 (.docx) và YJ-EU (.pdf)</strong> — trong Google Drive dự án, thư mục <code>Context\</code>. Nguồn duy nhất về hành vi phần cứng</li>
+    <li><strong>Mã nguồn <code>ocpp-rpc</code></strong> — đọc trực tiếp, đừng đọc README</li>
+  </ul>
+
+  <div class="box crit">
+    <span class="bt">Bốn câu chỉ hãng Ruihua trả lời được — simulator vô dụng ở đây</span>
+    <ol style="margin-bottom:0">
+      <li>Khi dùng thẻ ví, trụ có gửi số tiền đã trừ hoặc số dư lên CSMS không? Qua <code>DataTransfer</code>?</li>
+      <li>Phiên free vend gửi <code>idTag</code> với giá trị gì?</li>
+      <li>Firmware hỗ trợ những khoá <code>ChangeConfiguration</code> nào?</li>
+      <li>Firmware thật sự gửi những <code>measurand</code> nào trong <code>MeterValues</code>?</li>
+    </ol>
+  </div>
+  <p>Câu 1 ảnh hưởng trực tiếp tới ADR-0012 và tới phạm vi phải khoá ở Tuần 6. Thời gian chờ hãng trả lời không kiểm soát được — <strong>gửi sớm</strong>.</p>
+
+  <div class="box warn">
+    <span class="bt">Rủi ro R-A02 — lý do tài liệu này viết theo lối giải thích</span>
+    <p>Rủi ro đã ghi trong sổ của nhóm: <em>dựa vào code hoặc tài liệu do AI sinh ra mà không hiểu, rồi hỏng khi hội đồng truy vì sao nó chạy.</em> CSMS là phần bị đào sâu nhất trong buổi bảo vệ.</p>
+    <p>Phép thử đơn giản cho mọi dòng code và mọi câu trong Report: <strong>giải thích được bằng lời cho một người không đọc tài liệu này không?</strong> Nếu không, chưa xong.</p>
+  </div>
+</section>
+
+<div class="foot">
+  PowerMe · Capstone FA26SE187 · FPT University · GVHD Lâm Hữu Khánh Phương<br>
+  Soạn cho WP2 — Ngô Văn Minh Trí (SE191045) · 12/09/2026 · tài liệu nội bộ, không trích dẫn trực tiếp vào Report
+</div>
+
+</div>
+</body>
+</html>
