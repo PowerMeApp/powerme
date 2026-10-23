@@ -1,0 +1,113 @@
+sequenceDiagram
+  participant CP as Trụ (simulator)
+  participant CS as Mini-CSMS
+  CP->>CS: BootNotification Ruihua D1-120
+  CS-->>CP: CALLRESULT BootNotification
+  CP->>CS: StatusNotification c1 Available
+  CS-->>CP: CALLRESULT StatusNotification
+  CP->>CS: StatusNotification c2 Available
+  CS-->>CP: CALLRESULT StatusNotification
+  CP->>CS: Heartbeat
+  CS-->>CP: CALLRESULT Heartbeat
+  CP->>CS: Heartbeat
+  CS-->>CP: CALLRESULT Heartbeat
+  CP->>CS: BootNotification Ruihua D1-120
+  CS-->>CP: CALLRESULT BootNotification
+  CP->>CS: StatusNotification c1 Available
+  CS-->>CP: CALLRESULT StatusNotification
+  CP->>CS: StatusNotification c2 Available
+  CS-->>CP: CALLRESULT StatusNotification
+  CP->>CS: Authorize idTag=UNDEFINED
+  CS-->>CP: CALLRESULT Authorize
+  CP->>CS: StatusNotification c1 Preparing
+  CS-->>CP: CALLRESULT StatusNotification
+  CP->>CS: StartTransaction c1 meterStart=0 Wh
+  CS-->>CP: CALLRESULT StartTransaction transactionId=1
+  CP->>CS: StatusNotification c1 Charging
+  CS-->>CP: CALLRESULT StatusNotification
+  CP->>CS: Authorize idTag=BB2TBR09
+  CS-->>CP: CALLRESULT Authorize
+  CP->>CS: StatusNotification c2 Preparing
+  CS-->>CP: CALLRESULT StatusNotification
+  CP->>CS: StartTransaction c2 meterStart=0 Wh
+  CS-->>CP: CALLRESULT StartTransaction transactionId=2
+  CP->>CS: StatusNotification c2 Charging
+  CS-->>CP: CALLRESULT StatusNotification
+  CP->>CS: MeterValues ×6
+  CS-->>CP: CALLRESULT ×6
+  CP->>CS: Heartbeat
+  CS-->>CP: CALLRESULT Heartbeat
+  CP->>CS: MeterValues ×12
+  CS-->>CP: CALLRESULT ×12
+  CP->>CS: Heartbeat
+  CS-->>CP: CALLRESULT Heartbeat
+  CP->>CS: StatusNotification c1 Finishing
+  CS-->>CP: CALLRESULT StatusNotification
+  CP->>CS: StopTransaction tx1 meterStop=601 Wh reason=Local
+  CS-->>CP: CALLRESULT StopTransaction
+  CP->>CS: MeterValues ×1
+  CS-->>CP: CALLRESULT ×1
+  CP->>CS: StatusNotification c1 Available
+  CS-->>CP: CALLRESULT StatusNotification
+  CP->>CS: MeterValues ×2
+  CS-->>CP: CALLRESULT ×2
+  CP->>CS: StatusNotification c1 Preparing
+  CS-->>CP: CALLRESULT StatusNotification
+  CP->>CS: StartTransaction c1 meterStart=0 Wh
+  CS-->>CP: CALLRESULT StartTransaction transactionId=3
+  CP->>CS: StatusNotification c1 Charging
+  CS-->>CP: CALLRESULT StatusNotification
+  CP->>CS: MeterValues ×3
+  CS-->>CP: CALLRESULT ×3
+  CP->>CS: StatusNotification c2 Finishing
+  CS-->>CP: CALLRESULT StatusNotification
+  CP->>CS: StopTransaction tx2 meterStop=997 Wh reason=Local
+  CS-->>CP: CALLRESULT StopTransaction
+  CP->>CS: StatusNotification c2 Available
+  CS-->>CP: CALLRESULT StatusNotification
+  CP->>CS: MeterValues ×1
+  CS-->>CP: CALLRESULT ×1
+  CP->>CS: Heartbeat
+  CS-->>CP: CALLRESULT Heartbeat
+  CP->>CS: MeterValues ×4
+  CS-->>CP: CALLRESULT ×4
+  CP->>CS: StatusNotification c1 Finishing
+  CS-->>CP: CALLRESULT StatusNotification
+  CP->>CS: MeterValues ×1
+  CS-->>CP: CALLRESULT ×1
+  CP->>CS: StatusNotification c2 Preparing
+  CS-->>CP: CALLRESULT StatusNotification
+  CP->>CS: StopTransaction tx3 meterStop=242 Wh reason=Local
+  Note over CP,CS: ⚠ received_at − cp_timestamp = 125s → nghi phát lại
+  CS-->>CP: CALLRESULT StopTransaction
+  CP->>CS: StartTransaction c2 meterStart=0 Wh
+  Note over CP,CS: ⚠ received_at − cp_timestamp = 126s → nghi phát lại
+  CS-->>CP: CALLRESULT StartTransaction transactionId=1
+  CP->>CS: StatusNotification c2 Charging
+  CS-->>CP: CALLRESULT StatusNotification
+  CP->>CS: MeterValues tx3 303.03 Wh SoC=9%
+  Note over CP,CS: ⚠ received_at − cp_timestamp = 122s → nghi phát lại
+  CS-->>CP: CALLRESULT MeterValues
+  CP->>CS: StatusNotification c1 Available
+  CS-->>CP: CALLRESULT StatusNotification
+  CP->>CS: MeterValues tx3 354.41 Wh SoC=35%
+  Note over CP,CS: ⚠ received_at − cp_timestamp = 114s → nghi phát lại
+  CS-->>CP: CALLRESULT MeterValues
+  CP->>CS: MeterValues tx3 367.34 Wh SoC=95%
+  Note over CP,CS: ⚠ received_at − cp_timestamp = 107s → nghi phát lại
+  CS-->>CP: CALLRESULT MeterValues
+  CP->>CS: MeterValues ×1
+  CS-->>CP: CALLRESULT ×1
+  CP->>CS: MeterValues tx3 385.85 Wh SoC=18%
+  Note over CP,CS: ⚠ received_at − cp_timestamp = 104s → nghi phát lại
+  CS-->>CP: CALLRESULT MeterValues
+  CP->>CS: MeterValues ×1
+  CS-->>CP: CALLRESULT ×1
+  CP->>CS: MeterValues tx3 513.29 Wh SoC=18%
+  Note over CP,CS: ⚠ received_at − cp_timestamp = 109s → nghi phát lại
+  CS-->>CP: CALLRESULT MeterValues
+  CP->>CS: MeterValues ×3
+  CS-->>CP: CALLRESULT ×3
+  CP->>CS: MeterValues tx3 537.94 Wh SoC=41%
+  Note over CP,CS: ⚠ received_at − cp_timestamp = 127s → nghi phát lại
+  CS-->>CP: CALLRESULT MeterValues
