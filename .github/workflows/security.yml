@@ -4,7 +4,8 @@ on:
   push:
     branches: [main]
   pull_request:
-    branches: [main]
+    # PR xếp tầng (base là nhánh wp*/…) cũng phải qua CI, không chỉ PR vào main.
+    branches: [main, 'wp*/**']
 
 concurrency:
   group: security-${{ github.ref }}

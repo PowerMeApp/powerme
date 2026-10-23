@@ -6,22 +6,38 @@ CSMS OCPP 1.6J. **Trái tim kỹ thuật của đồ án.**
 |---|---|
 | Chủ sở hữu | WP2 — Backend / IoT Engineer |
 | Cột mốc | **M2 — 04/10/2026** (cổng kỹ thuật), M5 — 15/11/2026 |
-| Stack | NestJS + TypeScript · PostgreSQL · Redis |
+| Stack | NestJS 12 + TypeScript 5.9 (strict) · ocpp-rpc 2.2.1 (ADR-0004) · Drizzle ORM + PostgreSQL 16 (ADR-0008) · Redis (chưa dùng ở Iteration 1) |
 | Lộ trình chi tiết | [docs/WP2-LO-TRINH-KY-THUAT.md](../../docs/WP2-LO-TRINH-KY-THUAT.md) |
+| Iteration 1 | [docs/ITERATION-1-WF03.md](../../docs/ITERATION-1-WF03.md) — gateway + state machine phiên + đối soát, test phát lại trace EXP-01 |
+
+## Chạy
+
+```bash
+npm install                                    # ở gốc repo
+npm run typecheck -w @powerme/csms             # tsc --noEmit
+npm test -w @powerme/csms                      # unit (không DB); có DATABASE_URL thì chạy cả tích hợp
+npm run build -w @powerme/csms                 # tsc → dist/
+DATABASE_URL=postgresql://powerme:powerme@localhost:5432/powerme OCPP_PORT=9000 npm run start -w @powerme/csms
+```
+
+Migration: `psql "$DATABASE_URL" -f apps/csms/drizzle/0000_init.sql`. Trụ nối tới `ws://host:9000/ocpp/{serialNumber}`; serial phải có trong `charge_points`.
+
+Cấu trúc `src/`: `ocpp-gateway/` (socket, registry epoch, log frame, tuần tự hoá, handler) · `sessions/` (state machine STM-1, phiên, chuỗi đo, trạng thái connector) · `reconciliation/` (phát hiện phát lại, đối soát) · `db/` (Drizzle schema + module). Test tích hợp: `test/wf03-exp01.integration.test.ts` với fixture `test/fixtures/exp1-disconnect-81s.jsonl`.
 
 ## Phạm vi
 
-- **BE-02** Máy chủ WebSocket OCPP-J 1.6, định danh trụ theo SN trên đường dẫn
-- **BE-03** Bản tin từ trụ lên: `BootNotification`, `Heartbeat`, `StatusNotification`, `Authorize`, `StartTransaction`, `MeterValues`, `StopTransaction`
-- **BE-04** Lệnh xuống trụ: `RemoteStartTransaction`, `RemoteStopTransaction`, `Reset`, `UnlockConnector`, `GetConfiguration`, `ChangeConfiguration`, `TriggerMessage`
-- **BE-05** State machine trụ và connector cho cấu hình súng đôi, lưu bền và khôi phục
-- **BE-06** Lưu trữ MeterValues DC: SoC, điện áp, dòng, kWh
-- **BE-07** Engine đối soát: phát lại hàng đợi offline, phát hiện replay theo timestamp, chống trùng giao dịch, phát hiện lỗ hổng chuỗi meter
-- **BE-08** Fanout realtime qua Redis pub/sub
+- **BE-02** Máy chủ WebSocket OCPP-J 1.6, định danh trụ theo SN trên đường dẫn — *Iteration 1: có*
+- **BE-03** Bản tin từ trụ lên: `BootNotification`, `Heartbeat`, `StatusNotification`, `Authorize`, `StartTransaction`, `MeterValues`, `StopTransaction` — *Iteration 1: có*
+- **BE-04** Lệnh xuống trụ: `RemoteStartTransaction`, `RemoteStopTransaction`, `Reset`, `UnlockConnector`, `GetConfiguration`, `ChangeConfiguration`, `TriggerMessage` — *Iteration 1: chỉ TriggerMessage(StatusNotification) khi trụ nối lại*
+- **BE-05** State machine trụ và connector cho cấu hình súng đôi, lưu bền và khôi phục — *Iteration 1: STM-1 phiên (22 chuyển), STM-2 phản chiếu + gắn cờ, STM-3 in_service/offline theo socket*
+- **BE-06** Lưu trữ MeterValues DC: SoC, điện áp, dòng, kWh — *Iteration 1: mỗi SampledValue một dòng, dedup*
+- **BE-07** Engine đối soát: phát lại hàng đợi offline, phát hiện replay theo timestamp, chống trùng giao dịch, phát hiện lỗ hổng chuỗi meter — *Iteration 1: có*
+- **BE-08** Fanout realtime tới giao diện qua Socket.IO + Redis adapter — chỉ cho fanout, không nằm trên đường giao dịch (ADR-0006) — *chưa*
 
 ## Ràng buộc không được quên
 
 - Khoá nghiệp vụ là `(chargePointId, connectorId)`. **`connectorId = 0` dành riêng cho trạng thái toàn trụ** theo OCPP 1.6 — không phải một súng.
 - Chỉ làm **1.6J**. Không có 2.0.1 trong phạm vi.
-- **CSMS là nguồn sự thật cho hoá đơn.** Giá trên trụ chỉ để hiển thị. Mọi lệch so với Settlement của trụ phải sinh bản ghi đối soát.
+- **CSMS là nguồn sự thật cho bản ghi phiên và bản tính giá** (ADR-0012 thu hẹp từ "cho hoá đơn"). Giá trên trụ chỉ để hiển thị. Mọi lệch so với Settlement của trụ phải sinh bản ghi đối soát.
 - Phải nhận được `StartTransaction` với `idTag` lạ (quẹt RFID / nhập mật khẩu trên HMI) và ghi nhận thành phiên vãng lai.
+- Mọi frame OCPP ghi vào `ocpp_message_log` **trước** khi xử lý (ADR-0005); CALL chiều vào xử lý **tuần tự theo trụ** (ADR-0004).
