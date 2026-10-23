@@ -9,7 +9,7 @@
 ## 1. Năm điều quan trọng nhất
 
 1. **`main` không đổi từ 16/09.** Trên `main`, `apps/csms` chỉ có `package.json` + `README.md`. Toàn bộ công việc WP2 (tài liệu kiến trúc, 12 ADR, bàn thí nghiệm, lớp điều khiển, hai thí nghiệm) nằm ở **5 nhánh chưa merge** (mục 3).
-2. **Nguyên nhân gốc — phát hiện hôm nay:** 4/5 thành viên chỉ có quyền **đọc** repo; 5 team `wp1…wp5` mà CODEOWNERS trỏ tới chỉ có một thành viên là Trí. Không ai ngoài Trí mở được nhánh, approve có hiệu lực hay merge. Đã sửa cho Ân (mục 2); ba người còn lại chờ một lệnh.
+2. **Nguyên nhân gốc — phát hiện hôm nay:** 4/5 thành viên chỉ có quyền **đọc** repo; 5 team `wp1…wp5` mà CODEOWNERS trỏ tới chỉ có một thành viên là Trí. Không ai ngoài Trí mở được nhánh, approve có hiệu lực hay merge. **Đã sửa cho cả bốn người trong ngày 23/10** (mục 2).
 3. **CI hoạt động.** Ba workflow chạy trên mọi PR; xanh ở #7, #8, #11, #12. #9 đỏ vì định dạng — đã sửa trong #11 (mục 7).
 4. **Iteration 1 chưa đạt định nghĩa trong kế hoạch** (khung NestJS, TLS, gateway sản phẩm). Đạt phần *dụng cụ đo*: mini-CSMS trên `ocpp-rpc`, lớp điều khiển 12 lệnh, EXP-01 (ngắt 81 s) và EXP-02 (đặt chỗ) có log thật (mục 4).
 5. **Để T50 ("Iteration 1 chạy được, CI xanh, tài liệu đã có trong repo") có nghĩa trước 26/10:** merge chuỗi #7 → #8 → #12 và #9 → #11 trong 48 giờ. Cần quyết ở mục 8.
@@ -22,9 +22,9 @@
 |---|---|---|---|
 | Trí (WP2) | `ngovanminhtri05` | admin | admin |
 | Ân (WP1) | `TDuckAn` | **chỉ đọc**, không thuộc team | **write**, thành viên `wp1` ✅ |
-| Sơn (WP3) | `Son2110` | **chỉ đọc**, không thuộc team | *chờ Trí quyết* |
-| Khang (WP5) | `KhangLe7405` | **chỉ đọc**, không thuộc team | *chờ Trí quyết* |
-| Nghĩa (WP4) | `ggbb0711` *(suy ra, cần xác nhận)* | **chỉ đọc**, không thuộc team | *chờ Trí quyết* |
+| Sơn (WP3) | `Son2110` | **chỉ đọc**, không thuộc team | **write**, thành viên `wp3` ✅ |
+| Khang (WP5) | `KhangLe7405` | **chỉ đọc**, không thuộc team | **write**, thành viên `wp5` ✅ |
+| Nghĩa (WP4) | `ggbb0711` | **chỉ đọc**, không thuộc team | **write**, thành viên `wp4` ✅ |
 
 Team `wp1…wp5` đều đã có quyền `push` trên repo — chỉ thiếu thành viên. Cách sửa đúng là **thêm người vào team** (một lệnh mỗi người), không cấp collaborator lẻ.
 
@@ -126,7 +126,7 @@ Chưa ghim, cần quyết: NestJS, Drizzle, Socket.IO, Caddy, k6 (đề xuất t
 
 | # | Quyết định | Một lệnh / một câu |
 |---|---|---|
-| 1 | Thêm Sơn, Khang, Nghĩa vào team `wp3`, `wp5`, `wp4` | `gh api -X PUT orgs/PowerMeApp/teams/wp3/memberships/Son2110 -f role=member` (×3) — xác nhận `ggbb0711` là Nghĩa trước |
+| 1 | ~~Thêm Sơn, Khang, Nghĩa vào team~~ | ✅ Đã làm 23/10 |
 | 2 | Thứ tự merge: #7 → #8 → #12 → #9 → #11, ai approve cái nào | Ân: #7, #8, #12 (tài liệu) · Khang: #9, #11 (lab, simulator) |
 | 3 | Luật tạm cho tới Hội đồng: PR tài liệu/lab không có review sau 48 giờ → tác giả tự merge, ghi biên bản | Cả nhóm gật trong họp tuần này |
 | 4 | Sửa kiểm tra tiêu đề cho Dependabot (1 dòng) rồi merge 4 PR bot | PM-01 |
