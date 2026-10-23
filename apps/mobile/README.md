@@ -6,7 +6,7 @@ App tài xế.
 |---|---|
 | Chủ sở hữu | WP3 — Mobile Developer |
 | Cột mốc | **M3 — 18/10/2026** |
-| Stack | React Native / Expo |
+| Stack | Flutter (Dart) — hợp đồng API qua `openapi.json` sinh từ NestJS; ngoài npm workspaces (ADR-0001, phụ lục 10/2026) |
 
 ## Phạm vi
 

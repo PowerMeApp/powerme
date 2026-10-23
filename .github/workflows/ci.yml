@@ -26,7 +26,7 @@ jobs:
 
     services:
       postgres:
-        image: postgres:16-alpine
+        image: postgres:16.4-alpine
         env:
           POSTGRES_USER: powerme
           POSTGRES_PASSWORD: powerme
@@ -39,7 +39,7 @@ jobs:
           --health-retries 5
 
       redis:
-        image: redis:7-alpine
+        image: redis:7.4-alpine
         ports: ['6379:6379']
         options: >-
           --health-cmd "redis-cli ping"

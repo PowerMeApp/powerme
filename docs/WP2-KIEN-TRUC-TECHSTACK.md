@@ -20,17 +20,17 @@
 | Lớp | Chọn | Phiên bản | Nguồn |
 |---|---|---|---|
 | Runtime | Node.js LTS | **24.18.1** | *đã ghim* — `.nvmrc`, CI |
-| Ngôn ngữ | TypeScript, bật `strict` | 5.x | |
-| Framework | NestJS | 11 | *đã chọn* — `README.md` |
+| Ngôn ngữ | TypeScript, bật `strict` | **5.9.3** | *đã ghim* — `apps/csms/package.json` |
+| Framework | NestJS | **12.2.0** | *đã ghim* — `apps/csms/package.json`, `package-lock.json` |
 | Tầng vận chuyển OCPP-J | **ocpp-rpc** (MIT) | **2.2.1** — ghim cứng, không `^`/`~`; npm chưa có 3.x, bản 3.0.0 sắp tới là ESM breaking change | **mới — ADR-0004** |
 | Cơ sở dữ liệu | PostgreSQL, partition gốc theo tháng | **16.4** | *đã ghim* — `infra/docker-compose.yml` |
 | Cache, hàng đợi job | Redis + BullMQ | **7.4** | *đã ghim* — `infra/docker-compose.yml` |
-| Realtime tới app và dashboard | Socket.IO + Redis adapter | 4.x | **mới — ADR-0006** |
+| Realtime tới app và dashboard | Socket.IO + Redis adapter | *đề xuất* (4.x) — chưa có trong `package-lock.json` | **mới — ADR-0006** |
 | ORM | Drizzle ORM + migration SQL thuần | | **mới — chốt cùng WP5** |
 | Log | pino, JSON có cấu trúc | | |
 | Metrics | prom-client → Prometheus + Grafana | | |
 | Test | Jest (mặc định NestJS) · tích hợp chạy trên service container PostgreSQL + Redis mà CI đã có · e2e bằng SAP simulator · tải bằng k6 trong `infra/k6/` | | |
-| Reverse proxy, TLS | Caddy 2 | | **mới — ADR-0011** |
+| Reverse proxy, TLS | Caddy 2 | *đề xuất* — chưa có trong repo | **mới — ADR-0011** |
 | Triển khai | Docker Compose trên một VPS · GitHub Actions | | *đã có* |
 
 **Năm quy ước dữ liệu bắt buộc ghi vào SDD** (chi tiết ở ADR-0009):
@@ -87,7 +87,9 @@
 **Module do WP2 sở hữu:** `ocpp-gateway`, `message-log`, `charging`, `metering`, `reconciliation`, `realtime`, `stations`.
 **Module do WP5 sở hữu, chạy chung tiến trình:** `billing`, `payments`, `invoicing`.
 
-Cổng `3000` (HTTP) và `3001` (OCPP WebSocket) khớp `CSMS_HTTP_PORT` và `CSMS_OCPP_WS_PORT` trong `infra/.env.example`. Trên máy dev không cần Caddy — trụ ảo nối thẳng `ws://localhost:3001/ocpp/{serialNumber}`.
+> **Đối chiếu với code (23/10/2026):** đây là bố cục đề xuất. `apps/csms/src/` hiện chỉ có `ocpp-gateway/`, `sessions/`, `reconciliation/`, `db/` (nhật ký bản tin nằm trong `ocpp-gateway/`; `charging`, `metering`, `realtime`, `stations`, `billing`, `payments`, `invoicing` chưa có thư mục). Xem [PACKAGE-DIAGRAM-CSMS.md](PACKAGE-DIAGRAM-CSMS.md).
+
+Cổng `3000` (HTTP) và `3001` (OCPP WebSocket) khớp `CSMS_HTTP_PORT` và `CSMS_OCPP_WS_PORT` trong `infra/.env.example`. Trên máy dev không cần Caddy — trụ ảo nối thẳng `ws://localhost:3001/ocpp/{serialNumber}`. (Code Iteration 1 đọc `OCPP_PORT`, rồi `CSMS_OCPP_WS_PORT`, mặc định **9000** — xem `apps/csms/src/config.ts` và `infra/.env.example`; đặt `OCPP_PORT=3001` nếu muốn khớp sơ đồ.)
 
 ---
 
@@ -102,7 +104,7 @@ Cổng `3000` (HTTP) và `3001` (OCPP WebSocket) khớp `CSMS_HTTP_PORT` và `CS
 
 ### ADR-0003 · Node.js 24 LTS + TypeScript — *Chấp nhận*
 
-Chính thức hoá `.nvmrc` 24.18.1, CI Node 24, NestJS 11, TypeScript `strict`. Việc kéo theo: nâng `engines.node` lên `>=24`.
+Chính thức hoá `.nvmrc` 24.18.1, CI Node 24, NestJS 12.2.0, TypeScript `strict`. Việc kéo theo: nâng `engines.node` lên `>=24`.
 → [adr/0003-node-24-typescript-strict.md](adr/0003-node-24-typescript-strict.md)
 
 ### ADR-0004 · Dùng `ocpp-rpc` cho tầng vận chuyển OCPP-J — *Chấp nhận*
@@ -155,6 +157,8 @@ Trụ Ruihua có thẻ ví tự trừ tiền và chế độ free vend mà OCPP 
 ## 3. Mô hình dữ liệu WP2 sở hữu
 
 WP1 vẽ ERD từ danh sách này. Chỉ liệt kê cột quan trọng.
+
+> **Tên bảng thật khác bản đề xuất này:** schema đã cài (`apps/csms/src/db/schema/`) dùng `sessions` thay `transactions`, `rfid_cards` thay `id_tags`; `remote_commands` chưa tạo. Bảng tên thật và lý do: [THIET-KE-CSDL-VAT-LY.md](THIET-KE-CSDL-VAT-LY.md).
 
 | Bảng | Cột quan trọng | Ghi chú |
 |---|---|---|
