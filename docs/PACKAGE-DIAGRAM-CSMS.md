@@ -28,7 +28,7 @@ flowchart TB
     direction TB
     GW["ocpp-gateway<br/>ocpp-rpc 2.2.1 · connection registry<br/>identity → socket, epoch<br/>tuần tự hoá CALL chiều vào theo trụ<br/>ghi ocpp_message_log TRƯỚC khi gọi handler"]
     ST["stations<br/>charge_points · connectors · remote_commands<br/>onboarding, lệnh xuống trụ (202 + commandId)"]
-    SE["sessions<br/>transactions · meter_values<br/>idempotency StartTransaction (ADR-0010)<br/>origin / payment_mode (ADR-0012)"]
+    SE["sessions<br/>sessions · meter_values<br/>idempotency StartTransaction (ADR-0010)<br/>origin / payment_mode (ADR-0012)"]
     RC["reconciliation<br/>replay · duplicate · meter_gap · orphan_stop<br/>reconciliation_records, bật/tắt được"]
     BI["billing — WP5<br/>tính tiền, hoá đơn, điều chỉnh<br/>endpoint VNPay IPN"]
     TA["tariffs — WP5<br/>biểu giá"]
@@ -70,7 +70,7 @@ flowchart TB
   SE -->|"transaction.stopped / amended<br/>(sự kiện trong tiến trình)"| BI
   BI -->|"đọc chuỗi meter qua SessionsService"| SE
   BI -->|"TariffsService"| TA
-  SE -->|"tra id_tags qua UsersService"| US
+  SE -->|"tra rfid_cards qua UsersService"| US
 
   %% ---- realtime: chỉ nghe ----
   ST -.->|"station.connection, connector.status, command.result"| RT
@@ -105,11 +105,11 @@ flowchart TB
 |---|---|---|---|---|
 | `ocpp-gateway` | WP2 | Máy chủ OCPP-J 1.6 trên `ocpp-rpc`. Giữ connection registry (identity → socket, epoch), đóng phiên cũ khi trụ nối lại cùng identity, tuần tự hoá CALL chiều vào theo từng trụ, Basic Auth từng trụ. **Ghi frame thô vào `ocpp_message_log` trước khi gọi bất kỳ handler nào**, cả chiều vào lẫn chiều ra. | Không import module nghiệp vụ nào. Chỉ biết giao diện `OcppHandler` (handler do module khác đăng ký) và bảng `ocpp_message_log`. Hỏi `stations` mật khẩu trụ qua một `StationCredentialsPort` (interface) để không phụ thuộc ngược. | ADR-0004, ADR-0005, ADR-0011, NFR-OCPP-04 |
 | `stations` | WP2 | Sổ trụ và connector: `charge_points`, `connectors`, `remote_commands`. Onboarding (trả mật khẩu một lần, băm argon2), state machine trạng thái toàn trụ và từng súng, lệnh xuống trụ bất đồng bộ (`202` + `commandId`), cảnh báo offline 900 giây. Handler cho `BootNotification`, `StatusNotification`, `Heartbeat`. | `ocpp-gateway` (gửi CALL xuống trụ qua registry), `users` (RolesGuard cho `/api/admin/stations/*`). | ADR-0009 (SN vs `display_code`), ADR-0011, ADR-0012 (`free_vend_id_tag`) |
-| `sessions` | WP2 | Vòng đời giao dịch sạc: `transactions`, `meter_values`. Handler cho `Authorize`, `StartTransaction`, `MeterValues`, `StopTransaction`. Idempotency `StartTransaction` theo khoá tự nhiên, gán `origin` / `payment_mode`, ghi phiên vãng lai với `idTag` lạ. Cung cấp `SessionsService` — cửa duy nhất để module khác đọc hoặc sửa giao dịch và chuỗi meter. | `stations` (tra trụ/connector), `users` (tra `id_tags` để phân loại thẻ). | ADR-0009, ADR-0010, ADR-0012 |
+| `sessions` | WP2 | Vòng đời giao dịch sạc: `sessions`, `meter_values`. Handler cho `Authorize`, `StartTransaction`, `MeterValues`, `StopTransaction`. Idempotency `StartTransaction` theo khoá tự nhiên, gán `origin` / `payment_mode`, ghi phiên vãng lai với `idTag` lạ. Cung cấp `SessionsService` — cửa duy nhất để module khác đọc hoặc sửa giao dịch và chuỗi meter. | `stations` (tra trụ/connector), `users` (tra `rfid_cards` để phân loại thẻ). | ADR-0009, ADR-0010, ADR-0012 |
 | `reconciliation` | WP2 | Engine đối soát, bật/tắt được để làm thí nghiệm ablation: phát hiện replay theo `cp_timestamp` vs `received_at` và epoch, giao dịch trùng, lỗ hổng chuỗi meter, `orphan_stop`, `unknown_id_tag`. Ghi `reconciliation_records`, sửa giao dịch qua `SessionsService`, phát `transaction.amended`. | `sessions` (đọc/sửa qua service), BullMQ (job nền). | ADR-0005 (nguồn dữ liệu là log), ADR-0006 (job bền, không pub/sub), ADR-0009, ADR-0010 |
 | `billing` | **WP5** | Tính tiền khi nhận `transaction.stopped`, tính lại khi `transaction.amended`; hoá đơn và bản ghi điều chỉnh; endpoint VNPay IPN và return. **Không thu qua VNPay** cho phiên `station_wallet`; phiên `unattributed` vào dòng báo cáo riêng. | `sessions` (`SessionsService`, không truy vấn thẳng bảng), `tariffs`, `users` (chủ phiên để thu tiền), BullMQ. | ADR-0006, ADR-0008, ADR-0009 (VND `bigint`), ADR-0012 |
 | `tariffs` | **WP5** | Biểu giá theo trụ/khung giờ, quản trị qua `/api/admin/tariffs/*`. Thuần dữ liệu, không nghe sự kiện OCPP. | `users` (RolesGuard). | ADR-0009 |
-| `users` | WP2 | Người dùng, xác thực JWT, vai trò (driver / operator / admin), `RolesGuard` dùng chung cho mọi `/api/admin/*`. Sở hữu sổ đăng ký thẻ `id_tags` (online_card / wallet_card). | Không phụ thuộc module nghiệp vụ nào. | ADR-0012 (sổ thẻ) |
+| `users` | WP2 | Người dùng, xác thực JWT, vai trò (driver / operator / admin), `RolesGuard` dùng chung cho mọi `/api/admin/*`. Sở hữu sổ đăng ký thẻ `rfid_cards` (online_card / wallet_card). | Không phụ thuộc module nghiệp vụ nào. | ADR-0012 (sổ thẻ) |
 | `realtime` | WP2 | Socket.IO gateway tại `/realtime`, room `station:{id}` / `transaction:{id}`. Nghe sự kiện trong tiến trình và fan-out qua Redis adapter. **Không ghi DB, không gọi service nghiệp vụ**; client phải gọi lại REST khi nối lại. | Chỉ `@nestjs/event-emitter` và Redis adapter. Xác thực JWT lúc handshake qua `users`. | ADR-0006, NFR-OCPP-02 |
 
 Bảng → module sở hữu (mỗi bảng đúng một chủ):
@@ -118,16 +118,16 @@ Bảng → module sở hữu (mỗi bảng đúng một chủ):
 |---|---|
 | `ocpp_message_log` | `ocpp-gateway` |
 | `charge_points`, `connectors`, `remote_commands` | `stations` |
-| `transactions`, `meter_values` | `sessions` |
+| `sessions`, `meter_values` | `sessions` |
 | `reconciliation_records` | `reconciliation` |
-| `id_tags`, bảng người dùng | `users` |
+| `rfid_cards`, bảng người dùng | `users` |
 | bảng hoá đơn, thanh toán, biểu giá | `billing`, `tariffs` (WP5 đặt tên) |
 
 ---
 
 ## 3. Luật phụ thuộc
 
-Luật chung: **mỗi bảng có đúng một module chủ; module khác muốn đọc hay ghi phải qua service của module chủ.** Lý do: WP2 đổi partition `meter_values` hoặc đổi schema `transactions` mà không làm vỡ `billing` (hợp đồng mục 4.4 của tài liệu kiến trúc).
+Luật chung: **mỗi bảng có đúng một module chủ; module khác muốn đọc hay ghi phải qua service của module chủ.** Lý do: WP2 đổi partition `meter_values` hoặc đổi schema `sessions` mà không làm vỡ `billing` (hợp đồng mục 4.4 của tài liệu kiến trúc).
 
 1. `ocpp-gateway` **không import** `stations`, `sessions`, `reconciliation`, `billing`, `tariffs`, `realtime`. Nó không biết `billing` tồn tại. Nó chỉ biết:
    - giao diện `OcppHandler` — `stations` và `sessions` đăng ký handler cho từng action (decorator + `DiscoveryService` của Nest, hoặc provider token);
@@ -136,7 +136,7 @@ Luật chung: **mỗi bảng có đúng một module chủ; module khác muốn 
 
    Thứ tự bắt buộc với mọi frame: **INSERT `ocpp_message_log` → rồi mới gọi handler.** Handler ném lỗi thì log vẫn còn (ADR-0005).
 2. `stations` → `ocpp-gateway` là chiều duy nhất giữa hai module này ở mức import: `stations` gọi `OcppDispatchService.call(identity, action, params)` để gửi lệnh xuống trụ. Gateway gọi ngược lại `stations` chỉ qua handler đã đăng ký, không qua import.
-3. `sessions` là cửa duy nhất vào `transactions` và `meter_values`. `reconciliation` sửa giao dịch qua `SessionsService.amend(...)`; `billing` đọc chuỗi meter qua `SessionsService.getMeterSeries(...)`. **Cấm** `billing` hay `reconciliation` viết SQL vào hai bảng đó.
+3. `sessions` là cửa duy nhất vào `sessions` và `meter_values`. `reconciliation` sửa giao dịch qua `SessionsService.amend(...)`; `billing` đọc chuỗi meter qua `SessionsService.getMeterSeries(...)`. **Cấm** `billing` hay `reconciliation` viết SQL vào hai bảng đó.
 4. Đường đi giao dịch `ocpp-gateway → sessions → reconciliation → billing` là **gọi hàm và sự kiện trong tiến trình** (`@nestjs/event-emitter`). **Không có Redis pub/sub** ở bất kỳ mắt xích nào (ADR-0006). Việc nền cần retry (đối soát định kỳ, sinh hoá đơn, tạo partition tháng kế) dùng BullMQ — có lưu bền.
 5. `realtime` **chỉ nghe** sự kiện trong tiến trình và đẩy ra Socket.IO. Không ghi DB, không gọi `SessionsService`/`StationsService`, không là nguồn sự thật. Mất sự kiện là chấp nhận được; client gọi lại REST.
 6. `billing` và `tariffs` (WP5) được phép phụ thuộc vào `sessions`, `users`, `tariffs`. **Không** module WP2 nào import `billing` hay `tariffs`: `sessions` phát `transaction.stopped`/`amended` chứ không gọi `BillingService`. Nhờ vậy tắt `billing` (ví dụ khi chạy thí nghiệm ablation) thì phần OCPP vẫn chạy.
@@ -177,7 +177,7 @@ Những điểm tài liệu nguồn **khác** với danh sách quyết định �
 
 1. **Tên và số module.** `WP2-KIEN-TRUC-TECHSTACK.md` mục 1 liệt kê WP2: `ocpp-gateway`, `message-log`, `charging`, `metering`, `reconciliation`, `realtime`, `stations`; WP5: `billing`, `payments`, `invoicing`. Quyết định T19 dùng: `ocpp-gateway`, `stations`, `sessions`, `reconciliation`, `billing`, `tariffs`, `users`, `realtime`. Sơ đồ này ngầm hiểu: `message-log` gộp vào `ocpp-gateway`; `charging` + `metering` → `sessions`; `payments` + `invoicing` → `billing`; `tariffs` và `users` là mới. Cần xác nhận cách gộp này và cập nhật mục 1 của tài liệu kiến trúc cho khớp.
 2. **Hợp đồng với WP5 mục 4.4** ghi "billing đọc chuỗi `meter_values` qua repository của module `metering`". Với tên mới, phải đổi thành `SessionsService` của `sessions`. WP5 cần được báo vì đây là hợp đồng.
-3. **Bảng `id_tags` thuộc `users` hay `stations`?** Tài liệu kiến trúc chỉ liệt kê bảng, không gán module. Tôi đặt vào `users` vì `id_tags.user_id` trỏ tới người dùng và `users` là nơi xác thực. Nếu Trí muốn `stations` (vì người vận hành phát hành thẻ theo site) thì sửa bảng mục 2 và luật 7.
+3. **Bảng `rfid_cards` thuộc `users` hay `stations`?** Tài liệu kiến trúc chỉ liệt kê bảng, không gán module. Tôi đặt vào `users` vì `rfid_cards.driver_id` trỏ tới người dùng và `users` là nơi xác thực. Nếu Trí muốn `stations` (vì người vận hành phát hành thẻ theo site) thì sửa bảng mục 2 và luật 7.
 4. **Cơ chế đăng ký handler OCPP.** Để `ocpp-gateway` không import module nghiệp vụ (luật 1), tôi giả định handler đăng ký qua decorator + `DiscoveryService` (hoặc provider token). Nếu Trí định cho gateway import thẳng `StationsService`/`SessionsService` thì gateway sẽ phụ thuộc vào hai module đó và luật 1, 2 phải viết lại (và có vòng `stations ↔ ocpp-gateway` cần `forwardRef`).
 5. **Billing nhận `transaction.stopped` bằng gì?** Tài liệu kiến trúc nói BullMQ cho "đối soát, sinh hoá đơn" nhưng cũng nói billing "tính tiền khi nhận `transaction.stopped`". Tôi vẽ: sự kiện trong tiến trình kích hoạt, BullMQ chỉ cho việc nền có retry. Nếu Trí muốn `sessions` đẩy thẳng job BullMQ cho billing (bền hơn khi tiến trình sập giữa chừng) thì cạnh `SE → BI` đổi thành đi qua Redis/BullMQ — vẫn đúng ADR-0006 vì BullMQ không phải pub/sub.
 6. **Đường dẫn VNPay.** `infra/.env.example` đặt `VNPAY_RETURN_URL=http://localhost:3000/payment/vnpay/return` — không nằm dưới `/api/v1`. Sơ đồ ghi `/api/v1/billing/vnpay/ipn` theo logic "endpoint trong `billing`". Cần chốt đường dẫn thật với WP5 (QA-04) và sửa `.env.example` cho khớp.
