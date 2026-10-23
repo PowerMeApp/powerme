@@ -43,7 +43,7 @@
 | 7 | #15 | Bảng khai báo công nghệ T18 — mọi dòng có nguồn trong repo, 26 mục chưa ghim | 151 | ✅ |
 | 8 | #14 | Package diagram CSMS T19 — 17 node, 8 module, 10 luật phụ thuộc | ~200 | ✅ |
 | 9 | #16 | Xác nhận state machine T13 — STM-1 9 trạng thái / 22 chuyển, STM-2 phản chiếu OCPP, STM-3 sửa theo EXP-01 | ~180 | ✅ |
-| 10 | #18 | Thiết kế CSDL vật lý T11 — 32 bảng, 28 enum, 94 index, 36 CHECK, migration SQL 774 dòng, mô tả bảng | 2.661 | ✅ |
+| 10 | #18 | Thiết kế CSDL vật lý T11 — 32 bảng, 28 enum, 94 index, 24 CHECK (đếm trên văn bản migration; con số 36 trước đây không tái hiện được), migration SQL 774 dòng, mô tả bảng | 2.661 | ✅ |
 | 11 | #17 | WF-03 class + sequence diagram T24 (nháp, chờ T62) | 460 | ✅ |
 | 12 | #19 → #18 | **Iteration 1** — gateway OCPP (`ocpp-rpc`, tuần tự hoá theo trụ, epoch từ DB), state machine phiên 22 chuyển, đối soát, **96 unit test + 19 test tích hợp phát lại 75 frame EXP-01** (T33) | ~9.800 | ✅ |
 
