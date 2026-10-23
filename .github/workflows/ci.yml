@@ -4,7 +4,8 @@ on:
   push:
     branches: [main]
   pull_request:
-    branches: [main]
+    # PR xếp tầng (base là nhánh wp*/…) cũng phải qua CI, không chỉ PR vào main.
+    branches: [main, 'wp*/**']
 
 # PR đẩy commit mới thì huỷ lượt chạy cũ — tiết kiệm phút Actions
 concurrency:
