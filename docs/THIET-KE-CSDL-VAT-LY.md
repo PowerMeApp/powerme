@@ -25,7 +25,7 @@
 | Cột dẫn xuất (`/x` trong ERD) | cột thường, **cập nhật cùng transaction với dòng ledger** | T10 §5.6 |
 | Partition | `meter_values`, `ocpp_message_log` — `PARTITION BY RANGE (received_at)` theo tháng, tạo sẵn 2026-10 → 2027-01 + `DEFAULT` | ADR-0007 |
 
-Số liệu: **32 bảng** (+10 partition con), **28 enum**, **94 index** (kể cả index do PK/UNIQUE tạo, trong đó 7 partial), **36 CHECK**, 5 sequence cho số nghiệp vụ, 1 trigger append-only.
+Số liệu: **32 bảng** (+10 partition con), **28 enum**, **94 index** (kể cả index do PK/UNIQUE tạo, trong đó 7 partial), **24 CHECK (đếm trên văn bản migration; con số 36 trước đây không tái hiện được)**, 5 sequence cho số nghiệp vụ, 1 trigger append-only.
 
 ---
 
@@ -310,7 +310,7 @@ Những chỗ tôi phải chọn một giá trị để schema biên dịch đư
 ## 8. Kiểm chứng đã chạy
 
 ```bash
-npm run typecheck -w @powerme/csms            # tsc --noEmit, TypeScript 7.0.2 — qua
+npm run typecheck -w @powerme/csms            # tsc --noEmit, TypeScript 5.9.3 — qua
 npx drizzle-kit export --sql                  # DDL sinh từ schema TS, dùng để đối chiếu
 ```
 
