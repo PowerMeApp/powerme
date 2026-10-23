@@ -23,7 +23,7 @@
 | # | Risk | Impact | Verification / mitigation |
 |---|---|---|---|
 | 1 | **No physical charger (R-H01).** All behaviour is simulated; the simulator answers the way its author expects a pillar to answer | Results may not transfer to Ruihua firmware; the `meterStop` contradiction seen in EXP-01 may be simulator-specific | Independent third-party simulator (SAP v4.12.0, Apache-2.0) rather than our own; every unconfirmed behaviour is labelled an assumption in `simulator/d1-hmi/README.md`; five vendor questions drafted (wallet card, free-vend `idTag`, config keys, measurands, integer-vs-decimal Wh); ask the supervisor for one session on a real unit |
-| 2 | **`ocpp-rpc` has one maintainer** (235 of 241 commits) and its last npm release is 2.2.1 (17/07/2025) | Library stalls → we own it | Version pinned exactly, MIT licence allows a vendored copy; dependency surface is `ws`, `ajv`, `ajv-formats`, `backoff`; core behaviour covered by 115 automated tests |
+| 2 | **`ocpp-rpc` has one maintainer** (235 of 241 commits) and its last npm release is 2.2.1 (17/07/2025) | Library stalls → we own it | Version pinned exactly, MIT licence allows a vendored copy; dependency surface is `ws`, `ajv`, `ajv-formats`, `backoff`; core behaviour covered by 159 automated tests |
 | 3 | **Research validity.** EXP-01 is a single run on one simulator, disconnect by stopping the server (clean socket close), not a half-open 4G drop | A reviewer may call the finding anecdotal | Run 3 scenarios × N repeats with pre-defined metrics and a SteVe baseline; add a proxy that drops packets instead of closing the socket; report limits explicitly (done in `EXP-01` §"Điều KHÔNG được kết luận") |
 
 ---
@@ -40,6 +40,8 @@
 | G6 | ADR-0009 and ADR-0012 still list enum values that differ from STM-1 / the DB (`origin`, `payment_mode`, table names `id_tags`); the DB enum `payment_mode` lacks a value for sessions opened by an unknown tag | Medium | Update ADRs, add `unattributed`, Trí, 25/10 |
 | G7 | 14 internal inconsistencies in the repo (Node 22 vs 24, Postgres 16.4 vs 16, SteVe build, …) — `docs/BAO-CAO-HIEN-TRANG-REPO.md` §10 | Low | PM-01, Ân + Trí, 01/11 |
 | G8 | Embedded Postgres used for the demo is 17.x beta; CI uses Postgres 16 | Low | Staging on Postgres 16 |
+| G9 | **False replay flag.** The `before_epoch` rule marks a message replayed when `cp_timestamp < epoch_opened_at` with zero tolerance. In the integrated demo, 3–4 `StatusNotification`s generated ~0.2 s before the socket opened and sent live were flagged `PHÁT LẠI`. EXP-01 never exposed this because its simulator sends no timestamp on status messages | Medium | Decide a grace window (e.g. require `epoch_opened_at − cp_timestamp > REPLAY_SKEW_THRESHOLD_S`) and extend `replay-detector.spec.ts`; Trí, before Iteration 2 |
+| G10 | **Staged disconnect behaviour in the demo.** `STALE_METERSTOP=1` makes the HMI send a stale `meterStop` after reconnect, copying what the SAP simulator did in EXP-01, so the demo can reach status `review`. It is a staging switch, not confirmed firmware behaviour | Medium | Disclose on screen and in the demo script (done in `docs/DEMO-REVIEW-2.md`); confirm with Ruihua or a real unit | Trí + vendor |
 
 ---
 
@@ -67,7 +69,7 @@ FR identifiers must be mapped from the registration form v1.2 (not held by WP2).
 | Reconnect detection | Server marks a pillar `offline` ≤ 60 s after a socket close or missed pings (hard cap 900 s) | Scenario run with timestamps | **Not yet measured** |
 | Data integrity | Energy stored as integer Wh, money integer VND; DB rejects non-integer / negative values | Migration CHECK constraints + 11 violation cases (T11) | Measured on PG-lite; re-run on PG |
 | Reproducibility | Demo data loads from script; `npm run demo` reaches a running system from a clean checkout in ≤ 5 min | Timed run | Pending (BE-09) |
-| Test automation | ≥ 50 % of WP2 test cases run in CI | CI job counts | 115 automated in CI |
+| Test automation | ≥ 50 % of WP2 test cases run in CI | CI job counts | 159 automated in CI (11 suites) |
 
 ## Section 8 — Ownership map (WP2 row and cross-WP dependencies)
 
@@ -102,6 +104,6 @@ Dependencies on other members: WP5 provides the simulator patch and billing cons
 | STM-1 transitions | **22** | each valid transition + rejected-pair sweep |
 | STM-3 transitions | **8** | pillar lifecycle (`docs/XAC-NHAN-STATE-MACHINE-T13.md`) — to be written |
 | NFRs | 6 | Section 7 |
-| **Committed minimum (WP2)** | **61** | already automated today: 115 tests, of which ≥ 22 map to STM-1 |
+| **Committed minimum (WP2)** | **61** | already automated today: 159 tests in CI (11 suites; 28 console unit + 13 console integration + 19 WF-03 integration + 96 unit/engine), of which ≥ 22 map to STM-1 |
 
 Counts here cover WP2 only; the team total is the sum over members and must match the Commitment (BM04) exactly, with each test case counted for one person.
