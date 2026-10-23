@@ -13,7 +13,7 @@ Dùng [_template.md](_template.md) làm khuôn.
 |---|---|---|---|---|
 | [0001](0001-monorepo-npm-workspaces.md) | Monorepo với npm workspaces | Chấp nhận | 03/09/2026 · phụ lục 23/10/2026 | Một kho mã, `packages/shared` cho backend + dashboard; app Flutter nằm trong monorepo nhưng ngoài npm workspaces |
 | [0002](0002-modular-monolith.md) | Modular monolith, không làm microservices | Chấp nhận | 11/09/2026 · chấp nhận 23/10/2026 | `apps/csms` là một tiến trình NestJS chia module; `ocpp-gateway` có ranh giới để tách sau |
-| [0003](0003-node-24-typescript-strict.md) | Node.js 24 LTS + TypeScript `strict` | Chấp nhận | 11/09/2026 · chấp nhận 23/10/2026 | Chính thức hoá `.nvmrc` 24.18.1, CI Node 24, NestJS 11 |
+| [0003](0003-node-24-typescript-strict.md) | Node.js 24 LTS + TypeScript `strict` | Chấp nhận | 11/09/2026 · chấp nhận 23/10/2026 | Chính thức hoá `.nvmrc` 24.18.1, CI Node 24, NestJS (ghim 12.2.0, TS 5.9.3 — phụ lục 23/10) |
 | [0004](0004-ocpp-rpc-tang-van-chuyen.md) | Dùng `ocpp-rpc` cho tầng vận chuyển OCPP-J | Chấp nhận | 11/09/2026 · chấp nhận 23/10/2026 | Ghim cứng `ocpp-rpc@2.2.1`, vendor bản copy; schema OCA là CC BY-ND 4.0, không sửa |
 | [0005](0005-nhat-ky-ban-tin-ocpp-append-only.md) | Nhật ký bản tin OCPP ghi trước, chỉ thêm không sửa | Đề xuất | 11/09/2026 | Mọi frame vào `ocpp_message_log` trước khi xử lý nghiệp vụ; chỉ INSERT |
 | [0006](0006-khong-redis-pubsub-tren-duong-giao-dich.md) | Không dùng Redis pub/sub trên đường đi của giao dịch | Đề xuất | 11/09/2026 | Pub/sub chỉ cho fanout tới giao diện; giao dịch đi trong tiến trình, job nền qua BullMQ |

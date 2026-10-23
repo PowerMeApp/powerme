@@ -61,7 +61,7 @@
   ┌────────────▼──────────────────────────────▼─────────────────────▼─────────┐
   │ Caddy 2 — kết thúc TLS, định tuyến theo đường dẫn                         │
   └────────────┬──────────────────────────────┬─────────────────────┬─────────┘
-               │ /ocpp/* → cổng 3001          │ /api/*  → cổng 3000 │ /realtime
+               │ /ocpp/* → cổng 9000          │ /api/*  → cổng 3000 │ /realtime
   ┌────────────▼──────────────────────────────▼─────────────────────▼─────────┐
   │ apps/csms — @powerme/csms · NestJS · Node.js 24 · MỘT tiến trình          │
   │                                                                           │
@@ -89,7 +89,7 @@
 
 > **Đối chiếu với code (23/10/2026):** đây là bố cục đề xuất. `apps/csms/src/` hiện chỉ có `ocpp-gateway/`, `sessions/`, `reconciliation/`, `db/` (nhật ký bản tin nằm trong `ocpp-gateway/`; `charging`, `metering`, `realtime`, `stations`, `billing`, `payments`, `invoicing` chưa có thư mục). Xem [PACKAGE-DIAGRAM-CSMS.md](PACKAGE-DIAGRAM-CSMS.md).
 
-Cổng `3000` (HTTP) và `3001` (OCPP WebSocket) khớp `CSMS_HTTP_PORT` và `CSMS_OCPP_WS_PORT` trong `infra/.env.example`. Trên máy dev không cần Caddy — trụ ảo nối thẳng `ws://localhost:3001/ocpp/{serialNumber}`. (Code Iteration 1 đọc `OCPP_PORT`, rồi `CSMS_OCPP_WS_PORT`, mặc định **9000** — xem `apps/csms/src/config.ts` và `infra/.env.example`; đặt `OCPP_PORT=3001` nếu muốn khớp sơ đồ.)
+Cổng HTTP `3000` (`CSMS_HTTP_PORT`). Cổng OCPP WebSocket chuẩn của Iteration 1 là **9000** (`OCPP_PORT` trong `infra/.env.example`, được ưu tiên hơn `CSMS_OCPP_WS_PORT=3001` cũ; mặc định trong `apps/csms/src/config.ts`). Trên máy dev không cần Caddy — trụ ảo nối thẳng `ws://localhost:9000/ocpp/{serialNumber}`.
 
 ---
 
@@ -188,7 +188,7 @@ WP1 vẽ ERD từ danh sách này. Chỉ liệt kê cột quan trọng.
 
 | Thông số | Giá trị |
 |---|---|
-| Endpoint dev | `ws://localhost:3001/ocpp/{serialNumber}` |
+| Endpoint dev | `ws://localhost:9000/ocpp/{serialNumber}` |
 | Endpoint staging | `wss://{host}/ocpp/{serialNumber}` |
 | Subprotocol | `ocpp1.6` |
 | Xác thực | Basic Auth — username = `serialNumber`, password = mật khẩu cấp lúc onboarding. Dev tắt được xác thực bằng biến môi trường |
