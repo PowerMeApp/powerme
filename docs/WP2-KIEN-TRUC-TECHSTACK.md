@@ -5,8 +5,9 @@
 **Cần chốt:** trong S2 (07/09 – 20/09/2026), trước khi BE-02 gộp vào `main`
 **Liên quan:** WP3 (app), WP4 (dashboard), WP5 (simulator, billing) — mục 4 là hợp đồng giao tiếp với các bạn
 **Kế thừa:** [ADR-0001 Monorepo npm workspaces](adr/0001-monorepo-npm-workspaces.md) · `CONTRIBUTING.md` · `infra/docker-compose.yml`
-**Trạng thái:** Đề xuất — 11 quyết định đánh số ADR-0002 → ADR-0012
+**Trạng thái:** 11 quyết định đánh số ADR-0002 → ADR-0012, mỗi quyết định một file trong [`docs/adr/`](adr/README.md)
 **Cập nhật 11/09/2026:** thêm ADR-0012 sau khi đối chiếu manual gốc của hãng — trụ có thẻ ví tự trừ tiền và chế độ free vend
+**Cập nhật 23/10/2026:** tách 11 ADR ra file riêng trong `docs/adr/`; mục 2 dưới đây chỉ còn tóm tắt và link. ADR-0002, 0003, 0004, 0008 đã **Chấp nhận**; còn lại giữ **Đề xuất**
 
 ---
 
@@ -90,190 +91,64 @@ Cổng `3000` (HTTP) và `3001` (OCPP WebSocket) khớp `CSMS_HTTP_PORT` và `CS
 
 ---
 
-## 2. Các quyết định kiến trúc đề xuất
+## 2. Các quyết định kiến trúc
 
-Đánh số tiếp theo [ADR-0001](adr/0001-monorepo-npm-workspaces.md). Theo quy ước của `docs/adr/README.md`, **sau khi nhóm chấp nhận, mỗi quyết định được tách thành một file riêng** `docs/adr/NNNN-ten-quyet-dinh.md` theo `_template.md`. Tài liệu này là bản gom để review một lần.
+Đánh số tiếp theo [ADR-0001](adr/0001-monorepo-npm-workspaces.md). Theo quy ước của `docs/adr/README.md`, mỗi quyết định là **một file riêng** `docs/adr/NNNN-ten-quyet-dinh.md` theo `_template.md` — file ADR là nơi duy nhất giữ bối cảnh, quyết định, hệ quả và phương án đã loại. Dưới đây chỉ tóm tắt để đọc liền mạch; muốn tranh luận hay sửa thì sửa ở file ADR.
 
-### ADR-0002 · Modular monolith, không làm microservices
+### ADR-0002 · Modular monolith, không làm microservices — *Chấp nhận*
 
-**Quyết định:** `apps/csms` là một tiến trình NestJS. Module `ocpp-gateway` có ranh giới rõ ràng để sau này tách được thành dịch vụ riêng.
+`apps/csms` là một tiến trình NestJS chia module rõ ranh giới; `ocpp-gateway` tách được thành dịch vụ riêng sau này. Chưa scale ngang tầng WebSocket — ghi vào hướng phát triển.
+→ [adr/0002-modular-monolith.md](adr/0002-modular-monolith.md)
 
-**Lý do:** 13 tuần, hai người làm backend (WP2 + WP5). Gỡ lỗi một hệ phân tán — mất bản tin giữa các dịch vụ, lệch phiên bản hợp đồng, theo dõi request xuyên dịch vụ — sẽ nuốt trọn lịch. Và nó làm nhiễu thí nghiệm: nếu dữ liệu mất, không biết mất ở tầng OCPP hay ở message broker giữa các dịch vụ.
+### ADR-0003 · Node.js 24 LTS + TypeScript — *Chấp nhận*
 
-**Hệ quả:** chưa scale ngang được tầng kết nối WebSocket. Scale ngang cần sticky routing theo `serialNumber` cộng một registry ghi nhận trụ nào đang nối vào instance nào — **ghi vào chương hướng phát triển**.
+Chính thức hoá `.nvmrc` 24.18.1, CI Node 24, NestJS 11, TypeScript `strict`. Việc kéo theo: nâng `engines.node` lên `>=24`.
+→ [adr/0003-node-24-typescript-strict.md](adr/0003-node-24-typescript-strict.md)
 
-**Phương án bị loại:** tách gateway và core thành hai dịch vụ nối qua message broker, theo kiểu CitrineOS. Đúng khi quy mô lớn, quá đắt cho 13 tuần.
+### ADR-0004 · Dùng `ocpp-rpc` cho tầng vận chuyển OCPP-J — *Chấp nhận*
 
-### ADR-0003 · Node.js 24 LTS + TypeScript
+Ghim cứng `ocpp-rpc@2.2.1` (MIT), không `^`/`~` vì 3.0.0 sắp tới là ESM breaking change; vendor một bản copy dự phòng. Schema OCA đi kèm là CC BY-ND 4.0 — dùng nguyên văn. Ba việc thư viện không làm (tuần tự hoá chiều vào theo trụ, đóng phiên cũ khi nối lại cùng identity, logic nghiệp vụ) thuộc WP2.
+→ [adr/0004-ocpp-rpc-tang-van-chuyen.md](adr/0004-ocpp-rpc-tang-van-chuyen.md)
 
-**Quyết định:** Node.js 24 LTS, TypeScript `strict`. Chính thức hoá trạng thái đã có: `.nvmrc` ghim `24.18.1`, CI chạy `NODE_VERSION: '24'`.
+### ADR-0005 · Nhật ký bản tin OCPP ghi trước, chỉ thêm không sửa — *Đề xuất*
 
-**Lý do:**
-- OCPP-J là WebSocket + JSON — đúng sở trường của Node
-- Thư viện tầng vận chuyển tốt nhất tìm được (`ocpp-rpc`) là Node
-- SAP simulator mà WP5 phải patch viết bằng TypeScript — **cùng ngôn ngữ**, WP2 đọc và hỗ trợ patch được
-- Ba đầu ra dùng chung kiểu dữ liệu qua `packages/shared` — điều kiện tiên quyết của ADR-0001
+Mọi frame vào `ocpp_message_log` trước khi xử lý nghiệp vụ; bảng chỉ INSERT. Là ground truth cho thí nghiệm mất dữ liệu và nguồn cho FE-08.
+→ [adr/0005-nhat-ky-ban-tin-ocpp-append-only.md](adr/0005-nhat-ky-ban-tin-ocpp-append-only.md)
 
-**Lưu ý nhỏ:** `package.json` gốc khai báo `engines.node >= 22.0.0`, trong khi `.nvmrc` và CI dùng 24. Không lỗi, nhưng nên nâng `engines` lên `>=24` để khỏi có người chạy Node 22 rồi gặp khác biệt.
+### ADR-0006 · Không dùng Redis pub/sub trên đường đi của giao dịch — *Đề xuất*
 
-**Phương án bị loại:**
-- *Java / Spring Boot* — hợp lý nếu bám SteVe, nhưng phá vỡ việc dùng chung kiểu dữ liệu của ADR-0001.
-- *Go / ocpp-go* — README không hề đề cập hành vi offline hay configuration key liên quan; nhóm không dùng Go.
+Pub/sub chỉ cho fanout tới giao diện; giao dịch đi bằng gọi hàm trong tiến trình sau khi ghi log, job nền qua BullMQ. Client phải coi sự kiện realtime là gợi ý, REST là sự thật.
+→ [adr/0006-khong-redis-pubsub-tren-duong-giao-dich.md](adr/0006-khong-redis-pubsub-tren-duong-giao-dich.md)
 
-### ADR-0004 · Dùng `ocpp-rpc` cho tầng vận chuyển OCPP-J
+### ADR-0007 · PostgreSQL 16.4 với partition gốc, không dùng TimescaleDB — *Đề xuất*
 
-**Quyết định:** không tự viết tầng RPC-over-WebSocket. Dùng `ocpp-rpc@2.2.1` (MIT), ghim cứng. Trên npm chưa có 3.x (kiểm 12/09/2026); 3.0.0 đang phát triển là ESM breaking change nên không để `^` hay `~`. Thư viện một maintainer (235/241 commit) → vendor một bản copy trong repo làm dự phòng, MIT cho phép.
+Giữ 16.4 đã ghim; `meter_values` và `ocpp_message_log` partition theo tháng, job BullMQ tạo partition trước. Việc kéo theo: ghim CI về `postgres:16.4-alpine`.
+→ [adr/0007-postgresql-partition-goc.md](adr/0007-postgresql-partition-goc.md)
 
-**Đã kiểm chứng trực tiếp từ mã nguồn ngày 11/09/2026** (commit gần nhất của thư viện: 10/08/2026):
+### ADR-0008 · Drizzle ORM + migration SQL thuần — *Chấp nhận, đã chốt cùng WP5*
 
-| Yêu cầu của OCPP-J | `ocpp-rpc` xử lý thế nào |
-|---|---|
-| Mỗi chiều chỉ một CALL đang chờ | `callConcurrency` **mặc định = 1**. Chú thích trong code: *"OCPP requires this to be set to 1"*. CALL dư được xếp hàng |
-| Định danh trụ nằm trên URL | Server lấy đoạn cuối của đường dẫn làm `identity` |
-| Basic Auth theo Security Profile 1 và 2 | Server tự parse header `Authorization` với username = identity, đưa `password` vào callback `auth` |
-| Thoả thuận subprotocol | Tuỳ chọn `protocols`, ghi đè được trong callback `auth` |
-| Validate bản tin theo schema OCA | `strictMode`, có sẵn schema OCA cho `ocpp1.6`, `ocpp2.0.1`, `ocpp2.1` |
-| Timeout cho CALL | `callTimeoutMs` mặc định 60 000 ms |
-| WebSocket ping/pong — khác với OCPP Heartbeat | `pingIntervalMs` mặc định 30 000 ms, tự ngắt kết nối chết |
-| Không lộ stack trace ra ngoài | `respondWithDetailedErrors` mặc định `false` |
+ORM không cản viết SQL tay cho partition, unique idempotency, bảng append-only, mà vẫn có type-safety.
+→ [adr/0008-drizzle-orm-migration-sql.md](adr/0008-drizzle-orm-migration-sql.md)
 
-**Yêu cầu hệ thống:** Node.js ≥ 20. Phụ thuộc: `ws`, `ajv`, `backoff`.
+### ADR-0009 · Quy ước dữ liệu — *Đề xuất*
 
-**⚠️ Ba điều thư viện KHÔNG làm — WP2 phải tự làm:**
+`timestamptz` UTC; hai thời điểm mỗi bản tin (`cp_timestamp` / `received_at`); Wh và VND kiểu `bigint`; connector 0/1/2; SN là định danh kỹ thuật, `display_code` là mã hiển thị; `origin`, `payment_mode`, `delivered_offline` trên giao dịch.
+→ [adr/0009-quy-uoc-du-lieu.md](adr/0009-quy-uoc-du-lieu.md)
 
-1. **Không giới hạn đồng thời cho CALL chiều vào.** Trụ tuân thủ spec sẽ không gửi dồn, nhưng **đừng dựa vào điều đó** — trụ đang replay hàng đợi offline hoặc trụ lỗi firmware có thể gửi dồn. Nếu handler chạy song song, bản ghi vào DB sai thứ tự và làm hỏng chính dữ liệu mà engine đối soát dựa vào. **WP2 phải tuần tự hoá xử lý chiều vào theo từng trụ.**
-2. **Không xử lý trụ nối lại với cùng identity** khi kết nối cũ còn treo. WP2 phải chủ động đóng phiên cũ khi phiên mới cùng identity được xác thực.
-3. **Không có logic nghiệp vụ OCPP nào** — không state machine, không giao dịch, không đối soát. Đó vẫn nguyên là phần việc của đồ án.
+### ADR-0010 · Idempotency của StartTransaction — *Đề xuất*
 
-**⚠️ Bẫy giấy phép:** thư viện là MIT, nhưng **các file JSON schema của OCA đi kèm theo giấy phép CC BY-ND 4.0** (không phái sinh). Dùng nguyên văn, **không sửa đổi**. Ghi điều này vào SDD.
+Unique trên `(charge_point_id, connector_id, id_tag, meter_start_wh, cp_timestamp)`; trụ gửi lại thì trả đúng `transactionId` cũ. Nền móng của BE-07.
+→ [adr/0010-idempotency-starttransaction.md](adr/0010-idempotency-starttransaction.md)
 
-### ADR-0005 · Nhật ký bản tin OCPP ghi trước, chỉ thêm không sửa
+### ADR-0011 · Bảo mật OCPP: Security Profile 2 — *Đề xuất*
 
-**Quyết định:** mọi frame OCPP — cả chiều vào lẫn chiều ra — được ghi vào bảng `ocpp_message_log` **trước khi** xử lý nghiệp vụ. Bảng chỉ INSERT, không UPDATE, không DELETE, trừ việc xoá partition cũ theo chính sách lưu trữ.
+TLS kết thúc tại Caddy + Basic Auth riêng từng trụ; mật khẩu sinh lúc onboarding, hiện một lần, băm argon2. Security Profile 3 để hướng phát triển.
+→ [adr/0011-ocpp-security-profile-2.md](adr/0011-ocpp-security-profile-2.md)
 
-**Lý do — một quyết định, bốn lợi ích:**
-1. **Bền vững:** không có đường nào để mất bản tin trong bộ nhớ. Tiến trình sập ngay sau khi nhận, bản tin vẫn nằm trong DB
-2. **Ground truth cho thí nghiệm:** so trực tiếp "simulator đã gửi gì" với "CSMS đã nhận gì" — đây chính là cách đo tỉ lệ mất dữ liệu
-3. **Trình xem bản tin OCPP thô (FE-08) có sẵn** cho WP4
-4. **Chứng cứ cho định nghĩa hoàn thành:** `CONTRIBUTING.md` yêu cầu mọi task chạm giao thức OCPP phải đính kèm log bản tin thật trong PR — bảng này sinh ra log đó
+### ADR-0012 · Phiên sạc bằng thẻ ví và free vend — *Đề xuất, cần cả nhóm chốt*
 
-**Hệ quả:** thêm một lệnh INSERT cho mỗi bản tin, cỡ vài mili giây, thừa thãi so với timeout 60 giây. Bảng tăng rất nhanh → bắt buộc partition theo tháng (ADR-0007).
-
-### ADR-0006 · 🚨 KHÔNG dùng Redis pub/sub trên đường đi của giao dịch
-
-**Quyết định:** Redis pub/sub chỉ được dùng cho fanout realtime tới giao diện. **Tuyệt đối không** dùng nó để chuyển sự kiện giao dịch giữa các module.
-
-**Lý do:** pub/sub là *bắn rồi quên*. Subscriber nào đang tắt hoặc đang khởi động lại thì **mất bản tin vĩnh viễn**. Đặt nó trên đường đi của giao dịch, chính CSMS của nhóm sẽ tự gây ra đúng loại mất dữ liệu mà đề tài đang đo — và làm bẩn toàn bộ kết quả thí nghiệm.
-
-| Đường đi | Cơ chế | Mất có chấp nhận được không |
-|---|---|---|
-| Trụ → xử lý nghiệp vụ → DB | Gọi hàm trong tiến trình, sau khi đã ghi `ocpp_message_log` | ❌ **Không bao giờ** |
-| Công việc nền: đối soát, sinh hoá đơn | BullMQ — có lưu bền, có retry | ❌ Không |
-| CSMS → app và dashboard | Socket.IO qua Redis adapter, dùng pub/sub | ✅ Được — client gọi lại REST |
-
-**Hệ quả với tài liệu đã commit:** hai file đang mô tả pub/sub mà chưa kèm giới hạn này, cần sửa khi ADR được chấp nhận:
-- `apps/csms/README.md` — dòng BE-08 "Fanout realtime qua Redis pub/sub"
-- `packages/shared/README.md` — thư mục `realtime/` "Tên kênh và payload của luồng Redis pub/sub"
-
-### ADR-0007 · PostgreSQL 16.4 với partition gốc, không dùng TimescaleDB
-
-**Quyết định:** giữ PostgreSQL 16.4 đã ghim. `meter_values` và `ocpp_message_log` dùng declarative partitioning theo tháng. Không cài extension TimescaleDB.
-
-**Lý do:** partition gốc đã có từ lâu, 16.4 đủ dùng — **không cần nâng phiên bản**, nên không phải viết ADR đổi bảng ghim trong `infra/README.md`. Quy mô đồ án, kể cả load test, nằm gọn trong khả năng của partition gốc. TimescaleDB thêm một extension phải vận hành, và một số tính năng của nó theo giấy phép riêng chứ không phải Apache.
-
-**Hệ quả:** partition phải được tạo trước. Một job BullMQ chạy hằng tháng tạo partition cho tháng kế tiếp.
-
-**Lưu ý nhỏ:** CI dùng `postgres:16-alpine`, còn `docker-compose` ghim `16.4-alpine`. Nên ghim CI về cùng `16.4-alpine` để test và dev chạy đúng một phiên bản.
-
-### ADR-0008 · Drizzle ORM + migration SQL thuần — *chốt cùng WP5*
-
-**Quyết định đề xuất:** Drizzle ORM cho truy vấn, migration viết bằng SQL.
-
-**Lý do:** bảng partition, ràng buộc unique phục vụ idempotency, bảng append-only — **ORM nào cũng phải viết bằng SQL tay** cho mấy thứ này. Nên chọn ORM không cản trở việc viết SQL mà vẫn cho type-safety.
-
-**Cần WP5 đồng ý** vì billing, payments, invoicing dùng chung DB và chung ORM.
-
-### ADR-0009 · Quy ước dữ liệu
-
-| Loại dữ liệu | Quy ước | Vì sao |
-|---|---|---|
-| **Thời gian** | `timestamptz`, lưu UTC, chuyển sang `Asia/Ho_Chi_Minh` chỉ khi hiển thị | Tránh lỗi lệch múi giờ khi so sánh timestamp của trụ |
-| **Hai thời điểm mỗi bản tin** | `cp_timestamp` — lấy từ payload, **không tin cậy**<br>`received_at` — đồng hồ CSMS, **tin cậy** | Đồng hồ trụ có thể sai. **Chênh lệch giữa hai giá trị là tín hiệu chính để phát hiện replay** |
-| **Điện năng** | Wh, `bigint` | `meterStart`/`meterStop` trong OCPP là Wh. Nhầm sang kWh là sai hoá đơn 1000 lần |
-| **Tiền** | VND, `bigint` | Không có lỗi làm tròn số thực |
-| **Connector** | `1` súng A · `2` súng B · `0` toàn trụ | Khớp SRS phần cứng và OCPP 1.6 |
-| **Định danh kỹ thuật của trụ** | **Số serial (SN)** của trụ, xuất hiện ở đoạn cuối URL `/ocpp/{serialNumber}` | SRS phần cứng §6: kỹ thuật viên gõ Server URL, Port **và SN** trên HMI. Khớp `CSMS_OCPP_PATH_PREFIX` trong `infra/.env.example` |
-| **Mã hiển thị của trụ** | Cột riêng `display_code` dạng `PM-{model}-{tỉnh}-{số thứ tự}`, ví dụ `PM-D1-HCM-0001` | Người vận hành đọc mã này, không đọc SN. **Tách khỏi định danh kỹ thuật** để đổi tên site mà không phải cấu hình lại trụ |
-| **Phiên bắt đầu bằng cách nào** | `origin`: `app` · `rfid_online` · `rfid_wallet` · `hmi_password` · `free_vend` | Manual gốc có năm cách khởi động phiên — ADR-0012 |
-| **Ai thu tiền** | `payment_mode`: `csms_billed` · `station_wallet` · `unattributed` | Tách khỏi `origin`: cùng là quẹt thẻ, nhưng thẻ xác thực và thẻ ví trả tiền ở hai nơi khác nhau |
-| **Đến trễ do offline** | `delivered_offline` kiểu boolean, do engine đối soát gán | **Không phải một loại nguồn gốc** — phiên nào cũng có thể bị trụ gửi bù sau khi nối lại |
-
-### ADR-0010 · Idempotency của StartTransaction
-
-**Quyết định:** ràng buộc unique trên khoá tự nhiên
-`(charge_point_id, connector_id, id_tag, meter_start_wh, cp_timestamp)`.
-Khi trụ gửi lại cùng một `StartTransaction`, CSMS trả về **đúng `transactionId` cũ** thay vì tạo giao dịch mới.
-
-**Lý do:** lúc trụ gửi `StartTransaction` thì `transactionId` chưa tồn tại — CSMS mới là bên sinh ra nó — nên không dùng nó làm khoá chống trùng được. Trụ gửi lại khi mất `CALLRESULT` hoặc khi replay hàng đợi offline. Không idempotent thì một phiên sạc thành hai giao dịch và bị tính tiền hai lần. **Đây là bug kinh điển nhất của CSMS tự xây, và là nền móng của BE-07.**
-
-### ADR-0011 · Bảo mật OCPP: Security Profile 2
-
-**Quyết định:** TLS + Basic Auth riêng cho từng trụ. TLS kết thúc tại Caddy, chứng chỉ tự động. Mật khẩu từng trụ sinh lúc onboarding, **chỉ hiển thị một lần**, lưu dạng băm argon2.
-
-**Lý do:** khớp NFR đã đăng ký "OCPP-J over TLS". `ocpp-rpc` đã hỗ trợ sẵn phần Basic Auth.
-
-**Phương án bị loại:** Security Profile 3 — chứng chỉ phía client, cần dựng PKI. Quá đắt cho 13 tuần, ghi vào hướng phát triển.
-
-### ADR-0012 · Phiên sạc bằng thẻ ví và free vend — *cần cả nhóm chốt*
-
-**Bối cảnh — bản SRS tóm tắt đã bỏ sót, chỉ manual gốc của hãng mới có:**
-
-| Nguồn | Nội dung |
-|---|---|
-| Manual D1, bản 02/2025, nhà sản xuất **Jiangxi Ruihua Intelligent Technology Co., Ltd.** — mục 3.4 *Offline model charging process* | Bật **"Wallet ID card"** thì dùng được thẻ tính tiền. Bật **"Online IDcard"** thì dùng thẻ xác thực. Chế độ **mật khẩu** lấy mật khẩu từ cài đặt nền của trụ. Nếu cài đặt nền bật **"plug-and-charge"**, phiên sạc bắt đầu ngay khi cắm súng |
-| Manual D1 — quy trình quẹt thẻ | Màn hình *"Billing Interface & RFID Card Balance"* — trụ hiển thị số dư trên thẻ |
-| Manual YJ-EU — quy trình sạc bằng thẻ | Bước *"Check IC Card Balance"* |
-| Manual D1 — bảng thông số | Kết nối *"Ethernet / 4G router (option)"* · Cloud platform *"OCPP1.6J"* |
-
-**⚠️ Bẫy thuật ngữ:** "plug-and-charge" trong manual Ruihua là một cài đặt của hãng — cắm súng là sạc, không xác thực. **Nó không phải Plug & Charge theo ISO 15118**, vốn là xác thực tự động bằng chứng thư số giữa xe và trụ. Trong code và báo cáo, gọi chế độ này là **free vend** để không bị hội đồng bắt lỗi.
-
-**Vấn đề:**
-- `StartTransaction` của OCPP 1.6 chỉ có `idTag`. **Không có trường nào cho biết phiên được trả bằng thẻ ví.** Manual cũng không mô tả trụ có gửi số dư hay số tiền đã trừ lên CSMS hay không.
-- Nếu CSMS coi mọi phiên là phiên mình thu tiền, **khách dùng thẻ ví bị trừ tiền hai lần**: một lần trên thẻ, một lần qua VNPay.
-
-**Quyết định đề xuất:**
-1. Mỗi giao dịch mang hai thuộc tính tách biệt: `origin` (bắt đầu bằng cách nào) và `payment_mode` (ai thu tiền) — ADR-0009.
-2. CSMS phân loại thẻ bằng **sổ đăng ký thẻ** `id_tags`. Người vận hành là bên phát hành thẻ, nên biết thẻ nào là thẻ ví, thẻ nào là thẻ xác thực.
-3. Phiên free vend nhận diện qua `free_vend_id_tag` cấu hình riêng cho từng trụ → `payment_mode = unattributed`.
-4. Phiên `station_wallet`: CSMS **vẫn tính giá** từ `MeterValues` để đối soát, nhưng **không bao giờ** tạo lệnh thu qua cổng thanh toán.
-5. `StartTransaction` mang `idTag` không có trong sổ — thường là phiên đã diễn ra khi trụ offline — vẫn được ghi nhận với `payment_mode = unattributed`, kèm một `reconciliation_records` loại `unknown_id_tag` cho người vận hành xử lý. **Không xoá, không bỏ qua phiên đã diễn ra.**
-
-**Ngoài phạm vi 13 tuần** — ghi vào hướng phát triển: phát hành thẻ, nạp tiền thẻ ví, quản lý số dư thẻ phía CSMS.
-
-**Ba câu hỏi mở — chỉ hãng hoặc trụ thật trả lời được, simulator thì không:**
-1. Khi dùng thẻ ví, trụ có gửi số tiền đã trừ hoặc số dư thẻ lên CSMS không — qua `DataTransfer` hay trường nào?
-2. Phiên free vend gửi `idTag` giá trị gì?
-3. Mật khẩu của chế độ mật khẩu đặt ở đâu, và có đồng bộ lên CSMS không?
-
-**Hệ quả:**
-
-**Được:**
-- Không thu tiền hai lần.
-- Báo cáo doanh thu tách được theo hình thức thanh toán.
-- Thí nghiệm có thêm một kịch bản offline có thật, dẫn nguồn được: phiên thẻ ví bắt đầu khi router 4G của trụ mất sóng.
-
-**Mất:**
-- Nguyên tắc "CSMS là nguồn sự thật cho hoá đơn" phải **thu hẹp** thành "nguồn sự thật cho bản ghi phiên và bản tính giá". Tiền của phiên thẻ ví do trụ thu.
-- Nếu câu hỏi mở 1 có câu trả lời "không", CSMS **không đối chiếu được** số tiền trừ trên thẻ — chỉ đối chiếu được bản tính của mình với dữ liệu đo của trụ. Ghi thành giới hạn nghiên cứu.
-- Hoá đơn VAT của phiên thẻ ví xuất lúc nạp thẻ hay lúc sạc là câu hỏi pháp lý — chuyển cho WP5.
-
-**Các phương án đã cân nhắc và loại bỏ:**
-
-| Phương án | Vì sao loại |
-|---|---|
-| Coi mọi phiên là CSMS thu tiền | Khách dùng thẻ ví bị trừ tiền hai lần |
-| Tắt Wallet ID card và free vend trong cấu hình trụ | Đơn giản nhất, nhưng bỏ đi đúng tình huống offline mà đề tài nghiên cứu, trong khi người vận hành thật cần thẻ ví khi mạng 4G yếu. **Giữ làm phương án dự phòng** nếu S5 trễ tiến độ |
-| Nhận diện thẻ ví qua `DataTransfer` riêng của hãng | Chưa biết hãng có gửi hay không — phụ thuộc câu hỏi mở 1. Có thể bổ sung sau, không dùng làm nền |
+Trụ Ruihua có thẻ ví tự trừ tiền và chế độ free vend mà OCPP 1.6 không phân biệt được qua `StartTransaction`. Tách `origin` và `payment_mode`; phân loại thẻ bằng sổ `id_tags`; phiên `station_wallet` vẫn tính giá nhưng không thu qua VNPay. Ba câu hỏi mở chỉ hãng trả lời được.
+→ [adr/0012-phien-the-vi-va-free-vend.md](adr/0012-phien-the-vi-va-free-vend.md)
 
 ---
 
