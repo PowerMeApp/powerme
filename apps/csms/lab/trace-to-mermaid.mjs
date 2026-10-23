@@ -45,7 +45,11 @@ const skew = (r) =>
 
 // ---- 1. Mermaid ----
 const calls = new Map(); // id -> action, để ghép CALLRESULT với CALL
-const lines = ['sequenceDiagram', '  participant CP as Trụ (simulator)', '  participant CS as Mini-CSMS'];
+const lines = [
+  'sequenceDiagram',
+  '  participant CP as Trụ (simulator)',
+  '  participant CS as Mini-CSMS',
+];
 let mvRun = 0;
 const flushMv = () => {
   if (mvRun > 0) lines.push(`  CP->>CS: MeterValues ×${mvRun}`, `  CS-->>CP: CALLRESULT ×${mvRun}`);
@@ -66,7 +70,10 @@ for (const r of rows) {
     const arrow = r.dir === 'in' ? 'CP->>CS' : 'CS->>CP';
     lines.push(`  ${arrow}: ${action} ${summarize(action, params)}`.trimEnd());
     const s = skew(r);
-    if (s !== null && s > skewSec) lines.push(`  Note over CP,CS: ⚠ received_at − cp_timestamp = ${s.toFixed(0)}s → nghi phát lại`);
+    if (s !== null && s > skewSec)
+      lines.push(
+        `  Note over CP,CS: ⚠ received_at − cp_timestamp = ${s.toFixed(0)}s → nghi phát lại`,
+      );
   } else if (r.type === 3) {
     const action = calls.get(msg[1]);
     const call = rows.find((x) => x.type === 2 && x.id === msg[1] && x.dir !== r.dir);
@@ -92,7 +99,15 @@ for (const r of rows) {
     // transactionId nằm trong CALLRESULT cùng id
     const res = rows.find((x) => x.type === 3 && x.id === id && x.dir === 'out');
     const txId = res ? JSON.parse(res.raw)[2].transactionId : '?';
-    tx.set(txId, { txId, connector: p.connectorId, meterStart: p.meterStart, mv: 0, maxSkew: 0, meterStop: null, reason: null });
+    tx.set(txId, {
+      txId,
+      connector: p.connectorId,
+      meterStart: p.meterStart,
+      mv: 0,
+      maxSkew: 0,
+      meterStop: null,
+      reason: null,
+    });
   }
   if (action === 'MeterValues' && tx.has(p.transactionId)) {
     const t = tx.get(p.transactionId);
@@ -100,7 +115,11 @@ for (const r of rows) {
     t.maxSkew = Math.max(t.maxSkew, skew(r) ?? 0);
   }
   if (action === 'StopTransaction' && tx.has(p.transactionId)) {
-    Object.assign(tx.get(p.transactionId), { meterStop: p.meterStop, reason: p.reason, maxSkew: Math.max(tx.get(p.transactionId).maxSkew, skew(r) ?? 0) });
+    Object.assign(tx.get(p.transactionId), {
+      meterStop: p.meterStop,
+      reason: p.reason,
+      maxSkew: Math.max(tx.get(p.transactionId).maxSkew, skew(r) ?? 0),
+    });
   }
 }
 

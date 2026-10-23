@@ -3,8 +3,9 @@ name: CI
 on:
   push:
     branches: [main]
+  # KHÔNG lọc theo nhánh đích: PR xếp tầng (nhánh này dựa trên nhánh kia)
+  # cũng phải được kiểm. Lọc [main] khiến chúng không chạy check nào.
   pull_request:
-    branches: [main]
 
 # PR đẩy commit mới thì huỷ lượt chạy cũ — tiết kiệm phút Actions
 concurrency:
