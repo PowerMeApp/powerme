@@ -14,8 +14,11 @@
  *   --reset             xoá .demo-data (DB, mọi phiên đã sinh) rồi dựng lại từ đầu (= npm run demo:reset)
  *   --db-only           chỉ Postgres + seed (= npm run demo:db), xem db-embedded.mjs
  *
- * HMI và console do hai PR khác làm; script TỰ PHÁT HIỆN và chỉ cảnh báo nếu chưa có.
- * Biến môi trường cấp cho HMI (khớp mô tả của PR HMI): CSMS_URL, CP_ID, PORT/HMI_PORT.
+ * HMI và console đã có trong repo; script vẫn tự phát hiện và chỉ cảnh báo nếu thiếu. Script chỉ IN URL,
+ * không tự mở trình duyệt.
+ * Biến môi trường cấp cho HMI (đã đối chiếu với simulator/d1-hmi/server.mjs ở BE-10): CSMS_URL, CP_ID,
+ * HMI_PORT (server.mjs chỉ đọc HMI_PORT; PORT truyền thêm cho an toàn) và STALE_METERSTOP (mặc định bật).
+ * HMI và scripted-station.mjs dùng CÙNG identity RH24D1-00001: không chạy cả hai cùng lúc.
  */
 import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, readdirSync, statSync } from 'node:fs';
@@ -254,8 +257,12 @@ async function main() {
       env: {
         CSMS_URL: `ws://localhost:${PORTS.ocpp}/ocpp`,
         CP_ID,
+        // server.mjs chỉ đọc HMI_PORT (PORT bị bỏ qua); giữ cả hai cho khỏi vênh nếu HMI đổi.
         PORT: String(PORTS.hmi),
         HMI_PORT: String(PORTS.hmi),
+        // Mặc định BẬT để demo có phiên `review`: sau rớt mạng, StopTransaction mang meterStop cũ
+        // (mô phỏng hiện tượng 3 của EXP-01). Tắt: STALE_METERSTOP=0 npm run demo.
+        STALE_METERSTOP: process.env.STALE_METERSTOP ?? '1',
       },
     });
     const up = await waitFor(() => httpOk(`http://127.0.0.1:${PORTS.hmi}/`), 20_000, 500);
@@ -280,6 +287,10 @@ async function main() {
     [
       'Trụ thử (lab)',
       `node apps/csms/lab/fake-station.mjs  (ID=${CP_ID} CSMS=ws://localhost:${PORTS.ocpp}/ocpp)`,
+    ],
+    [
+      'Lưu ý',
+      `HMI và trụ kịch bản dùng chung ID ${CP_ID}: chỉ chạy MỘT trong hai (--no-hmi nếu dùng trụ kịch bản)`,
     ],
     ['Dừng', 'Ctrl+C trong cửa sổ này'],
     ['Làm lại từ đầu', 'npm run demo:reset -w @powerme/csms'],

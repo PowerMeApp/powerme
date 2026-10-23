@@ -18,6 +18,7 @@ node simulator/d1-hmi/server.mjs
 | `CSMS_URL` | `ws://localhost:9000/ocpp` | Endpoint CSMS (identity được nối vào cuối đường dẫn) |
 | `CP_ID` | `RH24D1-00001` | Identity của trụ |
 | `HMI_PORT` | `8100` | Cổng HMI (chỉ nghe `127.0.0.1`) |
+| `STALE_METERSTOP` | tắt | `1` = sau một lần rớt mạng, `StopTransaction` mang `meterStop` **cũ** (chỉ số lúc rớt) dù trụ vẫn sạc tiếp — tái hiện hiện tượng 3 của EXP-01 để CSMS ra phiên `review`. `npm run demo` của CSMS bật sẵn (`STALE_METERSTOP=0` để tắt) |
 | `RETRY_MS` `REPLAY_LOSS` `METER_INTERVAL` `PING_SEC` `REBOOT_MS` `SPEED` | 30000 / 0.25 / 10 / 30 / 3000 / 1 | Chủ yếu cho kiểm thử; xem đầu `server.mjs` |
 
 Để CSMS chấp nhận, cần có sẵn trụ `RH24D1-00001` và các `idTag` mẫu: `DEMO-CARD-0001` (thẻ hợp lệ), `DEMO-WALLET-0001` (thẻ ví). `DEMO-UNKNOWN-999` cố tình không đăng ký. Mật khẩu HMI mẫu: `123456` (giả).
@@ -51,7 +52,7 @@ Nút "Rớt mạng" bám [EXP-01](../../apps/csms/lab/EXP-01-ngat-ket-noi-81s.md
 - Trong lúc offline, MeterValues / StartTransaction / StopTransaction / StatusNotification vào hàng đợi, **giữ timestamp gốc**.
 - Nối lại **không gửi BootNotification**; socket mới = epoch mới.
 - Phát bù: bản tin trạng thái/giao dịch trước, **MeterValues cũ sau** (đến sau StopTransaction — sai thứ tự như EXP-01). Mặc định bỏ 25 % mẫu im lặng (EXP-01: 8 buffer, 6 phát lại).
-- Điểm **khác** EXP-01 có chủ đích: `meterStop` ở đây khớp với chỉ số tại lúc dừng. EXP-01 thấy `meterStop` cũ trong khi MeterValues live vẫn tăng, nhiều khả năng là đặc thù SAP (đã ghi trong EXP-01); không mô phỏng lại lỗi đó.
+- Điểm **khác** EXP-01 có chủ đích: mặc định `meterStop` khớp với chỉ số tại lúc dừng. EXP-01 thấy `meterStop` cũ trong khi MeterValues live vẫn tăng, nhiều khả năng là đặc thù SAP (đã ghi trong EXP-01). Muốn tái hiện lỗi đó (demo phiên `review`) thì bật `STALE_METERSTOP=1`: phiên nào đã sống qua một lần rớt mạng sẽ dừng với `meterStop` = chỉ số lúc rớt. Đây là **lựa chọn của chúng tôi để dựng tình huống**, không phải hành vi đã xác nhận của firmware Ruihua.
 
 "Rớt kiểu half-open" ngừng đọc/ghi socket nhưng không đóng; trụ chỉ phát hiện nhờ **ping timeout** (`WebSocketPingInterval`, mặc định 30 s → phát hiện sau 30–60 s), trong thời gian đó bản tin gửi đi mất trong im lặng rồi vào hàng đợi khi call quá 15 s.
 
