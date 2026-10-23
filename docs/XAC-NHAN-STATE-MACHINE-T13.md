@@ -9,7 +9,7 @@
 
 | STM | Kết luận | Thay đổi so với v0.2 |
 |---|---|---|
-| STM-1 Session | **Xác nhận, có bổ sung** | +1 trạng thái `review`; +3 chuyển (`stopping → active` khi RemoteStop bị Rejected; `closed → review`; `review → reconciled`); `orphaned → reconciled` tách thành `orphaned → reconciled` [nhất quán] và `orphaned → review` [conflict]. Tổng 9 trạng thái, 20 chuyển |
+| STM-1 Session | **Xác nhận, có bổ sung** | +1 trạng thái `review`; +5 chuyển (`stopping → active` khi RemoteStop bị Rejected; `closed → review`; `review → reconciled`; **`orphaned → active`** khi bản tin live tới sau nối lại; `reconciled → review` khi mẫu muộn đổi kết luận và chưa trừ tiền); `orphaned → reconciled` tách thành [nhất quán] / `orphaned → review` [conflict]. Tổng 9 trạng thái, 22 chuyển |
 | STM-2 Connector | **Xác nhận, sửa cách diễn đạt trigger** | Giữ đủ **9** giá trị OCPP trong enum DB (thêm `Reserved`) — CSMS *phản chiếu* StatusNotification, không bao giờ từ chối. Sửa #1, #2; thêm `Unavailable → Available` qua ChangeAvailability |
 | STM-3 Pillar | **Xác nhận giá trị, sửa 2 trigger** | #5 `offline → in_service` kích hoạt bởi **socket nối lại (epoch mới)**, không phải BootNotification — EXP-01 chứng minh trụ nối lại không gửi Boot. #4 `offline` khi **socket đóng HOẶC 900 s im lặng**, không chỉ 900 s |
 | STM-8 RfidCard | **Xác nhận** | Must: Operator/Admin gắn thẻ cho driver; driver tự gắn = Should. Bổ sung ghi chú về `card_kind` ↔ `payment_mode` |
@@ -47,8 +47,10 @@
 | 16 | orphaned → reconciled | trụ nối lại, StopTransaction phát lại tới, đối soát **nhất quán** | UC-INT-03 | |
 | **16a** | **orphaned → review** | trụ nối lại, StopTransaction phát lại tới, đối soát **conflict**; hoặc không có StopTransaction sau hard cap | UC-INT-03, UC-OPS-05 | **Mới** — thay cho #17 cũ |
 | **17** | **review → reconciled** | operator giải quyết [chọn số Wh cuối, ghi lý do] / record decision | UC-OPS-05 | Sửa: từ `review`, không từ `orphaned` |
+| **18** | **orphaned → active** | bản tin **live** (epoch mới, không phải phát lại) của chính phiên đó tới — MeterValues hoặc StatusNotification Charging | **EXP-01 giai đoạn D** | **Mới (T24 phát hiện).** Trụ nối lại lúc 14:20:22 và gửi MeterValues live cho tx 3 suốt 36 s trước khi StopTransaction phát lại tới. Không có chuyển này, phiên đang sạc thật bị ghi là orphaned |
+| **19** | **reconciled → review** | mẫu phát lại đến muộn làm đổi kết luận đối soát [**chưa có** CreditTransaction trừ tiền] | EXP-01 giai đoạn F | **Mới.** Đã trừ tiền rồi thì **không** đổi trạng thái — chỉ ghi ReconciliationRecord `late_sample` và báo operator; sửa tiền đi đường compensation (AC-B06) |
 
-**Tổng: 20 chuyển.** Trạng thái cuối: `failed`, `reconciled`.
+**Tổng: 22 chuyển.** Trạng thái cuối: `failed`, `reconciled` (reconciled có thể quay lại `review` theo #19 khi chưa trừ tiền).
 
 ### 1.3 Giá trị timeout (câu hỏi của Ân)
 
@@ -149,5 +151,7 @@ Phía WP2, chi phí nhỏ: `disabled` = gửi `ChangeAvailability(connectorId 0,
 
 - **T11** (CSDL vật lý): enum `sessions.status` 9 giá trị gồm `review`; `connectors.status` 9 giá trị OCPP; bảng `charge_point_connections`; cột `unexpected_transition` trong `connector_status_events`.
 - **T24** (WF-03): thêm bước TriggerMessage(StatusNotification) khi epoch mới; đường `closed → review`.
-- **T33** (Iteration 1 + test): 20 chuyển STM-1 → 20 test chuyển hợp lệ + test chuyển không hợp lệ bị từ chối (ví dụ `reconciled → active`); STM-2: test "chuyển bất thường được ghi và gắn cờ". Fixture: trace JSONL thật của EXP-01.
+- **Epoch phải khởi tạo từ DB** (`MAX(epoch)+1` trong `charge_point_connections`), không đếm trong RAM — EXP-01 chính là ca CSMS chết và registry mất sạch (T24 #9).
+- **Tên bảng phiên là `sessions`** (theo ERD T10 và T11); ADR-0010 và package diagram đang viết `transactions` → sửa chữ khi merge, không đổi nghĩa.
+- **T33** (Iteration 1 + test): 22 chuyển STM-1 → 22 test chuyển hợp lệ + test chuyển không hợp lệ bị từ chối (ví dụ `reconciled → active`); STM-2: test "chuyển bất thường được ghi và gắn cờ". Fixture: trace JSONL thật của EXP-01.
 - **Report 4:** ghi ngoại lệ "Connector không từ chối chuyển" (mục 2.1) và lý do thêm `review` (mục 1.1).
