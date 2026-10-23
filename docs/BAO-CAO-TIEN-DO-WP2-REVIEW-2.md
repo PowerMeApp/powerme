@@ -47,7 +47,7 @@
 | 11 | #17 | WF-03 class + sequence diagram T24 (nháp, chờ T62) | 460 | ✅ |
 | 12 | #19 → #18 | **Iteration 1** — gateway OCPP (`ocpp-rpc`, tuần tự hoá theo trụ, epoch từ DB), state machine phiên 22 chuyển, đối soát, **96 unit test + 19 test tích hợp phát lại 75 frame EXP-01** (T33) | ~9.800 | ✅ |
 
-Độc lập với nhau: #13, #14, #15, #16, #17 (đều từ `main`). Xếp tầng: #8 → #12; #9 → #11; #18 → T33.
+Độc lập với nhau: #13, #14, #15, #16, #17 (đều từ `main`). Xếp tầng: #8 → #12; #9 → #11; #18 → #19.
 
 ---
 
@@ -132,7 +132,7 @@
 ## 9. Kế hoạch 48 giờ tới (→ 25/10)
 
 1. Review và merge theo thứ tự mục 3 — mục tiêu `main` có tài liệu, ADR, lab, schema trước thứ Hai.
-2. ~~T33 lên PR với CI xanh~~ — đã xong (#19); sau khi #18 merge, đổi base của #19 sang `main`.
+2. T33 đã lên PR (#19) với CI xanh; sau khi #18 merge, đổi base của #19 sang `main`.
 3. Chốt 6 quyết định mục 8 trong họp nhóm.
 4. Gửi 5 câu Ruihua qua thầy.
 5. Xuất PDF các tài liệu cho T55 theo tên quy định.
