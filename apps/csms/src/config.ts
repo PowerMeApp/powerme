@@ -28,6 +28,12 @@ export interface CsmsConfig {
   reconcileGapFactor: number;
   /** Dung sai Wh khi so meterStop với mẫu cuối (bù làm tròn Wh thập phân của trụ). */
   reconcileEnergyToleranceWh: number;
+  /** Bảng điều khiển vận hành (BE-08): bật/tắt. Mặc định bật. */
+  consoleEnabled: boolean;
+  /** Host bind của console. Mặc định 127.0.0.1 vì CHƯA có xác thực — không bind 0.0.0.0. */
+  consoleHost: string;
+  /** Cổng HTTP của console (0 = cổng ngẫu nhiên, dùng trong test). */
+  consolePort: number;
 }
 
 /** Token DI cho CsmsConfig (dùng `@Inject(CONFIG)`). */
@@ -39,6 +45,14 @@ function intEnv(env: NodeJS.ProcessEnv, key: string, fallback: number): number {
   const n = Number(raw);
   if (!Number.isFinite(n)) throw new Error(`Biến môi trường ${key} không phải số: "${raw}"`);
   return n;
+}
+
+function boolEnv(env: NodeJS.ProcessEnv, key: string, fallback: boolean): boolean {
+  const raw = env[key]?.trim().toLowerCase();
+  if (raw === undefined || raw === '') return fallback;
+  if (['1', 'true', 'yes', 'on'].includes(raw)) return true;
+  if (['0', 'false', 'no', 'off'].includes(raw)) return false;
+  throw new Error(`Biến môi trường ${key} không phải true/false: "${env[key]}"`);
 }
 
 /** Đọc cấu hình; ném lỗi sớm khi thiếu DATABASE_URL thay vì chết lúc query đầu tiên. */
@@ -55,6 +69,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): CsmsConfig {
     meterValueSampleIntervalS: intEnv(env, 'METER_VALUE_SAMPLE_INTERVAL_S', 10),
     reconcileGapFactor: intEnv(env, 'RECONCILE_GAP_FACTOR', 3),
     reconcileEnergyToleranceWh: intEnv(env, 'RECONCILE_ENERGY_TOLERANCE_WH', 1),
+    consoleEnabled: boolEnv(env, 'CONSOLE_ENABLED', true),
+    consoleHost: env['CONSOLE_HOST'] || '127.0.0.1',
+    consolePort: intEnv(env, 'CONSOLE_PORT', 3000),
   };
 }
 

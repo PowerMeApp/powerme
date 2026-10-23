@@ -24,6 +24,15 @@ Migration: `psql "$DATABASE_URL" -f apps/csms/drizzle/0000_init.sql`. Trụ nố
 
 Cấu trúc `src/`: `ocpp-gateway/` (socket, registry epoch, log frame, tuần tự hoá, handler) · `sessions/` (state machine STM-1, phiên, chuỗi đo, trạng thái connector) · `reconciliation/` (phát hiện phát lại, đối soát) · `db/` (Drizzle schema + module). Test tích hợp: `test/wf03-exp01.integration.test.ts` với fixture `test/fixtures/exp1-disconnect-81s.jsonl`.
 
+## Bảng điều khiển vận hành (demo)
+
+`src/console/` — trang web một file + vài endpoint JSON để xem hệ thống đang chạy (demo Review 2). Mở `http://127.0.0.1:3000/` sau khi chạy CSMS. Cấu hình: `CONSOLE_ENABLED` (mặc định `true`), `CONSOLE_HOST` (mặc định `127.0.0.1`), `CONSOLE_PORT` (mặc định `3000`).
+
+- Chỉ đọc: `GET /api/admin/{stations,sessions,sessions/:id,reconciliation,messages,summary}`. Hai lệnh: `POST /api/admin/stations/:serial/disconnect` (đóng socket phía CSMS), `POST /api/admin/sessions/:id/remote-stop` (RemoteStopTransaction).
+- **Chưa có xác thực** (RolesGuard là việc sau — ADR-0011): đừng bind ra `0.0.0.0`. POST từ `Origin` không phải localhost bị từ chối 403.
+- **Chưa làm:** xác thực/phân quyền, realtime Socket.IO (trang poll mỗi 1 s), billing, bảng lưu chuyển trạng thái phiên (nên chi tiết phiên không có danh sách chuyển trạng thái).
+- Ảnh chụp: [docs/console.png](docs/console.png) (tổng quan), [docs/console-detail.png](docs/console-detail.png) (chi tiết phiên) — dữ liệu là trace EXP-01 phát lại qua gateway vào Postgres thử nghiệm, không phải trụ thật.
+
 ## Phạm vi
 
 - **BE-02** Máy chủ WebSocket OCPP-J 1.6, định danh trụ theo SN trên đường dẫn — *Iteration 1: có*
