@@ -46,3 +46,17 @@ Node.js 24 LTS, TypeScript bật `strict`, framework NestJS 11.
 
 - 11/09/2026 — Đề xuất trong [WP2-KIEN-TRUC-TECHSTACK.md](../WP2-KIEN-TRUC-TECHSTACK.md).
 - 23/10/2026 — Chấp nhận: repo đã commit NestJS/TypeScript, `.nvmrc` và CI đã ở Node 24.
+
+---
+
+## Phụ lục 23/10/2026 — đối chiếu với repo sau Iteration 1
+
+Quyết định **không đổi** (Node 24 LTS, TypeScript `strict`, NestJS). Chỉ số liệu cụ thể cập nhật theo `package-lock.json` và `package.json`:
+
+| Mục | Ghi ở trên | Thực tế |
+|---|---|---|
+| NestJS | "NestJS 11" | **12.2.0** (`@nestjs/core`, `@nestjs/common`, ghim chính xác) |
+| TypeScript | chưa ghim | **5.9.3** (`apps/csms/package.json`; TS 7 bị hạ vì không tương thích decorator metadata của Nest) |
+| `engines.node` | `>= 22.0.0`, "nên nâng" | **`>=24.0.0`** — đã nâng trong PR #22 |
+
+Không cần ADR mới: đây là hiện thực hoá chi tiết của cùng một quyết định.
