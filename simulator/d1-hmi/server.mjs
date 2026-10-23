@@ -13,7 +13,8 @@
 //   giả của trụ, không phải bảo mật của server này).
 //
 // Env: CSMS_URL (ws://localhost:9000/ocpp), CP_ID (RH24D1-00001), HMI_PORT (8100),
-//      và cho kiểm thử: RETRY_MS, REPLAY_LOSS, METER_INTERVAL, PING_SEC, REBOOT_MS, SPEED.
+//      và cho kiểm thử: RETRY_MS, REPLAY_LOSS, METER_INTERVAL, PING_SEC, REBOOT_MS, SPEED;
+//      STALE_METERSTOP=1: StopTransaction sau một lần rớt mạng mang meterStop cũ (hiện tượng 3 EXP-01).
 
 import http from 'node:http';
 import { readFile } from 'node:fs/promises';
@@ -32,6 +33,7 @@ const station = createStation({
   pingSec: num(env.PING_SEC, 30),
   rebootMs: num(env.REBOOT_MS, 3000),
   speed: num(env.SPEED, 1),
+  staleMeterStop: env.STALE_METERSTOP === '1',
 });
 
 const PORT = num(env.HMI_PORT, 8100);

@@ -55,6 +55,7 @@ export function createStation(options = {}) {
     replayLoss: 0.25, // EXP-01: phát lại 6/8
     rebootMs: 3000,
     speed: 1,
+    staleMeterStop: false, // STALE_METERSTOP=1: StopTransaction sau rớt mạng mang meterStop cũ (EXP-01 hiện tượng 3)
     ...options,
   };
   const events = new EventEmitter();
@@ -346,6 +347,10 @@ export function createStation(options = {}) {
     net.cause = null;
     if (client) client = null;
     clearInterval(hbTimer);
+    // Tuỳ chọn staleMeterStop (STALE_METERSTOP=1): ghi nhớ chỉ số lúc rớt để StopTransaction sau đó
+    // mang meterStop CŨ — tái hiện hiện tượng 3 của EXP-01 (xem README).
+    for (const c of conns.values())
+      if (c.tx && c.tx.staleStop === undefined) c.tx.staleStop = c.tx.meterStart + c.tx.wh;
     tl('net', `mất kết nối (${reason}) — thử lại mỗi ${opt.retryMs / 1000}s`);
     scheduleRetry();
   }
@@ -477,9 +482,15 @@ export function createStation(options = {}) {
     const tx = c.tx;
     if (!tx || tx.stopping) return;
     tx.stopping = true;
-    const meterStop = tx.meterStart + tx.wh;
+    const actualStop = tx.meterStart + tx.wh;
+    const meterStop = opt.staleMeterStop && tx.staleStop !== undefined ? tx.staleStop : actualStop;
+    if (meterStop !== actualStop)
+      tl(
+        'warn',
+        `STALE_METERSTOP: gửi meterStop cũ ${meterStop} Wh (chỉ số thật ${actualStop} Wh)`,
+      );
     const ts = simIso();
-    c.register = meterStop;
+    c.register = actualStop;
     c.tx = null;
     c.last = { kw: 0, v: 0, a: 0 };
     tx.final = { wh: tx.wh, cost: (tx.wh / 1000) * opt.unitPrice };

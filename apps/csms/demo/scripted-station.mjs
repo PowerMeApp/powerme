@@ -11,7 +11,7 @@
  *   node demo/scripted-station.mjs <kịch bản> [tuỳ chọn]
  *
  * Kịch bản:
- *   ds-01a   quẹt thẻ hợp lệ (mặc định DEMO-ONLINE-01; --tag DEMO-WALLET-01 cho thẻ ví) → phiên active, origin=rfid
+ *   ds-01a   quẹt thẻ hợp lệ (mặc định DEMO-CARD-0001; --tag DEMO-WALLET-0001 cho thẻ ví) → phiên active, origin=rfid
  *   ds-01b   thẻ bị chặn DEMO-BLOCKED-01 → Authorize Blocked, không có phiên
  *   ds-03a   phiên sạc → rớt mạng 60 s → nối lại KHÔNG Boot → StopTransaction phát lại mang meterStop cũ
  *            (tái hiện hiện tượng 3 của EXP-01) → phiên review + bản ghi conflict + mẫu phát lại
@@ -179,7 +179,7 @@ async function plugAndStart(idTag) {
 // ---- Kịch bản ------------------------------------------------------------------------------
 const SCENARIOS = {
   async 'ds-01a'() {
-    const tag = opt('tag', 'DEMO-ONLINE-01');
+    const tag = opt('tag', 'DEMO-CARD-0001');
     await connect({ boot: true });
     if ((await authorize(tag)) !== 'Accepted') throw new Error('thẻ không được chấp nhận');
     const tx = await plugAndStart(tag);
@@ -207,7 +207,7 @@ const SCENARIOS = {
   },
 
   async 'ds-03a'() {
-    const tag = opt('tag', 'DEMO-ONLINE-01');
+    const tag = opt('tag', 'DEMO-CARD-0001');
     await connect({ boot: true });
     await authorize(tag);
     const tx = await plugAndStart(tag);
@@ -244,7 +244,7 @@ const SCENARIOS = {
   },
 
   async 'ds-03b'() {
-    const tag = opt('tag', 'DEMO-ONLINE-01');
+    const tag = opt('tag', 'DEMO-CARD-0001');
     await connect({ boot: true });
     await authorize(tag);
     await notify(CONNECTOR, 'Preparing');
@@ -289,7 +289,7 @@ const SCENARIOS = {
   },
 
   async 'ds-03d'() {
-    const tag = opt('tag', 'DEMO-ONLINE-01');
+    const tag = opt('tag', 'DEMO-CARD-0001');
     const offlineS = Number(opt('offline-s', 15));
     await connect({ boot: true });
     await authorize(tag);

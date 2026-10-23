@@ -79,18 +79,24 @@ FROM top_ups t
 WHERE t.idempotency_key = 'demo-seed-topup-0001'
 ON CONFLICT ON CONSTRAINT credit_transactions_account_entry_no_key DO NOTHING;
 
--- Thẻ RFID mẫu (thẻ lạ cố ý KHÔNG có ở đây) -------------------------------------------------
---   DEMO-ONLINE-01  : online, gắn tài xế mẫu, active   → origin=rfid, payment_mode=csms_billed
---   DEMO-WALLET-01  : wallet (thẻ ví tại trụ), active   → origin=rfid, payment_mode=station_wallet
---   DEMO-BLOCKED-01 : online, blocked                    → Authorize trả Blocked
+-- Free vend của HMI (mật khẩu 123456 trên màn hình) gửi StartTransaction idTag 'HMI-FREEVEND' không Authorize;
+-- sessions.service classifyIdTag nhận ra qua charge_points.free_vend_tag → origin=free_vend, payment_mode=free.
+UPDATE charge_points SET free_vend_tag = 'HMI-FREEVEND'
+WHERE serial_number = 'RH24D1-00001' AND free_vend_tag IS NULL;
+
+-- Thẻ RFID mẫu (thẻ lạ cố ý KHÔNG có ở đây; tên khớp simulator/d1-hmi/model.mjs CARDS) -------------------------------------------------
+--   DEMO-CARD-0001  : online, gắn tài xế mẫu, active   → origin=rfid, payment_mode=csms_billed
+--   DEMO-WALLET-0001  : wallet (thẻ ví tại trụ), active   → origin=rfid, payment_mode=station_wallet
+--   DEMO-BLOCKED-01 : online, blocked                    → Authorize trả Blocked (HMI không có nút thẻ này; dùng scripted-station ds-01b)
+--   DEMO-UNKNOWN-999 (nút "thẻ lạ" của HMI) và UNKNOWN-TAG-99 (ds-03c) cố ý không seed
 INSERT INTO rfid_cards (card_identifier, card_kind, driver_id, status)
-SELECT 'DEMO-ONLINE-01', 'online', u.id, 'active'
+SELECT 'DEMO-CARD-0001', 'online', u.id, 'active'
 FROM users u
 WHERE u.email = 'driver.demo@powerme.test'
 ON CONFLICT ON CONSTRAINT rfid_cards_card_identifier_key DO NOTHING;
 
 INSERT INTO rfid_cards (card_identifier, card_kind, driver_id, status)
-VALUES ('DEMO-WALLET-01', 'wallet', NULL, 'active')
+VALUES ('DEMO-WALLET-0001', 'wallet', NULL, 'active')
 ON CONFLICT ON CONSTRAINT rfid_cards_card_identifier_key DO NOTHING;
 
 INSERT INTO rfid_cards (card_identifier, card_kind, driver_id, status)
