@@ -33,7 +33,7 @@ powerme/
 └── scripts/           Tiện ích thiết lập và vận hành kho mã
 ```
 
-Ba đầu ra TypeScript nằm chung một npm workspace để dùng chung kiểu dữ liệu qua `packages/shared` — hợp đồng API chỉ định nghĩa một lần.
+`apps/csms` và `apps/dashboard` (TypeScript) nằm chung một npm workspace để dùng chung kiểu dữ liệu qua `packages/shared`. `apps/mobile` (Flutter) nằm trong kho nhưng ngoài workspace; app lấy hợp đồng API từ `openapi.json` sinh từ NestJS.
 
 ---
 
@@ -53,7 +53,7 @@ Ba đầu ra TypeScript nằm chung một npm workspace để dùng chung kiểu
 
 ## Bắt đầu
 
-**Yêu cầu:** Node.js ≥ 22 (xem [.nvmrc](.nvmrc)) · Docker Desktop · Git
+**Yêu cầu:** Node.js 24 (đúng bản trong [.nvmrc](.nvmrc), `engines` yêu cầu `>=24`) · Docker Desktop · Git
 
 ```bash
 git clone https://github.com/PowerMeApp/powerme.git
@@ -61,14 +61,14 @@ cd powerme
 npm install
 
 cp infra/.env.example infra/.env    # điền giá trị cho máy của bạn
-npm run infra:up                    # PostgreSQL + Redis + SteVe (CSMS đối chứng)
+npm run infra:up                    # PostgreSQL + Redis (SteVe nằm ở profile `reference`, xem infra/README.md)
 ```
 
 `npm install` tự bật hook `pre-push` của dự án. Nếu nghi ngờ chưa bật, chạy `npm run setup:hooks`.
 
 | Lệnh | Việc |
 |---|---|
-| `npm run infra:up` | Bật PostgreSQL, Redis, SteVe |
+| `npm run infra:up` | Bật PostgreSQL, Redis (SteVe chỉ bật với `--profile reference`, xem [infra/README.md](infra/README.md)) |
 | `npm run infra:down` | Tắt hạ tầng (giữ dữ liệu) |
 | `npm run infra:reset` | Tắt và **xoá sạch volume** |
 | `npm run build` | Build toàn bộ workspace |

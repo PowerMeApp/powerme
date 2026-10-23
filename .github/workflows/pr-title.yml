@@ -9,6 +9,8 @@ permissions:
 
 jobs:
   conventional-commit:
+    # Dependabot luôn viết "Bump" hoa và dùng scope ngoài danh sách (ci, deps).
+    if: github.actor != 'dependabot[bot]'
     name: Tiêu đề PR theo Conventional Commits
     runs-on: ubuntu-latest
     steps:

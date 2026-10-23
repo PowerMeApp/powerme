@@ -63,8 +63,9 @@ services:
 
   steve:
     # ⚠️ Ghim tag của bản release đã xác nhận (3.14.1, 12/08/2026).
-    #    Nếu image công khai không có tag này, build cục bộ từ commit đã ghim và
-    #    ghi lại số commit ở docs/adr/.
+    #    Không có image công khai nào tên `steve:3.14.1`: phải build cục bộ từ tag
+    #    `steve-3.14.1` (commit 3fd8cda4722822214f744329bc48dba349456514).
+    #    Cách build: xem mục "Build SteVe" trong infra/README.md.
     image: steve:3.14.1
     container_name: powerme-steve
     profiles: ['reference']

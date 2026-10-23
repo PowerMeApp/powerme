@@ -6,7 +6,7 @@ Trạm sạc mô phỏng. **Phần cứng của đồ án này hoàn toàn là s
 |---|---|
 | Chủ sở hữu | WP5 — Backend / QA Engineer |
 | Thượng nguồn | [SAP/e-mobility-charging-stations-simulator](https://github.com/SAP/e-mobility-charging-stations-simulator) · Apache-2.0 |
-| Phiên bản ghim | `<điền commit SHA khi clone>` |
+| Phiên bản ghim | tag `web@v4.12.0` = commit `227ec233edbc115a879fb18fb0094b99694954fe` · pnpm 11.22.0 (`packageManager` của upstream) |
 | Cột mốc | **M1 — 06/09/2026** (chạy được), **M2 — 04/10/2026** (patch xong) |
 
 ## Vì sao chọn SAP simulator
@@ -41,9 +41,9 @@ Patch một dự án Apache-2.0 rẻ hơn nhiều so với tự viết simulator
 
 Không copy toàn bộ mã nguồn SAP vào kho này. Cách làm:
 
-1. Clone upstream ra ngoài kho, **ghim đúng một commit SHA**.
+1. Clone upstream ra ngoài kho, **ghim đúng một tag/commit** (hiện: `web@v4.12.0`).
 2. Giữ trong `simulator/` phần thuộc về nhóm: template trạm, file `.patch`, script dựng, cấu hình chạy.
-3. Ghi commit SHA đã ghim vào bảng ở đầu file này. Đổi SHA thì ghi lý do vào ADR.
+3. Tag và SHA đã ghim nằm ở bảng đầu file này; đây là nơi duy nhất ghim SAP (không có trong `package.json`). Đổi phiên bản thì ghi lý do vào ADR. Cấu hình bàn thí nghiệm đã dùng: [apps/csms/lab/simulator/README.md](../apps/csms/lab/simulator/README.md).
 
 Giữ nguyên header giấy phép Apache-2.0 và ghi rõ phần nào là sửa đổi của nhóm — đây là nghĩa vụ của Apache-2.0, và cũng là thứ hội đồng có thể hỏi.
 

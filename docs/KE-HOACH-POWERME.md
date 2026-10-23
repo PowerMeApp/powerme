@@ -331,7 +331,7 @@ Một claim nói GPL-3.0 kèm nghĩa vụ copyleft đã bị bác, một verifie
 
 ### Trung bình · Công cụ — Hai dự án biến động nhanh
 SteVe release 3.14.1 ngày 12/08/2026, SAP simulator push ngày 17/08/2026.
-**Đối phó:** ghim version cụ thể trong `package.json` và docker compose ngay từ S1. Kiểm lại thông tin công cụ trước khi nộp báo cáo.
+**Đối phó:** ghim version cụ thể ngay từ S1: Postgres, Redis, SteVe trong `infra/docker-compose.yml`; SAP simulator bằng tag `web@v4.12.0` trong `simulator/README.md` (SAP không phải dependency npm nên không nằm trong `package.json`). Kiểm lại thông tin công cụ trước khi nộp báo cáo.
 
 ---
 
