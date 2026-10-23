@@ -2,7 +2,7 @@
 
 **Ngày:** 23/10/2026 · **Lập:** Ngô Văn Minh Trí (WP2, Team Leader) · **Cho:** Ân (WP1) viết Report 4, và cả nhóm trước Review 2 (26/10)
 **Repo:** `github.com/PowerMeApp/powerme` · `main` tại `59abc4a` (16/09/2026)
-**Mở khoá:** T11, T18, T19, T30 và mọi việc phụ thuộc T63.
+**Mở khoá:** T11, T18, T19, T30 và mọi việc phụ thuộc T63. Mục 10 là danh sách thiếu sót cho T55.
 
 ---
 
@@ -144,3 +144,26 @@ Chưa ghim, cần quyết: NestJS, Drizzle, Socket.IO, Caddy, k6 (đề xuất t
 | Tiến độ Iteration 1 | Mục 4 — **ghi đúng là "xác minh giao thức và dụng cụ đo"** |
 | Kết quả thực nghiệm sơ bộ | EXP-01, EXP-02 (đều ghi rõ giới hạn) |
 | Rủi ro quy trình | Mục 2 — quyền truy cập, và R-A02 |
+
+---
+
+## 10. Mâu thuẫn trong repo — danh sách thiếu sót cho T55
+
+Phát hiện khi lập bảng công nghệ (T18). Chưa sửa; mỗi dòng là một việc nhỏ, phần lớn thuộc PM-01.
+
+| # | Mâu thuẫn | Ở đâu | Sửa |
+|---|---|---|---|
+| M1 | Node: `engines >=22` · `.nvmrc` 24.18.1 · CI `24` · README "≥ 22" | `package.json`, `.nvmrc`, `ci.yml`, `README.md` | Nâng `engines` lên `>=24`, README theo `.nvmrc` |
+| M2 | Postgres/Redis: compose `16.4` / `7.4` nhưng CI `16` / `7` | `docker-compose.yml` vs `ci.yml` | Ghim CI đúng số compose |
+| M3 | App: `main` vẫn React Native/Expo ở README, KE-HOACH, `apps/mobile/README.md`, ADR-0001 "cả ba đầu ra TypeScript", `packages/shared/README.md` | nhiều file trên `main` | Merge #7, sửa nốt `apps/mobile/README.md` và `packages/shared/README.md` |
+| M4 | SAP simulator: CONTRIBUTING §8 và `infra/README.md` trỏ `simulator/README.md`, file đó vẫn ghi "điền commit SHA"; phiên bản thật (v4.12.0) chỉ ở `apps/csms/lab/simulator/README.md` nhánh #11 | `simulator/README.md` | Khang điền v4.12.0 + pnpm 11.22.0 vào `simulator/README.md` |
+| M5 | SteVe: compose yêu cầu build từ commit ghim "ghi ở docs/adr/" — không có ADR hay Dockerfile SteVe nào | `docker-compose.yml`, `docs/adr/` | Thêm `infra/steve/Dockerfile` ghim commit, hoặc đổi ghi chú |
+| M6 | BE-08: `main` ghi "Redis pub/sub"; ADR-0006 ghi Socket.IO, pub/sub chỉ giao diện. `apps/csms/README.md` chưa nhắc ocpp-rpc | `apps/csms/README.md`, KE-HOACH | Merge #7; cập nhật README csms |
+| M7 | README nói `infra:up` bật cả SteVe; compose để SteVe ở profile `reference` | `README.md` vs compose | Sửa README |
+| M8 | TECHSTACK ghi ocpp-rpc "Node ≥ 20"; lockfile ghi `>=17.3.0` | TECHSTACK vs `package-lock.json` | Sửa TECHSTACK |
+| M9 | TECHSTACK ghi NestJS 11 / TS 5.x / Socket.IO 4.x — chưa gói nào trong lockfile | TECHSTACK | Ghi rõ là đề xuất cho tới khi ghim |
+| M10 | R-A02 trích nguyên văn khác nhau ở hai chỗ cùng file; sổ rủi ro gốc không trong repo | `PHAN-TICH-TAI-LIEU-WP1.md` | Ân đưa sổ rủi ro vào `docs/` |
+| M11 | Prettier: khai `^3.4.2`, lock 3.9.6, Dependabot đề `^3.9.8` | `package.json`, lock | Report ghi 3.9.6 |
+| M12 | 4 PR Dependabot tạo trước commit ba rào chắn — diff hiện xoá rào chắn | `dependabot/*` | Rebase trước khi gộp |
+| M13 | CI trên `main` chỉ chạy PR vào `main`; #11 đã bỏ lọc nhưng chưa merge → PR xếp tầng (#12) không có CI tới khi gộp | `ci.yml`, `security.yml` | Merge #9 → #11 |
+| M14 | KE-HOACH §9 "ghim SAP trong package.json từ S1" — chưa ghim ở đâu | KE-HOACH | Khang: submodule hoặc ghi tag trong `simulator/README.md` |
