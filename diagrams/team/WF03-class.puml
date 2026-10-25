@@ -65,13 +65,21 @@ package "sessions" {
     + canApply(status, event) : bool
   }
   enum SessionEvent <<enumeration>> {
-    START_ACCEPTED
-    STOP_RECEIVED
-    STATION_OFFLINE
+    REMOTE_START_ACCEPTED
+    START_TRANSACTION
+    START_TIMEOUT
+    STATUS_SUSPENDED
+    STATUS_CHARGING
+    STOP_REQUESTED
+    REMOTE_STOP_REJECTED
+    STOP_TRANSACTION
     RECONCILE_OK
     RECONCILE_CONFLICT
+    STATION_OFFLINE
+    HARD_CAP_EXCEEDED
     OPERATOR_RESOLVED
-    FAILED
+    LIVE_MESSAGE
+    LATE_SAMPLE_CONFLICT
   }
   enum SessionStatus <<enumeration>> {
     pending
