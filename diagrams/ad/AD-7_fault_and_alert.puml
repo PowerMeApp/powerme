@@ -1,0 +1,59 @@
+@startuml AD-7_fault_and_alert
+!include _style.iuml
+title AD-7 (WF-04) Pillar Fault: Report, Alert and Remote Recovery\n<size:11>Scope: PowerMe «software system» · Trigger: driver report, pillar fault or pillar silent · Owner: Trần Trọng Nghĩa · v2.0</size>
+
+|PowerMe Platform\n«software system»|
+|Operator\n«person»|
+|#EEEEEE|Charging Pillar\n«external system»|
+|PowerMe Platform\n«software system»|
+start
+:Receive fault signal; <<input>>
+switch ( )
+case ([driver reported a faulty\npillar (UC-CHG-05)])
+  :Record driver's fault report;
+case ([pillar reported a connector\nFaulted (UC-INT-04)])
+  :Connector\n[Faulted]; <<task>>
+  if ( ) then ([session running on it])
+    :Close session with fault reason\nand bill energy delivered (AD-1);
+  else ([else])
+  endif
+case ([pillar silent for 900 s])
+  :ChargingPillar\n[offline] (AD-2); <<task>>
+endswitch
+:Hide connector from search\nand suggestions;
+:FaultEvent\n[raised]; <<task>>
+:Raise fault alert (≤ 900 s offline); <<output>>
+|Operator\n«person»|
+:Receive and acknowledge alert\n(UC-OPS-03); <<input>>
+|PowerMe Platform\n«software system»|
+:FaultEvent\n[acknowledged]; <<task>>
+|Operator\n«person»|
+if ( ) then ([remote reset may fix it])
+  :Send remote reset\n(UC-OPS-04);
+  |PowerMe Platform\n«software system»|
+  :FaultEvent\n[resetting]; <<task>>
+  :Send reset command; <<output>>
+  |#EEEEEE|Charging Pillar\n«external system»|
+  :Restart and report status;
+  |PowerMe Platform\n«software system»|
+  if ( ) then ([connector reports Available])
+    :Connector\n[Available]; <<task>>
+    :Show connector in search again;
+    :FaultEvent\n[resolved]; <<task>>
+    stop
+  else ([reset refused, timeout\nor still Faulted])
+    :FaultEvent\n[acknowledged]; <<task>>
+  endif
+else ([needs site visit])
+endif
+|Operator\n«person»|
+:Fix on site, then close alert;
+|PowerMe Platform\n«software system»|
+:FaultEvent\n[resolved]; <<task>>
+stop
+note right
+  Maintenance tickets are Should (FR-18),
+  not part of WF-04.
+end note
+!include _legend.iuml
+@enduml

@@ -1,0 +1,51 @@
+@startuml AD-6_pillar_started_session
+!include _style.iuml
+title AD-6 Session Started at the Pillar (card, password or free vend) and Classified\n<size:11>Scope: PowerMe «software system» · Trigger: driver taps a card, enters the pillar password or plugs in · v2.0 (ADR-0015: no reservation path; ends in STM-1 states)</size>
+
+|Driver\n«person»|
+|#EEEEEE|Charging Pillar\n«external system»|
+|PowerMe Platform\n«software system»|
+|Driver\n«person»|
+start
+:Tap card, enter pillar password\nor plug in (free vend);
+|#EEEEEE|Charging Pillar\n«external system»|
+if ( ) then ([online card])
+  :Ask platform to\nauthorise card; <<output>>
+  |PowerMe Platform\n«software system»|
+  if ( ) then ([card unknown, unlinked or blocked,\nor credit < start minimum])
+    :Refuse card; <<output>>
+    |#EEEEEE|Charging Pillar\n«external system»|
+    :Show refusal on pillar screen;
+    stop
+  else ([linked driver with enough credit])
+    |PowerMe Platform\n«software system»|
+    :Accept card; <<output>>
+  endif
+else ([wallet card, password or free vend])
+  |#EEEEEE|Charging Pillar\n«external system»|
+  :Authorise locally;
+endif
+|#EEEEEE|Charging Pillar\n«external system»|
+:Start energy delivery and\nreport session start;
+|PowerMe Platform\n«software system»|
+:Record session (never dropped)\nand look up its card tag;
+switch ( )
+case ([online card of a driver])
+  :Classify csms_billed;
+case ([wallet card])
+  :Classify station_wallet;
+case ([free-vend tag or unknown tag])
+  :Classify free / unattributed;
+endswitch
+:ChargingSession\n[active]; <<task>>
+:Monitor until the pillar\nreports the session end (AD-1);
+:ChargingSession\n[closed]; <<task>>
+if ( ) then ([csms_billed])
+  :Price, debit Charging Credit,\naward points, send statement;
+else ([station_wallet or free])
+  :Price for reconciliation only;\nno debit, no invoice (ADR-0012);
+endif
+:ChargingSession\n[reconciled]; <<task>>
+stop
+!include _legend.iuml
+@enduml

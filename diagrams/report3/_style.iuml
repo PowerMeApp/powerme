@@ -1,0 +1,19 @@
+' PowerMe activity-diagram style — shared by AD-1..AD-8
+skinparam conditionStyle diamond
+skinparam shadowing false
+skinparam dpi 300
+skinparam defaultFontName "DejaVu Sans"
+skinparam defaultFontSize 12
+skinparam ActivityBackgroundColor #FFFFFF
+skinparam ActivityBorderColor #333333
+skinparam ActivityDiamondBackgroundColor #FFFFFF
+skinparam ArrowColor #333333
+skinparam SwimlaneTitleFontStyle bold
+skinparam LegendBackgroundColor #FAFAFA
+skinparam LegendFontSize 10
+skinparam NoteBackgroundColor #FFFDE7
+skinparam NoteBorderColor #999999
+skinparam NoteFontSize 10
+skinparam TitleFontSize 14
+skinparam FooterFontSize 9
+footer PowerMe · WP1 (Trần Đức Ân) · UML 2.5.1 activity · System level

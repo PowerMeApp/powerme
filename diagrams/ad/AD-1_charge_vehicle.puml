@@ -1,0 +1,74 @@
+@startuml AD-1_charge_vehicle
+!include _style.iuml
+title AD-1 (WF-01) Find a Station and Charge End to End\n<size:11>Scope: PowerMe «software system» · Trigger: driver wants to charge · Owner: Lý Hoàng Sơn · v2.0 (ADR-0015: no reservation path)</size>
+
+|Driver\n«person»|
+start
+:Find station or get suggestion\n(UC-CHG-01, UC-CHG-07 · AD-5); <<procedure>>
+:Scan connector QR code\nand choose charging limit;
+|PowerMe Platform\n«software system»|
+:Check connector status\nand available Charging Credit;
+if ( ) then ([connector Faulted, Unavailable,\nin use or pillar offline])
+  :Show reason and\nalternative stations; <<output>>
+  stop
+else ([connector Available or Preparing])
+endif
+if ( ) then ([available credit < start minimum\nor CreditAccount in_shortfall])
+  :Refuse start and offer top-up\n(UC-PAY-01 · AD-3); <<output>>
+  stop
+else ([available credit >= start minimum])
+endif
+:Cap charging limit at what\nthe credit can pay for;
+:ChargingSession\n[pending]; <<task>>
+:Send start command; <<output>>
+|#EEEEEE|Charging Pillar\n«external system»|
+if ( ) then ([start rejected or no StartTransaction\nbefore start timeout])
+  |PowerMe Platform\n«software system»|
+  :ChargingSession\n[failed]; <<task>>
+  :Tell driver the start failed\n(no charge); <<output>>
+  stop
+else ([start accepted])
+  |#EEEEEE|Charging Pillar\n«external system»|
+  :Start energy delivery and\nreport readings periodically;
+endif
+|PowerMe Platform\n«software system»|
+:ChargingSession\n[active]; <<task>>
+repeat
+  :Receive meter readings; <<input>>
+  :Update energy, running cost\nand credit left;
+  :Push progress to driver app\n(UC-CHG-04, ≤ 5 s); <<output>>
+repeat while ([no stop condition])
+-> [stop condition met];
+if ( ) then ([limit reached, credit at\ncutoff reserve, or driver tapped Stop])
+  :ChargingSession\n[stopping]; <<task>>
+  :Send stop command; <<output>>
+  |#EEEEEE|Charging Pillar\n«external system»|
+  :Stop energy delivery;
+else ([battery full or stopped at pillar])
+  |#EEEEEE|Charging Pillar\n«external system»|
+  :Stop energy delivery by itself;
+endif
+|#EEEEEE|Charging Pillar\n«external system»|
+:Report session end;
+|PowerMe Platform\n«software system»|
+:ChargingSession\n[closed]; <<task>>
+:Cross-check energy, price\nper tariff band;
+:Debit Charging Credit;
+:CreditTransaction\n[session_debit]; <<task>>
+:Award loyalty points;
+:LoyaltyTransaction\n[earned]; <<task>>
+:ChargingSession\n[reconciled]; <<task>>
+:Send charging statement; <<output>>
+|Driver\n«person»|
+:View charging statement\n(UC-PAY-02);
+stop
+
+floating note left
+  Driver may tap Stop at any time (UC-CHG-03).
+  Pause by EV or pillar keeps the same session:
+  [active] ⇄ [paused] (STM-1 #5–6).
+  Pillar offline mid-session → AD-2 (WF-03).
+  Card / free-vend start at the pillar → AD-6.
+end note
+!include _legend.iuml
+@enduml

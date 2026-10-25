@@ -1,0 +1,198 @@
+@startuml WF03-class
+!include _team.iuml
+skinparam linetype polyline
+skinparam nodesep 30
+skinparam ranksep 45
+hide empty members
+left to right direction
+title WF-03 Class diagram: ocpp-gateway, sessions and reconciliation
+footer Content: Ngô Văn Minh Trí (WP2), WF03-class-reconciliation-sessions-gateway 23/10/2026 · redrawn in the Report 4 diagram style and translated to English, content unchanged
+
+package "ocpp-gateway" {
+  class ConnectionRegistry {
+    - Map<string,Connection> byIdentity
+    --
+    + open(identity, socket) : Connection
+    + close(identity, code) : void
+    + markOffline(identity) : void
+    + touch(identity, receivedAt) : void
+    + get(identity) : Connection
+  }
+  class Connection {
+    + string identity
+    + int epoch
+    + Date epochOpenedAt
+    + Date lastMessageAt
+    + ConnectionState state
+  }
+  enum ConnectionState <<enumeration>> {
+    in_service
+    offline
+  }
+  class ReplayDetector {
+    - int skewThresholdS
+    --
+    + detect(cpTimestamp, receivedAt, conn) : ReplayVerdict
+  }
+  class ReplayVerdict {
+    + bool replayed
+    + float skewS
+    + ReplayReason reason
+  }
+  enum ReplayReason <<enumeration>> {
+    none
+    before_epoch
+    skew_over_threshold
+  }
+  class OcppMessageLogger {
+    + logInbound(frame, conn, verdict) : OcppMessageLog
+    + logOutbound(frame, conn) : OcppMessageLog
+  }
+}
+
+package "sessions" {
+  class SessionsService {
+    + onStartTransaction(req, logId) : StartResult
+    + onMeterValues(req, logId) : void
+    + onStopTransaction(req, logId) : void
+    + onStationConnection(identity, state, epoch) : void
+    + getMeterSeries(sessionId) : List<MeterValue>
+    + resolve(sessionId, outcome, actor) : void
+    + flagForReview(sessionId, recordId) : void
+  }
+  class SessionStateMachine {
+    + apply(session, event) : SessionStatus
+    + canApply(status, event) : bool
+  }
+  enum SessionEvent <<enumeration>> {
+    START_ACCEPTED
+    STOP_RECEIVED
+    STATION_OFFLINE
+    RECONCILE_OK
+    RECONCILE_CONFLICT
+    OPERATOR_RESOLVED
+    FAILED
+  }
+  enum SessionStatus <<enumeration>> {
+    pending
+    active
+    paused
+    stopping
+    closed
+    review
+    reconciled
+    orphaned
+    failed
+  }
+}
+
+package "reconciliation" {
+  class ReconciliationService {
+    - bool enabled
+    - int expectedIntervalS
+    - int energyToleranceWh
+    --
+    + onTransactionStopped(evt) : void
+    + onLateMeterValues(evt) : void
+    + onDuplicateStart(evt) : void
+    + reconcile(sessionId) : ReconciliationRecord
+    - compare(session, series) : Verdict
+    - findGaps(series, intervalS) : List<Gap>
+  }
+}
+
+package "entities" {
+  class Session <<entity>> {
+    sessions
+    --
+    + bigint id
+    + string chargePointId
+    + int connectorId
+    + string idTag
+    + SessionStatus status
+    + bigint meterStartWh
+    + bigint meterStopWh
+    + Date cpTimestamp
+    + Date startedAt
+    + Date stoppedAt
+    + Date orphanedAt
+    + bool deliveredOffline
+    + string origin
+    + string paymentMode
+  }
+  class MeterValue <<entity>> {
+    meter_values
+    --
+    + bigint id
+    + bigint sessionId
+    + Date cpTimestamp
+    + Date receivedAt
+    + string measurand
+    + bigint valueWh
+    + int epoch
+    + bool replayed
+  }
+  class ReconciliationRecord <<entity>> {
+    reconciliation_records
+    --
+    + bigint id
+    + bigint sessionId
+    + RecordType recordType
+    + Date gapStart
+    + Date gapEnd
+    + bigint energyDifferenceWh
+    + bigint messageLogId
+    + Resolution resolution
+    + string resolvedBy
+    + Date createdAt
+  }
+  class OcppMessageLog <<entity>> {
+    ocpp_message_log
+    --
+    + bigint id
+    + string chargePointId
+    + Direction direction
+    + int messageType
+    + string action
+    + Date receivedAt
+    + Date cpTimestamp
+    + int epoch
+    + bool replayed
+    + jsonb raw
+  }
+  enum RecordType <<enumeration>> {
+    consistent
+    gap_detected
+    conflict
+    duplicate
+  }
+  enum Resolution <<enumeration>> {
+    auto
+    pending
+    operator_accept_meter_stop
+    operator_accept_series
+    operator_void
+  }
+}
+
+ConnectionRegistry "1" *-- "0..*" Connection : identity → socket, epoch
+Connection --> ConnectionState
+ReplayDetector ..> Connection : reads epochOpenedAt
+ReplayDetector ..> ReplayVerdict : returns
+OcppMessageLogger ..> ReplayVerdict : records replayed
+ReplayVerdict --> ReplayReason
+OcppMessageLogger ..> OcppMessageLog : INSERT before the handler
+ReconciliationService --> SessionsService : getMeterSeries, resolve,\nflagForReview
+SessionsService --> SessionStateMachine
+SessionStateMachine ..> SessionEvent
+SessionStateMachine ..> SessionStatus
+SessionsService ..> Session : only entry point to sessions
+SessionsService ..> MeterValue : only entry point to meter_values
+Session --> SessionStatus
+Session "1" *-- "0..*" MeterValue
+Session "1" o-- "0..*" ReconciliationRecord
+ReconciliationService ..> ReconciliationRecord : INSERT, append-only
+ReconciliationRecord ..> OcppMessageLog : messageLogId,\nduplicate records only
+ReconciliationRecord --> RecordType
+ReconciliationRecord --> Resolution
+@enduml

@@ -1,0 +1,14 @@
+@startuml STM-5_CreditAccount
+!include _style.iuml
+title STM-5 CreditAccount\ncredit_accounts.status · v0.3 · 24/10/2026 · confirmed by Khang
+[*] --> active : driver account created
+active --> in_shortfall : session debit\n[balance < 0]\n/ block new csms_billed starts
+in_shortfall --> active : top-up credited\n[balance ≥ 0]
+active --> closed : driver requests closure in app\n[balance ≥ 0, no open top-up, no running session]\n/ refund entry, refund listed for Admin (UC-ADM-08)
+closed --> [*]
+note right of in_shortfall
+  Closing is refused while in_shortfall.
+  Closure: driver request in the app (UC-ACC-02);
+  Admin executes the gateway refund (UC-ADM-08).
+end note
+@enduml

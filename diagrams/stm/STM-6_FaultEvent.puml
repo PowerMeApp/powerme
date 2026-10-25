@@ -1,0 +1,16 @@
+@startuml STM-6_FaultEvent
+!include _style.iuml
+title STM-6 FaultEvent (operator alert)\nfault_events.status · v0.2 · 24/10/2026 · trigger names from WP4 FaultStateMachine (Nghĩa)
+[*] --> raised : SIGNAL\n[driver report, Faulted status\nor pillar offline past alert delay]\n/ hide connector, notify operator
+raised --> acknowledged : ACKNOWLEDGE (Operator)
+raised --> resolved : CONNECTOR_AVAILABLE
+acknowledged --> resetting : RESET_SENT (Operator remote reset)\n/ start reset timer
+resetting --> resolved : CONNECTOR_AVAILABLE
+resetting --> acknowledged : RESET_FAILED\n(refused or reset timeout)
+acknowledged --> resolved : CONNECTOR_AVAILABLE or\nOPERATOR_CLOSE after site visit
+resolved --> [*]
+note right of acknowledged
+  One open FaultEvent per connector.
+  Maintenance tickets are Should (FR-18).
+end note
+@enduml

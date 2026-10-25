@@ -1,0 +1,34 @@
+@startuml fig11_sf_admin
+!include _sf_style.iuml
+state "Login" as Login
+state "Signed in (Admin)" as Signed {
+  state "Admin Dashboard" as Dash
+  state "Users & Roles" as Users
+  state "Device Registry" as Devices
+  state "Card Registry & Free-Vend Tags" as Cards
+  state "Policy Templates [Should]" as Policy
+  state "System Health [Should]" as Health
+  state "Billing Exceptions\n(top-ups · late payments · invoices to review)" as Billing
+  [*] --> Dash
+  Dash --> Users : open users & roles
+  Users --> Dash : back
+  Dash --> Devices : open device registry
+  Devices --> Dash : back
+  Dash --> Cards : open card registry
+  Cards --> Dash : back
+  Dash --> Policy : open policy templates
+  Policy --> Dash : back
+  Dash --> Health : open system health
+  Health --> Dash : back
+  Dash --> Billing : open billing exceptions
+  Billing --> Dash : back
+}
+[*] --> Login : open console
+Login --> Signed : log in [Admin role]
+Signed --> [*] : log out
+legend bottom right
+  Screen navigation flow (UML state-machine notation)
+  each state = one screen; shaded = pop-up sheet
+  transition label = user action [guard]
+endlegend
+@enduml

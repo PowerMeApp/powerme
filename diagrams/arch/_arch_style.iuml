@@ -1,0 +1,36 @@
+skinparam shadowing false
+skinparam defaultFontName Arial
+skinparam defaultFontSize 12
+skinparam dpi 200
+skinparam linetype ortho
+skinparam nodesep 50
+skinparam ranksep 60
+skinparam ArrowColor #333333
+skinparam component {
+  BackgroundColor #FFFFFF
+  BorderColor #333333
+}
+skinparam node {
+  BackgroundColor #FAFAFA
+  BorderColor #333333
+}
+skinparam database {
+  BackgroundColor #FFFFFF
+  BorderColor #333333
+}
+skinparam rectangle<<external>> {
+  BackgroundColor #EEEEEE
+  BorderColor #777777
+}
+skinparam package<<external>> {
+  BackgroundColor #F4F4F4
+  BorderColor #999999
+}
+skinparam TitleFontSize 14
+skinparam FooterFontSize 9
+footer PowerMe · WP1 (Trần Đức Ân) · v1.1 · 24/10/2026 · Report 4 §2 System Overview · names to align with the repo at tag review-2 (Trí)
+skinparam component<<new>> {
+  BackgroundColor #FFF8E1
+  BorderColor #B08900
+  BorderStyle dashed
+}
