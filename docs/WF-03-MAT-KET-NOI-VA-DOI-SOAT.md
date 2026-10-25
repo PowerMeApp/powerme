@@ -197,6 +197,9 @@ sequenceDiagram
 
 ## 4. Class diagram — `reconciliation` và phần liên quan của `sessions`, `ocpp-gateway`
 
+> **Đồng bộ 25/10/2026:** enum `SessionEvent` nay là **15 giá trị đúng như `apps/csms/src/sessions/session-state-machine.ts`** (bản nháp 23/10 ghi 7 giá trị và dùng ba tên khác: `START_ACCEPTED` → `START_TRANSACTION`, `STOP_RECEIVED` → `STOP_TRANSACTION`, `FAILED` → `START_TIMEOUT`). Bản PlantUML của nhóm `diagrams/team/WF03-class.puml` đã sửa cùng lúc.
+> **Còn lệch code (BM02 F34, F31):** thuộc tính `enabled` của `ReconciliationService` chưa tồn tại trong code (công tắc bật/tắt đối soát cho thí nghiệm ablation chưa làm); `RealtimeGateway` chưa được hiện thực. Đây là thiết kế đích.
+
 Chỉ ghi thuộc tính và phương thức có ý nghĩa với WF-03; không liệt kê getter/setter, không liệt hoá đủ cột. Chú thích `<<...>>` là module sở hữu hoặc bảng DB tương ứng.
 
 ```mermaid
@@ -279,13 +282,21 @@ classDiagram
   }
   class SessionEvent {
     <<enumeration>>
-    START_ACCEPTED
-    STOP_RECEIVED
-    STATION_OFFLINE
+    REMOTE_START_ACCEPTED
+    START_TRANSACTION
+    START_TIMEOUT
+    STATUS_SUSPENDED
+    STATUS_CHARGING
+    STOP_REQUESTED
+    REMOTE_STOP_REJECTED
+    STOP_TRANSACTION
     RECONCILE_OK
     RECONCILE_CONFLICT
+    STATION_OFFLINE
+    HARD_CAP_EXCEEDED
     OPERATOR_RESOLVED
-    FAILED
+    LIVE_MESSAGE
+    LATE_SAMPLE_CONFLICT
   }
   class Session {
     <<entity sessions>>
@@ -408,7 +419,7 @@ Bảng chuyển trạng thái `SessionStateMachine.apply` dùng trong WF-03 (STM
 | Từ | Sự kiện | Đến | Ghi chú |
 |---|---|---|---|
 | `active` / `paused` / `stopping` | `STATION_OFFLINE` | `orphaned` | socket đóng hoặc 900 s im lặng, chưa có StopTransaction |
-| `active` / `paused` / `stopping` | `STOP_RECEIVED` | `closed` | đường bình thường, không mất kết nối |
+| `active` / `paused` / `stopping` | `STOP_TRANSACTION` | `closed` | đường bình thường, không mất kết nối |
 | `closed` | `RECONCILE_OK` | `reconciled` | consistent hoặc gap_detected |
 | `closed` | `RECONCILE_CONFLICT` | `review` | conflict |
 | `orphaned` | `RECONCILE_OK` | `reconciled` | StopTransaction phát lại tới và đối soát xong |
