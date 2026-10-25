@@ -1,0 +1,64 @@
+@startuml AD-3_top_up_credit
+!include _style.iuml
+title AD-3 (WF-02) Top Up Charging Credit (with optional points redemption)\n<size:11>Scope: PowerMe «software system» · Trigger: driver opens Top Up · Owner: Lê Bảo Khang · v2.0</size>
+
+|Driver\n«person»|
+start
+:Enter top-up amount and\nchoose whether to redeem points;
+|PowerMe Platform\n«software system»|
+if ( ) then ([amount outside 50,000–2,000,000 VND\nor balance would exceed 5,000,000 VND])
+  :Show limit error; <<output>>
+  stop
+else ([within limits])
+endif
+if ( ) then ([redeem chosen and\npoints balance >= 500])
+  :Apply points discount\n(<= 50% of top-up, UC-PAY-03);
+else ([else])
+endif
+:Create top-up with\nidempotency key;
+:TopUp\n[pending]; <<task>>
+:Redirect driver to payment\nfor amount minus discount; <<output>>
+|Driver\n«person»|
+:Pay at payment gateway;
+|#EEEEEE|Payment Gateway\n«external system»|
+:Process payment;
+:Send payment result (IPN); <<output>>
+|PowerMe Platform\n«software system»|
+:Receive and verify payment result; <<input>>
+note right
+  No result before the pending timeout → TopUp [expired].
+  A late success inside the late-result window is still
+  credited once (STM-4 #4–5).
+end note
+if ( ) then ([result already applied\nto this top-up])
+  :Acknowledge and change nothing;
+  stop
+else ([first result])
+endif
+if ( ) then ([payment succeeded,\namount matches])
+  :Settle any shortfall first,\nthen add full top-up amount;
+  :TopUp\n[credited]; <<task>>
+  :CreditTransaction\n[top_up]; <<task>>
+  if ( ) then ([points were applied])
+    :LoyaltyTransaction\n[redeemed]; <<task>>
+  else ([else])
+  endif
+  :EInvoice\n[requested]; <<task>>
+  :Request e-invoice for\namount collected; <<output>>
+  |#EEEEEE|E-Invoice Provider\n«external system»|
+  :Issue e-invoice;
+  |PowerMe Platform\n«software system»|
+  :EInvoice\n[issued]; <<task>>
+  :Notify driver of new balance; <<output>>
+  |Driver\n«person»|
+  :View new balance and e-invoice;
+  stop
+else ([payment failed or cancelled])
+  |PowerMe Platform\n«software system»|
+  :TopUp\n[failed]; <<task>>
+  :Keep credit and points unchanged;
+  :Show failure and offer retry; <<output>>
+  stop
+endif
+!include _legend.iuml
+@enduml

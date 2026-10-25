@@ -1,0 +1,67 @@
+@startuml WF04-seq-2
+!include _team.iuml
+title WF-04 Sequence 2: driver report, reset refused or timed out, site visit, fault clears by itself
+footer Content: Trần Trọng Nghĩa (WP4), wf-04-seq-2 24/10/2026 · redrawn in the Report 4 diagram style, content unchanged
+hide footbox
+actor "Driver" as drv
+participant "Driver app" as app
+participant "Charging pillar" as cp <<external>>
+box "ocpp-gateway" #FAFBFD
+participant "OcppGateway" as gw
+end box
+box "stations" #FAFBFD
+participant "FaultService" as fs
+participant "RemoteCommand\nService" as rc
+end box
+participant "RealtimeGateway" as rt
+participant "Dashboard" as ui
+actor "Operator" as op
+
+== F — driver reports a faulty connector (UC-CHG-05) ==
+drv -> app : Report fault (c2, description)
+app -> fs : POST /api/v1/fault-reports
+fs -> fs : INSERT fault_reports
+alt open fault already exists for c2
+  fs -> fs : link report → fault_reports.fault_event_id
+else no open fault
+  fs -> fs : INSERT fault_events (driver_report, raised) · link report
+  fs -> rt : alert.raised
+  rt -> ui : push room station:{id}
+end
+fs --> app : 201 Created + report number
+
+== G — reset refused or no Available before the timeout (STM-6 resetting → acknowledged) ==
+op -> ui : Remote reset
+ui -> rc : POST /stations/{id}/commands {reset}
+rc -> fs : markResetting(faultId, commandId)
+rc -> gw : OcppDispatchService.call(Reset)
+gw -> cp : Reset
+alt pillar answers Rejected
+  cp --> gw : CALLRESULT Rejected
+  gw --> rc : Rejected
+  rc -> fs : onResetFailed(faultId, rejected)
+else no Available within the reset timeout
+  fs -> fs : reset timer fires
+end
+fs -> fs : resetting → acknowledged
+fs -> rt : alert.updated (reset failed)
+rt -> ui : show reset failed
+
+== H — site visit needed (AD-7 "needs site visit") ==
+alt maintenance tickets in scope «Should»
+  op -> ui : Create maintenance ticket
+  ui -> fs : POST /api/admin/faults/{id}/tickets
+  fs -> fs : INSERT maintenance_tickets (open)
+else Must scope, no tickets
+  op -> ui : Close alert after site visit
+  ui -> fs : POST /api/admin/faults/{id}/close
+  fs -> fs : acknowledged → resolved (t7) · resolved_at
+  fs -> rt : alert.resolved
+end
+
+== I — fault clears by itself before anyone acts (STM-6 raised → resolved, t3) ==
+cp -> gw : StatusNotification(Available)
+gw -> fs : onConnectorStatus(Available) via StationsService
+fs -> fs : raised → resolved
+fs -> rt : alert.resolved (kept in alert history)
+@enduml

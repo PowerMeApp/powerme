@@ -1,0 +1,23 @@
+@startuml fig07_ucd_adm
+!include style.iuml
+left to right direction
+actor Admin
+rectangle "PowerMe Platform — Platform Administration" {
+  usecase "UC-ADM-01\nManage User Accounts" as D1
+  usecase "UC-ADM-02\nAssign Roles and Permissions" as D2
+  usecase "UC-ADM-03\nManage Pillar Device Registry" as D3
+  usecase "UC-ADM-04\nManage RFID Cards" as D4
+  usecase "UC-ADM-05\nConfigure Free-Vend Tag" as D5
+  usecase "UC-ADM-06\nManage Policy Templates\n[Should]" as D6
+  usecase "UC-ADM-07\nMonitor Platform Health\n[Should]" as D7
+  usecase "UC-ADM-08\nHandle Billing Exceptions" as D8
+}
+Admin -- D1
+Admin -- D2
+Admin -- D3
+Admin -- D4
+Admin -- D5
+Admin -- D6
+Admin -- D7
+Admin -- D8
+@enduml

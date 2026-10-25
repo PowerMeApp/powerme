@@ -1,0 +1,27 @@
+@startuml fig06_ucd_ops
+!include style.iuml
+left to right direction
+actor Operator
+actor "Charging Pillar" as CP <<system>>
+rectangle "PowerMe Platform — Pillar Operations" {
+  usecase "UC-OPS-01\nOnboard Charging Pillar" as O1
+  usecase "UC-OPS-02\nMonitor Pillar Status" as O2
+  usecase "UC-OPS-03\nView Fault Alerts" as O3
+  usecase "UC-OPS-04\nSend Remote Pillar Command" as O4
+  usecase "UC-OPS-05\nResolve Unattributed Session" as O5
+  usecase "UC-OPS-06\nConfigure Tariff Schedule" as O6
+  usecase "UC-OPS-07\nManage Promotions" as O7
+  usecase "UC-OPS-08\nManage Maintenance Tickets\n[Should]" as O8
+  usecase "UC-OPS-09\nView Revenue Analytics\n[Should]" as O9
+}
+Operator -- O1
+Operator -- O2
+Operator -- O3
+Operator -- O4
+Operator -- O5
+Operator -- O6
+Operator -- O7
+Operator -- O8
+Operator -- O9
+O4 -- CP
+@enduml

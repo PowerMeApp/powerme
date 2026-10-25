@@ -1,0 +1,31 @@
+' PowerMe activity-diagram style v2.1 (shared by AD-1..AD-8)
+skinparam conditionStyle diamond
+skinparam shadowing false
+skinparam defaultFontName Arial
+skinparam defaultFontSize 12
+skinparam dpi 200
+skinparam roundCorner 14
+skinparam ArrowColor #3D4B5C
+skinparam ArrowFontSize 11
+skinparam ActivityBackgroundColor #EEF3F9
+skinparam ActivityBorderColor #3D4B5C
+skinparam ActivityBorderThickness 1.2
+skinparam ActivityDiamondBackgroundColor #FFFFFF
+skinparam ActivityDiamondBorderColor #3D4B5C
+skinparam ActivityStartColor #1B2733
+skinparam ActivityEndColor #1B2733
+skinparam ActivityBarColor #3D4B5C
+skinparam SwimlaneBorderColor #9AA5B1
+skinparam SwimlaneTitleFontStyle bold
+skinparam SwimlaneTitleFontSize 13
+skinparam LegendBackgroundColor #FFFFFF
+skinparam LegendBorderColor #9AA5B1
+skinparam LegendFontSize 10
+skinparam NoteBackgroundColor #FFF8E1
+skinparam NoteBorderColor #C9A227
+skinparam NoteFontSize 10
+skinparam TitleFontSize 15
+skinparam TitleFontStyle bold
+skinparam FooterFontSize 9
+skinparam FooterFontColor #6B7785
+footer PowerMe · WP1 (Trần Đức Ân) · v2.1 · 24/10/2026 · UML 2.5.1 activity · System level · object-node states = DB status values (STM-1..8)

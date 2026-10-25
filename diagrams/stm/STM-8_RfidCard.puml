@@ -1,0 +1,10 @@
+@startuml STM-8_RfidCard
+!include _style.iuml
+title STM-8 RfidCard (supporting lifecycle, OCPP idTag)\nrfid_cards.status · v0.2
+[*] --> unlinked : card registered (Admin)
+unlinked --> active : linked to a driver
+active --> blocked : Admin blocks card
+blocked --> active : Admin unblocks card
+active --> unlinked : driver unlinks card
+blocked --> [*] : card retired
+@enduml

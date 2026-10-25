@@ -11,8 +11,6 @@
  *
  * Needs DATABASE_URL like the WF-03 test (skipped without it). Uses OCPP port 19605.
  */
-import { readFileSync } from 'node:fs';
-import path from 'node:path';
 import { Logger } from '@nestjs/common';
 import { asc, eq } from 'drizzle-orm';
 import { RPCClient } from 'ocpp-rpc';
@@ -36,6 +34,7 @@ import { ReplayDetector } from '../src/reconciliation/replay-detector.js';
 import { SessionStateMachine } from '../src/sessions/session-state-machine.js';
 import { SessionsService } from '../src/sessions/sessions.service.js';
 import { PillarAuthService } from '../src/stations/pillar-auth.service.js';
+import { resetAndMigrate } from './helpers/apply-migrations.js';
 import {
   OnboardingError,
   PillarOnboardingService,
@@ -43,7 +42,6 @@ import {
 
 const DATABASE_URL = process.env['DATABASE_URL'];
 const describeDb = DATABASE_URL ? describe : describe.skip;
-const MIGRATION = path.join(__dirname, '..', 'drizzle', '0000_init.sql');
 const OCPP_PORT = 19605;
 const SERIAL = 'RH24D1-00077';
 
@@ -103,8 +101,8 @@ describeDb('WF-05 — onboard a pillar and bring it into service (SD-5a, SD-5b)'
   beforeAll(async () => {
     Logger.overrideLogger(['error']);
     db = createDb(DATABASE_URL as string);
-    await db.$client.query('DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public;');
-    await db.$client.query(readFileSync(MIGRATION, 'utf8'));
+    // DB sạch + áp tuần tự 0000 → 0001 (cùng helper với test WF-03; code ghi cột `replayed` của 0001).
+    await resetAndMigrate(db.$client);
 
     const [opA, opB] = await db
       .insert(operators)

@@ -1,0 +1,74 @@
+@startuml fig09_sf_driver
+hide empty description
+skinparam shadowing false
+skinparam defaultFontName "DejaVu Sans"
+skinparam defaultFontSize 15
+skinparam dpi 300
+skinparam state {
+  BackgroundColor #EEF2F8
+  BorderColor #555555
+  BackgroundColor<<sheet>> #FFF4D6
+  ArrowColor #333333
+}
+skinparam stereotypeFontSize 1
+skinparam stereotypeFontColor #FFF4D6
+
+state "Login" as Login
+state "Registration & Onboarding\n(profile, vehicle, consent)" as Reg
+state "Home — Map & List\n(Charging Credit balance;\nstatus badges + freshness)" as Home
+state "Suggested for You\n(battery %, target %, Fastest / Cheapest;\ntop 3 stations with reasons)" as Suggest
+state "Station Detail" as Detail
+state "Profile & Vehicles" as Profile
+state "History & e-Invoices" as History
+state "Loyalty Points" as Loyalty
+state "Charging Credit & Top Up\n(redeem points)" as Credit
+state "VNPay Payment\n(hosted page)" as VNPay
+state "Start Session" as Start <<sheet>>
+state "Report Fault" as Fault <<sheet>>
+state "Reserve Connector [Should]\n(fee, countdown, cancel)" as Reserve <<sheet>>
+state "Active Session" as Active
+state "Charging Statement" as Statement <<sheet>>
+
+[*] --> Login : open app
+Login --> Reg : register [no account]
+Reg --> Home : finish [consent given]
+Login --> Home : log in [valid credentials]
+
+Home --> Detail : select station
+Detail --> Home : back
+Home --> Suggest : open suggestions
+Suggest --> Detail : select suggestion
+Suggest --> Reserve : reserve [Should]
+Suggest --> Home : back / navigate (map deep link)
+Home --> Profile : open profile
+Profile --> Home : back
+Home --> History : open history
+History --> Home : back
+Home --> Loyalty : open loyalty
+Loyalty --> Home : back
+Home --> Credit : open credit
+Credit --> Home : back
+Home --> [*] : log out
+
+Credit --> VNPay : top up [amount within limits]
+VNPay --> Credit : payment result
+
+Detail --> Start : tap Start [connector Available\n(or reserved by me — Should)]
+Start --> Detail : cancel
+Start --> Credit : top up [credit < start minimum]
+Detail --> Fault : report fault
+Fault --> Detail : submit / cancel
+Detail --> Reserve : reserve [Should]
+Reserve --> Detail : confirm / cancel / expired
+Reserve --> Start : start [reservation active]
+
+Start --> Active : confirm [credit ≥ start minimum]
+Active --> Statement : stop / limit or credit cutoff reached
+Statement --> Home : close
+
+legend bottom right
+  Screen navigation flow (UML state-machine notation)
+  each state = one screen; shaded = pop-up sheet
+  transition label = user action [guard]
+endlegend
+@enduml

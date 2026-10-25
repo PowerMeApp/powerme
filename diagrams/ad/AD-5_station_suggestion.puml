@@ -1,0 +1,39 @@
+@startuml AD-5_station_suggestion
+!include _style.iuml
+title AD-5 (called by WF-01) Get Station Suggestion (rank by time until charged)\n<size:11>Scope: PowerMe «software system» · Trigger: driver opens "Suggested for you" · v2.0 (ADR-0015 D-3: suggestion v2)</size>
+
+|Driver\n«person»|
+start
+:Open suggestions, optionally\nenter battery %;
+|PowerMe Platform\n«software system»|
+:Find compatible, online stations\nwithin search radius;
+if ( ) then ([battery % entered])
+  :Limit radius to battery % ×\nrated range × 0.8;
+else ([else])
+endif
+if ( ) then ([no candidate station])
+  :Show "no compatible station\nin range"; <<output>>
+  stop
+else ([candidates found])
+endif
+:Request travel times; <<output>>
+|#EEEEEE|Map & Routing Service\n«external system»|
+:Calculate travel times;
+|PowerMe Platform\n«software system»|
+if ( ) then ([travel times received])
+else ([routing error or timeout])
+  :Estimate travel time from straight-line\ndistance (mark approximate);
+endif
+:Estimate wait on arrival from live\nconnector status and time-left estimates;
+:Estimate charging time from\nvehicle model and connector power;
+:Score each station: travel + wait + charge\n(+ reliability penalty for recent fault reports);
+:Pick top 3 stations;
+:Show top 3 with reasons; <<output>>
+|Driver\n«person»|
+if ( ) then ([navigate])
+  :Open phone's map app\n(deep link);
+else ([no action])
+endif
+stop
+!include _legend.iuml
+@enduml

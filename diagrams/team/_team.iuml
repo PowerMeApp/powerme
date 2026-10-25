@@ -1,0 +1,69 @@
+' Shared style for WP2/WP4 diagrams redrawn for Report 4 (same palette as WF-05 class/sequence diagrams)
+skinparam defaultFontName Arial
+skinparam dpi 200
+skinparam shadowing false
+skinparam roundCorner 8
+skinparam ArrowColor #3D4B5C
+skinparam ArrowFontSize 10
+skinparam ArrowFontColor #22303D
+skinparam TitleFontSize 15
+skinparam TitleFontStyle bold
+skinparam FooterFontSize 9
+skinparam FooterFontColor #6B7785
+skinparam NoteBackgroundColor #FFF8E1
+skinparam NoteBorderColor #C9A227
+skinparam NoteFontSize 10
+skinparam rectangle {
+  BackgroundColor #EEF3F9
+  BorderColor #3D4B5C
+  FontSize 11
+}
+skinparam database {
+  BackgroundColor #EEF3F9
+  BorderColor #3D4B5C
+  FontSize 11
+}
+skinparam package {
+  BackgroundColor #FAFBFD
+  BorderColor #9AA5B1
+  FontStyle bold
+  FontSize 12
+}
+skinparam class {
+  BackgroundColor #FFFFFF
+  BorderColor #3D4B5C
+  HeaderBackgroundColor #EEF3F9
+  AttributeFontSize 10
+  FontSize 11
+  FontStyle bold
+  StereotypeFontSize 9
+}
+skinparam class<<entity>> {
+  HeaderBackgroundColor #E7F4EA
+}
+skinparam class<<enumeration>> {
+  HeaderBackgroundColor #FFF6DD
+}
+' sequence
+skinparam maxMessageSize 260
+skinparam responseMessageBelowArrow true
+skinparam sequenceMessageAlign left
+skinparam ParticipantPadding 6
+skinparam BoxPadding 8
+skinparam SequenceLifeLineBorderColor #8A97A6
+skinparam SequenceGroupBorderColor #8A97A6
+skinparam SequenceGroupBackgroundColor #F3F6FA
+skinparam SequenceGroupHeaderFontStyle bold
+skinparam SequenceDividerBackgroundColor #FFF6DD
+skinparam SequenceDividerBorderColor #C9A227
+skinparam SequenceDividerFontStyle bold
+skinparam SequenceBoxBorderColor #B8C3CF
+skinparam ParticipantBackgroundColor #EEF3F9
+skinparam ParticipantBorderColor #3D4B5C
+skinparam ParticipantFontStyle bold
+skinparam ParticipantFontSize 12
+skinparam ActorBorderColor #3D4B5C
+skinparam ActorBackgroundColor #EEF3F9
+skinparam participant<<external>> {
+  BackgroundColor #E8E8E8
+}

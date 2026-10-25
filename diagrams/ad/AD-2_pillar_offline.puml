@@ -1,0 +1,59 @@
+@startuml AD-2_pillar_offline
+!include _style.iuml
+title AD-2 (WF-03) Pillar Disconnects Mid-Session and the Session Is Reconciled\n<size:11>Scope: PowerMe «software system» · Trigger: pillar loses its connection during a session · Owner: Ngô Văn Minh Trí · v2.1 (aligned with WP2 SD WF-03)</size>
+
+|#EEEEEE|Charging Pillar\n«external system»|
+|PowerMe Platform\n«software system»|
+|Driver\n«person»|
+|Operator\n«person»|
+|#EEEEEE|Charging Pillar\n«external system»|
+start
+:Lose connection to platform\nduring a session;
+fork
+  :Keep charging locally;
+  :Queue session data\n(readings, stop);
+fork again
+  |PowerMe Platform\n«software system»|
+  :Detect socket closed;
+  :ChargingPillar\n[offline]; <<task>>
+  :ChargingSession\n[orphaned]; <<task>>
+  :Show "pillar offline,\ndata delayed" to driver and operator; <<output>>
+end fork
+|#EEEEEE|Charging Pillar\n«external system»|
+:Reconnect (new connection epoch)\nand resend queued data;
+|PowerMe Platform\n«software system»|
+:ChargingPillar\n[in_service]; <<task>>
+:Log every message first; mark messages\nstamped before the reconnect as replayed;
+:Drop duplicates (same natural key);
+if ( ) then ([no StopTransaction yet])
+  :Keep collecting readings\n(session stays orphaned); <<procedure>>
+  stop
+else ([StopTransaction received])
+endif
+:Cross-check meter stop against\nthe reading series (late replayed readings\nre-run the check, append-only record);
+if ( ) then ([consistent or gap explained\nby the offline window])
+  :ReconciliationRecord\n[consistent | gap_detected]; <<task>>
+  :ChargingSession\n[reconciled]; <<task>>
+  :Price energy and debit\nCharging Credit;
+  if ( ) then ([final cost > credit])
+    :CreditAccount\n[in_shortfall]; <<task>>
+  else ([cost covered])
+  endif
+  :Send charging statement; <<output>>
+  |Driver\n«person»|
+  :View charging statement;
+  stop
+else ([energy difference over tolerance])
+  |PowerMe Platform\n«software system»|
+  :ReconciliationRecord\n[conflict, pending]; <<task>>
+  :ChargingSession\n[review]; <<task>>
+  :Hold billing; flag for operator; <<output>>
+  |Operator\n«person»|
+  :Resolve: accept meter stop,\naccept series or void (UC-OPS-05);
+  |PowerMe Platform\n«software system»|
+  :ChargingSession\n[reconciled]; <<task>>
+  :Bill the accepted energy\nand send statement; <<output>>
+  stop
+endif
+!include _legend.iuml
+@enduml

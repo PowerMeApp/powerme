@@ -1,0 +1,44 @@
+@startuml WF03-seq-2
+!include _team.iuml
+title WF-03 Sequence 2: replayed StartTransaction (idempotent, ADR-0010)
+footer Content: Ngô Văn Minh Trí (WP2), WF03-sequence-2-startTransaction-phat-lai 23/10/2026 · redrawn in the Report 4 diagram style and translated to English, content unchanged
+autonumber
+hide footbox
+participant "Charging pillar" as cp <<external>>
+box "ocpp-gateway" #FAFBFD
+participant "OcppGateway" as gw
+participant "MessageLog" as log
+end box
+box "sessions / reconciliation" #FAFBFD
+participant "SessionsService" as ses
+participant "Reconciliation\nService" as rec
+end box
+participant "RealtimeGateway" as rt
+
+note over cp, rt
+  Precondition: tx3 was created in epoch 1 from StartTransaction(c1, idTag X, meterStart 0, cp_timestamp T0).
+  The CALLRESULT may have been lost during the disconnect.
+end note
+cp -> gw : StartTransaction c1 idTag=X meterStart=0 cp_timestamp=T0 (replayed, skew 126 s)
+gw -> gw : ReplayDetector: T0 < epoch_opened_at → replayed=true
+gw -> log : INSERT ocpp_message_log (action=StartTransaction, epoch=2, replayed=true)
+gw -> ses : handler StartTransaction (req, logId)
+ses -> ses : INSERT sessions (...) ON CONFLICT (charge_point_id, connector_id, id_tag, meter_start_wh, cp_timestamp) DO NOTHING
+alt natural key not present — new session, e.g. opened while offline
+  ses -> ses : INSERT succeeds, new transactionId from the DB sequence, delivered_offline=true, status=active
+  ses -> rt : transaction.started
+  ses --> gw : StartResult(new transactionId, Accepted)
+else UNIQUE rejects — ADR-0010, session already exists
+  ses -> ses : SELECT id FROM sessions WHERE natural key → transactionId=3
+  ses -> ses : does NOT change status, does NOT touch meter_values
+  ses -> rec : transaction.duplicate_start (tx3, logId)
+  rec -> rec : INSERT reconciliation_records (session_id=3, record_type=duplicate, message_log_id=logId, resolution=auto)
+  ses --> gw : StartResult(transactionId=3, Accepted)
+end
+gw -> log : INSERT outbound (CALLRESULT)
+gw --> cp : CALLRESULT StartTransaction transactionId=3 idTagInfo Accepted
+note over cp, rt
+  The pillar never sees a CALLERROR. The duplicate is traced in reconciliation_records (duplicate)
+  and in two ocpp_message_log rows with the same natural key.
+end note
+@enduml

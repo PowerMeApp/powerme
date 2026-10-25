@@ -1,0 +1,171 @@
+@startuml WF01-class
+!include _team.iuml
+skinparam linetype polyline
+skinparam nodesep 30
+skinparam ranksep 50
+hide empty members
+title WF-01 Class diagram: Driver App (find a station and charge)
+footer Content: Lý Hoàng Sơn (WP3), t22-wf01-class 24/10/2026 · redrawn in the Report 4 diagram style, content unchanged
+
+package "Stations" {
+  interface StationRepository {
+    + find(vehicleId: String, query: String): Future<List<StationOption>>
+    + suggest(vehicleId: String): Future<List<StationOption>>
+  }
+  class StationsController {
+    - repository: StationRepository
+    - scope: AuthScope
+    --
+    + find(vehicleId: String, query: String): Future<void>
+    + suggest(vehicleId: String): Future<void>
+    + clear(): void
+  }
+  class StationOption {
+    + connectorId: String
+    + status: String
+    + updatedAt: DateTime
+    + rank: int?
+    + estimatedTariffVndPerKwh: int?
+  }
+}
+package "Auth" {
+  class AuthScope {
+    + principalId: String
+    + generation: int
+  }
+}
+package "Charging" {
+  class ChargingController {
+    - repository: ChargingRepository
+    - scope: AuthScope
+    - session: SessionSnapshot?
+    - command: CommandOutcome?
+    --
+    + start(request: StartRequest): Future<void>
+    + stop(sessionId: String, key: String): Future<void>
+    + resync(sessionId: String): Future<void>
+    + recover(key: String): Future<void>
+    + apply(snapshot: SessionSnapshot): void
+    - isCurrent(snapshot: SessionSnapshot): bool
+    + dispose(): void
+  }
+  interface ChargingRepository {
+    + start(request: StartRequest): Future<CommandOutcome>
+    + stop(sessionId: String, key: String): Future<CommandOutcome>
+    + outcome(key: String): Future<CommandOutcome>
+    + snapshot(sessionId: String): Future<SessionSnapshot>
+    + watch(sessionId: String): Stream<SessionSnapshot>
+  }
+  class CommandOutcome {
+    + scope: AuthScope
+    + commandId: String?
+    + requestKey: String
+    + status: CommandState
+    + sessionId: String?
+    + reasonCode: String?
+    + version: int
+  }
+  class StartRequest {
+    + scope: AuthScope
+    + connectorId: String
+    + vehicleId: String
+    + mode: ChargingMode
+    + limitValue: int?
+    + key: String
+  }
+  class SessionSnapshot {
+    + scope: AuthScope
+    + sessionId: String
+    + version: int
+    + observedAt: DateTime
+    + state: SessionState
+    + settlement: SettlementState
+    + energyWh: int?
+    + estimatedCostVnd: int?
+    + availableCreditVnd: int?
+    + socPercent: int?
+    + elapsedSeconds: int?
+    + connectionState: String
+    + paymentMode: String
+    + quality: String
+    + statement: Statement?
+  }
+  class Statement {
+    + scope: AuthScope
+    + sessionId: String
+    + version: int
+    + debitVnd: int
+    + balanceVnd: int
+    + earnedPoints: int
+  }
+  enum CommandState <<enumeration>> {
+    requested
+    accepted
+    rejected
+    unknown
+  }
+  enum ChargingMode <<enumeration>> {
+    autoFull
+    timed
+    energy
+    cost
+  }
+  enum SessionState <<enumeration>> {
+    pending
+    active
+    paused
+    stopping
+    closed
+    unknown
+  }
+  enum SettlementState <<enumeration>> {
+    pending
+    posted
+    review
+    notApplicable
+    unknown
+  }
+}
+package "API adapter" {
+  class ApiStationRepository {
+    - scope: AuthScope
+    --
+    + find(vehicleId: String, query: String): Future<List<StationOption>>
+    + suggest(vehicleId: String): Future<List<StationOption>>
+  }
+  class ApiChargingRepository {
+    - scope: AuthScope
+    - realtime: SessionRealtimeAdapter
+    --
+    + start(request: StartRequest): Future<CommandOutcome>
+    + stop(sessionId: String, key: String): Future<CommandOutcome>
+    + outcome(key: String): Future<CommandOutcome>
+    + snapshot(sessionId: String): Future<SessionSnapshot>
+    + watch(sessionId: String): Stream<SessionSnapshot>
+  }
+}
+package "Realtime adapter" {
+  class SessionRealtimeAdapter {
+    + watch(scope: AuthScope, sessionId: String): Stream<SessionSnapshot>
+    + close(): Future<void>
+  }
+}
+
+ApiStationRepository ..|> StationRepository
+StationsController --> StationRepository : injected
+StationsController --> AuthScope : scope
+StationRepository ..> StationOption : returns
+ChargingController --> AuthScope : scope
+ChargingController --> ChargingRepository : injected
+ApiChargingRepository ..|> ChargingRepository
+ApiChargingRepository --> SessionRealtimeAdapter : updates
+SessionRealtimeAdapter ..> SessionSnapshot : emits
+ChargingRepository ..> CommandOutcome : returns
+ChargingRepository ..> StartRequest : input
+ChargingRepository ..> SessionSnapshot : snapshots
+CommandOutcome --> CommandState : status
+StartRequest --> ChargingMode : mode
+SessionSnapshot --> "0..1" Statement : statement
+SessionSnapshot --> SessionState : state
+SessionSnapshot --> SettlementState : settlement
+@enduml
