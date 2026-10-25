@@ -34,6 +34,11 @@ export interface CsmsConfig {
   consoleHost: string;
   /** Cổng HTTP của console (0 = cổng ngẫu nhiên, dùng trong test). */
   consolePort: number;
+  /**
+   * WF-05: public OCPP base URL given to the operator at onboarding (e.g.
+   * `wss://staging.powerme.vn/ocpp`). Optional; default `ws://localhost:{ocppPort}/ocpp`.
+   */
+  ocppPublicUrl?: string;
 }
 
 /** Token DI cho CsmsConfig (dùng `@Inject(CONFIG)`). */
@@ -72,6 +77,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): CsmsConfig {
     consoleEnabled: boolEnv(env, 'CONSOLE_ENABLED', true),
     consoleHost: env['CONSOLE_HOST'] || '127.0.0.1',
     consolePort: intEnv(env, 'CONSOLE_PORT', 3000),
+    ...(env['OCPP_PUBLIC_URL'] ? { ocppPublicUrl: env['OCPP_PUBLIC_URL'] } : {}),
   };
 }
 

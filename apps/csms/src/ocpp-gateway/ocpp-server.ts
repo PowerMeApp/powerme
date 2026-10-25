@@ -24,12 +24,14 @@ import {
   Logger,
   OnApplicationBootstrap,
   OnApplicationShutdown,
+  Optional,
 } from '@nestjs/common';
 import { RPCServer } from 'ocpp-rpc';
 import type RPCServerClient from 'ocpp-rpc/lib/server-client';
 import { CONFIG, CsmsConfig } from '../config.js';
 import { ReplayDetector } from '../reconciliation/replay-detector.js';
 import { SessionsService } from '../sessions/sessions.service.js';
+import { PillarAuthService } from '../stations/pillar-auth.service.js';
 import { Connection, ConnectionRegistry } from './connection-registry.js';
 import { InboundSerializer } from './inbound-serializer.js';
 import type { InboundContext } from './inbound-context.js';
@@ -50,6 +52,8 @@ export class OcppServer implements OnApplicationBootstrap, OnApplicationShutdown
     private readonly replayDetector: ReplayDetector,
     private readonly handlers: OcppHandlers,
     private readonly sessions: SessionsService,
+    /** WF-05 (SD-5b): lifecycle + Basic-auth check. Optional so WF-03 tests can build the server without it. */
+    @Optional() private readonly pillarAuth?: PillarAuthService,
   ) {}
 
   async onApplicationBootstrap(): Promise<void> {
@@ -63,6 +67,19 @@ export class OcppServer implements OnApplicationBootstrap, OnApplicationShutdown
   async start(): Promise<void> {
     const server = new RPCServer({ protocols: ['ocpp1.6'], strictMode: true });
     server.auth(async (accept, reject, handshake) => {
+      if (this.pillarAuth) {
+        // WF-05 / SD-5b: unknown → 404, not onboarded or retired → 403, wrong credential → 401.
+        const res = await this.pillarAuth.verify(handshake.identity, handshake.password);
+        if (!res.ok) {
+          this.logger.warn(
+            `từ chối ${handshake.identity} từ ${handshake.remoteAddress ?? '?'}: ${res.status} ${res.reason}`,
+          );
+          reject(res.status, res.reason);
+          return;
+        }
+        accept({ chargePointId: res.chargePointId });
+        return;
+      }
       // Chỉ nhận trụ đã onboard (có dòng charge_points). Basic Auth (ADR-0011) chưa kiểm ở Iteration 1.
       const chargePointId = await this.registry.findChargePointId(handshake.identity);
       if (chargePointId === null) {

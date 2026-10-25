@@ -8,6 +8,7 @@ import { Module } from '@nestjs/common';
 import { DbModule } from '../db/db.module.js';
 import { ReconciliationModule } from '../reconciliation/reconciliation.module.js';
 import { SessionsModule } from '../sessions/sessions.module.js';
+import { StationsModule } from '../stations/stations.module.js';
 import { ConnectionRegistry } from './connection-registry.js';
 import { InboundSerializer } from './inbound-serializer.js';
 import { OcppHandlers } from './ocpp-handlers.js';
@@ -15,7 +16,7 @@ import { OcppMessageLogger } from './ocpp-message-logger.js';
 import { OcppServer } from './ocpp-server.js';
 
 @Module({
-  imports: [DbModule, SessionsModule, ReconciliationModule],
+  imports: [DbModule, SessionsModule, ReconciliationModule, StationsModule],
   providers: [ConnectionRegistry, InboundSerializer, OcppMessageLogger, OcppHandlers, OcppServer],
   exports: [OcppServer, ConnectionRegistry],
 })
