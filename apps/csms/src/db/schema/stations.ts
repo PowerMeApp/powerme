@@ -81,7 +81,7 @@ export const chargePoints = pgTable(
     supportsReservation: boolean('supports_reservation').notNull().default(false),
     /** Lần kết nối hiện tại; tăng 1 mỗi lần trụ nối lại. Khớp charge_point_connections.epoch. */
     currentEpoch: integer('current_epoch').notNull().default(0),
-    /** Băm argon2 của mật khẩu Basic Auth (Security Profile 2, ADR-0011). Chỉ hiển thị một lần lúc onboarding. */
+    /** Băm scrypt của mật khẩu Basic Auth, dạng `scrypt$N$r$p$salt$hash` (Security Profile 2, ADR-0011 sửa 25/10). Chỉ hiển thị một lần lúc onboarding. */
     basicAuthPasswordHash: text('basic_auth_password_hash'),
     lastMessageAt: timestamp('last_message_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),

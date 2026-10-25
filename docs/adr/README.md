@@ -21,5 +21,5 @@ Dùng [_template.md](_template.md) làm khuôn.
 | [0008](0008-drizzle-orm-migration-sql.md) | Drizzle ORM + migration SQL thuần | Chấp nhận | 11/09/2026 · chấp nhận 23/10/2026 | ORM không cản viết SQL tay cho partition / unique / append-only; chốt cùng WP5 |
 | [0009](0009-quy-uoc-du-lieu.md) | Quy ước dữ liệu | Đề xuất | 11/09/2026 | UTC `timestamptz`, hai thời điểm mỗi bản tin, Wh và VND `bigint`, connector 0/1/2, SN và `display_code`, `origin` / `payment_mode` |
 | [0010](0010-idempotency-starttransaction.md) | Idempotency của `StartTransaction` | Đề xuất | 11/09/2026 | Unique trên khoá tự nhiên; gửi lại thì trả đúng `transactionId` cũ |
-| [0011](0011-ocpp-security-profile-2.md) | Bảo mật OCPP: Security Profile 2 | Đề xuất | 11/09/2026 | TLS tại Caddy + Basic Auth riêng từng trụ, mật khẩu hiện một lần, băm argon2 |
+| [0011](0011-ocpp-security-profile-2.md) | Bảo mật OCPP: Security Profile 2 | Đề xuất | 11/09/2026 | TLS tại Caddy + Basic Auth riêng từng trụ, mật khẩu hiện một lần, băm scrypt (sửa 25/10) |
 | [0012](0012-phien-the-vi-va-free-vend.md) | Phiên sạc bằng thẻ ví và free vend | Đề xuất | 11/09/2026 | Tách `origin` và `payment_mode`; sổ đăng ký thẻ; phiên thẻ ví không thu qua VNPay |

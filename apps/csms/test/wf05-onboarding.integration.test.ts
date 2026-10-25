@@ -101,7 +101,7 @@ describeDb('WF-05 — onboard a pillar and bring it into service (SD-5a, SD-5b)'
   beforeAll(async () => {
     Logger.overrideLogger(['error']);
     db = createDb(DATABASE_URL as string);
-    // DB sạch + áp tuần tự 0000 → 0001 (cùng helper với test WF-03; code ghi cột `replayed` của 0001).
+    // Clean DB, then apply 0000 → 0001 in order (same helper as the WF-03 test; the code writes 0001's `replayed` column).
     await resetAndMigrate(db.$client);
 
     const [opA, opB] = await db
@@ -284,7 +284,7 @@ describeDb('WF-05 — onboard a pillar and bring it into service (SD-5a, SD-5b)'
     );
   });
 
-  // ---- Review PR #33, quyết định 2: trụ chưa có credential ---------------------------------
+  // ---- Review of PR #33, decision 2: pillar with no credential on file ----------------------
 
   it('a pillar with no credential on file: 401 by default, accepted only with ALLOW_LEGACY_NO_CREDENTIAL', async () => {
     await db
@@ -298,7 +298,7 @@ describeDb('WF-05 — onboard a pillar and bring it into service (SD-5a, SD-5b)'
     expect(strict).toMatchObject({ ok: false, status: 401 });
 
     const defaulted = await new PillarAuthService(db, CONFIG).verify('LEGACY-SEED-0001', undefined);
-    expect(defaulted).toMatchObject({ ok: false, status: 401 }); // CONFIG của test không bật
+    expect(defaulted).toMatchObject({ ok: false, status: 401 }); // the test CONFIG leaves it off
 
     const legacy = await new PillarAuthService(db, {
       ...CONFIG,

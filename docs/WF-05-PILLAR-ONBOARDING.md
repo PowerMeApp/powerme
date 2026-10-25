@@ -23,10 +23,10 @@ Error → HTTP status for the future controller: `ONBOARDING_ERROR_STATUS` (403 
 
 Run: `npm run demo:db -w @powerme/csms` in one terminal, then `DATABASE_URL=postgresql://powerme:powerme@127.0.0.1:54330/powerme_test npm test -w @powerme/csms`.
 
-## Decisions for the reviewer (Trí)
+## Decisions taken in the review of PR #33 (Trí, 25/10)
 
-1. **scrypt instead of argon2** for the pillar credential: `node:crypto`, no native add-on on Windows dev machines. The stored format `scrypt$N$r$p$salt$hash` is self-describing, so argon2 can be added later under its own prefix. ADR-0011 wording to update if accepted.
-2. **Pillars without a credential are still accepted** (with a warning): `demo/seed.sql` and the WF-03 trace pillar were created before WF-05. Make it a hard 401 once the seed goes through `onboard()`.
+1. **scrypt instead of argon2** for the pillar credential: `node:crypto`, no native add-on on Windows dev machines. The stored format `scrypt$N$r$p$salt$hash` is self-describing, so argon2 can be added later under its own prefix. **Accepted**; ADR-0011 amended.
+2. **Pillars without a credential are refused (401) by default** (PR #35): accepted with a warning only when `ALLOW_LEGACY_NO_CREDENTIAL=true`, for `demo/seed.sql` and the WF-03 trace pillar, which were created before WF-05.
 3. `PillarAuthService` is injected into `OcppServer` as `@Optional()`, so the WF-03 and console tests build the server unchanged.
 
 ## Not in this slice (Known gaps, Design Brief §5)
@@ -36,3 +36,8 @@ Run: `npm run demo:db -w @powerme/csms` in one terminal, then `DATABASE_URL=post
 - GetConfiguration after Boot (SoC reporting, free-vend tag) and saving model / firmware from BootNotification.
 - Disable / enable / decommission endpoints (STM-3 #4–#6 are in the policy and unit-tested).
 - Operator dashboard screen for onboarding (Nghĩa, WP4).
+
+## Security limits today (follow-up of the PR #33 review)
+
+- **No TLS yet.** The CSMS listens on `ws://`, so the Basic-auth password travels in clear text. Security Profile 2 (ADR-0011) is the target; it is reached when Caddy terminates TLS on staging (T04). Until then, connect pillars and the simulator on the dev network only.
+- **No rate limit on failed pillar logins.** Anyone who knows a serial can try passwords without delay. The password has ~144 bits of entropy, so guessing is not practical, but repeated failures still cost a scrypt hash each (CPU). Tracked as an issue to close before staging opens: limit failures per serial and per IP (e.g. 5 per minute, then 429 for 15 minutes) and log them for the audit log.
