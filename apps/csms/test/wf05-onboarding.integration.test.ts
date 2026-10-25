@@ -267,6 +267,25 @@ describeDb('WF-05 — onboard a pillar and bring it into service (SD-5a, SD-5b)'
     );
   });
 
+  it('pillars onboarded at the same time in one province get distinct display codes', async () => {
+    const serials = [78, 79, 80, 81, 82, 83].map((n) => `RH24D1-000${n}`);
+    for (const s of serials) {
+      await onboarding.registerDevice(adminId, { serialNumber: s, model: 'D1-120' });
+    }
+    const results = await Promise.all(
+      serials.map((s) =>
+        onboarding.onboard(staffAId, {
+          serialNumber: s,
+          siteId: siteAId,
+          connectors: [{ connectorNo: 1 }],
+        }),
+      ),
+    );
+    expect(results.map((r) => r.displayCode).sort()).toEqual(
+      [2, 3, 4, 5, 6, 7].map((n) => `PM-D1-HCM-000${n}`),
+    );
+  });
+
   // ---- SD-5b: first connection -----------------------------------------------------------
 
   it('wrong or missing credential → 401, pillar stays awaiting_connection', async () => {

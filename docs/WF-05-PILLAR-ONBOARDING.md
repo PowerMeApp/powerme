@@ -15,11 +15,11 @@ Design: Report 4 §3.6 (CD-5, SD-5a, SD-5b), AD-8 v2.0, STM-3 v0.3 (ADR-0016) ·
 
 Error → HTTP status for the future controller: `ONBOARDING_ERROR_STATUS` (403 other operator's site, 404 site missing, 409 serial not registered / already onboarded, 400 bad connectors).
 
-## Tests (26 new, all automated in CI)
+## Tests (27 new, all automated in CI)
 
 - `src/stations/pillar-lifecycle-policy.spec.ts` — TC-STM3-01..06 (one per transition) + 6 refused moves + `mayConnect` (15 cases).
 - `src/stations/pillar-credential.spec.ts` — generation, salted hash, verify string/Buffer, wrong/missing/malformed (4).
-- `test/wf05-onboarding.integration.test.ts` — the whole workflow on Postgres and a real OCPP-J WebSocket (`ocpp-rpc` client with Basic auth): Admin-only registry, not-onboarded pillar refused (403), 5 onboarding rejections with nothing written, success, double onboarding (409), wrong / missing credential (401), right credential → Boot Accepted, `in_service`, both connectors `Available` (7).
+- `test/wf05-onboarding.integration.test.ts` — the whole workflow on Postgres and a real OCPP-J WebSocket (`ocpp-rpc` client with Basic auth): Admin-only registry, not-onboarded pillar refused (403), 5 onboarding rejections with nothing written, success, double onboarding (409), 6 concurrent onboardings in one province get distinct display codes, wrong / missing credential (401), right credential → Boot Accepted, `in_service`, both connectors `Available` (8).
 
 Run: `npm run demo:db -w @powerme/csms` in one terminal, then `DATABASE_URL=postgresql://powerme:powerme@127.0.0.1:54330/powerme_test npm test -w @powerme/csms`.
 

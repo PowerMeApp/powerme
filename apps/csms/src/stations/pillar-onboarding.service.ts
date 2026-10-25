@@ -235,6 +235,11 @@ export class PillarOnboardingService {
   /**
    * `PM-{model}-{province}-{nnnn}` (ADR-0009). Model = text before the first '-' of the model
    * (D1-120 → D1); province = text before the first '-' of the site code (HCM-DEMO-01 → HCM).
+   *
+   * The sequence is per province and `display_code` is UNIQUE, so two onboardings in the same
+   * province would otherwise read the same number. A transaction-scoped advisory lock keyed on the
+   * province serialises them; the next number is the highest existing suffix + 1 (not a count, so
+   * a gap never makes it reuse a code).
    */
   private async nextDisplayCode(
     tx: Parameters<Parameters<Db['transaction']>[0]>[0],
@@ -244,8 +249,11 @@ export class PillarOnboardingService {
     const clean = (s: string) => s.toUpperCase().replace(/[^A-Z0-9]/g, '');
     const m = clean((model ?? '').split('-')[0] ?? '') || 'XX';
     const prov = clean(siteCode.split('-')[0] ?? '') || 'VN';
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`display_code:${prov}`}))`);
     const [agg] = await tx
-      .select({ n: sql<number>`count(*)` })
+      .select({
+        n: sql<number>`coalesce(max(substring(${chargePoints.displayCode} from '([0-9]+)$')::int), 0)`,
+      })
       .from(chargePoints)
       .where(like(chargePoints.displayCode, `PM-%-${prov}-%`));
     const seq = String(Number(agg?.n ?? 0) + 1).padStart(4, '0');
