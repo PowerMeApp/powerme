@@ -6,13 +6,13 @@ Ngày hạn và người chịu trách nhiệm là **đề xuất của Trí (WP
 
 | ID | Mức | Phản hồi | Người chịu trách nhiệm | Hạn | Lý do / việc làm / commit |
 |---|---|---|---|---|---|
-| F01 | High | Planned | Ân (WP1) | 26/10 | Phiếu đăng ký, SRS, SDD nằm ngoài repo (Drive của WP1). Ân đưa bản sao vào `docs/requirements/`. Cũng nằm ở Known Gap G12. |
+| F01 | High | Fixed + Planned | Ân (WP1) | 27/10 | Phiếu v1.2, Report 1 và SRS (Report 3, có UC-ADM-08) đã vào `docs/requirements/`, kèm bảng FR → UC; nguồn sơ đồ SDD ở `diagrams/` — [67e95bd](https://github.com/PowerMeApp/powerme/commit/67e95bd3cf8b02e6c69e1933f8250eb33808fa00) (PR #34). Còn lại: bản PDF Report 4 (SDD) đưa vào `docs/requirements/` sau khi các thành viên trả lời các điểm review. Known Gap G12 đóng phần phiếu/SRS. |
 | F02 | Medium | Planned | Ân + Trí | 26/10 | Gắn mã FR từ phiếu v1.2 vào bảng tính năng bắt buộc của Design Brief §6. |
-| F03 | Medium | Planned | Ân (WP1) | 26/10 | Cần SRS trong repo mới kiểm được; tiêu chí chấp nhận của 8 tính năng WP2 đã có. |
+| F03 | Medium | Fixed | Ân (WP1) | — | SRS trong repo (`docs/requirements/report3-srs.md`): mỗi FR có actor và use case; bảng FR → UC ở `docs/requirements/README.md` — [67e95bd](https://github.com/PowerMeApp/powerme/commit/67e95bd3cf8b02e6c69e1933f8250eb33808fa00). |
 | F04 | Medium | Planned | Trí + Khang | 20/11 | Dựng công cụ đo (prom-client, k6) ở Iteration 2. Known Gap G15. |
 | F05 | Medium | Fixed + Planned | Trí | 14/11 | Đã rút lại câu "≤ 60 s khi mất ping" khỏi Design Brief, chốt một nghĩa duy nhất (socket đóng = đã làm; 900 s = chưa có timer) — [fa21e54](https://github.com/PowerMeApp/powerme/commit/fa21e54e65939f913d0edb26ca4be83a171354d9). Cài timer 900 s ở Iteration 2. |
 | F06 | Medium | Fixed + Planned | Trí | 31/10 | Sửa khẳng định sai "DB từ chối Wh không nguyên" — [fa21e54](https://github.com/PowerMeApp/powerme/commit/fa21e54e65939f913d0edb26ca4be83a171354d9). Chốt chính sách làm tròn cho ADR-0009 quy ước 3 (phụ lục). |
-| F07 | Medium | Planned | Ân (WP1) | 26/10 | Logical ERD (T10) đưa vào `diagrams/erd/` trong repo. |
+| F07 | Medium | Fixed | Ân (WP1) | — | Logical ERD LERD-1 v0.3 và LERD-2 ở `diagrams/erd/`; các điểm khác code ghi trong `diagrams/README.md` — [67e95bd](https://github.com/PowerMeApp/powerme/commit/67e95bd3cf8b02e6c69e1933f8250eb33808fa00). |
 | F08 | Medium | Fixed + Planned | Trí | 14/11 | Bảng `remote_commands` đã có trong migration 0001 — [e56d51a](https://github.com/PowerMeApp/powerme/commit/e56d51a801546ebed91c7c4a8c7d289a931db109). Code phát lệnh (BE-04) vẫn Planned. |
 | F09 | Medium | Fixed | Trí | — | Thêm `sessions.orphaned_at`, `meter_values.replayed/epoch`, `ocpp_message_log.replayed`, ghi từ ReplayVerdict — [e56d51a](https://github.com/PowerMeApp/powerme/commit/e56d51a801546ebed91c7c4a8c7d289a931db109). |
 | F10 | Medium | Fixed | Trí | — | Enum `record_type` có `conflict` và `late_sample`; code và console đã chuyển (vẫn đọc bản ghi cũ) — [e56d51a](https://github.com/PowerMeApp/powerme/commit/e56d51a801546ebed91c7c4a8c7d289a931db109). |
@@ -26,11 +26,11 @@ Ngày hạn và người chịu trách nhiệm là **đề xuất của Trí (WP
 | F18 | High | Planned | Trí | 07/11 | Đường giải quyết `review` do operator (OPERATOR_RESOLVED). Known Gap G2. |
 | F19 | High | Planned | Trí | 14/11 | RemoteStart/Stop, start timeout, hard cap 24 h. Known Gap G2. |
 | F20 | Low | Kept | Trí | — | Xác nhận nhất quán, không cần hành động. |
-| F21 | High | Planned | Trí + Nghĩa | 14/11 | Luồng onboarding và disable của trụ. Known Gap G11. |
+| F21 | High | Fixed + Planned | Ân (WP1), Trí review | 14/11 | Onboarding đã có: `registered` → `awaiting_connection` → `in_service`, credential Basic Auth kiểm tra khi kết nối (404/403/401), trụ `registered`/`decommissioned` bị từ chối, 26 test — [baf03a5](https://github.com/PowerMeApp/powerme/commit/baf03a56f3515ad5a4dad44f44259d6e949391de) (PR #33, #35). Còn Planned: endpoint HTTP (chờ module `users` + RolesGuard), disable/enable/decommission, `ConnectionRegistry.open()` không được bật lại trụ `disabled` (T61). Known Gap G11 thu hẹp. |
 | F22 | Medium | Planned | Trí | 31/10 | `classifyIdTag` và Authorize phải xét `card.status` (unlinked/blocked). |
 | F23 | Medium | Planned | Trí | 31/10 | Đối chiếu bảng chuyển trạng thái connector với OCPP 1.6 §4.9 bản gốc; hiện viết theo hiểu biết. |
-| F24 | Low | Planned | Ân (WP1) | 26/10 | Gắn UC/FR cho chuyển #9a, #18, #19 của STM-1. |
-| F25 | Medium | Planned | Ân (WP1) | 26/10 | Activity diagram AD-1…AD-8 đưa vào `diagrams/` dạng mã nguồn. Known Gap G12. |
+| F24 | Low | Fixed | Ân (WP1) | — | Bảng truy vết 22 chuyển STM-1 → UC/FR: #9a → UC-CHG-03, UC-OPS-04 / FR-04, FR-11; #18 → UC-INT-03 / FR-16; #19 → UC-INT-03, UC-OPS-05 / FR-16, FR-13 (`docs/requirements/README.md`) — [67e95bd](https://github.com/PowerMeApp/powerme/commit/67e95bd3cf8b02e6c69e1933f8250eb33808fa00). |
+| F25 | Medium | Fixed | Ân (WP1) | — | AD-1…AD-8 dạng PlantUML ở `diagrams/ad/` (render được với PlantUML 1.2024.7) — [67e95bd](https://github.com/PowerMeApp/powerme/commit/67e95bd3cf8b02e6c69e1933f8250eb33808fa00). |
 | F26 | High | Planned | Khang (WP5) | 21/11 | Tính giá, trừ ví, cộng điểm, statement. Known Gap G17. |
 | F27 | High | Planned | Trí | 14/11 | Phát lệnh RemoteStart/Reset/Unlock/Change/GetConfiguration từ sản phẩm. Known Gap G17. |
 | F28 | Medium | Planned | Nghĩa + Trí | 21/11 | Luồng fault_events / fault_reports. |
@@ -55,6 +55,6 @@ Ngày hạn và người chịu trách nhiệm là **đề xuất của Trí (WP
 
 ## Thống kê
 
-- Tổng số điểm: **46**. Theo phản hồi: **Fixed** = 5, **Fixed + Planned** = 5, **Kept** = 4, **Planned** = 32 (cập nhật 25/10/2026 sau migration 0001; trước đó Fixed = 5, Kept = 3, Planned = 38).
-- Điểm mức **High**: F01, F18, F19, F21, F26, F27, F31, F37 — không điểm nào ở trạng thái Fixed; tất cả là việc chưa làm hoặc tài liệu nằm ngoài repo, và đều đã vào Known Gaps.
+- Tổng số điểm: **46**. Theo phản hồi: **Fixed** = 9, **Fixed + Planned** = 7, **Kept** = 4, **Planned** = 26 (cập nhật 25/10/2026 sau PR #33, #34 của WP1; trước đó sau migration 0001: Fixed = 5, Fixed + Planned = 5, Kept = 4, Planned = 32).
+- Điểm mức **High**: F01, F18, F19, F21, F26, F27, F31, F37 — F01 và F21 đã Fixed một phần (Fixed + Planned, phần còn lại có người và hạn); 6 điểm còn lại là việc chưa làm và đều đã vào Known Gaps.
 - Commit sửa tài liệu theo báo cáo này: [fa21e54](https://github.com/PowerMeApp/powerme/commit/fa21e54e65939f913d0edb26ca4be83a171354d9) (merge sau khi gắn tag `review-2`; tag không bị di chuyển).
