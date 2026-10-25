@@ -1,0 +1,15 @@
+@startuml fig08_ucd_int
+!include style.iuml
+left to right direction
+actor "Charging Pillar" as CP <<system>>
+rectangle "PowerMe Platform — Pillar Integration" {
+  usecase "UC-INT-01\nConnect Pillar to Platform" as I1
+  usecase "UC-INT-02\nAuthorize Charging Card" as I2
+  usecase "UC-INT-03\nReport Charging Transaction" as I3
+  usecase "UC-INT-04\nReport Connector Status" as I4
+}
+CP -- I1
+CP -- I2
+CP -- I3
+CP -- I4
+@enduml

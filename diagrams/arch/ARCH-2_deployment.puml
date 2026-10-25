@@ -1,0 +1,51 @@
+@startuml ARCH-2_deployment
+!include _arch_style.iuml
+title ARCH-2 Deployment diagram: staging (Review 2 demo environment)\n<size:11>UML 2.5 deployment · one VPS, Docker Compose · production follows the same layout</size>
+
+node "Driver phone\n<<device>>\nAndroid / iOS" as phone {
+  artifact "PowerMe Driver App\n(Flutter build)" as appA
+}
+node "Operator / Admin PC\n<<device>>" as pc {
+  artifact "Web browser" as br
+}
+node "Developer / CI\n<<execution environment>>\nGitHub Actions" as ci {
+  artifact "CI workflow:\nlint, unit + e2e tests,\nbuild images" as wf
+}
+
+node "Staging VPS\n<<device>>\nUbuntu 24.04 LTS, region Singapore" as vps {
+  node "Docker Engine + Compose\n<<execution environment>>" as dk {
+    node "caddy\n<<container>>" as caddy {
+      artifact "Caddy 2: TLS (Let's Encrypt),\nreverse proxy, static web build" as cad
+    }
+    node "csms\n<<container>>" as csms {
+      artifact "apps/csms NestJS (Node.js 24):\nREST + Socket.IO :3000, OCPP WS :3001" as nest
+    }
+    node "postgres\n<<container>>" as pg {
+      artifact "PostgreSQL 16.4\n+ volume pgdata" as pga
+    }
+    node "redis\n<<container>>" as rd {
+      artifact "Redis 7.4\n(Socket.IO adapter, BullMQ)" as rda
+    }
+    node "simulator\n<<container>>" as sim {
+      artifact "SAP e-mobility charging\nstations simulator (OCPP 1.6J)" as sima
+    }
+  }
+  artifact "deploy.sh / rollback.sh\nseed script" as scripts
+}
+
+cloud "External services" as ext {
+  node "VNPay sandbox" as vnp
+  node "E-invoice sandbox" as einv
+  node "Map & routing API" as map
+  node "FCM" as fcm
+}
+
+phone --> caddy : HTTPS 443 / WSS
+pc --> caddy : HTTPS 443 / WSS
+caddy --> csms : HTTP :3000 /api, /realtime\nWS :3001 /ocpp (internal)
+sim --> caddy : WSS 443 /ocpp/{serialNumber}
+csms --> pg : TCP 5432 (internal)
+csms --> rd : TCP 6379 (internal)
+csms --> ext : HTTPS
+ci --> vps : SSH: pull image tag,\ncompose up, migrate, seed
+@enduml

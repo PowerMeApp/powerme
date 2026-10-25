@@ -1,0 +1,51 @@
+@startuml SD-5b_first_connection
+!include _seq.iuml
+title SD-5b (WF-05) Pillar connects for the first time and goes into service\n<size:11>STM-3 #3 awaiting_connection → in_service · STM-2 Unavailable → Available · FR-09, FR-16 · UC-INT-01</size>
+autonumber
+participant "Charging Pillar\n(simulator)" as cp <<external>>
+box "ocpp-gateway" #FAFBFD
+participant "OcppServer\n(ocpp-rpc)" as gw
+participant "Connection\nRegistry" as reg
+participant "OcppHandlers" as h
+end box
+box "stations" #FAFBFD
+participant "PillarAuth\nService" as auth
+participant "PillarLifecycle\nPolicy" as pol
+end box
+box "sessions" #FAFBFD
+participant "Sessions\nService" as ses
+end box
+database "PostgreSQL" as db
+
+cp -> gw : WSS /ocpp/{serialNumber}\nBasic auth (serial : password)
+gw -> auth : verify(identity, password)
+auth -> db : SELECT id, lifecycle, basic_auth_password_hash
+alt unknown serial
+  auth --> gw : 404
+else lifecycle registered / decommissioned
+  auth -> pol : mayConnect(lifecycle) → false
+  auth --> gw : 403
+else hash on file and password wrong or missing
+  auth --> gw : 401 (scrypt, constant-time compare)
+else credential valid
+  auth --> gw : ok(chargePointId)
+  gw -> reg : open(identity, client)
+  reg -> db : INSERT charge_point_connections (epoch = MAX + 1)\nUPDATE charge_points SET lifecycle = in_service
+  gw --> cp : 101 Switching Protocols (ocpp1.6)
+  cp -> gw : BootNotification.req
+  gw -> db : INSERT ocpp_message_log (before the handler)
+  gw -> h : dispatch(BootNotification)
+  h --> cp : Accepted, interval 300 s
+  loop connectorId 1..2
+    cp -> gw : StatusNotification.req (Available)
+    gw -> h : dispatch(StatusNotification)
+    h -> ses : onStatusNotification
+    ses -> db : INSERT connector_status_events\nUPDATE connectors SET status = Available
+    h --> cp : StatusNotification.conf
+  end
+end
+note over gw, auth
+  Rejections are logged (Logger.warn); an audit-log table is planned.
+  Pillars seeded before WF-05 (no hash) are accepted with a warning.
+end note
+@enduml

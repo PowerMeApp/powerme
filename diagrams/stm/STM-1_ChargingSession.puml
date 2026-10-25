@@ -1,0 +1,33 @@
+@startuml STM-1_ChargingSession
+!include _style.iuml
+title STM-1 ChargingSession lifecycle (System level)\nsessions.status · v0.5 · 25/10/2026 · = SessionStateMachine at tag review-2 (22 transitions, T13)
+[*] --> pending : (1) REMOTE_START_ACCEPTED\n[connector free, credit ≥ start minimum]
+[*] --> active : (2) START_TRANSACTION\n(started at the pillar, no pending match)\n/ stamp origin, payment_mode
+pending --> active : (3) START_TRANSACTION
+pending --> failed : (4) START_TIMEOUT\n[no StartTransaction in SESSION_START_TIMEOUT_S]
+active --> paused : (5) STATUS_SUSPENDED
+paused --> active : (6) STATUS_CHARGING
+active --> stopping : (7) STOP_REQUESTED\n/ send RemoteStop
+paused --> stopping : (8) STOP_REQUESTED\n/ send RemoteStop
+stopping --> active : (9a) REMOTE_STOP_REJECTED\n(OCPP 1.6 RemoteStop Rejected)
+stopping --> closed : (9) STOP_TRANSACTION
+active --> closed : (10) STOP_TRANSACTION\n[stopped at the pillar]
+paused --> closed : (11) STOP_TRANSACTION
+closed --> reconciled : (12) RECONCILE_OK\n/ price, debit, points, statement
+closed --> review : (12a) RECONCILE_CONFLICT\n/ billing held
+active --> orphaned : (13) STATION_OFFLINE
+paused --> orphaned : (14) STATION_OFFLINE
+stopping --> orphaned : (15) STATION_OFFLINE
+orphaned --> reconciled : (16) RECONCILE_OK\n[replayed StopTransaction consistent\nor gap_detected]
+orphaned --> review : (16a) RECONCILE_CONFLICT\nor HARD_CAP_EXCEEDED
+orphaned --> active : (18) LIVE_MESSAGE\n[live message after reconnect, no stop yet]
+review --> reconciled : (17) OPERATOR_RESOLVED\n(accept meter_stop / accept series / void)
+reconciled --> review : (19) LATE_SAMPLE_CONFLICT\n[late replayed samples change the verdict,\nno debit yet]
+failed --> [*]
+reconciled --> [*]
+note right of orphaned
+  ADR-0016 target (T61, Trí): socket close starts an
+  offline grace period; #13–#15 fire only when it expires
+  Then orphaned → active (#18) covers the reconnect case.
+end note
+@enduml

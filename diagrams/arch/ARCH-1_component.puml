@@ -1,0 +1,64 @@
+@startuml ARCH-1_component
+!include _arch_style.iuml
+title ARCH-1 Component diagram: PowerMe platform and external services\n<size:11>v1.1 · module names from WP2 package diagram (apps/csms, modular monolith, ADR-0002) · dashed yellow = module decided 24/10 (ADR-0016), not in the WP2 package diagram yet</size>
+
+actor "Driver" as drv
+actor "Operator staff" as opr
+actor "Admin" as adm
+
+package "PowerMe platform" {
+  component "Driver App\n<size:10>Flutter (WP3), Dart client generated from openapi.json</size>" as app
+  component "Operator Dashboard &\nAdmin Console\n<size:10>React + Vite (WP4)</size>" as web
+  component "Caddy 2\n<size:10>TLS termination, path routing</size>\n<size:10>(ADR-0011 Security Profile 2)</size>" as caddy
+
+  package "apps/csms (NestJS, one process)" {
+    component "ocpp-gateway\n<size:10>ocpp-rpc 2.2.1, connection registry</size>\n<size:10>(identity → socket, epoch), replay detector,</size>\n<size:10>logs ocpp_message_log before handlers</size>" as ocpp
+    component "stations\n<size:10>charge_points, connectors, remote_commands;</size>\n<size:10>onboarding, remote commands (202 + commandId);</size>\n<size:10>FaultService: fault_events, fault_reports (WP4)</size>" as st
+    component "sessions\n<size:10>sessions, meter_values; idempotent</size>\n<size:10>StartTransaction (ADR-0010), origin/payment_mode</size>" as ses
+    component "reconciliation\n<size:10>replay, duplicate, meter_gap, orphan_stop;</size>\n<size:10>reconciliation_records</size>" as rec
+    component "users\n<size:10>JWT, roles, RolesGuard; rfid_cards</size>" as usr
+    component "billing (WP5)\n<size:10>money, invoices, adjustments, VNPay IPN;</size>\n<size:10>+ Charging Credit ledger, top-ups, loyalty</size>" as bil
+    component "tariffs (WP5)" as tar
+    component "realtime\n<size:10>Socket.IO gateway, listens to events only</size>" as rt
+    component "suggestions (Sơn)\n<size:10>read-only ranking, routing API</size>" <<new>> as sug
+  }
+  database "PostgreSQL 16.4\n<size:10>Drizzle; each module owns its tables</size>" as db
+  database "Redis 7.4\n<size:10>Socket.IO adapter, BullMQ jobs</size>" as redis
+}
+
+rectangle "Charging Pillar\n(SAP simulator for tests)" <<external>> as cp
+rectangle "VNPay sandbox" <<external>> as vnp
+rectangle "E-Invoice Provider\n(sandbox)" <<external>> as einv
+rectangle "Map & Routing\nService" <<external>> as map
+
+drv --> app
+opr --> web
+adm --> web
+app --> caddy : HTTPS /api/v1, Socket.IO /realtime
+web --> caddy : HTTPS /api/v1, /api/admin, Socket.IO
+cp --> caddy : OCPP-J 1.6 WSS /ocpp/{serialNumber}\nBasic auth
+vnp --> caddy : HTTP IPN /api/v1/billing/vnpay/ipn
+caddy --> ocpp : WS :3001 /ocpp/*
+caddy --> st : HTTP :3000 /api/*
+ocpp --> st : Boot / Status / Heartbeat
+ocpp --> ses : Authorize / Start / Meter / Stop
+ses --> usr : look up rfid_cards
+ses --> rec : transaction.stopped (in-process event)
+rec --> ses : resolve / flagForReview
+ses --> bil : transaction.stopped / amended
+bil --> tar : TariffsService
+bil --> vnp : payment URL
+bil --> einv : invoice data
+sug --> map : travel times
+st ..> rt : alert.* events
+ses ..> rt : transaction.* events
+st ..> rt : station.* events
+rt --> redis : pub/sub fan-out (ADR-0006)
+rec --> redis : BullMQ durable jobs
+bil --> redis : BullMQ durable jobs
+ocpp ..> db
+st ..> db
+ses ..> db
+rec ..> db
+bil ..> db
+@enduml

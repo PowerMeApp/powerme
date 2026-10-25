@@ -1,0 +1,57 @@
+@startuml WF01-seq
+!include _team.iuml
+title WF-01 Sequence diagram: charging session in the Driver App (module level)
+footer Content: Lý Hoàng Sơn (WP3), t22-wf01-sequence 24/10/2026 · redrawn in the Report 4 diagram style, content unchanged
+autonumber
+hide footbox
+actor "Driver" as drv
+box "Flutter Driver App / WP3" #FAFBFD
+participant "Stations" as st
+participant "Charging" as chg
+participant "API adapter" as api
+participant "Realtime adapter" as rt
+end box
+box "External" #F4F4F4
+participant "WP2 Backend\n(external)" as be <<external>>
+end box
+
+note over drv, be : Precondition: authenticated Driver, consent and owned vehicle selected.
+drv -> st : Find / suggest
+st -> api : Find / suggest (vehicle)
+api -> be : Find / suggest (vehicle)
+be --> api : Ranked options + freshness
+api --> st : Ranked options + freshness
+drv -> chg : QR connector + mode / limit
+chg -> api : Check credit & start
+api -> be : Validate credit & start (key)
+be --> api : Start outcome
+api --> chg : Start outcome
+alt insufficient credit / rejected / unknown
+  chg -> drv : WF-02 if low credit; else recover
+else Accepted
+  chg -> drv : Start pending
+  be -> rt : Active confirmed
+  rt -> chg : Active confirmed
+  chg -> drv : Active
+  loop session active; updates arrive
+    be -> rt : Progress + freshness
+    rt -> chg : Progress + freshness
+    chg -> drv : Progress + freshness
+  end
+  drv -> chg : Stop
+  chg -> api : Request stop
+  api -> be : Request stop (key)
+  be --> api : Stop outcome
+  api --> chg : Stop outcome
+  alt Accepted
+    chg -> drv : Stop pending
+  else rejected / unknown
+    chg -> drv : Rejected / unknown; no Closed
+  end
+  opt server confirms closed + settled csms_billed
+    be -> rt : Closed + settled; statement / points
+    rt -> chg : Closed + settled; statement / points
+    chg -> drv : Statement / balance / points
+  end
+end
+@enduml

@@ -1,0 +1,23 @@
+' PowerMe use-case diagram style (Report 3 Fig. 2-8): monochrome UML
+skinparam shadowing false
+skinparam defaultFontName "DejaVu Sans"
+skinparam defaultFontSize 15
+skinparam dpi 450
+skinparam actorStyle stick
+skinparam usecase {
+  BackgroundColor #FFFFFF
+  BorderColor #000000
+  BorderThickness 1.5
+}
+skinparam actor {
+  BackgroundColor #FFFFFF
+  BorderColor #000000
+}
+skinparam rectangle {
+  BackgroundColor #FFFFFF
+  BorderColor #000000
+  BorderThickness 1.5
+  FontStyle bold
+}
+skinparam ArrowColor #000000
+skinparam stereotypeFontSize 14

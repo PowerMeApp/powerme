@@ -1,0 +1,240 @@
+@startuml LERD-1_Charging-Billing
+!include _erd_style.iuml
+title LERD-1 Logical ERD: Charging & Billing (crow's foot, 3NF)\nPK = identifier · {BK} = business key · {U} = unique · (FK) = reference · /x = derived, stored as snapshot · v0.3 · 24/10/2026 (WF-02 billing attributes, Khang)
+
+entity User {
+  * UserId
+  --
+  Email {BK}
+  FullName
+  PhoneNumber
+  AccountStatus
+  CreatedAt
+}
+entity Driver {
+  * UserId (FK)
+  --
+  ConsentVersion
+  ConsentGivenAt
+}
+entity VehicleModel {
+  * VehicleModelId
+  --
+  Brand + ModelName {BK}
+  ConnectorType
+  BatteryCapacityKwh
+  RatedRangeKm
+  MaxDcKw
+  IsVinFast
+}
+entity Vehicle {
+  * VehicleId
+  --
+  PlateNumber {BK}
+  Driver (FK)
+  VehicleModel (FK)
+  IsDefault
+}
+entity RfidCard {
+  * RfidCardId
+  --
+  CardIdentifier {BK}
+  CardKind
+  Driver (FK, optional)
+  CardStatus
+  IssuedAt
+}
+entity Connector {
+  * ConnectorId
+  --
+  ChargingPillar (FK) + ConnectorNo {BK}
+  ConnectorType
+  MaxPowerKw
+  ConnectorStatus
+  StatusChangedAt
+}
+entity ChargingSession {
+  * SessionId
+  --
+  ChargingPillar + Connector + IdTag + MeterStartWh + CpTimestamp {BK}
+  Driver (FK, optional)
+  Vehicle (FK, optional)
+  Promotion (FK, optional)
+  Origin
+  PaymentMode
+  BillingMode
+  LimitValue
+  SessionStatus
+  StartedAt
+  StoppedAt
+  OrphanedAt
+  MeterStartWh
+  MeterStopWh
+  StopReason
+  DeliveredOffline
+  /EnergyWh
+  /TotalCostVnd
+}
+entity SessionPause {
+  * SessionPauseId
+  --
+  ChargingSession (FK) + PausedAt {BK}
+  ResumedAt
+  PauseCause
+}
+entity MeterReading {
+  * MeterReadingId
+  --
+  ChargingSession (FK) + CpTimestamp + Measurand {BK}
+  ValueWh
+  ReceivedAt
+  Epoch
+  Replayed
+}
+entity TariffPeriod {
+  * TariffPeriodId
+  --
+  Operator (FK) + Band + TimeRange {BK}
+  PricePerKwhVnd
+  EffectiveFrom
+  EffectiveTo
+}
+entity SessionTariffSegment {
+  * ChargingSession (FK)
+  * TariffPeriod (FK)
+  --
+  SegmentStart
+  SegmentEnd
+  EnergyWh
+  AmountVnd
+}
+entity Promotion {
+  * PromotionId
+  --
+  PromotionCode {BK}
+  Operator (FK)
+  DiscountType
+  DiscountValue
+  ValidFrom
+  ValidTo
+}
+entity ReconciliationRecord {
+  * ReconciliationRecordId
+  --
+  ChargingSession (FK) + CreatedAt {BK}
+  RecordType
+  GapStart
+  GapEnd
+  EnergyDifferenceWh
+  MessageLogRef (optional)
+  Resolution
+  ResolvedBy (FK, optional)
+}
+entity CreditAccount {
+  * CreditAccountId
+  --
+  Driver (FK) {BK}
+  AccountStatus
+  /BalanceVnd
+  ClosedAt (optional)
+  ClosureRefundedAt (optional)
+}
+entity CreditTransaction {
+  * CreditTransactionId
+  --
+  CreditAccount (FK) + EntryNo {BK}
+  TransactionType
+  AmountVnd
+  /BalanceAfterVnd
+  ChargingSession (FK, optional)
+  TopUp (FK, optional)
+  CreatedAt
+}
+entity TopUp {
+  * TopUpId
+  --
+  GatewayReference {BK}
+  CreditAccount (FK)
+  AmountVnd
+  PointsRedeemed
+  PointsDiscountVnd
+  /AmountPaidVnd
+  TopUpStatus
+  IdempotencyKey {U}
+  GatewayTransactionNo (optional)
+  CreatedAt
+  ExpiresAt
+  CompletedAt
+  RefundedAt (optional)
+  RefundedBy (FK Admin, optional)
+  LateGatewayRef {U} (optional)
+  LatePaidAt (optional)
+  LateAmountVnd (optional)
+  LateRefundedAt (optional)
+}
+entity EInvoice {
+  * EInvoiceId
+  --
+  InvoiceNo {BK}
+  TopUp (FK) {U}
+  InvoiceStatus
+  AmountVnd
+  VatAmountVnd
+  IssuedAt
+  AttemptCount
+  LastErrorKind (optional)
+  LastErrorMessage (optional)
+  LastAttemptAt (optional)
+}
+entity InvoiceAdjustment {
+  * InvoiceAdjustmentId
+  --
+  EInvoice (FK) + AdjustmentNo {BK}
+  Reason
+  AmountVnd
+  IssuedAt
+}
+entity LoyaltyAccount {
+  * LoyaltyAccountId
+  --
+  Driver (FK) {BK}
+  /PointsBalance
+}
+entity LoyaltyTransaction {
+  * LoyaltyTransactionId
+  --
+  LoyaltyAccount (FK) + EntryNo {BK}
+  TransactionType
+  Points
+  ExpiresAt
+  ChargingSession (FK, optional)
+  TopUp (FK, optional)
+  CreatedAt
+}
+
+User <|-- Driver
+Driver ||--o{ Vehicle : owns
+VehicleModel ||--o{ Vehicle : classifies
+Driver |o--o{ RfidCard : holds
+Driver |o--o{ ChargingSession : starts
+Vehicle |o--o{ ChargingSession : is charged in
+RfidCard |o--o{ ChargingSession : authorises (by IdTag)
+Promotion |o--o{ ChargingSession : applies to
+Connector ||--o{ ChargingSession : hosts
+ChargingSession ||--o{ SessionPause : is paused in
+ChargingSession ||--o{ MeterReading : records
+ChargingSession ||--|{ SessionTariffSegment : is split into
+TariffPeriod ||--o{ SessionTariffSegment : prices
+ChargingSession ||--o{ ReconciliationRecord : is checked by
+Driver ||--|| CreditAccount : has
+CreditAccount ||--o{ CreditTransaction : logs
+CreditAccount ||--o{ TopUp : is topped up by
+ChargingSession |o--o| CreditTransaction : is settled by
+TopUp |o--o{ CreditTransaction : is credited / refunded by
+TopUp ||--o| EInvoice : is invoiced by
+EInvoice ||--o{ InvoiceAdjustment : is corrected by
+Driver ||--|| LoyaltyAccount : has
+LoyaltyAccount ||--o{ LoyaltyTransaction : logs
+ChargingSession |o--o{ LoyaltyTransaction : earns
+TopUp |o--o{ LoyaltyTransaction : redeems / restores
+@enduml
