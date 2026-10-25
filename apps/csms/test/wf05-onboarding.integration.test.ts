@@ -152,7 +152,7 @@ describeDb('WF-05 — onboard a pillar and bring it into service (SD-5a, SD-5b)'
       new ReplayDetector(CONFIG.replaySkewThresholdS),
       new OcppHandlers(sessions, CONFIG),
       sessions,
-      new PillarAuthService(db),
+      new PillarAuthService(db, CONFIG),
     );
     await server.start();
   });
@@ -284,6 +284,29 @@ describeDb('WF-05 — onboard a pillar and bring it into service (SD-5a, SD-5b)'
     expect(results.map((r) => r.displayCode).sort()).toEqual(
       [2, 3, 4, 5, 6, 7].map((n) => `PM-D1-HCM-000${n}`),
     );
+  });
+
+  // ---- Review PR #33, quyết định 2: trụ chưa có credential ---------------------------------
+
+  it('a pillar with no credential on file: 401 by default, accepted only with ALLOW_LEGACY_NO_CREDENTIAL', async () => {
+    await db
+      .insert(chargePoints)
+      .values({ serialNumber: 'LEGACY-SEED-0001', lifecycle: 'in_service' });
+
+    const strict = await new PillarAuthService(db, {
+      ...CONFIG,
+      allowLegacyNoCredential: false,
+    }).verify('LEGACY-SEED-0001', undefined);
+    expect(strict).toMatchObject({ ok: false, status: 401 });
+
+    const defaulted = await new PillarAuthService(db, CONFIG).verify('LEGACY-SEED-0001', undefined);
+    expect(defaulted).toMatchObject({ ok: false, status: 401 }); // CONFIG của test không bật
+
+    const legacy = await new PillarAuthService(db, {
+      ...CONFIG,
+      allowLegacyNoCredential: true,
+    }).verify('LEGACY-SEED-0001', undefined);
+    expect(legacy).toMatchObject({ ok: true, credentialChecked: false });
   });
 
   // ---- SD-5b: first connection -----------------------------------------------------------

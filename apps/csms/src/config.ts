@@ -39,6 +39,13 @@ export interface CsmsConfig {
    * `wss://staging.powerme.vn/ocpp`). Optional; default `ws://localhost:{ocppPort}/ocpp`.
    */
   ocppPublicUrl?: string;
+  /**
+   * Cho phép trụ CHƯA có credential (seed trước WF-05, trace WF-03) kết nối không cần Basic auth.
+   * Mặc định `false`: trụ không có hash bị từ chối 401. `npm run demo` đặt `true` vì seed demo
+   * chưa đi qua `onboard()`. KHÔNG bật trên staging/production — ai biết serial là vào được.
+   * (Review PR #33, quyết định 2.) Không khai báo = false.
+   */
+  allowLegacyNoCredential?: boolean;
 }
 
 /** Token DI cho CsmsConfig (dùng `@Inject(CONFIG)`). */
@@ -78,6 +85,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): CsmsConfig {
     consoleHost: env['CONSOLE_HOST'] || '127.0.0.1',
     consolePort: intEnv(env, 'CONSOLE_PORT', 3000),
     ...(env['OCPP_PUBLIC_URL'] ? { ocppPublicUrl: env['OCPP_PUBLIC_URL'] } : {}),
+    allowLegacyNoCredential: boolEnv(env, 'ALLOW_LEGACY_NO_CREDENTIAL', false),
   };
 }
 

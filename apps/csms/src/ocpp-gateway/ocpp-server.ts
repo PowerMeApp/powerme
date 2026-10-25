@@ -65,6 +65,14 @@ export class OcppServer implements OnApplicationBootstrap, OnApplicationShutdown
   }
 
   async start(): Promise<void> {
+    // Review PR #33 (quyết định 3): `@Optional()` chỉ để test WF-03 dựng server không cần service.
+    // Ở app thật, thiếu PillarAuthService nghĩa là bắt tay OCPP KHÔNG kiểm mật khẩu (fail-open) —
+    // phải kêu to lúc khởi động, không để chạy âm thầm.
+    if (!this.pillarAuth && process.env['NODE_ENV'] !== 'test') {
+      this.logger.error(
+        'PillarAuthService không có trong DI — bắt tay OCPP chạy KHÔNG kiểm credential. Kiểm tra OcppGatewayModule có import StationsModule.',
+      );
+    }
     const server = new RPCServer({ protocols: ['ocpp1.6'], strictMode: true });
     server.auth(async (accept, reject, handshake) => {
       if (this.pillarAuth) {
