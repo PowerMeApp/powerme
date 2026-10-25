@@ -13,13 +13,15 @@ dot -Tpng report3/Fig01_Business-Context-Diagram.dot -o png/fig01_bcd.png
 | `ad/` | AD-1 … AD-8 activity diagrams (AD-4 reservation is Should) | WP1 | Report 3, Report 4 §3.1.1 |
 | `arch/` | ARCH-1 component, ARCH-2 deployment (staging) | WP1 | Report 4 §1.1 |
 | `stm/` | STM-1 … STM-8 state machines (STM-4/5/7 confirmed by Khang) | WP1, owners confirm | Report 4 §3.1.2 |
-| `erd/` | LERD-1 v0.3 (Charging & Billing), LERD-2 v0.2 (Operations & Administration) | WP1, WP5 | Report 4 §2 |
+| `erd/` | LERD-1 v0.4 (Charging & Billing), LERD-2 v0.3 (Operations & Administration), aligned with migration `0001` on 25/10 | WP1, WP5 | Report 4 §2 |
 | `wf05/` | CD-5 class, SD-5a onboard, SD-5b first connection | WP1 (Ân) | Report 4 §3.6 |
 | `team/` | PKG-1 CSMS and WF-03 class + 2 sequences (Trí), PKG-2 dashboard and WF-04 class + 2 sequences (Nghĩa), PKG-3 driver app and WF-01 class + sequence (Sơn): redrawn in one style, content unchanged | WP2, WP3, WP4 | Report 4 §1.2, §3.2, §3.4, §3.5 |
 
 WF-02 (CD-2, SD-2a, SD-2b, SD-2c) sources are kept by Lê Bảo Khang (WP5) and will be added in `wf02/` by him.
 
-## Known differences between the diagrams and the code at tag `review-2`
+## Known differences between the diagrams and the code
+
+Checked against `main` after migration `0001_quyet-dinh-be-11.sql` (PR #36, 25/10/2026). Rows 1–7 were first found at tag `review-2`.
 
 Declared here so the BM02 self-review and reviewers see them; each has an owner.
 
@@ -27,8 +29,8 @@ Declared here so the BM02 self-review and reviewers see them; each has an owner.
 |---|---|---|---|
 | 1 | STM-1 | Code moves a session to `orphaned` as soon as the socket closes; ADR-0016 adds an offline grace period first | Trí, T61 |
 | 2 | STM-3 | `charge_points.lifecycle` still has `offline`; ADR-0016 moves connectivity to separate attributes. `ConnectionRegistry.open()` sets `in_service` unconditionally, so a future `disabled` pillar would be re-enabled on reconnect | Trí, T61 |
-| 3 | LERD-1 v0.3 | Billing attributes (top-up expiry, late payment, refund, e-invoice error fields, account closure) are not in migration `0000_init.sql` yet; loyalty types are `earn/redeem/expire/adjust` in the migration vs `earned/redeemed/restored/expired` in the ERD | Khang, Trí |
-| 4 | LERD-2, WF-04 | `remote_commands` is designed but not in the migration | Trí, Nghĩa |
+| 3 | LERD-1 v0.4 | Billing attributes (top-up expiry, late payment, refund, e-invoice error fields, account closure) are not in migrations `0000`/`0001` yet (planned for the WF-02 billing migration); loyalty types are `earn/redeem/expire/adjust` in the migration vs `earned/redeemed/restored/expired` in the ERD | Khang, Trí |
+| 4 | WF-04 sequences | `remote_commands` is now in migration `0001` and matches LERD-2 v0.3; the code that sends commands and updates their status (BE-04) is not built yet | Trí, Nghĩa |
 | 5 | WF-03 class | Event names in the diagram (START_ACCEPTED, STOP_RECEIVED, FAILED) are the 23/10 draft; the code uses the T13 names (START_TRANSACTION, STOP_TRANSACTION, START_TIMEOUT, …); STM-1 v0.5 follows the code | Trí |
 | 6 | WF-01 class | The app's `SessionState` has no `reconciled`, `orphaned`, `review` or `failed` (it maps them to `unknown`/settlement); align with STM-1 before the app talks to the CSMS | Sơn |
 | 7 | CD-5 | `PillarController` (HTTP endpoints) is planned; the service layer and the connection check are in code (PR #33) | Ân |
