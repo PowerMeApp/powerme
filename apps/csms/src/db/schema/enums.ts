@@ -2,7 +2,8 @@
  * Enum Postgres (`CREATE TYPE ... AS ENUM`) dùng chung cho toàn schema.
  *
  * Giá trị PHẢI khớp chính xác với state machine T12/T13 và migration
- * `drizzle/0000_init.sql`. Thêm giá trị mới = thêm migration `ALTER TYPE ... ADD VALUE`.
+ * `drizzle/0000_init.sql` + `drizzle/0001_quyet-dinh-be-11.sql`. Thêm giá trị mới = thêm
+ * migration `ALTER TYPE ... ADD VALUE` (giá trị mới không dùng được trong cùng transaction).
  */
 import { pgEnum } from 'drizzle-orm/pg-core';
 
@@ -57,7 +58,12 @@ export const sessionOriginEnum = pgEnum('session_origin', [
   'hmi_password',
   'free_vend',
 ]);
-export const paymentModeEnum = pgEnum('payment_mode', ['csms_billed', 'station_wallet', 'free']);
+export const paymentModeEnum = pgEnum('payment_mode', [
+  'csms_billed',
+  'station_wallet',
+  'free',
+  'unattributed',
+]);
 export const billingModeEnum = pgEnum('billing_mode', [
   'full',
   'timed',
@@ -79,6 +85,8 @@ export const reconciliationRecordTypeEnum = pgEnum('reconciliation_record_type',
   'meter_gap',
   'orphan_stop',
   'unknown_id_tag',
+  'conflict',
+  'late_sample',
 ]);
 
 // ---- billing ----
@@ -141,3 +149,12 @@ export const reservationHoldModeEnum = pgEnum('reservation_hold_mode', [
 
 // ---- ocpp-gateway ----
 export const ocppDirectionEnum = pgEnum('ocpp_direction', ['in', 'out']);
+/** Vòng đời lệnh CSMS → trụ (bảng remote_commands, migration 0001). */
+export const remoteCommandStatusEnum = pgEnum('remote_command_status', [
+  'pending',
+  'sent',
+  'accepted',
+  'rejected',
+  'timeout',
+  'failed',
+]);

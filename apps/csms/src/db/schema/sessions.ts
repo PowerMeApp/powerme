@@ -133,6 +133,8 @@ export const sessions = pgTable(
     receivedStartedAt: timestamp('received_started_at', { withTimezone: true })
       .notNull()
       .defaultNow(),
+    /** Lần ĐẦU phiên sang orphaned (đồng hồ CSMS); giữ nguyên khi orphaned → active. Null = chưa từng. */
+    orphanedAt: timestamp('orphaned_at', { withTimezone: true }),
     cpStoppedAt: timestamp('cp_stopped_at', { withTimezone: true }),
     receivedStoppedAt: timestamp('received_stopped_at', { withTimezone: true }),
     meterStartWh: bigint('meter_start_wh', { mode: 'number' }).notNull(),
@@ -196,6 +198,31 @@ export const sessionPauses = pgTable(
 );
 
 /**
+ * Lịch sử chuyển trạng thái phiên (BM02 F13, migration 0001): mỗi chuyển state machine chấp nhận
+ * = một dòng, ghi cùng transaction với UPDATE sessions.status. Append-only (trigger chặn
+ * UPDATE/DELETE); FK ON DELETE RESTRICT vì CASCADE sẽ đụng trigger chặn DELETE.
+ * `fromStatus` null cho chuyển từ INITIAL (T13 #1, #2). `occurredAt` = đồng hồ CSMS.
+ */
+export const sessionStatusHistory = pgTable(
+  'session_status_history',
+  {
+    id: bigint('id', { mode: 'number' }).primaryKey().generatedAlwaysAsIdentity(),
+    sessionId: bigint('session_id', { mode: 'number' })
+      .notNull()
+      .references(() => sessions.id, { onDelete: 'restrict' }),
+    fromStatus: sessionStatusEnum('from_status'),
+    toStatus: sessionStatusEnum('to_status').notNull(),
+    /** Tên event của state machine: START_TRANSACTION, STATION_OFFLINE, RECONCILE_OK… */
+    event: text('event').notNull(),
+    /** station = frame của trụ · system = CSMS tự quyết · hoặc users.id (operator). */
+    actor: text('actor').notNull().default('system'),
+    note: text('note'),
+    occurredAt: timestamp('occurred_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('session_status_history_session_id_occurred_at_idx').on(t.sessionId, t.occurredAt)],
+);
+
+/**
  * Một SampledValue của MeterValues = một dòng. PARTITION BY RANGE (received_at) — xem SQL.
  * Business key (session_id, cp_timestamp, measurand) của ERD KHÔNG thể là UNIQUE trên bảng
  * partition vì Postgres bắt UNIQUE phải chứa khoá partition; dedupe là việc của engine đối soát
@@ -218,6 +245,10 @@ export const meterValues = pgTable(
     unit: text('unit'),
     context: text('context'),
     phase: text('phase'),
+    /** ReplayDetector phán frame chứa mẫu này là phát lại. Dòng trước migration 0001 = false (chưa phân loại). */
+    replayed: boolean('replayed').notNull().default(false),
+    /** charge_point_connections.epoch lúc frame tới; null với dòng trước migration 0001. */
+    epoch: integer('epoch'),
   },
   (t) => [
     primaryKey({ name: 'meter_values_pkey', columns: [t.id, t.receivedAt] }),

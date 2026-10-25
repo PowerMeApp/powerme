@@ -143,7 +143,7 @@ export const connectorStatusEvents = pgTable(
     vendorErrorCode: text('vendor_error_code'),
     info: text('info'),
     /** Đồng hồ trụ (`timestamp` trong payload) — KHÔNG tin cậy (ADR-0009). */
-    pillarTimestamp: timestamp('pillar_timestamp', { withTimezone: true }),
+    cpTimestamp: timestamp('cp_timestamp', { withTimezone: true }),
     /** Đồng hồ CSMS — tin cậy (ADR-0009). */
     receivedAt: timestamp('received_at', { withTimezone: true }).notNull().defaultNow(),
     unexpectedTransition: boolean('unexpected_transition').notNull().default(false),

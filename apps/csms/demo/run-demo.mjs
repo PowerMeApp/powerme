@@ -3,7 +3,7 @@
  *
  * Vì sao tồn tại: máy dev không có Docker/Postgres. Script này dựng cả chuỗi chỉ với Node:
  *   1. Postgres nhúng (embedded-postgres 17 beta) ở 127.0.0.1:54330, data trong apps/csms/.demo-data/
- *   2. áp drizzle/0000_init.sql (nếu chưa có bảng) và nạp demo/seed.sql
+ *   2. áp các migration còn thiếu trong drizzle/ (0000, 0001… theo bảng _migrations) và nạp demo/seed.sql
  *   3. build CSMS nếu dist/ cũ hơn src/, rồi chạy `node dist/main.js` (cổng OCPP 9000)
  *   4. nếu có: HMI trụ D1 (`simulator/d1-hmi/server.mjs`, :8100) và bảng điều khiển CSMS (:3000)
  *   5. in bảng tóm tắt URL; Ctrl+C dừng và kill toàn bộ tiến trình con (kể cả cây con trên Windows)

@@ -12,8 +12,8 @@
  * File này là thư viện (run-demo.mjs import) và cũng chạy riêng được:
  *   node demo/db-embedded.mjs        # = npm run demo:db — chỉ bật DB + seed, Ctrl+C để dừng
  *
- * Liên quan: drizzle/0000_init.sql (migration), demo/seed.sql (dữ liệu mẫu),
- * test/wf03-exp01.integration.test.ts (cách test áp migration — làm giống).
+ * Liên quan: drizzle/*.sql (migration, áp bằng demo/migrate.mjs), demo/seed.sql (dữ liệu mẫu),
+ * test/helpers/apply-migrations.ts (bản TypeScript của cùng logic cho test tích hợp).
  */
 import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
@@ -21,6 +21,7 @@ import { mkdir, rm } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { migrate } from './migrate.mjs';
 
 const require = createRequire(import.meta.url);
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -189,19 +190,13 @@ export async function connectDemoDb(url) {
 }
 
 /**
- * Áp drizzle/0000_init.sql nếu DB chưa có bảng. Idempotent: đã có `charge_points` thì bỏ qua
- * (migration tạo enum/partition nên không chạy lại được trên schema cũ — dùng `demo:reset`).
+ * Áp mọi migration trong drizzle/ còn thiếu (0000, 0001, …) theo thứ tự tên, theo dõi bằng bảng
+ * `_migrations`. DB demo cũ đã có 0000 sẽ tự lên các migration sau mà không mất dữ liệu.
+ * Chi tiết: demo/migrate.mjs.
  */
 export async function applyMigration(client, log = () => {}) {
-  const { rows } = await client.query("SELECT to_regclass('public.charge_points') AS t");
-  if (rows[0].t) {
-    log('schema đã có — bỏ qua migration');
-    return false;
-  }
-  const sql = readFileSync(path.join(CSMS_DIR, 'drizzle', '0000_init.sql'), 'utf8');
-  await client.query(sql);
-  log('đã áp drizzle/0000_init.sql');
-  return true;
+  const applied = await migrate(client, log);
+  return applied.length > 0;
 }
 
 /** Nạp demo/seed.sql (idempotent nhờ ON CONFLICT DO NOTHING). */

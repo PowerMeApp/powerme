@@ -23,6 +23,11 @@ export interface MessageLogEntry {
   receivedAt: Date;
   /** Frame đã parse ([type, id, ...]). */
   raw: unknown;
+  /**
+   * Phán quyết ReplayDetector — PHẢI truyền lúc INSERT (bảng append-only, không UPDATE được).
+   * null/bỏ qua = không phân loại được (không có cp_timestamp, hoặc không phải CALL chiều vào).
+   */
+  replayed?: boolean | null;
 }
 
 @Injectable()
@@ -43,6 +48,7 @@ export class OcppMessageLogger {
         cpTimestamp: entry.cpTimestamp,
         receivedAt: entry.receivedAt,
         raw: entry.raw,
+        replayed: entry.replayed ?? null,
       })
       .returning({ id: ocppMessageLog.id });
     if (!row) throw new Error('INSERT ocpp_message_log không trả về id');

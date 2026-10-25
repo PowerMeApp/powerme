@@ -10,7 +10,7 @@
  * phải thay bằng ước lượng). Cờ replayed dựng lại bằng chính ReplayDetector (xem mappers).
  */
 import { Inject, Injectable } from '@nestjs/common';
-import { and, asc, count, desc, eq, gt, inArray, like, sql } from 'drizzle-orm';
+import { and, asc, count, desc, eq, gt, inArray, like, or, sql } from 'drizzle-orm';
 import { CONFIG, CsmsConfig } from '../config.js';
 import { DB, Db } from '../db/db.module.js';
 import {
@@ -57,10 +57,18 @@ const SESSION_COLUMNS = {
   energyWh: sessions.energyWh,
 };
 
-/** Điều kiện SQL của "bản ghi conflict": meter_gap có resolution bắt đầu bằng "conflict". */
-const IS_CONFLICT = and(
-  eq(reconciliationRecords.recordType, 'meter_gap'),
-  like(reconciliationRecords.resolution, 'conflict%'),
+/**
+ * Điều kiện SQL của "bản ghi conflict" (khớp `reconciliationKind() === 'conflict'`):
+ *  - record_type = conflict (từ migration 0001);
+ *  - record_type = late_sample mà kết luận (tiền tố resolution) là conflict;
+ *  - DỮ LIỆU CŨ trước 0001: meter_gap có resolution bắt đầu bằng "conflict".
+ */
+const IS_CONFLICT = or(
+  eq(reconciliationRecords.recordType, 'conflict'),
+  and(
+    inArray(reconciliationRecords.recordType, ['late_sample', 'meter_gap']),
+    like(reconciliationRecords.resolution, 'conflict%'),
+  ),
 );
 
 @Injectable()
