@@ -215,6 +215,8 @@ async function main() {
     env: {
       DATABASE_URL: db.url,
       OCPP_PORT: String(PORTS.ocpp),
+      // Seed demo chưa đi qua onboard() nên trụ chưa có credential (review PR #33).
+      ALLOW_LEGACY_NO_CREDENTIAL: 'true',
       CONSOLE_PORT: String(PORTS.console),
       // Giá trị theo infra/.env.example
       OCPP_HEARTBEAT_INTERVAL_SECONDS: '300',

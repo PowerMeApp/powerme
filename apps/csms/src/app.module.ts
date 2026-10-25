@@ -11,6 +11,7 @@ import { DbModule } from './db/db.module.js';
 import { OcppGatewayModule } from './ocpp-gateway/ocpp-gateway.module.js';
 import { ReconciliationModule } from './reconciliation/reconciliation.module.js';
 import { SessionsModule } from './sessions/sessions.module.js';
+import { StationsModule } from './stations/stations.module.js';
 
 @Module({
   imports: [
@@ -18,6 +19,7 @@ import { SessionsModule } from './sessions/sessions.module.js';
     DbModule,
     ReconciliationModule,
     SessionsModule,
+    StationsModule,
     OcppGatewayModule,
     ConsoleModule,
   ],
