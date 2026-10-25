@@ -3,7 +3,7 @@
  *
  * Vì sao tồn tại: chứng minh các endpoint `/api/admin/*` đọc đúng những gì đường xử lý sẵn có của
  * gateway đã ghi — cùng fixture và cùng cách phát lại với `wf03-exp01.integration.test.ts`
- * (áp migration 0000_init lên DB sạch, tạo trụ RH24D1-00001 + 2 súng, đưa 75 CALL chiều vào qua
+ * (áp migration 0000 + 0001 lên DB sạch, tạo trụ RH24D1-00001 + 2 súng, đưa 75 CALL chiều vào qua
  * `OcppServer.processCall`, hai epoch như EXP-01). Sau đó bật ConsoleServer trên cổng ngẫu nhiên
  * và gọi HTTP thật.
  *
@@ -39,6 +39,7 @@ import { ReconciliationService } from '../src/reconciliation/reconciliation.serv
 import { ReplayDetector } from '../src/reconciliation/replay-detector.js';
 import { SessionStateMachine } from '../src/sessions/session-state-machine.js';
 import { SessionsService } from '../src/sessions/sessions.service.js';
+import { resetAndMigrate } from './helpers/apply-migrations.js';
 
 interface TraceFrame {
   received_at: string;
@@ -55,7 +56,7 @@ const describeDb = DATABASE_URL ? describe : describe.skip;
 
 const CP = 'RH24D1-00001';
 const FIXTURE = path.join(__dirname, 'fixtures', 'exp1-disconnect-81s.jsonl');
-const MIGRATION = path.join(__dirname, '..', 'drizzle', '0000_init.sql');
+
 const SOCKET_CLOSED_AT = new Date('2026-09-16T14:19:01.000Z');
 const EPOCH2_OPENED_AT = new Date('2026-09-16T14:20:22.978Z');
 
@@ -99,6 +100,7 @@ interface SessionJson {
   meter_value_count: number;
 }
 interface RecordJson {
+  record_no: number;
   kind: string;
   record_type: string;
   energy_difference_wh: number | null;
@@ -141,8 +143,7 @@ describeDb('Bảng điều khiển vận hành — dữ liệu thật từ trace
   beforeAll(async () => {
     Logger.overrideLogger(['error']);
     db = createDb(DATABASE_URL as string);
-    await db.$client.query('DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public;');
-    await db.$client.query(readFileSync(MIGRATION, 'utf8'));
+    await resetAndMigrate(db.$client);
 
     const [cp] = await db
       .insert(chargePoints)
@@ -268,7 +269,9 @@ describeDb('Bảng điều khiển vận hành — dữ liệu thật từ trace
     expect(body.sessions_by_status['review']).toBeGreaterThanOrEqual(1);
     expect(body.sessions_by_status['reconciled']).toBe(2);
     expect(body.sessions_by_status['active']).toBe(1);
-    expect(body.reconciliation_by_type['meter_gap']).toBeGreaterThanOrEqual(7);
+    expect(body.reconciliation_by_type['conflict']).toBe(1);
+    expect(body.reconciliation_by_type['late_sample']).toBe(6);
+    expect(body.reconciliation_by_type['meter_gap']).toBe(0);
     expect(body.reconciliation_conflicts).toBe(7);
     expect(body.message_frames).toBe(75);
   });
@@ -339,7 +342,7 @@ describeDb('Bảng điều khiển vận hành — dữ liệu thật từ trace
     const conflicts = body.filter((r) => r.kind === 'conflict');
     expect(conflicts.length).toBeGreaterThanOrEqual(1);
     for (const c of conflicts) {
-      expect(c.record_type).toBe('meter_gap');
+      expect(['conflict', 'late_sample']).toContain(c.record_type);
       expect(c.energy_difference_wh).toBe(801);
       expect(c.meter_stop_minus_start_wh).toBe(242);
       expect(Math.round(c.series_last_wh as number)).toBe(1043); // chuỗi 1042,64 Wh
@@ -430,5 +433,30 @@ describeDb('Bảng điều khiển vận hành — dữ liệu thật từ trace
     expect(r.status).toBe(200);
     expect(r.body).toMatchObject({ closed: true, epoch: 2 });
     expect(client2.closed).toBe(true);
+  });
+
+  it('tương thích dữ liệu cũ (trước 0001): meter_gap + resolution "conflict…" vẫn được đếm và hiển thị là conflict', async () => {
+    // Giả lập một DB demo cũ: bản ghi conflict kiểu cũ trên tx1 (đang reconciled, chưa có conflict).
+    const list = (await get<SessionJson[]>('/api/admin/sessions')).body;
+    const tx1 = list.find((s) => s.transaction_no === 1);
+    expect(tx1?.has_conflict).toBe(false);
+    const before = (await get<{ reconciliation_conflicts: number }>('/api/admin/summary')).body;
+    await db.$client.query(
+      `INSERT INTO reconciliation_records (session_id, record_no, record_type, energy_difference_wh, resolution)
+       VALUES ($1, 99, 'meter_gap', 5, 'conflict: meter_stop_minus_start=601 series_last=606 diff=5 samples=3 monotonic=true gaps=0 trigger=stop replayed=false')`,
+      [tx1?.id],
+    );
+    const after = (await get<{ reconciliation_conflicts: number }>('/api/admin/summary')).body;
+    expect(after.reconciliation_conflicts).toBe(before.reconciliation_conflicts + 1);
+    const tx1After = (await get<SessionJson[]>('/api/admin/sessions')).body.find(
+      (s) => s.transaction_no === 1,
+    );
+    expect(tx1After?.has_conflict).toBe(true);
+    const detail = await get<{ reconciliation_records: RecordJson[] }>(
+      `/api/admin/sessions/${String(tx1?.id)}`,
+    );
+    const legacy = detail.body.reconciliation_records.find((r) => r.record_no === 99);
+    expect(legacy?.record_type).toBe('meter_gap');
+    expect(legacy?.kind).toBe('conflict');
   });
 });

@@ -158,7 +158,7 @@ Trụ Ruihua có thẻ ví tự trừ tiền và chế độ free vend mà OCPP 
 
 WP1 vẽ ERD từ danh sách này. Chỉ liệt kê cột quan trọng.
 
-> **Tên bảng thật khác bản đề xuất này:** schema đã cài (`apps/csms/src/db/schema/`) dùng `sessions` thay `transactions`, `rfid_cards` thay `id_tags`; `remote_commands` chưa tạo. Bảng tên thật và lý do: [THIET-KE-CSDL-VAT-LY.md](THIET-KE-CSDL-VAT-LY.md).
+> **Tên bảng thật khác bản đề xuất này:** schema đã cài (`apps/csms/src/db/schema/`) dùng `sessions` thay `transactions`, `rfid_cards` thay `id_tags`; `remote_commands` đã tạo ở migration 0001 (25/10/2026; cột `status` thêm `sent`/`failed`, có `idempotency_key`, `payload`/`response` jsonb — xem THIET-KE-CSDL-VAT-LY.md mục 3.8). Bảng tên thật và lý do: [THIET-KE-CSDL-VAT-LY.md](THIET-KE-CSDL-VAT-LY.md).
 
 | Bảng | Cột quan trọng | Ghi chú |
 |---|---|---|

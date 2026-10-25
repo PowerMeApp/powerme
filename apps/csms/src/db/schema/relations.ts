@@ -13,7 +13,7 @@ import {
   loyaltyTransactions,
   topUps,
 } from './billing.js';
-import { ocppMessageLog } from './ocpp-log.js';
+import { ocppMessageLog, remoteCommands } from './ocpp-log.js';
 import {
   faultEvents,
   faultReports,
@@ -26,6 +26,7 @@ import {
   meterValues,
   rfidCards,
   sessionPauses,
+  sessionStatusHistory,
   sessions,
   vehicleModels,
   vehicles,
@@ -153,6 +154,7 @@ export const sessionsRelations = relations(sessions, ({ one, many }) => ({
   rfidCard: one(rfidCards, { fields: [sessions.rfidCardId], references: [rfidCards.id] }),
   promotion: one(promotions, { fields: [sessions.promotionId], references: [promotions.id] }),
   pauses: many(sessionPauses),
+  statusHistory: many(sessionStatusHistory),
   meterValues: many(meterValues),
   tariffSegments: many(sessionTariffSegments),
   reconciliationRecords: many(reconciliationRecords),
@@ -162,6 +164,13 @@ export const sessionsRelations = relations(sessions, ({ one, many }) => ({
 
 export const sessionPausesRelations = relations(sessionPauses, ({ one }) => ({
   session: one(sessions, { fields: [sessionPauses.sessionId], references: [sessions.id] }),
+}));
+
+export const sessionStatusHistoryRelations = relations(sessionStatusHistory, ({ one }) => ({
+  session: one(sessions, {
+    fields: [sessionStatusHistory.sessionId],
+    references: [sessions.id],
+  }),
 }));
 
 export const meterValuesRelations = relations(meterValues, ({ one }) => ({
@@ -299,4 +308,12 @@ export const ocppMessageLogRelations = relations(ocppMessageLog, ({ one }) => ({
     fields: [ocppMessageLog.chargePointId],
     references: [chargePoints.id],
   }),
+}));
+
+export const remoteCommandsRelations = relations(remoteCommands, ({ one }) => ({
+  chargePoint: one(chargePoints, {
+    fields: [remoteCommands.chargePointId],
+    references: [chargePoints.id],
+  }),
+  requester: one(users, { fields: [remoteCommands.requestedBy], references: [users.id] }),
 }));

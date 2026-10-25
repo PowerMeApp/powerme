@@ -3,7 +3,7 @@
  *
  * Vì sao tồn tại: T13 mục 6 yêu cầu fixture của STM-1 là trace JSONL thật
  * (`test/fixtures/exp1-disconnect-81s.jsonl`, 150 frame, chép từ `apps/csms/lab/ocpp-traces/`).
- * Test này áp migration `drizzle/0000_init.sql` lên DB sạch, tạo trụ RH24D1-00001 với 2 súng, rồi
+ * Test này áp migration `drizzle/0000_init.sql` rồi `0001_quyet-dinh-be-11.sql` lên DB sạch, tạo trụ RH24D1-00001 với 2 súng, rồi
  * đưa 75 frame CALL chiều vào qua ĐÚNG đường xử lý của gateway (`OcppServer.processCall` →
  * ReplayDetector → ocpp_message_log → OcppHandlers → SessionsService → ReconciliationService),
  * không mở socket. Hai epoch được mô phỏng như EXP-01: epoch 1 cho frame trước 14:19:01Z (lúc
@@ -20,7 +20,7 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { Logger } from '@nestjs/common';
-import { and, asc, count, eq } from 'drizzle-orm';
+import { and, asc, count, eq, sql } from 'drizzle-orm';
 import type { CsmsConfig } from '../src/config.js';
 import { createDb, Db } from '../src/db/db.module.js';
 import {
@@ -31,6 +31,7 @@ import {
   meterValues,
   ocppMessageLog,
   reconciliationRecords,
+  sessionStatusHistory,
   sessions,
 } from '../src/db/schema/index.js';
 import {
@@ -47,6 +48,7 @@ import { ReconciliationService } from '../src/reconciliation/reconciliation.serv
 import { ReplayDetector, ReplayVerdict } from '../src/reconciliation/replay-detector.js';
 import { SessionStateMachine } from '../src/sessions/session-state-machine.js';
 import { ENERGY_MEASURAND, SessionsService } from '../src/sessions/sessions.service.js';
+import { resetAndMigrate } from './helpers/apply-migrations.js';
 
 interface TraceFrame {
   received_at: string;
@@ -64,7 +66,6 @@ const describeDb = DATABASE_URL ? describe : describe.skip;
 
 const CP = 'RH24D1-00001';
 const FIXTURE = path.join(__dirname, 'fixtures', 'exp1-disconnect-81s.jsonl');
-const MIGRATION = path.join(__dirname, '..', 'drizzle', '0000_init.sql');
 /** Mini-CSMS bị tắt lúc 14:19:01Z (EXP-01): frame trước mốc này thuộc epoch 1. */
 const SOCKET_CLOSED_AT = new Date('2026-09-16T14:19:01.000Z');
 /** Trụ nối lại (EXP-01): epoch 2 mở lúc này. */
@@ -189,9 +190,8 @@ describeDb('WF-03 — phát lại trace EXP-01 (ngắt kết nối 81 s giữa p
   beforeAll(async () => {
     Logger.overrideLogger(['warn', 'error']);
     db = createDb(DATABASE_URL as string);
-    // DB sạch: migration 0000_init tạo enum/partition nên không chạy lại được trên schema cũ.
-    await db.$client.query('DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public;');
-    await db.$client.query(readFileSync(MIGRATION, 'utf8'));
+    // DB sạch + áp tuần tự 0000 → 0001 (migration tạo enum/partition nên không chạy lại được trên schema cũ).
+    await resetAndMigrate(db.$client);
 
     const [cp] = await db
       .insert(chargePoints)
@@ -370,7 +370,7 @@ describeDb('WF-03 — phát lại trace EXP-01 (ngắt kết nối 81 s giữa p
     expect(tx4.cpStartedAt).toEqual(new Date('2026-09-16T14:18:52.934Z'));
     expect(tx4.deliveredOffline).toBe(true);
     expect(tx4.status).toBe('active'); // trace kết thúc khi tx4 còn sạc
-    expect(tx4.paymentMode).toBe('station_wallet'); // thẻ lạ → tạm station_wallet (ADR-0012, chờ enum unattributed)
+    expect(tx4.paymentMode).toBe('unattributed'); // thẻ lạ → chưa biết ai thu tiền (ADR-0012, migration 0001)
 
     const dupes = await db
       .select({ n: count() })
@@ -400,7 +400,7 @@ describeDb('WF-03 — phát lại trace EXP-01 (ngắt kết nối 81 s giữa p
       .where(eq(meterValues.sessionId, tx3.id));
     expect(total?.n).toBe(65); // 13 MeterValues × 5 SampledValue (SoC, V, W, A, Wh)
 
-    // Schema không có cột replayed → kiểm bằng ReplayDetector trên từng frame và bằng record `replay`.
+    // Kiểm bằng ReplayDetector trên từng frame và bằng record `replay`; cột replayed: xem (o), (p).
     const replayedMv = verdicts.filter(
       (v) => v.action === 'MeterValues' && v.transactionId === 3 && v.verdict.replayed,
     );
@@ -431,9 +431,16 @@ describeDb('WF-03 — phát lại trace EXP-01 (ngắt kết nối 81 s giữa p
     expect(tx3.receivedStoppedAt).toEqual(new Date('2026-09-16T14:20:58.209Z'));
     expect(tx3.stopReason).toBe('Local');
 
-    // Enum base không có `conflict` → record_type = meter_gap, resolution bắt đầu bằng "conflict".
-    const gapRecords = (await recordsOf(tx3.id)).filter((r) => r.recordType === 'meter_gap');
-    expect(gapRecords.length).toBeGreaterThanOrEqual(1);
+    // Migration 0001: lần đối soát do StopTransaction → record_type = conflict; các lần do mẫu
+    // muộn → late_sample (kết luận vẫn ở tiền tố resolution). meter_gap chỉ cho gap_detected thuần.
+    const all = await recordsOf(tx3.id);
+    expect(all.filter((r) => r.recordType === 'meter_gap')).toHaveLength(0);
+    const gapRecords = all.filter(
+      (r) => r.recordType === 'conflict' || r.recordType === 'late_sample',
+    );
+    expect(all.filter((r) => r.recordType === 'conflict')).toHaveLength(1);
+    expect(all.filter((r) => r.recordType === 'late_sample')).toHaveLength(6);
+    expect(gapRecords[0]?.recordType).toBe('conflict');
     const first = gapRecords[0];
     expect(first?.resolution).toMatch(/^conflict:/);
     expect(first?.energyDifferenceWh).toBe(801); // round(1042.64) − 242
@@ -444,6 +451,7 @@ describeDb('WF-03 — phát lại trace EXP-01 (ngắt kết nối 81 s giữa p
     // Giai đoạn F: 6 mẫu muộn → đối soát lại, mỗi lần lỗ hổng thu hẹp → bản ghi mới (append-only).
     expect(gapRecords).toHaveLength(7);
     const last = gapRecords[gapRecords.length - 1];
+    expect(last?.recordType).toBe('late_sample');
     expect(last?.resolution).toMatch(/^conflict \(late_sample\):/);
     expect(last?.energyDifferenceWh).toBe(801);
     expect(last?.gapStart).toEqual(new Date('2026-09-16T14:19:47.867Z'));
@@ -590,6 +598,133 @@ describeDb('WF-03 — phát lại trace EXP-01 (ngắt kết nối 81 s giữa p
       .where(eq(reconciliationRecords.recordType, 'unknown_id_tag'));
     expect(rows).toHaveLength(4);
     expect(rows.every((r) => r.recordNo === 1)).toBe(true);
+  });
+
+  // ---------------------------------------------------------------------------
+  // Migration 0001 — khẳng định theo DỮ LIỆU THẬT chạy ra từ trace (BM02 F09, F13)
+  // ---------------------------------------------------------------------------
+
+  it('(m) session_status_history: mỗi kịch bản trace để lại đúng chuỗi chuyển trạng thái, liền mạch và khớp sessions.status', async () => {
+    const rows = await db
+      .select({
+        transactionNo: sessions.transactionNo,
+        status: sessions.status,
+        from: sessionStatusHistory.fromStatus,
+        to: sessionStatusHistory.toStatus,
+        event: sessionStatusHistory.event,
+        actor: sessionStatusHistory.actor,
+        at: sessionStatusHistory.occurredAt,
+      })
+      .from(sessionStatusHistory)
+      .innerJoin(sessions, eq(sessions.id, sessionStatusHistory.sessionId))
+      .orderBy(
+        asc(sessionStatusHistory.sessionId),
+        asc(sessionStatusHistory.occurredAt),
+        asc(sessionStatusHistory.id),
+      );
+    const byTx = new Map<number, typeof rows>();
+    for (const r of rows) byTx.set(r.transactionNo, [...(byTx.get(r.transactionNo) ?? []), r]);
+    const chain = (tx: number) =>
+      (byTx.get(tx) ?? []).map((r) => `${r.from ?? '●'} -${r.event}-> ${r.to}`);
+
+    expect(chain(1)).toEqual([
+      '● -START_TRANSACTION-> active',
+      'active -STOP_TRANSACTION-> closed',
+      'closed -RECONCILE_OK-> reconciled',
+    ]);
+    expect(chain(2)).toEqual(chain(1));
+    // tx3: đúng kịch bản EXP-01 — offline giữa phiên, live quay lại, StopTransaction phát lại → conflict.
+    expect(chain(3)).toEqual([
+      '● -START_TRANSACTION-> active',
+      'active -STATION_OFFLINE-> orphaned',
+      'orphaned -LIVE_MESSAGE-> active',
+      'active -STOP_TRANSACTION-> closed',
+      'closed -RECONCILE_CONFLICT-> review',
+    ]);
+    expect(chain(4)).toEqual(['● -START_TRANSACTION-> active']);
+
+    for (const [tx, list] of byTx) {
+      // liền mạch: from của dòng sau = to của dòng trước; dòng cuối = sessions.status
+      list.forEach((r, i) => {
+        if (i > 0) expect(r.from).toBe(list[i - 1]?.to);
+        else expect(r.from).toBeNull();
+      });
+      expect(list.at(-1)?.to).toBe(list[0]?.status);
+      // thời gian không lùi (đồng hồ CSMS)
+      for (let i = 1; i < list.length; i++) {
+        expect(list[i]?.at.getTime()).toBeGreaterThanOrEqual(list[i - 1]?.at.getTime() ?? 0);
+      }
+      expect(tx).toBeGreaterThan(0);
+    }
+    // actor: frame của trụ → station; CSMS tự quyết (offline, đối soát) → system
+    const actors = Object.fromEntries(
+      rows.filter((r) => r.transactionNo === 3).map((r) => [r.event, r.actor]),
+    );
+    expect(actors).toEqual({
+      START_TRANSACTION: 'station',
+      STATION_OFFLINE: 'system',
+      LIVE_MESSAGE: 'station',
+      STOP_TRANSACTION: 'station',
+      RECONCILE_CONFLICT: 'system',
+    });
+    // 3 + 3 + 5 + 1 dòng: không chuyển nào bị bỏ sót hay ghi trùng
+    expect(rows).toHaveLength(12);
+  });
+
+  it('(n) sessions.orphaned_at: chỉ tx3 từng orphaned, giữ nguyên sau orphaned → active → review', async () => {
+    const all = await db.select().from(sessions).orderBy(asc(sessions.transactionNo));
+    expect(all.map((s) => s.orphanedAt)).toEqual([null, null, SOCKET_CLOSED_AT, null]);
+    expect((await sessionByTx(3)).status).toBe('review');
+  });
+
+  it('(o) meter_values.replayed / epoch: 30 dòng (6 MeterValues × 5 SampledValue) phát lại của tx3 đều replayed=true, epoch 2', async () => {
+    const tx3 = await sessionByTx(3);
+    const rows = await db.select().from(meterValues).where(eq(meterValues.sessionId, tx3.id));
+    const replayed = rows.filter((r) => r.replayed);
+    expect(replayed).toHaveLength(30);
+    expect(replayed.filter((r) => r.measurand === ENERGY_MEASURAND)).toHaveLength(6);
+    expect(replayed.every((r) => r.epoch === 2)).toBe(true);
+    // 6 mẫu phát lại tới SAU StopTransaction (EXP-01 hiện tượng 2)
+    for (const r of replayed) {
+      expect(r.receivedAt.getTime()).toBeGreaterThan(Date.parse('2026-09-16T14:20:58.209Z'));
+    }
+    // 15 dòng epoch 1 (3 MV) + 20 dòng epoch 2 live (4 MV) = replayed=false
+    const live = rows.filter((r) => !r.replayed);
+    expect(live).toHaveLength(35);
+    expect(live.filter((r) => r.epoch === 1)).toHaveLength(15);
+    expect(live.filter((r) => r.epoch === 2)).toHaveLength(20);
+    // mọi dòng ghi sau 0001 đều có epoch
+    const [nullEpoch] = await db
+      .select({ n: count() })
+      .from(meterValues)
+      .where(sql`${meterValues.epoch} IS NULL`);
+    expect(nullEpoch?.n).toBe(0);
+    // ReplayDetector đã phán cả frame; ở đây chỉ tx3 có mẫu phát lại
+    const [other] = await db
+      .select({ n: count() })
+      .from(meterValues)
+      .where(and(eq(meterValues.replayed, true), sql`${meterValues.sessionId} <> ${tx3.id}`));
+    expect(other?.n).toBe(0);
+  });
+
+  it('(p) ocpp_message_log.replayed: bằng phán quyết ReplayDetector khi có cp_timestamp, null khi không phân loại được', async () => {
+    const rows = await db
+      .select()
+      .from(ocppMessageLog)
+      .where(eq(ocppMessageLog.direction, 'in'))
+      .orderBy(asc(ocppMessageLog.id));
+    expect(rows).toHaveLength(75);
+    expect(rows.map((r) => r.uniqueId)).toEqual(verdicts.map((v) => v.frame.id));
+    rows.forEach((r, i) => {
+      const v = verdicts[i];
+      expect(r.replayed).toBe(v?.verdict.skewS === null ? null : v?.verdict.replayed);
+    });
+    expect(rows.filter((r) => r.replayed === true)).toHaveLength(8);
+    // Heartbeat / StatusNotification / Authorize / Boot của SAP không có timestamp → null, không phải false
+    const unclassifiable = rows.filter((r) => r.cpTimestamp === null);
+    expect(unclassifiable.length).toBeGreaterThan(0);
+    expect(unclassifiable.every((r) => r.replayed === null)).toBe(true);
+    expect(rows.filter((r) => r.cpTimestamp !== null).every((r) => r.replayed !== null)).toBe(true);
   });
 
   it('(j) ADR-0010: phát lại lần nữa StartTransaction của tx3 → trả đúng transactionId 3, không phiên mới, ghi duplicate', async () => {

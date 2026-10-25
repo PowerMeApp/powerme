@@ -4,7 +4,7 @@
 -- tay. File này idempotent (ON CONFLICT DO NOTHING / WHERE NOT EXISTS): chạy lại không nhân đôi
 -- dòng và không đụng tới phiên/meter đã phát sinh. Muốn làm lại từ đầu: `npm run demo:reset`.
 --
--- Tên cột/enum đối chiếu với src/db/schema/*.ts và drizzle/0000_init.sql.
+-- Tên cột/enum đối chiếu với src/db/schema/*.ts và drizzle/0000_init.sql + 0001_quyet-dinh-be-11.sql.
 -- Quyết định đáng chú ý:
 --   * Trụ seed ở lifecycle 'awaiting_connection' — đúng như test tích hợp EXP-01. Gateway
 --     (connection-registry.open) tự chuyển sang 'in_service' khi socket mở, không chờ Boot (STM-3).

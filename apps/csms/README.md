@@ -20,7 +20,7 @@ npm run build -w @powerme/csms                 # tsc → dist/
 DATABASE_URL=postgresql://powerme:powerme@localhost:5432/powerme OCPP_PORT=9000 npm run start -w @powerme/csms
 ```
 
-Migration: `psql "$DATABASE_URL" -f apps/csms/drizzle/0000_init.sql`. Trụ nối tới `ws://host:9000/ocpp/{serialNumber}`; serial phải có trong `charge_points`.
+Migration: `DATABASE_URL=... node apps/csms/demo/migrate.mjs` (áp tuần tự `drizzle/0000_…` rồi `0001_…`, ghi bảng `_migrations`; không dùng `psql -f` rời từng file vì sẽ lệch bảng theo dõi). Trụ nối tới `ws://host:9000/ocpp/{serialNumber}`; serial phải có trong `charge_points`.
 
 Cấu trúc `src/`: `ocpp-gateway/` (socket, registry epoch, log frame, tuần tự hoá, handler) · `sessions/` (state machine STM-1, phiên, chuỗi đo, trạng thái connector) · `reconciliation/` (phát hiện phát lại, đối soát) · `db/` (Drizzle schema + module). Test tích hợp: `test/wf03-exp01.integration.test.ts` với fixture `test/fixtures/exp1-disconnect-81s.jsonl`.
 
@@ -30,7 +30,7 @@ Cấu trúc `src/`: `ocpp-gateway/` (socket, registry epoch, log frame, tuần t
 
 - Chỉ đọc: `GET /api/admin/{stations,sessions,sessions/:id,reconciliation,messages,summary}`. Hai lệnh: `POST /api/admin/stations/:serial/disconnect` (đóng socket phía CSMS), `POST /api/admin/sessions/:id/remote-stop` (RemoteStopTransaction).
 - **Chưa có xác thực** (RolesGuard là việc sau — ADR-0011): đừng bind ra `0.0.0.0`. POST từ `Origin` không phải localhost bị từ chối 403.
-- **Chưa làm:** xác thực/phân quyền, realtime Socket.IO (trang poll mỗi 1 s), billing, bảng lưu chuyển trạng thái phiên (nên chi tiết phiên không có danh sách chuyển trạng thái).
+- **Chưa làm:** xác thực/phân quyền, realtime Socket.IO (trang poll mỗi 1 s), billing, hiển thị lịch sử chuyển trạng thái phiên (bảng `session_status_history` có từ migration 0001 nhưng chi tiết phiên của console chưa đọc nó).
 - Ảnh chụp: [docs/console.png](docs/console.png) (tổng quan), [docs/console-detail.png](docs/console-detail.png) (chi tiết phiên) — dữ liệu là trace EXP-01 phát lại qua gateway vào Postgres thử nghiệm, không phải trụ thật.
 
 ## Phạm vi

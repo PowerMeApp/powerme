@@ -12,12 +12,12 @@
  *   - `energy_wh` của phiên chưa đóng: null (cột dẫn xuất chỉ có khi đóng phiên);
  *     `latest_meter_wh` cho biết số đọc đồng hồ mới nhất nếu có mẫu.
  *
- * KHÔNG có bảng lưu chuyển trạng thái phiên (state machine chỉ ghi trạng thái hiện tại), nên
- * chi tiết phiên không có danh sách chuyển trạng thái — đúng yêu cầu "nếu không có thì bỏ".
+ * Bảng `session_status_history` đã có từ migration 0001 nhưng console chưa đọc nó, nên chi tiết
+ * phiên vẫn không có danh sách chuyển trạng thái (việc của lần sau, không làm lẫn vào BE-11).
  *
- * "conflict" không phải giá trị enum reconciliation_record_type: ReconciliationService lưu nó
- * như record_type = meter_gap + resolution bắt đầu bằng "conflict" (xem reconciliation.service.ts
- * dòng đầu). `reconciliationKind()` suy ngược lại cùng quy ước đó.
+ * Từ migration 0001, `conflict` và `late_sample` là giá trị enum reconciliation_record_type.
+ * Bản ghi TRƯỚC 0001 lưu conflict như record_type = meter_gap + resolution bắt đầu bằng "conflict"
+ * (mẫu muộn: meter_gap + "(late_sample)"); `reconciliationKind()` vẫn đọc được cả hai dạng.
  */
 import type { ReplayDetector } from '../reconciliation/replay-detector.js';
 
@@ -39,6 +39,8 @@ export const RECONCILIATION_TYPES = [
   'meter_gap',
   'orphan_stop',
   'unknown_id_tag',
+  'conflict',
+  'late_sample',
 ] as const;
 
 export function iso(d: Date | null | undefined): string | null {
@@ -85,13 +87,27 @@ export type ReconciliationKind =
   | 'duplicate'
   | 'orphan_stop'
   | 'unknown_id_tag'
-  | 'meter_gap';
+  | 'meter_gap'
+  | 'late_sample';
 
-/** Suy "loại hiển thị" từ record_type + tiền tố resolution (quy ước của ReconciliationService). */
+/**
+ * "Loại hiển thị" của bản ghi đối soát.
+ *  - `conflict` → conflict.
+ *  - `late_sample` → kết luận nằm ở tiền tố resolution ("conflict (late_sample): …" → conflict,
+ *    "gap_detected (late_sample): …" → gap_detected); không đọc được thì giữ nguyên late_sample.
+ *  - `meter_gap` → gap_detected, hoặc (DỮ LIỆU CŨ trước 0001) conflict nếu resolution mở đầu
+ *    bằng "conflict".
+ */
 export function reconciliationKind(
   recordType: string,
   resolution: string | null,
 ): ReconciliationKind {
+  if (recordType === 'conflict') return 'conflict';
+  if (recordType === 'late_sample') {
+    if (resolution?.startsWith('conflict')) return 'conflict';
+    if (resolution?.startsWith('gap_detected')) return 'gap_detected';
+    return 'late_sample';
+  }
   if (recordType === 'meter_gap') {
     if (resolution?.startsWith('conflict')) return 'conflict';
     if (resolution?.startsWith('gap_detected')) return 'gap_detected';
@@ -139,7 +155,9 @@ export function mapReconciliation(row: ReconciliationInput) {
     record_no: row.recordNo,
     record_type: row.recordType,
     kind,
-    late_sample: row.resolution?.includes('(late_sample)') ?? false,
+    // Dạng mới: record_type = late_sample · dạng cũ (trước 0001): meter_gap + "(late_sample)".
+    late_sample:
+      row.recordType === 'late_sample' || (row.resolution?.includes('(late_sample)') ?? false),
     gap_start: iso(row.gapStart),
     gap_end: iso(row.gapEnd),
     energy_difference_wh: row.energyDifferenceWh,

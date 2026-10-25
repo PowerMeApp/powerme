@@ -62,13 +62,53 @@ describe('reconciliationKind / resolutionNumber / mapReconciliation', () => {
   const conflict =
     'conflict: meter_stop_minus_start=242 series_last=1042.64 diff=801 samples=13 monotonic=true gaps=1 trigger=stop replayed=true';
 
-  it('meter_gap + resolution "conflict…" → conflict; "gap_detected…" → gap_detected', () => {
+  it('DỮ LIỆU CŨ trước 0001: meter_gap + resolution "conflict…" → conflict; "gap_detected…" → gap_detected', () => {
     expect(reconciliationKind('meter_gap', conflict)).toBe('conflict');
     expect(reconciliationKind('meter_gap', 'conflict (late_sample): x=1')).toBe('conflict');
     expect(reconciliationKind('meter_gap', 'gap_detected: x=1')).toBe('gap_detected');
     expect(reconciliationKind('meter_gap', null)).toBe('meter_gap');
     expect(reconciliationKind('replay', 'replay: action=StopTransaction')).toBe('replay');
     expect(reconciliationKind('unknown_id_tag', null)).toBe('unknown_id_tag');
+  });
+
+  it('dạng mới từ 0001: record_type conflict / late_sample tự mang ý nghĩa', () => {
+    expect(reconciliationKind('conflict', conflict)).toBe('conflict');
+    expect(reconciliationKind('conflict', null)).toBe('conflict');
+    // late_sample: kết luận đọc từ tiền tố resolution
+    expect(reconciliationKind('late_sample', 'conflict (late_sample): diff=801')).toBe('conflict');
+    expect(reconciliationKind('late_sample', 'gap_detected (late_sample): diff=0')).toBe(
+      'gap_detected',
+    );
+    expect(reconciliationKind('late_sample', null)).toBe('late_sample');
+  });
+
+  it('mapReconciliation đọc cả bản ghi mới (late_sample) lẫn bản ghi cũ (meter_gap + "(late_sample)")', () => {
+    const base = {
+      id: 1,
+      sessionId: 3,
+      transactionNo: 3,
+      recordNo: 2,
+      gapStart: null,
+      gapEnd: null,
+      energyDifferenceWh: 801,
+      reviewedAt: null,
+      createdAt: T('14:21:00'),
+    };
+    const resolution = conflict.replace('conflict:', 'conflict (late_sample):');
+    const fresh = mapReconciliation({ ...base, recordType: 'late_sample', resolution });
+    const legacy = mapReconciliation({ ...base, recordType: 'meter_gap', resolution });
+    for (const out of [fresh, legacy]) {
+      expect(out.kind).toBe('conflict');
+      expect(out.late_sample).toBe(true);
+      expect(out.series_last_wh).toBe(1042.64);
+    }
+    expect(fresh.record_type).toBe('late_sample');
+    expect(legacy.record_type).toBe('meter_gap');
+    // late_sample không kèm "(late_sample)" trong resolution vẫn là mẫu muộn
+    expect(
+      mapReconciliation({ ...base, recordType: 'late_sample', resolution: 'conflict: x=1' })
+        .late_sample,
+    ).toBe(true);
   });
 
   it('rút số từ resolution; "null" hoặc thiếu khoá → null, không nhầm khoá có tiền tố', () => {
@@ -239,7 +279,7 @@ describe('replay: replayedFlag / epochOpenedAtFor / mapMessage / mapMeterValue',
 });
 
 describe('buildSummary', () => {
-  it('đủ 9 trạng thái phiên và 5 loại đối soát (điền 0), online/offline tính từ registry', () => {
+  it('đủ 9 trạng thái phiên và 7 loại đối soát (điền 0), online/offline tính từ registry', () => {
     const out = buildSummary({
       stationSerials: ['A', 'B', 'C'],
       connectedSerials: new Set(['A', 'Z']),
@@ -256,7 +296,9 @@ describe('buildSummary', () => {
     expect(out.sessions_by_status['review']).toBe(1);
     expect(out.sessions_by_status['failed']).toBe(0);
     expect(out.sessions_total).toBe(3);
-    expect(Object.keys(out.reconciliation_by_type)).toHaveLength(5);
+    expect(Object.keys(out.reconciliation_by_type)).toHaveLength(7);
+    expect(out.reconciliation_by_type['conflict']).toBe(0);
+    expect(out.reconciliation_by_type['late_sample']).toBe(0);
     expect(out.reconciliation_conflicts).toBe(7);
     expect(out.message_frames).toBe(150);
   });

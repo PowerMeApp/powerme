@@ -4,7 +4,8 @@
 **Task:** T11 / BE-06 — thiết kế CSDL mức vật lý
 **Người chịu trách nhiệm:** Ngô Văn Minh Trí (WP2)
 **Nguồn:** mô hình logic T10 (Ân, 20/10/2026) · state machine T12/T13 · ADR-0005, 0007, 0008, 0009, 0010, 0011, 0012 · `docs/PACKAGE-DIAGRAM-CSMS.md` (bảng → module chủ) · `apps/csms/lab/README.md` (định dạng trace)
-**Sản phẩm:** `apps/csms/src/db/schema/*.ts` (Drizzle) · `apps/csms/drizzle/0000_init.sql` (migration viết tay) · tài liệu này
+**Sản phẩm:** `apps/csms/src/db/schema/*.ts` (Drizzle) · `apps/csms/drizzle/0000_init.sql` + `apps/csms/drizzle/0001_quyet-dinh-be-11.sql` (migration viết tay) · tài liệu này
+**Cập nhật 25/10/2026 (BE-11):** áp migration 0001 — `payment_mode` có `unattributed`, đổi `pillar_timestamp` → `cp_timestamp`, thêm bảng `remote_commands` và `session_status_history`, cột `orphaned_at` / `replayed` / `epoch`, `reconciliation_record_type` có `conflict` + `late_sample`. Nhật ký từng thay đổi và cách kiểm: `docs/NHAT-KY-MIGRATION-0001.md`.
 
 > Nguồn sự thật về cấu trúc DB là **migration SQL viết tay** (ADR-0008). Schema Drizzle phải khớp từng cột với SQL — mục 8 ghi cách đối chiếu đã chạy.
 
@@ -18,14 +19,16 @@
 | Business key của ERD | `UNIQUE` riêng, không làm PK | T11 |
 | Tên bảng / cột | `snake_case`, số nhiều cho bảng | T11 |
 | Thời gian | `timestamptz`, lưu UTC | ADR-0009 |
-| Hai đồng hồ | bảng nhận dữ liệu từ trụ có cả `cp_timestamp`/`pillar_timestamp` (đồng hồ trụ, **không tin**) lẫn `received_at` (đồng hồ CSMS, **tin**) | ADR-0009 |
+| Hai đồng hồ | bảng nhận dữ liệu từ trụ có cả `cp_timestamp` (đồng hồ trụ, **không tin**; trước 0001 `connector_status_events` gọi là `pillar_timestamp`) lẫn `received_at` (đồng hồ CSMS, **tin**) | ADR-0009 |
 | Điện năng | Wh, `bigint` | ADR-0009 |
 | Tiền | VND, `bigint` | ADR-0009 |
 | Enum | `CREATE TYPE ... AS ENUM` qua `pgEnum` của Drizzle; giá trị khớp T12/T13 | T11 |
 | Cột dẫn xuất (`/x` trong ERD) | cột thường, **cập nhật cùng transaction với dòng ledger** | T10 §5.6 |
 | Partition | `meter_values`, `ocpp_message_log` — `PARTITION BY RANGE (received_at)` theo tháng, tạo sẵn 2026-10 → 2027-01 + `DEFAULT` | ADR-0007 |
 
-Số liệu: **32 bảng** (+10 partition con), **28 enum**, **94 index** (kể cả index do PK/UNIQUE tạo, trong đó 7 partial), **24 CHECK (đếm trên văn bản migration; con số 36 trước đây không tái hiện được)**, 5 sequence cho số nghiệp vụ, 1 trigger append-only.
+Số liệu sau migration 0001 (**đếm bằng truy vấn trên Postgres thật đã áp 0000 + 0001**, không đếm trên văn bản): **34 bảng** (+10 partition con của `meter_values`, `ocpp_message_log`), **29 enum** (117 giá trị), **100 index** (kể cả index do PK/UNIQUE tạo, trong đó 9 partial), **27 CHECK**, 53 FK, 295 cột, 5 sequence cho số nghiệp vụ, 2 trigger append-only (`ocpp_message_log`, `session_status_history`).
+
+Cách đếm (bỏ partition con và bảng theo dõi `_migrations`): bảng = `pg_class` có `relkind IN ('r','p')` và `NOT relispartition`; index = `pg_indexes`; partial index = `pg_index.indpred IS NOT NULL`; **CHECK = `pg_constraint` với `contype = 'c'`** (không tính NOT NULL — Postgres 17 không lưu NOT NULL ở đây, Postgres 18 lưu với `contype = 'n'` nên phải loại); enum = `count(DISTINCT enumtypid)` của `pg_enum`; sequence nghiệp vụ = `relkind = 'S'` không phải sequence của cột identity. Số cũ sau 0000 (32 / 28 / 94 / 7 / 24) tái hiện đúng bằng cùng truy vấn; 0001 cộng 2 bảng, 1 enum, 6 index (2 partial), 3 CHECK, 3 FK, 25 cột, 1 trigger.
 
 ---
 
@@ -80,6 +83,8 @@ Trả lời T10 §2: tên bảng thật, module chủ theo `PACKAGE-DIAGRAM-CSMS
 |---|---|---|
 | `ocpp_message_log` | ocpp-gateway | nhật ký frame append-only, ghi trước handler (ADR-0005) |
 | `charge_point_connections` | stations | epoch kết nối — nền phát hiện phát lại (EXP-01) |
+| `remote_commands` | ocpp-gateway | lệnh CSMS → trụ bất đồng bộ (`202 + commandId`), migration 0001 (BM02 F08) |
+| `session_status_history` | sessions | lịch sử chuyển trạng thái phiên, append-only, migration 0001 (BM02 F13) |
 
 ---
 
@@ -117,7 +122,7 @@ Khoá: UNIQUE `(charge_point_id, connector_no)`; CHECK `connector_no IN (1, 2)`;
 `connector_no = 0` là toàn trụ theo OCPP 1.6 và **không có dòng** ở đây.
 
 **`connector_status_events`** — mọi `StatusNotification` đã nhận. CSMS phản chiếu, không từ chối (T13): chuyển trạng thái bất thường so với bảng OCPP vẫn ghi, gắn cờ `unexpected_transition = true`.
-Cột: `charge_point_id` (FK), `connector_no` (0 · 1 · 2), `connector_id` (FK, **null khi `connector_no = 0`**), `status`, `error_code` (mặc định `NoError`), `vendor_error_code`, `info`, `pillar_timestamp` (đồng hồ trụ), `received_at` (đồng hồ CSMS), `unexpected_transition`.
+Cột: `charge_point_id` (FK), `connector_no` (0 · 1 · 2), `connector_id` (FK, **null khi `connector_no = 0`**), `status`, `error_code` (mặc định `NoError`), `vendor_error_code`, `info`, `cp_timestamp` (đồng hồ trụ; đổi tên từ `pillar_timestamp` ở migration 0001), `received_at` (đồng hồ CSMS), `unexpected_transition`.
 Khoá: UNIQUE `(charge_point_id, connector_no, received_at)`; CHECK `connector_no IN (0,1,2)`; CHECK `(connector_no = 0) = (connector_id IS NULL)`; index `(connector_id, received_at)`.
 
 **`charge_point_connections`** — mỗi lần trụ mở WebSocket là một epoch (EXP-01). Bản tin có `cp_timestamp` sớm hơn `opened_at` của epoch hiện tại là ứng viên phát lại.
@@ -136,10 +141,11 @@ Cột: `card_identifier` (BK — giá trị idTag trên dây, CHECK ≤ 20 ký t
 **`sessions`** — phiên sạc = một giao dịch OCPP. Bảng trung tâm của hệ thống.
 Cột định danh: `transaction_no integer` (BK; `transactionId` CSMS cấp cho trụ qua sequence `sessions_transaction_no_seq`, kiểu int32 vì OCPP 1.6), `connector_id`, `charge_point_id`, `connector_no`, `id_tag` (idTag nguyên văn trong `StartTransaction`, kể cả khi không tra được thẻ).
 Cột liên kết tuỳ chọn: `driver_id`, `vehicle_id`, `rfid_card_id`, `promotion_id`.
-Cột phân loại (ADR-0012): `origin` (`app_qr` · `rfid` · `hmi_password` · `free_vend`), `payment_mode` (`csms_billed` · `station_wallet` · `free`), `billing_mode` (`full` · `timed` · `energy_kwh` · `amount_vnd`) + `limit_value` (phút / Wh / VND tuỳ `billing_mode`).
+Cột phân loại (ADR-0012): `origin` (`app_qr` · `rfid` · `hmi_password` · `free_vend`), `payment_mode` (`csms_billed` · `station_wallet` · `free` · `unattributed` — giá trị cuối thêm ở 0001: phiên mở bằng idTag lạ, chưa biết ai thu tiền; trước đó code tạm gán `station_wallet`), `billing_mode` (`full` · `timed` · `energy_kwh` · `amount_vnd`) + `limit_value` (phút / Wh / VND tuỳ `billing_mode`).
 Cột trạng thái: `status` — 9 giá trị theo T12/T13: `pending` → `active` ⇄ `paused` → `stopping` → `closed` → (`review` →) `reconciled`; nhánh lỗi `orphaned`, `failed`. `closed → review` khi đối soát phát hiện conflict; `review → reconciled` khi operator giải quyết.
 Cột thời gian (ADR-0009, hai đồng hồ): `cp_started_at` / `received_started_at`, `cp_stopped_at` / `received_stopped_at`. `StartedAt`/`EndedAt` của ERD ánh xạ sang cặp này.
 Cột đo: `meter_start_wh`, `meter_stop_wh`, `stop_reason` (Reason OCPP nguyên văn), `delivered_offline` (engine đối soát gán).
+Cột `orphaned_at` (0001, `timestamptz` null): **lần đầu** phiên bị chuyển sang `orphaned` (đồng hồ CSMS). Giữ nguyên khi `orphaned → active` (T13 #18) và khi bị orphaned lần hai, nên `orphaned_at IS NOT NULL` nghĩa là "phiên này từng mất kết nối"; null = chưa từng. Mốc từng lần nằm ở `session_status_history`.
 Cột dẫn xuất: `energy_wh`, `total_cost_vnd` — cập nhật cùng transaction lúc đóng phiên / ghi ledger.
 Khoá:
 - UNIQUE `transaction_no`.
@@ -153,8 +159,13 @@ Timeout và ngưỡng skew của state machine **không nằm trong DB**: xem `X
 **`session_pauses`** — khoảng tạm dừng trong phiên (`SuspendedEV` / `SuspendedEVSE`). Bảng thật, không JSON.
 Cột: `session_id` (FK), `paused_at`, `resumed_at` (null khi đang dừng), `pause_cause` (`ev` · `evse`). UNIQUE `(session_id, paused_at)`; CHECK `resumed_at >= paused_at`.
 
+**`session_status_history`** (0001, BM02 F13) — lịch sử chuyển trạng thái phiên; **mỗi chuyển được state machine T13 chấp nhận = một dòng**, ghi trong cùng transaction với `UPDATE sessions.status` (`SessionsService.transition()` / luồng StartTransaction / StopTransaction).
+Cột: `session_id` (FK → `sessions`), `from_status` (`session_status`, **null** cho chuyển từ INITIAL ● — T13 #1, #2), `to_status`, `event` (tên event state machine: `START_TRANSACTION`, `STATION_OFFLINE`, `RECONCILE_OK`…), `actor` (`station` = frame của trụ gây ra · `system` = CSMS tự quyết, mặc định `system`; dành chỗ cho `users.id` khi có thao tác operator #17), `note` (vết: `message_log_id=…`, `replayed`, kết luận đối soát), `occurred_at` (đồng hồ CSMS; chuyển cùng một frame có cùng `occurred_at` nên xếp theo `id`).
+Khoá: index `(session_id, occurred_at)`. **Append-only**: trigger `session_status_history_no_update_delete` chặn UPDATE/DELETE giống `ocpp_message_log`. FK `ON DELETE RESTRICT` — **không** dùng `CASCADE` vì `CASCADE` xoá dòng con bằng DELETE nên đụng chính trigger chặn DELETE và báo lỗi khó hiểu; `RESTRICT` nói thẳng "không xoá phiên còn lịch sử" (muốn dọn dữ liệu thử phải `DISABLE TRIGGER` có chủ ý).
+Chuỗi thật của tx3 trong trace EXP-01: `● → active (START_TRANSACTION)` · `active → orphaned (STATION_OFFLINE)` · `orphaned → active (LIVE_MESSAGE)` · `active → closed (STOP_TRANSACTION)` · `closed → review (RECONCILE_CONFLICT)`.
+
 **`meter_values`** — một `SampledValue` = một dòng. **Partition theo tháng trên `received_at`.**
-Cột: `session_id` (FK), `cp_timestamp` (đồng hồ trụ), `received_at` (đồng hồ CSMS, khoá partition), `measurand` (nguyên văn OCPP: `Energy.Active.Import.Register`, `Power.Active.Import`, `SoC`, `Voltage`, `Current.Import`…), `value numeric(14,3)`, `unit`, `context`, `phase`.
+Cột: `session_id` (FK), `cp_timestamp` (đồng hồ trụ), `received_at` (đồng hồ CSMS, khoá partition), `measurand` (nguyên văn OCPP: `Energy.Active.Import.Register`, `Power.Active.Import`, `SoC`, `Voltage`, `Current.Import`…), `value numeric(14,3)`, `unit`, `context`, `phase`, và (0001) `replayed boolean NOT NULL DEFAULT false` (ReplayDetector phán **cả frame** chứa mẫu là phát lại — 6 MeterValues phát lại của tx3 = 30 dòng `replayed = true`, trong đó 6 dòng `Energy.Active.Import.Register`), `epoch integer` (null) = `charge_point_connections.epoch` lúc frame tới. Dòng có trước 0001 nhận `replayed = false` / `epoch = NULL` (chưa phân loại); chỉ dòng ghi sau 0001 đáng tin.
 Khoá: PK `(id, received_at)` — Postgres bắt PK/UNIQUE của bảng partition phải chứa khoá partition. Vì thế **BK `(session_id, cp_timestamp, measurand)` của ERD không thể là UNIQUE**; chỉ có index thường trên bộ đó. Dedupe là việc của engine đối soát (`reconciliation_records.record_type = duplicate`), đúng tinh thần ADR-0005 "lưu hết, xử lý sau".
 Partition: `meter_values_2026_10` … `_2027_01` + `meter_values_default`. Job BullMQ hằng tháng tạo partition tháng kế (ADR-0007).
 
@@ -169,8 +180,9 @@ Partition: `meter_values_2026_10` … `_2027_01` + `meter_values_default`. Job B
 ### 3.5. Module `reconciliation`
 
 **`reconciliation_records`** — kết quả engine đối soát (BE-07).
-Cột: `session_id` (FK), `record_no` (từ 1, BK cùng `session_id`), `record_type` (`replay` · `duplicate` · `meter_gap` · `orphan_stop` · `unknown_id_tag` — theo package diagram và ADR-0012), `gap_start`/`gap_end`, `energy_difference_wh`, `reviewed_by` (FK → `users`, operator hoặc admin), `reviewed_at`, `resolution`.
+Cột: `session_id` (FK), `record_no` (từ 1, BK cùng `session_id`), `record_type` (`replay` · `duplicate` · `meter_gap` · `orphan_stop` · `unknown_id_tag` — theo package diagram và ADR-0012 — cộng `conflict` · `late_sample` thêm ở 0001, BM02 F10), `gap_start`/`gap_end`, `energy_difference_wh`, `reviewed_by` (FK → `users`, operator hoặc admin), `reviewed_at`, `resolution`.
 Khoá: UNIQUE `(session_id, record_no)`; CHECK `(reviewed_by IS NULL) = (reviewed_at IS NULL)`; partial index `(record_type, created_at) WHERE reviewed_at IS NULL` cho màn hình "cần xử lý".
+Quy ước ghi từ 0001 (`ReconciliationService.recordVerdict`): đối soát do **StopTransaction** kết luận `conflict` → `record_type = conflict`; đối soát lại do **mẫu muộn** → `late_sample` (kết luận vẫn ở tiền tố `resolution`: `conflict (late_sample): …` hoặc `gap_detected (late_sample): …`); `meter_gap` chỉ còn cho `gap_detected` thuần. Trước 0001 conflict và mẫu muộn lưu là `meter_gap` + tiền tố `resolution`; bản ghi cũ **không bị sửa** và console vẫn đọc được (nhánh tương thích trong `console.mappers.reconciliationKind` và `console.queries.IS_CONFLICT`, có test).
 
 ### 3.6. Module `billing` (WP5)
 
@@ -205,10 +217,14 @@ Khoá: **partial UNIQUE `(connector_id) WHERE status = 'active'`** và **`(drive
 ### 3.8. Module `ocpp-gateway`
 
 **`ocpp_message_log`** — mọi frame OCPP hai chiều, **ghi trước khi gọi handler** (ADR-0005). **Partition theo tháng trên `received_at`.**
-Cột (khớp định dạng trace của lab): `charge_point_id`, `epoch`, `direction` (`in` · `out`), `message_type` (2 CALL · 3 CALLRESULT · 4 CALLERROR), `unique_id` (MessageId OCPP-J), `action` (chỉ CALL), `cp_timestamp` (từ payload nếu có), `received_at`, `raw jsonb`.
+Cột (khớp định dạng trace của lab): `charge_point_id`, `epoch`, `direction` (`in` · `out`), `message_type` (2 CALL · 3 CALLRESULT · 4 CALLERROR), `unique_id` (MessageId OCPP-J), `action` (chỉ CALL), `cp_timestamp` (từ payload nếu có), `received_at`, `raw jsonb`, và (0001) `replayed boolean` (**null** = không phân loại được: frame không có `cp_timestamp`, CALLRESULT/CALLERROR, chiều ra; `true`/`false` = phán quyết `ReplayDetector`). Cột phải được truyền **ngay lúc INSERT** (`OcppServer.processCall` → `OcppMessageLogger.log`) vì trigger append-only chặn UPDATE. Dòng có trước 0001 để null.
 Khoá: PK `(id, received_at)`; CHECK `message_type IN (2,3,4)`; CHECK `(message_type = 2) = (action IS NOT NULL)`; index `(charge_point_id, received_at)`, `(charge_point_id, unique_id)` (ghép CALL ↔ CALLRESULT), `(action, received_at)`.
 Append-only ở mức DB: trigger `ocpp_message_log_no_update_delete` từ chối mọi UPDATE/DELETE; xoá dữ liệu cũ bằng `DROP TABLE` partition (không qua trigger).
 Partition: `ocpp_message_log_2026_10` … `_2027_01` + `_default`.
+
+**`remote_commands`** (0001, BM02 F08) — lệnh CSMS → trụ, **bất đồng bộ**: API trả `202 + commandId` (xem `WP2-KIEN-TRUC-TECHSTACK.md`), kết quả (CALLRESULT / timeout) cập nhật dòng này. Chỉ có bảng + schema TS; code gửi lệnh là việc của BE-04.
+Cột: `charge_point_id` (FK), `connector_no` (null = cả trụ; 0/1/2), `action` (tên action OCPP nguyên văn: `RemoteStartTransaction`, `RemoteStopTransaction`, `Reset`, `UnlockConnector`, `ChangeAvailability`, `ChangeConfiguration`, `GetConfiguration`, `TriggerMessage`, `DataTransfer`…), `payload jsonb`, `status` (`remote_command_status`: `pending` mặc định · `sent` · `accepted` · `rejected` · `timeout` · `failed`), `requested_by` (FK → `users`, null = CSMS tự phát sinh), `idempotency_key` (null), `requested_at` (mặc định `now()`), `sent_at`, `responded_at`, `response jsonb`, `error`.
+Khoá: CHECK `connector_no IS NULL OR connector_no IN (0,1,2)`; CHECK `sent_at >= requested_at`; CHECK `responded_at` chỉ khi đã có `sent_at` và `>= sent_at` (lệnh `failed` trước khi gửi vì trụ offline thì không có `sent_at`); partial UNIQUE `(idempotency_key) WHERE idempotency_key IS NOT NULL`; index `(charge_point_id, requested_at DESC)`; partial index `(status) WHERE status IN ('pending','sent')` cho worker quét lệnh dang dở.
 
 ---
 
@@ -227,8 +243,10 @@ Partition: `ocpp_message_log_2026_10` … `_2027_01` + `_default`.
 | 6 | mọi cột tiền/Wh là `bigint`; cột dẫn xuất là cột thường có chú thích | toàn bộ | không lỗi làm tròn; snapshot cập nhật cùng transaction (T10 §5.6, ADR-0009) |
 | 7 | partial UNIQUE `reservations (connector_id) WHERE status='active'`, `(driver_id) WHERE status='active'` | reservations | một đặt chỗ active mỗi súng và mỗi tài xế — tại DB, không ở thư viện (EXP-02) |
 | 8 | UNIQUE `sessions (charge_point_id, connector_no, id_tag, meter_start_wh, cp_started_at)` | sessions | `StartTransaction` phát lại không sinh giao dịch thứ hai (ADR-0010) |
-| 9 | `cp_*`/`pillar_timestamp` cạnh `received_at` ở `sessions`, `meter_values`, `connector_status_events`, `ocpp_message_log` | — | chênh lệch hai đồng hồ là tín hiệu phát hiện replay (ADR-0009) |
+| 9 | `cp_*` cạnh `received_at` ở `sessions`, `meter_values`, `connector_status_events`, `ocpp_message_log` | — | chênh lệch hai đồng hồ là tín hiệu phát hiện replay (ADR-0009) |
 | 10 | trigger chặn UPDATE/DELETE trên `ocpp_message_log` | ocpp-gateway | nhật ký chỉ thêm, không sửa (ADR-0005) |
+| 11 | trigger chặn UPDATE/DELETE trên `session_status_history` + FK `ON DELETE RESTRICT` (0001) | sessions | lịch sử chuyển trạng thái không bị sửa/xoá âm thầm, kể cả khi xoá phiên cha |
+| 12 | partial UNIQUE `remote_commands (idempotency_key) WHERE idempotency_key IS NOT NULL` (0001) | ocpp-gateway | client retry `POST /commands` không sinh lệnh thứ hai xuống trụ |
 
 ### 4.2. Ràng buộc bổ sung ở mức vật lý
 
@@ -248,6 +266,8 @@ Partition: `ocpp_message_log_2026_10` … `_2027_01` + `_default`.
 | CHECK `(message_type = 2) = (action IS NOT NULL)` | ocpp_message_log | CALL có action; CALLRESULT/CALLERROR không |
 | CHECK `(reviewed_by IS NULL) = (reviewed_at IS NULL)` | reconciliation_records | "đã xử lý" phải có cả người lẫn lúc |
 | CHECK percent ≤ 100, `valid_to > valid_from` | promotions | giá trị khuyến mãi hợp lệ |
+| CHECK `connector_no IS NULL OR connector_no IN (0,1,2)` (0001) | remote_commands | lệnh chỉ nhắm cả trụ hoặc connector 0/1/2 |
+| CHECK `sent_at >= requested_at`; CHECK `responded_at` chỉ khi đã gửi và `>= sent_at` (0001) | remote_commands | trình tự thời gian của một lệnh không đảo ngược |
 
 ---
 
@@ -272,8 +292,8 @@ Partition: `ocpp_message_log_2026_10` … `_2027_01` + `_default`.
 | ERD không có `ocpp_message_log`, `charge_point_connections` (ADR-0005, EXP-01) | tạo ở mức vật lý, ghi rõ "bảng kỹ thuật" |
 | MeterReading BK `(ChargingSession, ReadingTime, Measurand)` không thể UNIQUE trên bảng partition | chỉ index thường; dedupe giao cho engine đối soát (mục 3.3) |
 | ConnectorStatusEvent gắn `Connector(FK)` nhưng OCPP có `connectorId = 0` (toàn trụ) | thêm `charge_point_id` + `connector_no` (0/1/2), `connector_id` null khi 0 |
-| ADR-0009 ghi `origin`: `app · rfid_online · rfid_wallet · hmi_password · free_vend` và `payment_mode`: `... · unattributed`; T12/T13 chốt `app_qr · rfid · hmi_password · free_vend` và `... · free` | **dùng giá trị T12/T13** theo yêu cầu "khớp chính xác"; ADR-0009 và ADR-0012 cần sửa cho khớp (mục 7) |
-| `PACKAGE-DIAGRAM-CSMS.md` gọi bảng là `transactions`, `id_tags`, `remote_commands` | dùng `sessions`, `rfid_cards` theo T11; `remote_commands` không có trong T10/T11 nên **chưa tạo** (mục 7) |
+| ADR-0009 ghi `origin`: `app · rfid_online · rfid_wallet · hmi_password · free_vend` và `payment_mode`: `... · unattributed`; T12/T13 chốt `app_qr · rfid · hmi_password · free_vend` và `... · free` | **dùng giá trị T12/T13** (`origin` giữ nguyên). **Cập nhật 25/10/2026:** `payment_mode` bổ sung `unattributed` (migration 0001) cho idTag lạ; hai ADR đã thêm mục "Cập nhật 25/10/2026" ghi giá trị thực tế |
+| `PACKAGE-DIAGRAM-CSMS.md` gọi bảng là `transactions`, `id_tags`, `remote_commands` | dùng `sessions`, `rfid_cards` theo T11. **Cập nhật 25/10/2026:** `remote_commands` đã tạo ở migration 0001 (mục 3.8) |
 
 ---
 
@@ -283,11 +303,13 @@ Những chỗ tôi phải chọn một giá trị để schema biên dịch đư
 
 **Cho Trí (WP2):**
 
-1. **Enum chưa có nguồn giá trị** — tôi tự đặt, cần duyệt hoặc đổi: `user_account_status` (active/suspended/closed), `operator_status` (như trên), `staff_role` (manager/technician), `connector_type` (ccs2/chademo/gbt/type2), `fault_source` (ocpp/driver_report/operator), `maintenance_ticket_status` (open/in_progress/closed), `reservation_hold_mode` (reserve_now/csms_only — suy từ EXP-02), `tariff_band` (off_peak/normal/peak — theo ba khung giờ EVN), `discount_type` (percent/fixed_vnd), `credit_transaction_type` (top_up/session_debit/refund/adjustment), `loyalty_transaction_type` (earn/redeem/expire/adjust).
+> **Cập nhật 25/10/2026:** mục 1 đã được Trí duyệt (giữ nguyên giá trị, **chưa có Khang/Nghĩa duyệt riêng**); mục 2 đã xử lý (ADR có mục "Cập nhật 25/10/2026", Known Gap G6 đóng); mục 3 đã làm (`remote_commands` ở 0001); mục 5 đã làm (`cp_timestamp`). Các mục còn lại giữ nguyên là câu hỏi mở.
+
+1. **Enum chưa có nguồn giá trị** — *đã duyệt bởi Trí 25/10/2026, chưa có Khang/Nghĩa duyệt riêng; 0001 không đổi giá trị nào.* Tôi tự đặt: `user_account_status` (active/suspended/closed), `operator_status` (như trên), `staff_role` (manager/technician), `connector_type` (ccs2/chademo/gbt/type2), `fault_source` (ocpp/driver_report/operator), `maintenance_ticket_status` (open/in_progress/closed), `reservation_hold_mode` (reserve_now/csms_only — suy từ EXP-02), `tariff_band` (off_peak/normal/peak — theo ba khung giờ EVN), `discount_type` (percent/fixed_vnd), `credit_transaction_type` (top_up/session_debit/refund/adjustment), `loyalty_transaction_type` (earn/redeem/expire/adjust).
 2. **ADR-0009 / ADR-0012 lệch enum T12/T13** (`origin`, `payment_mode`, tên `id_tags`). Schema theo T12/T13; hai ADR cần một dòng "Ghi chú trạng thái" cập nhật.
-3. **`remote_commands`** có trong package diagram (module `stations`) nhưng không có trong T10. Tạo ở BE-04 hay thêm vào migration 0001?
+3. **`remote_commands`** có trong package diagram (module `stations`) nhưng không có trong T10. ~~Tạo ở BE-04 hay thêm vào migration 0001?~~ **Đã thêm vào 0001 (chỉ bảng; code gửi lệnh vẫn là BE-04).** Bảng đặt ở nhóm `ocpp-gateway` trong schema TS (không phải `stations` như package diagram) vì lệnh đi qua gateway; đổi thư mục không ảnh hưởng DB.
 4. **`meter_values.session_id NOT NULL`** theo ERD → `MeterValues` không kèm `transactionId` (ngoài phiên) sẽ không lưu được vào bảng này (frame thô vẫn còn trong `ocpp_message_log`). Nếu BE-06 cần lưu cả mẫu ngoài phiên thì đổi thành nullable + thêm `connector_id`.
-5. **`connector_status_events.pillar_timestamp`** giữ tên của Ân; các bảng khác dùng `cp_timestamp` (ADR-0009). Có muốn đổi thành `cp_timestamp` cho thống nhất không?
+5. **`connector_status_events.pillar_timestamp`** giữ tên của Ân; các bảng khác dùng `cp_timestamp` (ADR-0009). ~~Có muốn đổi không?~~ **Đã đổi thành `cp_timestamp` ở 0001** (`RENAME COLUMN`, dữ liệu giữ nguyên — có test nâng cấp).
 6. **`sessions.stop_reason` là `text`** (không enum) để trụ báo gì cũng ghi được; `connectors.status` lại là enum 9 giá trị theo quyết định T13. Hai cách khác nhau cho hai cột — chấp nhận hay enum hoá `stop_reason` (11 giá trị Reason của OCPP 1.6)?
 7. **`users.password_hash`** không có trong T10; thêm vì `users` module xác thực JWT. Nếu đăng nhập OTP thuần thì bỏ.
 8. **Partition tạo sẵn 2026-10 → 2027-01**: thử nghiệm M5/M6 (11–12/2026) nằm trong khoảng; dữ liệu khác rơi vào `_default`. Job BullMQ tạo partition kế là việc của BE-06 hay BE-07?
@@ -318,8 +340,33 @@ npx drizzle-kit export --sql                  # DDL sinh từ schema TS, dùng �
 
 Chạy migration trên PGlite và thử ràng buộc: `connector_no = 3`, `StartTransaction` phát lại, bộ ba súng lệch, hai ví một tài xế, hai đặt chỗ active cùng súng / cùng tài xế, UPDATE/DELETE `ocpp_message_log`, hai `session_debit` một phiên, sự kiện toàn trụ gắn súng — **tất cả bị từ chối đúng**; dòng `meter_values` có `received_at` tháng 10/2026 vào `meter_values_2026_10`, dòng tháng 5/2027 vào `meter_values_default`.
 
-Áp dụng migration lên Postgres thật:
+**Cập nhật 25/10/2026 (migration 0001) — đối chiếu bằng máy trên Postgres 17 thật** (script đối chiếu: `drizzle-kit export --sql` nạp vào DB nháp `schema_ts`, `0000 + 0001` nạp vào DB nháp `schema_sql`, so `information_schema.columns`, `pg_constraint`, `pg_indexes`, `pg_enum`, bỏ partition con):
+
+| | SQL (0000+0001) | Drizzle TS | Khớp |
+|---|---|---|---|
+| cột | 295 | 295 | 295 |
+| ràng buộc (PK/UNIQUE/FK/CHECK) | 146 | 146 | 146 |
+| index | 100 | 100 | 100 |
+| enum | 29 | 29 | 29 |
+
+Hai khác biệt đã xử lý để ra 0 khác biệt: (1) tên FK — SQL dùng `*_fkey` (mặc định Postgres), Drizzle sinh `*_fk`; FK được so theo **định nghĩa** (cột, bảng đích, `ON DELETE`), 53/53 khớp; (2) `requested_at DESC` — Drizzle mặc định sinh `DESC NULLS LAST`, Postgres mặc định `DESC NULLS FIRST`; schema TS khai `.desc().nullsFirst()` cho khớp SQL. Trigger, function, sequence, `COMMENT` không nằm trong phép so (Drizzle không biểu diễn).
+
+**Giới hạn của phép kiểm:** Postgres nhúng của máy dev là **17.x beta** (xem `demo/db-embedded.mjs`); CI chạy Postgres 16.4. Migration chỉ dùng cú pháp có từ Postgres 12 (`ADD VALUE` trong transaction, `RENAME COLUMN`, `ADD COLUMN` trên bảng partition) nên không kỳ vọng khác biệt, nhưng kết quả trên 16.4 do CI xác nhận, không phải do lần chạy cục bộ này.
+
+Áp dụng migration lên Postgres thật — tuần tự, có bảng theo dõi `_migrations`:
 
 ```bash
-psql "$DATABASE_URL" -f apps/csms/drizzle/0000_init.sql
+DATABASE_URL=postgresql://… node apps/csms/demo/migrate.mjs
 ```
+
+DB demo đã có 0000 (dựng trước khi có `_migrations`) được ghi nhận 0000 là đã áp rồi chạy 0001 lên dữ liệu hiện có (đã thử trên DB demo thật và bằng test `migration-0001.integration.test.ts`). Dùng `psql -f` rời từng file vẫn chạy được SQL nhưng không ghi `_migrations`.
+
+---
+
+## 9. Giới hạn đã biết
+
+1. **Không có FK từ `reconciliation_records` tới `ocpp_message_log` (BM02 F11).** `ocpp_message_log` là bảng partition theo `received_at`; Postgres bắt khoá chính của bảng partition chứa cột khoá partition, nên khoá chính là `(id, received_at)`, và một FK chỉ bằng `id` **không thể** tham chiếu tới (FK cần UNIQUE/PK đúng bộ cột được tham chiếu). Muốn có FK thật phải thêm cột `received_at` vào `reconciliation_records` và dùng FK tổng hợp `(message_log_id, message_log_received_at)`; đã cân nhắc và **không làm** — thêm cột chỉ để thoả FK, và chính sách xoá partition cũ (ADR-0007) sẽ phải tính tới FK đó (chưa đánh giá). Hiện tại liên kết là chuỗi `message_log_id=N` nằm trong `resolution` (và trong `session_status_history.note`); không có ràng buộc toàn vẹn, chỉ có quy ước. Tra ngược dùng `ocpp_message_log (id)` kèm khoảng `received_at` của bản ghi đối soát để partition pruning hoạt động.
+2. **Dòng có trước 0001 không có `replayed`/`epoch`/`orphaned_at` đáng tin.** `meter_values.replayed` mặc định `false` (không phân biệt được "live" với "chưa phân loại"), `meter_values.epoch` null, `ocpp_message_log.replayed` null (không backfill được vì bảng append-only chặn UPDATE). Console vẫn dựng cờ `replayed` bằng chính `ReplayDetector` từ `cp_timestamp` + epoch nên không phụ thuộc cột mới.
+3. **`session_status_history` chỉ ghi chuyển do `SessionsService` thực hiện.** Chuyển #1, #3, #4, #7, #8, #9a, #17 và `HARD_CAP_EXCEEDED` chưa có trigger thật (xem `docs/ITERATION-1-WF03.md` mục 4) nên chưa sinh dòng; khi cài, mọi chỗ gọi `stateMachine.apply` phải đi qua cùng `transition()`.
+4. **`remote_commands` mới có bảng.** Không có code ghi/đọc; cột `status` và các CHECK là thiết kế, chưa qua vòng đời thật (BE-04).
+5. **Bản ghi đối soát cũ** (trước 0001) giữ dạng `meter_gap` + tiền tố `resolution`; không migrate dữ liệu cũ sang `conflict`/`late_sample` để không sửa bản ghi đối soát đã có người xem. Console có nhánh tương thích.

@@ -63,3 +63,13 @@ Bản SRS tóm tắt đã bỏ sót, chỉ manual gốc của hãng mới có:
 | Coi mọi phiên là CSMS thu tiền | Khách dùng thẻ ví bị trừ tiền hai lần |
 | Tắt Wallet ID card và free vend trong cấu hình trụ | Đơn giản nhất, nhưng bỏ đi đúng tình huống offline mà đề tài nghiên cứu, trong khi người vận hành thật cần thẻ ví khi mạng 4G yếu. **Giữ làm phương án dự phòng** nếu S5 trễ tiến độ |
 | Nhận diện thẻ ví qua `DataTransfer` riêng của hãng | Chưa biết hãng có gửi hay không — phụ thuộc câu hỏi mở 1. Có thể bổ sung sau, không dùng làm nền |
+
+## Cập nhật 25/10/2026
+
+Trạng thái giữ nguyên. Giá trị thực tế trong schema sau migration 0001 (BE-11); nội dung cũ không bị xoá.
+
+- **Tên bảng:** sổ đăng ký thẻ (quyết định 2, "`id_tags`") là bảng **`rfid_cards`** (T11), cột `card_identifier`, `card_kind` ∈ `online` · `wallet` · `free_vend`, `status` ∈ `unlinked` · `active` · `blocked`.
+- **`origin`:** `app_qr` · `rfid` · `hmi_password` · `free_vend` (T12/T13), không phải năm giá trị của ADR-0009 cũ.
+- **`payment_mode`:** `csms_billed` · `station_wallet` · `free` · `unattributed`. Quyết định 5 (idTag không có trong sổ → `unattributed`) **đã được cài đặt từ 0001**: `SessionsService` gán `payment_mode = unattributed` kèm bản ghi `unknown_id_tag`; trước đó code tạm gán `station_wallet` vì enum chưa có giá trị này (tức phiên bị coi là đã thu tiền ở trụ — sai với ADR).
+- **Còn lệch, chưa đổi:** quyết định 3 viết phiên free vend → `payment_mode = unattributed`, nhưng schema T12/T13 và code dùng **`free`** cho free vend (nhận diện qua `charge_points.free_vend_tag`, `origin = free_vend`). Giữ `free`; `unattributed` chỉ dành cho idTag lạ. Cần Trí/Khang chốt có sửa ADR hay sửa code (ghi ở `docs/DESIGN-BRIEF-WP2-INPUT.md` G6).
+- **Lịch sử phiên:** mỗi chuyển trạng thái (kể cả phiên `unattributed`) có một dòng `session_status_history`.

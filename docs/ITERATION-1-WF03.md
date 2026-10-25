@@ -31,6 +31,7 @@ apps/csms/
 ├── jest.config.js
 ├── scripts/run-jest.cjs         chạy jest với --experimental-vm-modules (Nest 12 là ESM-only)
 ├── drizzle/0000_init.sql        (T11, không đổi)
+├── drizzle/0001_quyet-dinh-be-11.sql   (BE-11, 25/10/2026)
 ├── src/
 │   ├── main.ts                  NestFactory.createApplicationContext (chưa có HTTP)
 │   ├── app.module.ts
@@ -79,7 +80,7 @@ Unit test đặt cạnh mã nguồn (`*.spec.ts`): `session-state-machine.spec.t
 
 - **SessionStateMachine** — `apply(from, event)` tra bảng `TRANSITIONS` (23 dòng = 22 chuyển, 16a hai trigger); không có → `InvalidTransitionError`. Không đọc DB; guard của #19 (chưa trừ tiền) do service kiểm.
 - **SessionsService** —
-  - `onStartTransaction`: INSERT … ON CONFLICT (khoá ADR-0010) DO NOTHING; trùng → SELECT lại, ghi `duplicate`, trả `transaction_no` cũ. idTag tra `rfid_cards` → origin/payment_mode; lạ → vẫn tạo phiên, `payment_mode = station_wallet` tạm (enum base chưa có `unattributed`), ghi `unknown_id_tag`. Phát lại → `delivered_offline = true` + record `replay`.
+  - `onStartTransaction`: INSERT … ON CONFLICT (khoá ADR-0010) DO NOTHING; trùng → SELECT lại, ghi `duplicate`, trả `transaction_no` cũ. idTag tra `rfid_cards` → origin/payment_mode; lạ → vẫn tạo phiên, `payment_mode = unattributed` (thêm ở migration 0001; trước đó tạm `station_wallet`), ghi `unknown_id_tag`. Mỗi chuyển trạng thái ghi một dòng `session_status_history` cùng transaction (0001). Phát lại → `delivered_offline = true` + record `replay`.
   - `onMeterValues`: mỗi SampledValue một dòng; dedup (session, cp_timestamp, measurand) bằng SELECT trước INSERT trong cùng transaction (bảng partition không UNIQUE được). Live tới phiên `orphaned` → #18 `active`. Mẫu muộn khi đã có `meter_stop` → đối soát lại; `reconciled` + conflict + chưa có `session_debit` → #19 `review`.
   - `onStopTransaction`: ghi meter_stop/cp_stopped_at/received_stopped_at/energy_wh; `active|paused|stopping` → #9/#10/#11 `closed`; đối soát → #12/#12a (từ closed) hoặc #16/#16a (từ orphaned). Phiên đã dừng mà Stop tới nữa → `orphan_stop`.
   - `onStatusNotification`: phản chiếu, `unexpected_transition` theo bảng; SuspendedEV/EVSE → #5 + `session_pauses`; Charging → #6 (hoặc #18 nếu orphaned và live).
@@ -90,7 +91,7 @@ Unit test đặt cạnh mã nguồn (`*.spec.ts`): `session-state-machine.spec.t
 
 - **ReplayDetector.classify({cpTimestamp, receivedAt, epochOpenedAt})** → `{replayed, reason: 'before_epoch' | 'skew' | null, skewS}`. Luật chính `cp_timestamp < epoch_opened_at`; phụ `received_at − cp_timestamp > REPLAY_SKEW_THRESHOLD_S` (5 s). Không có timestamp → live.
 - **evaluateSeries** (thuần) → `conflict` (chuỗi không đơn điệu, hoặc meterStop < round(mẫu cuối) − 1 Wh, hoặc không có meterStop) · `gap_detected` (khoảng cách > 3 × 10 s giữa hai mốc liên tiếp, kể cả cp_started_at → mẫu đầu và mẫu cuối → cp_stopped_at) · `consistent`. `energy_difference_wh = round(mẫu cuối) − meterStop`.
-- **ReconciliationService** — ghi `reconciliation_records` append-only với `record_no` tăng trong phiên: `meter_gap` (gap_detected hoặc conflict, phân biệt bằng tiền tố của `resolution`), `replay`, `duplicate`, `orphan_stop`, `unknown_id_tag`; `hasSessionDebit` cho guard #19. Không đổi `sessions.status`.
+- **ReconciliationService** — ghi `reconciliation_records` append-only với `record_no` tăng trong phiên: `conflict` (StopTransaction kết luận conflict), `late_sample` (đối soát lại do mẫu muộn; kết luận ở tiền tố `resolution`), `meter_gap` (chỉ `gap_detected` thuần), `replay`, `duplicate`, `orphan_stop`, `unknown_id_tag` (từ migration 0001; trước đó conflict và mẫu muộn là `meter_gap` + tiền tố `resolution`); `hasSessionDebit` cho guard #19. Không đổi `sessions.status`.
 
 ---
 
@@ -142,7 +143,7 @@ Biến môi trường (xem `infra/.env.example`): `DATABASE_URL` (bắt buộc),
 
 Trụ (hoặc SAP simulator với `ws://localhost:9000/ocpp`) nối tới `ws://host:OCPP_PORT/ocpp/{serialNumber}`; serial phải có trong `charge_points` trước.
 
-**Test tích hợp** xoá sạch schema `public` của DB được trỏ tới rồi áp `drizzle/0000_init.sql` — chỉ trỏ vào DB test. Thiếu `DATABASE_URL` thì describe bị skip (máy dev không có Postgres vẫn xanh).
+**Test tích hợp** xoá sạch schema `public` của DB được trỏ tới rồi áp tuần tự `drizzle/0000_init.sql` → `0001_quyet-dinh-be-11.sql` bằng helper `test/helpers/apply-migrations.ts` — chỉ trỏ vào DB test. Thiếu `DATABASE_URL` thì describe bị skip (máy dev không có Postgres vẫn xanh).
 
 ---
 
@@ -162,14 +163,15 @@ Xem job CI của PR (link trong phần "Kiểm chứng" của PR). Cập nhật 
 | T33 yêu cầu | Dữ liệu thật & khẳng định trong test | Khớp? |
 |---|---|---|
 | (a) 3 phiên, không trùng | **4 phiên** (`transaction_no` 1–4), 4 khoá tự nhiên khác nhau, 0 record `duplicate`. tx4 = StartTransaction c2 (BB2TBR09, meterStart 0, cp_timestamp 14:18:52.934Z) sinh ra lúc offline, phát lại ở epoch 2 — mini-CSMS của lab cấp lại id 1, CSMS thật cấp 4 (WF-03 mục 3 "khoá tự nhiên chưa có"). tx4 `delivered_offline = true`, còn `active` khi trace kết thúc | **Lệch: 4 thay vì 3** — test ghi 4 |
-| (b) tx3 13 `meter_values`, 6 replayed | 13 dòng `Energy.Active.Import.Register` (3 + 4 live + 6 phát lại; 65 dòng tổng vì mỗi MeterValues có 5 SampledValue). Schema không có cột `replayed` → kiểm bằng ReplayDetector trên từng frame (6 MeterValues của tx3 replayed, `before_epoch`, skew 104–127 s, đều nhận sau StopTransaction) và bằng 6 record `replay` action=MeterValues + 1 record `replay` action=StopTransaction | Khớp |
-| (c) tx3 `review`, record conflict, diff 242 vs 1042 | `status = review`, `meter_stop_wh = 242`, `energy_wh = 242`, `delivered_offline = true`. Enum base không có `conflict` → `record_type = meter_gap`, `resolution` bắt đầu `conflict:`; `energy_difference_wh = 801` = round(1042,64) − 242 (SAP làm tròn khi phát meterStop: 600,78 → 601, 996,78 → 997); gap đầu 14:18:47.811 → 14:20:27.901 (100 s). 6 mẫu muộn → 6 record `meter_gap` nữa (`conflict (late_sample):`), gap cuối thu còn 14:19:47.867 → 14:20:27.901 (40 s, vẫn > 30 s) | Khớp (801 chứ không phải 800) |
-| (d) tx2 reconciled/consistent (997) | tx2 `reconciled`, 997 Wh, 14 mẫu, 0 record `meter_gap`/`replay`; tx1 `reconciled`, 601 Wh | Khớp (consistent = không có record, vì enum không có `consistent`) |
+| (b) tx3 13 `meter_values`, 6 replayed | 13 dòng `Energy.Active.Import.Register` (3 + 4 live + 6 phát lại; 65 dòng tổng vì mỗi MeterValues có 5 SampledValue). Kiểm bằng ReplayDetector trên từng frame (6 MeterValues của tx3 replayed, `before_epoch`, skew 104–127 s, đều nhận sau StopTransaction), bằng 6 record `replay` action=MeterValues + 1 record `replay` action=StopTransaction, và (từ 0001) bằng cột `meter_values.replayed`: 30 dòng `true` (6 MeterValues × 5 SampledValue, epoch 2, trong đó 6 dòng Energy) — test (o); `ocpp_message_log.replayed`: 8 `true`, `null` cho frame không có timestamp — test (p) | Khớp |
+| (c) tx3 `review`, record conflict, diff 242 vs 1042 | `status = review`, `meter_stop_wh = 242`, `energy_wh = 242`, `delivered_offline = true`. Từ 0001: `record_type = conflict` (1 bản ghi), `resolution` bắt đầu `conflict:` (trước 0001 là `meter_gap` + cùng tiền tố); `energy_difference_wh = 801` = round(1042,64) − 242 (SAP làm tròn khi phát meterStop: 600,78 → 601, 996,78 → 997); gap đầu 14:18:47.811 → 14:20:27.901 (100 s). 6 mẫu muộn → 6 record `late_sample` nữa (`conflict (late_sample):`; trước 0001 là `meter_gap`), gap cuối thu còn 14:19:47.867 → 14:20:27.901 (40 s, vẫn > 30 s) | Khớp (801 chứ không phải 800) |
+| (d) tx2 reconciled/consistent (997) | tx2 `reconciled`, 997 Wh, 14 mẫu, 0 record `meter_gap`/`conflict`/`replay`; tx1 `reconciled`, 601 Wh | Khớp (consistent = không có record, vì enum không có `consistent`) |
 | (e) `ocpp_message_log` đúng số frame vào | 75 dòng `direction = in` = 75 CALL chiều vào; 54 epoch 1 + 21 epoch 2; `unique_id` và `received_at` khớp từng frame; cp_timestamp khác null đúng bằng số frame có timestamp; phân bố action: Boot 2, StatusNotification 18, Heartbeat 5, Authorize 2, StartTransaction 4, MeterValues 41, StopTransaction 3 | Khớp |
 | (f) Stop/Start phát lại skew > 100 s → replayed | Đúng **8** frame replayed, tất cả `before_epoch`, skew 104,2–126,8 s: StopTransaction tx3 (125,275 s), StartTransaction c2 (125,709 s), 6 MeterValues; 67 frame còn lại live (skew ≤ 10 ms hoặc không có timestamp) | Khớp |
 | Bổ sung | (g) 18 `connector_status_events`, 0 `unexpected_transition`, c1 Available / c2 Charging cuối trace · (h) 2 epoch, epoch 1 `closed_at` + `1006 …`, `current_epoch = 2`, `last_message_at` = frame cuối · (i) 4 record `unknown_id_tag` (UNDEFINED, BB2TBR09 không có trong `rfid_cards`) · (j) phát lại lần nữa StartTransaction tx3 → trả transactionId 3, vẫn 4 phiên, 1 record `duplicate` · (k) StopTransaction lặp → `orphan_stop`, phiên giữ `review` · (l) nối lại cùng identity khi socket cũ treo → đóng 1012, epoch 3, close muộn của socket cũ không coi là mất kết nối · epoch 2 mở bằng **ConnectionRegistry mới** (mô phỏng CSMS khởi động lại) vẫn ra 2 nhờ DB | — |
 
 Đường trạng thái thật của tx3 trong test: `active` → (socket đóng) `orphaned` #13 → (MeterValues live 796 Wh) `active` #18 → (StopTransaction phát lại) `closed` #10 → (conflict) `review` #12a → 6 mẫu muộn: giữ `review`, thêm record. Không đi #16a vì #18 đã kéo về `active` trước khi Stop tới — đúng như EXP-01 giai đoạn D.
+Từ migration 0001 đường này nằm trong `session_status_history` (test (m)): `● -START_TRANSACTION-> active`, `active -STATION_OFFLINE-> orphaned` (actor `system`), `orphaned -LIVE_MESSAGE-> active`, `active -STOP_TRANSACTION-> closed`, `closed -RECONCILE_CONFLICT-> review`; `sessions.orphaned_at` = 14:19:01.000Z (test (n)).
 
 ---
 
@@ -181,17 +183,17 @@ Xem job CI của PR (link trong phần "Kiểm chứng" của PR). Cập nhật 
 - Basic Auth Security Profile 2 (ADR-0011): auth chỉ kiểm serial có trong DB.
 - BootNotification chỉ log; chưa cập nhật `model`/`firmware_version`, chưa GetConfiguration `ConnectionTimeOut`.
 - `last_message_at` UPDATE mỗi frame — đủ cho Iteration 1, cần gộp khi tải lớn.
-- StatusNotification không có `timestamp` (SAP) → ReplayDetector không phân loại được; `connector_status_events.pillar_timestamp` null.
+- StatusNotification không có `timestamp` (SAP) → ReplayDetector không phân loại được; `connector_status_events.cp_timestamp` null (cột tên `pillar_timestamp` trước migration 0001).
 - Realtime, billing, HTTP API, vendor bản copy ocpp-rpc (ADR-0004).
 
 ## 8. Chỗ cần Trí xác nhận
 
-1. **Enum `reconciliation_record_type`** của base (replay, duplicate, meter_gap, orphan_stop, unknown_id_tag) khác bộ `{consistent, gap_detected, conflict, late_sample}` của WF-03/T33. Iteration 1 ánh xạ: consistent → không ghi; gap_detected / conflict / late_sample → `meter_gap` + tiền tố trong `resolution`. Có nên thêm giá trị enum ở migration kế (`0001_…`) không?
+1. **Enum `reconciliation_record_type`** của base (replay, duplicate, meter_gap, orphan_stop, unknown_id_tag) khác bộ `{consistent, gap_detected, conflict, late_sample}` của WF-03/T33. Iteration 1 ánh xạ: consistent → không ghi; gap_detected / conflict / late_sample → `meter_gap` + tiền tố trong `resolution`. ~~Có nên thêm giá trị enum ở migration kế (`0001_…`) không?~~ **Đã làm 25/10/2026 (migration 0001): thêm `conflict` và `late_sample`; `meter_gap` chỉ còn cho `gap_detected` thuần.**
 2. **4 phiên thay vì 3** trong EXP-01: StartTransaction c2 phát lại là phiên mới (khoá tự nhiên khác tx2). Xác nhận cách đọc này.
 3. **Làm tròn Wh**: `energy_difference_wh = 801` dùng `Math.round` (khớp cách SAP phát meterStop). Nếu muốn 800 (cắt phần thập phân) thì đổi một dòng trong `evaluateSeries`.
-4. **payment_mode cho thẻ lạ** = `station_wallet` tạm (chờ PR thêm `unattributed`), ghi `unknown_id_tag`.
+4. **payment_mode cho thẻ lạ** = ~~`station_wallet` tạm (chờ PR thêm `unattributed`)~~ **`unattributed` từ migration 0001 (25/10/2026)**, ghi `unknown_id_tag`.
 5. **Bảng chuyển connector** (`valid-transitions.ts`) dựng từ trí nhớ về bảng mục 4.9 OCPP 1.6 — đối chiếu spec trước khi dùng làm căn cứ báo cáo.
 6. **TypeScript 5.9.3 thay cho 7.0.2** của base: ts-jest 29.4.15 khai báo peer `typescript <7`, và NestJS cần `emitDecoratorMetadata`; không đáng 20 phút vật lộn với TS 7 (theo dặn của T11). drizzle-kit/Drizzle không bị ảnh hưởng.
 7. **`OCPP_PORT`** (9000, như lab) song song `CSMS_OCPP_WS_PORT` (3001, compose/Caddy): config đọc `OCPP_PORT` trước. Thống nhất một tên khi dựng staging.
-8. Mỗi mẫu muộn làm thay đổi lỗ hổng → một record `meter_gap` mới (append-only theo WF-03). EXP-01 sinh 7 record cho tx3 — chấp nhận, hay chỉ ghi record khi kết luận (`conflict`/`gap_detected`) đổi?
+8. Mỗi mẫu muộn làm thay đổi lỗ hổng → một record mới (từ 0001 là `late_sample`; append-only theo WF-03). EXP-01 sinh 7 record cho tx3 (1 `conflict` + 6 `late_sample`) — chấp nhận, hay chỉ ghi record khi kết luận (`conflict`/`gap_detected`) đổi?
 9. Nest 12 / drizzle-orm là ESM-only; app build CommonJS và chạy được trên Node 24 nhờ `require(esm)`; Jest cần `--experimental-vm-modules` (bọc trong `scripts/run-jest.cjs`). Có muốn chuyển cả app sang ESM (`"type": "module"`) ở Iteration 2?

@@ -206,6 +206,8 @@ export class OcppServer implements OnApplicationBootstrap, OnApplicationShutdown
       cpTimestamp,
       receivedAt,
       raw: [MESSAGE_TYPE.CALL, call.messageId, call.action, call.params],
+      // Không có cp_timestamp → ReplayDetector không phân loại được → null (không phải false).
+      replayed: replay.skewS === null ? null : replay.replayed,
     });
     await this.registry.touch(conn, receivedAt);
     const ctx: InboundContext = {
