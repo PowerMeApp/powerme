@@ -7,15 +7,17 @@
  *   2. lifecycle `registered` (not onboarded) or
  *      `decommissioned` (retired)                        → 403
  *   3. a credential was issued at onboarding (hash set) → Basic-auth password must match, else 401
- *   4. no credential on file (pillars seeded before WF-05, e.g. demo/seed.sql) → accepted with a
- *      warning, so Iteration 1 demos and the WF-03 trace keep working. Turning this into a hard
- *      reject is one line once every seeded pillar is onboarded through WF-05 (Known gap).
+ *   4. no credential on file (pillars seeded before WF-05, e.g. demo/seed.sql):
+ *        - `ALLOW_LEGACY_NO_CREDENTIAL=true`  → accepted with a warning (demo, WF-03 trace)
+ *        - otherwise (default)                → 401. Anyone who knows the serial could connect, so
+ *          this stays off outside the demo (review of PR #33, decision 2).
  *
  * The STM-3 #3 move `awaiting_connection → in_service` happens in ConnectionRegistry.open() when
  * the socket is accepted (WP2 design: a reconnecting pillar does not always send BootNotification).
  */
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { eq } from 'drizzle-orm';
+import { CONFIG, CsmsConfig } from '../config.js';
 import { DB, Db } from '../db/db.module.js';
 import { chargePoints } from '../db/schema/index.js';
 import { verifyPillarPassword } from './pillar-credential.js';
@@ -30,7 +32,10 @@ export class PillarAuthService {
   private readonly logger = new Logger(PillarAuthService.name);
   private readonly policy = new PillarLifecyclePolicy();
 
-  constructor(@Inject(DB) private readonly db: Db) {}
+  constructor(
+    @Inject(DB) private readonly db: Db,
+    @Inject(CONFIG) private readonly config: CsmsConfig,
+  ) {}
 
   async verify(identity: string, password: Buffer | string | undefined): Promise<PillarAuthResult> {
     const [cp] = await this.db
@@ -58,8 +63,11 @@ export class PillarAuthService {
       if (!match) return { ok: false, status: 401, reason: 'Invalid credential' };
       return { ok: true, chargePointId: cp.id, credentialChecked: true };
     }
+    if (!this.config.allowLegacyNoCredential) {
+      return { ok: false, status: 401, reason: 'No credential on file' };
+    }
     this.logger.warn(
-      `${identity}: no credential on file (onboarded before WF-05) — accepted without Basic auth`,
+      `${identity}: no credential on file (onboarded before WF-05) — accepted without Basic auth (ALLOW_LEGACY_NO_CREDENTIAL=true)`,
     );
     return { ok: true, chargePointId: cp.id, credentialChecked: false };
   }
