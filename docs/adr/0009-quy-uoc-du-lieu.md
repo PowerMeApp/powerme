@@ -44,3 +44,16 @@ Năm quy ước đầu là **bắt buộc ghi vào SDD**.
 | Phương án | Vì sao loại |
 |---|---|
 | (chưa ghi trong tài liệu nguồn) | |
+
+## Cập nhật 25/10/2026
+
+Trạng thái giữ nguyên. Mục này ghi **giá trị thực tế trong schema** sau migration 0001 (BE-11, `apps/csms/drizzle/`), vì bảng quyết định ở trên viết ngày 11/09 và lệch một số tên đã chốt ở T11–T13. Nội dung cũ không bị xoá.
+
+| Quy ước ở trên | Thực tế trong DB (0000 + 0001) |
+|---|---|
+| `cp_timestamp` + `received_at` | Đúng cho mọi bảng nhận dữ liệu từ trụ. `connector_status_events` trước đây đặt tên `pillar_timestamp`; **đã đổi thành `cp_timestamp`** ở 0001 (`ALTER TABLE … RENAME COLUMN`) |
+| `origin`: `app` · `rfid_online` · `rfid_wallet` · `hmi_password` · `free_vend` | `session_origin` = **`app_qr` · `rfid` · `hmi_password` · `free_vend`** (T12/T13). Thẻ online hay thẻ ví **không** nằm ở `origin` mà ở `rfid_cards.card_kind` (`online` · `wallet` · `free_vend`) và `sessions.payment_mode` |
+| `payment_mode`: `csms_billed` · `station_wallet` · `unattributed` | `payment_mode` = **`csms_billed` · `station_wallet` · `free` · `unattributed`**. `free` có từ 0000 (phiên free vend nhận diện qua `charge_points.free_vend_tag`); `unattributed` thêm ở 0001 và dùng cho phiên mở bằng idTag không có trong sổ thẻ |
+| sổ thẻ `id_tags` (ADR-0012) | bảng **`rfid_cards`** (cột `card_identifier`, T11) |
+
+Duyệt: giá trị enum do nhóm tự đặt ở 0000 (11 enum, liệt kê ở `docs/THIET-KE-CSDL-VAT-LY.md` mục 7) **giữ nguyên, đã duyệt bởi Trí 25/10/2026, chưa có Khang/Nghĩa duyệt riêng**.
