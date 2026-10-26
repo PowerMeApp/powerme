@@ -244,7 +244,8 @@ describeDb('WF-03 — phát lại trace EXP-01 (ngắt kết nối 81 s giữa p
     expect(conn1.epoch).toBe(1);
     expect(conn1.chargePointId).toBe(chargePointId);
     const [cp] = await db.select().from(chargePoints).where(eq(chargePoints.id, chargePointId));
-    expect(cp?.lifecycle).toBe('in_service');
+    expect(cp?.lifecycle).toBe('in_service'); // awaiting_connection → in_service (STM-3 #3)
+    expect(cp?.isOnline).toBe(true);
     expect(cp?.currentEpoch).toBe(1);
   });
 
@@ -282,7 +283,9 @@ describeDb('WF-03 — phát lại trace EXP-01 (ngắt kết nối 81 s giữa p
     expect((await sessionByTx(3)).status).toBe('orphaned');
     expect((await sessionByTx(1)).status).toBe('reconciled');
     const [cp] = await db.select().from(chargePoints).where(eq(chargePoints.id, chargePointId));
-    expect(cp?.lifecycle).toBe('offline');
+    // T61 (ADR-0016 D-C): socket đóng chỉ đổi is_online, lifecycle hành chính giữ in_service.
+    expect(cp?.lifecycle).toBe('in_service');
+    expect(cp?.isOnline).toBe(false);
     const [e1] = await db
       .select()
       .from(chargePointConnections)
@@ -325,6 +328,7 @@ describeDb('WF-03 — phát lại trace EXP-01 (ngắt kết nối 81 s giữa p
 
     const [cp] = await db.select().from(chargePoints).where(eq(chargePoints.id, chargePointId));
     expect(cp?.lifecycle).toBe('in_service');
+    expect(cp?.isOnline).toBe(true);
     expect(cp?.currentEpoch).toBe(2);
     // Vẫn orphaned cho tới khi có bản tin live của chính phiên đó.
     expect((await sessionByTx(3)).status).toBe('orphaned');

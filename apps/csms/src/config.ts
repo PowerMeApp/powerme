@@ -46,7 +46,19 @@ export interface CsmsConfig {
    * (Review PR #33, quyết định 2.) Không khai báo = false.
    */
   allowLegacyNoCredential?: boolean;
+  /**
+   * ADR-0016 D-A (STM-1 v0.5): thời gian ân hạn (giây) kể từ khi socket đóng trước khi các phiên
+   * active/paused/stopping bị kéo sang `orphaned` (#13–#15). Nối lại trong ân hạn thì phiên giữ
+   * nguyên. `0` = orphan ngay (hành vi cũ). Không khai báo = {@link DEFAULT_OFFLINE_GRACE_S}.
+   */
+  offlineGraceS?: number;
 }
+
+/**
+ * Mặc định của OFFLINE_GRACE_S. 30 s là GIÁ TRỊ TẠM do Trí chọn: ADR-0016 gốc không nằm trong
+ * repo nên chưa có con số chính thức (xem PR T61). Đổi ở đây + infra/.env.example khi có.
+ */
+export const DEFAULT_OFFLINE_GRACE_S = 30;
 
 /** Token DI cho CsmsConfig (dùng `@Inject(CONFIG)`). */
 export const CONFIG = Symbol('CSMS_CONFIG');
@@ -65,6 +77,16 @@ function boolEnv(env: NodeJS.ProcessEnv, key: string, fallback: boolean): boolea
   if (['1', 'true', 'yes', 'on'].includes(raw)) return true;
   if (['0', 'false', 'no', 'off'].includes(raw)) return false;
   throw new Error(`Biến môi trường ${key} không phải true/false: "${env[key]}"`);
+}
+
+/** Số nguyên giây >= 0 (0 hợp lệ = tắt ân hạn). Âm / thập phân / không phải số → ném lỗi rõ. */
+function graceEnv(env: NodeJS.ProcessEnv, key: string, fallback: number): number {
+  const n = intEnv(env, key, fallback);
+  if (!Number.isInteger(n) || n < 0)
+    throw new Error(
+      `Biến môi trường ${key} phải là số nguyên giây >= 0 (0 = tắt ân hạn): "${env[key]}"`,
+    );
+  return n;
 }
 
 /** Đọc cấu hình; ném lỗi sớm khi thiếu DATABASE_URL thay vì chết lúc query đầu tiên. */
@@ -86,6 +108,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): CsmsConfig {
     consolePort: intEnv(env, 'CONSOLE_PORT', 3000),
     ...(env['OCPP_PUBLIC_URL'] ? { ocppPublicUrl: env['OCPP_PUBLIC_URL'] } : {}),
     allowLegacyNoCredential: boolEnv(env, 'ALLOW_LEGACY_NO_CREDENTIAL', false),
+    offlineGraceS: graceEnv(env, 'OFFLINE_GRACE_S', DEFAULT_OFFLINE_GRACE_S),
   };
 }
 
