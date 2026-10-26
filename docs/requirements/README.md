@@ -5,19 +5,20 @@ Markdown copies of the requirement documents, so code reviews, the BM02 self-rev
 | File | Source | Date |
 |---|---|---|
 | `registration-form-v1.2.md` | `FA26SE187_Phieu-dang-ky_v1.2.docx` (accepted form; contact details removed) | 15/10/2026 |
+| `registration-form-v1.3.md` | `FA26SE187_Phieu-dang-ky_v1.3.docx` (proposed final form for Review 2; contact details removed) | 26/10/2026 |
 | `report1-project-introduction.md` | `Report1_Project Introduction - PowerMe.docx` | 21/10/2026 |
 | `report3-srs.md` | `Report3_Software Requirement Specification - PowerMe.docx` | 24/10/2026 |
 
 Report 4 (Software Design Document) is not copied: it is built from the diagram sources in `diagrams/` and the code.
 
-## FR → use case (form v1.2 §3.2c)
+## FR → use case (form v1.3 §3.2c)
 
 | FR | Actor | Requirement (short) | Use cases | Priority |
 |---|---|---|---|---|
 | FR-01, FR-02 | Driver | Register with consent; personal and vehicle profiles; account closure request | UC-ACC-01, UC-ACC-02, UC-ACC-03 | Must |
 | FR-03, FR-21 | Driver | Live connector status with freshness; up to three suggested stations | UC-CHG-01, UC-CHG-07 | Must |
 | FR-04 – FR-06 | Driver | Start/stop in four billing modes within credit; live progress; report a faulty pillar | UC-CHG-02 – UC-CHG-05 | Must |
-| FR-07, FR-08 | Driver (Admin for exceptions) | VNPay top-up with VAT e-invoice; history, balance, e-invoices; Admin billing exceptions (refund, late payment, e-invoice retry) | UC-PAY-01, UC-PAY-02, **UC-ADM-08** | Must |
+| FR-07, FR-08 | Driver; Admin for exceptions (FR-07 Admin part) | VNPay top-up with VAT e-invoice; history, balance, e-invoices; Admin billing exceptions (refund, late payment, e-invoice retry) | UC-PAY-01, UC-PAY-02, **UC-ADM-08** | Must |
 | FR-17 | Driver | Earn and redeem loyalty points | UC-PAY-03, UC-PAY-04 | Must |
 | FR-09 | Operator | Onboard a pillar and receive its credential | UC-OPS-01 | Must |
 | FR-10, FR-11 | Operator | Status, uptime, utilisation, alerts; remote start/stop/reset | UC-OPS-02 – UC-OPS-04 | Must |
@@ -26,7 +27,7 @@ Report 4 (Software Design Document) is not copied: it is built from the diagram 
 | FR-16 | Charging pillar | OCPP 1.6J central system; record every session; no double billing; reconcile after a connection loss | UC-INT-01 – UC-INT-04 | Must |
 | FR-18 – FR-20 | Operator, Admin, Driver | Maintenance tickets, analytics; policy templates, platform health; reservation | UC-OPS-08/09, UC-ADM-06/07, UC-CHG-06 | Should |
 
-UC-ADM-08 Handle Billing Exceptions was added on 24/10/2026 by the WF-02 design; it is the Admin side of the FR-07 top-up and e-invoice flow, so the form's FR list is unchanged. UC-ADM-08 and UC-ACC-02 (account closure) were added after the form was accepted; on 26/10/2026 they were decided to be a **scope change**, to be written into the proposed final form for Review 2 (v1.3) and listed in its BM03 Record of Changes (BM02 run 2, F01).
+Form v1.3 lists UC-ADM-08 as the Admin part of FR-07 and the account-closure request under FR-01/FR-02 (BM03 rows 1-2); no FR is added.
 
 ## STM-1 ChargingSession: transition → UC / FR
 
