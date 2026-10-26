@@ -22,6 +22,8 @@
 
 **Kết quả.** Khi `StopTransaction` (live hoặc phát lại) tới, `reconciliation` so `meterStop − meterStart` với chuỗi `meter_values` (mẫu cuối vs `meterStop`, đơn điệu tăng, lỗ hổng thời gian), ghi một `reconciliation_records` với `record_type ∈ {consistent, gap_detected, conflict}`. `consistent` / `gap_detected` → phiên `reconciled`, billing tính tiền. `conflict` → phiên `review`, billing **không** tính cho tới khi operator giải quyết (UC-OPS-05). EXP-01 là ca `conflict` điển hình: `meterStop = 242 Wh` trong khi MeterValues live đã lên `1042 Wh`, chênh **4,3 lần** — nhiều khả năng là đặc thù của SAP simulator, chưa biết firmware Ruihua có làm vậy không.
 
+> **Khớp code (26/10/2026, BM02 F39):** đây cũng là quy tắc của code và T13 #12/#12a đã được sửa cho khớp. Kết luận `consistent` / `gap_detected` / `conflict` là kết quả của `evaluateSeries`, còn `record_type` thật trong DB là: `consistent` → không ghi record; `gap_detected` → `meter_gap`; `conflict` → `conflict` (enum từ migration 0001). `gap_detected` đi `RECONCILE_OK` vì lỗ hổng đơn thuần không chứng minh số đo sai — `meterStop − meterStart` là bộ đếm tích luỹ của trụ; lỗ hổng chỉ được ghi lại (`meter_gap`, có `gap_start`/`gap_end`). Code không phân biệt lỗ hổng "giải thích được bằng khoảng offline" hay không: mọi khoảng trống > `RECONCILE_GAP_FACTOR` × nhịp mẫu đều là `gap_detected`.
+
 **Bất biến.** Không có bản tin nào bị mất trong bộ nhớ: log ghi trước handler. Không mắt xích nào trên đường `ocpp-gateway → sessions → reconciliation → billing` đi qua Redis pub/sub (ADR-0006); `realtime` chỉ nghe sự kiện trong tiến trình để đẩy lên dashboard/app và được phép mất sự kiện (client gọi lại REST).
 
 ---
@@ -106,8 +108,8 @@ sequenceDiagram
     SES->>SES: apply(tx3, RECONCILE_OK): orphaned → reconciled
     SES-)RT: transaction.reconciled
     RT-)DB: tx3 hết cờ, billing tính tiền
-  else gap_detected — lỗ hổng chuỗi giải thích được bằng khoảng offline, meterStop vẫn khớp
-    REC->>REC: INSERT reconciliation_records (record_type=gap_detected, gap_start, gap_end, resolution=auto)
+  else gap_detected — có lỗ hổng chuỗi (bất kể giải thích được hay không), meterStop vẫn khớp
+    REC->>REC: INSERT reconciliation_records (record_type=meter_gap, gap_start, gap_end, resolution=gap_detected…)
     REC->>SES: resolve(tx3, RECONCILED, actor=system)
     SES->>SES: apply(tx3, RECONCILE_OK): orphaned → reconciled
     SES-)RT: transaction.reconciled
