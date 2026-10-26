@@ -1,0 +1,450 @@
+/*
+  tru-sac.css — kiểu dáng của khối "Trụ sạc" minh hoạ trên HMI D1 (QA-02).
+
+  LÀM GÌ: tô màu và làm hoạt ảnh cho hình SVG do tru-sac.js dựng. Màu nền/chữ lấy từ biến CSS
+    của index.html (--panel, --line, --text, --ok, --danger...); các biến --lt-* (màu đèn) và
+    --tru-* (màu thân trụ, xe) khai báo ở đây, có bản sáng/tối.
+  VÌ SAO TÁCH FILE: index.html đã dài; hình + hoạt ảnh là một mảng riêng, dễ đọc khi tách.
+  QUY TẮC HOẠT ẢNH: mọi chuyển động nằm trong @keyframes/transition ở file này và bị tắt bởi
+    (a) lớp .noanim trên #tru (nút "Tắt hoạt ảnh"), (b) prefers-reduced-motion: reduce.
+    Khi tắt, màu và chữ vẫn giữ nguyên — chỉ mất chuyển động.
+*/
+
+:root {
+  /* Màu đèn trạng thái: giống nhau ở sáng/tối vì đèn LED tự phát sáng. */
+  --lt-Available: #35d07f;
+  --lt-Preparing: #4aa3ff;
+  --lt-Charging: #35d07f;
+  --lt-SuspendedEV: #f0b04a;
+  --lt-SuspendedEVSE: #f0b04a;
+  --lt-Finishing: #a78bfa;
+  --lt-Faulted: #ff4d57;
+  --lt-Unavailable: #8b97a6;
+  --lt-Reserved: #2cc3b8;
+  /* Thân trụ, xe, cáp: bản sáng */
+  --tru-body: #dde4ee;
+  --tru-edge: #7f8ea3;
+  --tru-car: #5d7a99;
+  --tru-glass: #cfe3f5;
+  --tru-cable: #3a4656;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    --tru-body: #2a3a4e;
+    --tru-edge: #5f738c;
+    --tru-car: #7f9bb8;
+    --tru-glass: #1d2e42;
+    --tru-cable: #9fb0c4;
+  }
+}
+:root[data-theme='dark'] {
+  --tru-body: #2a3a4e;
+  --tru-edge: #5f738c;
+  --tru-car: #7f9bb8;
+  --tru-glass: #1d2e42;
+  --tru-cable: #9fb0c4;
+}
+
+/* ── Khung khối ─────────────────────────────────────────────────────────── */
+#tru {
+  margin: 0.8rem 1rem 0;
+}
+#tru .tru-head {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+#tru .tru-head h2 {
+  margin: 0;
+  flex: 1;
+}
+#tru.collapsed .tru-body {
+  display: none;
+}
+#tru .tru-svg {
+  display: block;
+  width: 100%;
+  max-width: 1040px;
+  max-height: 62vh;
+  margin: 0.3rem auto 0;
+}
+#tru .tru-cap {
+  text-align: center;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+/* Chế độ "Chữ lớn": hình phóng to tới hết bề ngang, chú thích to hơn */
+:root.big #tru .tru-svg {
+  max-width: 100%;
+  max-height: none;
+}
+:root.big #tru .tru-cap {
+  font-size: 1.05rem;
+}
+
+/* ── Thân trụ, màn hình LCD ─────────────────────────────────────────────── */
+#tru .ground {
+  stroke: var(--line);
+  stroke-width: 3;
+}
+#tru .body {
+  fill: var(--tru-body);
+  stroke: var(--tru-edge);
+  stroke-width: 3;
+}
+#tru .vent {
+  stroke: var(--tru-edge);
+  stroke-width: 3;
+  stroke-linecap: round;
+  opacity: 0.6;
+}
+#tru .brand {
+  fill: var(--text);
+  font-weight: 700;
+  font-size: 22px;
+  letter-spacing: 3px;
+}
+#tru .plate {
+  fill: var(--muted);
+  font-size: 16px;
+}
+/* LCD luôn tối như màn hình thật, chữ sáng cố định (không đổi theo giao diện) */
+#tru .lcd-bg {
+  fill: #0b1620;
+  stroke: var(--tru-edge);
+  stroke-width: 3;
+}
+#tru[data-net='offline'] .lcd-bg,
+#tru[data-net='connecting'] .lcd-bg {
+  stroke: var(--danger);
+}
+#tru .lcd-sep {
+  stroke: #28405a;
+  stroke-width: 2;
+}
+#tru .lc {
+  fill: #d8f3ff;
+  font-weight: 700;
+  text-anchor: middle;
+}
+#tru .lc-h {
+  fill: #8fa6b8;
+  font-size: 13px;
+  letter-spacing: 1px;
+}
+#tru .lc-ok {
+  fill: #5df0a0;
+}
+#tru .lc-warn {
+  fill: #ffc857;
+}
+#tru .lc-err {
+  fill: #ff7b84;
+}
+#tru .lc-info {
+  fill: #7cc4ff;
+}
+#tru .lc-dim {
+  fill: #9fb4c6;
+  font-weight: 400;
+}
+#tru .lc-strip {
+  font-size: 14px;
+}
+#tru .strip-bg {
+  fill: #12283d;
+}
+#tru[data-net='offline'] .strip-bg,
+#tru[data-net='connecting'] .strip-bg {
+  fill: #5a1a20;
+}
+
+/* ── Mạng: ăng-ten, bong bóng hàng đợi, phát bù ─────────────────────────── */
+#tru .ant {
+  fill: none;
+  stroke: var(--ok);
+  stroke-width: 3;
+  stroke-linecap: round;
+}
+#tru .ant-tip {
+  fill: var(--ok);
+}
+#tru[data-net='connecting'] .ant {
+  stroke: var(--warn);
+}
+#tru[data-net='connecting'] .ant-tip {
+  fill: var(--warn);
+}
+#tru[data-net='offline'] .ant {
+  stroke: var(--muted);
+}
+#tru[data-net='offline'] .ant-tip {
+  fill: var(--muted);
+}
+#tru .cross {
+  display: none;
+  stroke: var(--danger);
+  stroke-width: 5;
+  stroke-linecap: round;
+}
+#tru[data-net='offline'] .cross {
+  display: inline;
+}
+#tru .net-txt {
+  font-size: 17px;
+  font-weight: 700;
+  fill: var(--ok);
+  text-anchor: end;
+}
+#tru[data-net='connecting'] .net-txt {
+  fill: var(--warn);
+}
+#tru[data-net='offline'] .net-txt {
+  fill: var(--danger);
+}
+#tru .bubble circle {
+  fill: var(--warn);
+}
+#tru .bubble text {
+  fill: #0b1620;
+  font-weight: 700;
+  font-size: 17px;
+  text-anchor: middle;
+}
+#tru .bubble .bub-lbl {
+  fill: var(--muted);
+  font-weight: 400;
+  font-size: 14px;
+  text-anchor: start;
+}
+#tru .replay-txt {
+  fill: var(--ok);
+  font-size: 15px;
+  font-weight: 700;
+  opacity: 0;
+}
+#tru .replay.go .replay-txt {
+  opacity: 1;
+}
+#tru .pkt {
+  fill: var(--accent);
+  opacity: 0;
+}
+#tru .replay.go .pkt {
+  animation: fly 1.3s ease-out both;
+}
+@keyframes fly {
+  0% {
+    opacity: 1;
+    transform: translateX(0);
+  }
+  100% {
+    opacity: 0;
+    transform: translateX(340px);
+  }
+}
+
+/* ── Mỗi súng: đèn, nhãn, cáp, xe ───────────────────────────────────────── */
+#tru .bay {
+  fill: #0f1a26;
+  stroke: var(--tru-edge);
+  stroke-width: 3;
+}
+#tru .ring {
+  fill: none;
+  stroke: var(--lt, var(--lt-Unavailable));
+  stroke-width: 7;
+  filter: drop-shadow(0 0 6px var(--lt, transparent));
+}
+#tru .letter {
+  fill: #d8f3ff;
+  font-size: 24px;
+  font-weight: 700;
+  text-anchor: middle;
+}
+#tru .badge {
+  fill: var(--lt, var(--lt-Unavailable));
+  stroke: var(--line);
+  stroke-width: 1.5;
+}
+#tru .badge-t1,
+#tru .badge-t2 {
+  fill: #0b1620;
+  text-anchor: middle;
+}
+#tru .badge-t1 {
+  font-size: 20px;
+  font-weight: 700;
+}
+#tru .badge-t2 {
+  font-size: 14px;
+}
+#tru .gun-head {
+  fill: #cfd8e3;
+  stroke: #0b1620;
+  stroke-width: 2;
+}
+#tru .idle-head {
+  transition: opacity 0.2s;
+}
+#tru .trg.plugged .idle-head {
+  opacity: 0;
+}
+/* Cáp cắm: chỉ hiện sau khi xe trượt vào (trễ 0,8 s); rút súng thì mất ngay */
+#tru .plug {
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+#tru .trg.plugged .plug {
+  opacity: 1;
+  transition-delay: 0.8s;
+}
+#tru .cable {
+  fill: none;
+  stroke: var(--tru-cable);
+  stroke-width: 8;
+  stroke-linecap: round;
+}
+/* Các chấm chạy trên cáp: chu kỳ nét = 16 đơn vị (2 + 14) → dịch dashoffset đúng 16 là khớp vòng lặp.
+   Thời lượng --dur do JS đặt theo công suất (và theo tốc độ ×10). */
+#tru .flow {
+  fill: none;
+  stroke: var(--lt-Charging);
+  stroke-width: 5.5;
+  stroke-linecap: round;
+  stroke-dasharray: 2 14;
+  opacity: 0;
+}
+#tru .trg.chg .flow {
+  opacity: 1;
+  animation: flow var(--dur, 1s) linear infinite;
+}
+@keyframes flow {
+  to {
+    stroke-dashoffset: -16;
+  }
+}
+
+/* Xe: trượt vào từ ngoài khung khi súng được cắm */
+#tru .car {
+  transition: transform 0.9s cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+#tru .trg[data-side='A'] .car {
+  transform: translateX(-300px);
+}
+#tru .trg[data-side='B'] .car {
+  transform: translateX(300px);
+}
+#tru .trg.plugged .car {
+  transform: none;
+}
+#tru .car-body {
+  fill: var(--tru-car);
+  stroke: var(--tru-edge);
+  stroke-width: 2;
+}
+#tru .car-glass {
+  fill: var(--tru-glass);
+  stroke: var(--tru-edge);
+  stroke-width: 1.5;
+}
+#tru .wheel {
+  fill: #1c2430;
+  stroke: var(--tru-edge);
+  stroke-width: 2;
+}
+#tru .hub {
+  fill: #aab6c5;
+}
+#tru .bat-frame {
+  fill: #0f1a26;
+  stroke: #d8f3ff;
+  stroke-width: 2;
+}
+#tru .bat-fill {
+  fill: var(--lt-Charging);
+  transform-box: fill-box;
+  transform-origin: left center;
+  transition: transform 0.6s ease;
+}
+#tru .bat-txt {
+  fill: var(--text);
+  font-size: 17px;
+  font-weight: 700;
+  text-anchor: middle;
+}
+
+/* ── Hoạt ảnh của đèn: mỗi trạng thái một kiểu nhấp nháy để phân biệt không cần màu ── */
+#tru .trg[data-st='Preparing'] .ring {
+  animation: blink-slow 2s ease-in-out infinite;
+}
+#tru .trg[data-st='Charging'] .ring {
+  animation: breathe 3s ease-in-out infinite;
+}
+#tru .trg[data-st='SuspendedEV'] .ring {
+  animation: blink-ev 1.6s steps(1) infinite;
+}
+#tru .trg[data-st='SuspendedEVSE'] .ring {
+  animation: pulse2 2s steps(1) infinite;
+}
+#tru .trg[data-st='Faulted'] .ring {
+  animation: blink-fast 0.5s steps(1) infinite;
+}
+@keyframes blink-slow {
+  50% {
+    opacity: 0.25;
+  }
+}
+@keyframes breathe {
+  50% {
+    opacity: 0.4;
+    stroke-width: 4;
+  }
+}
+@keyframes blink-ev {
+  50% {
+    opacity: 0.12;
+  }
+}
+/* xung đôi: sáng-tắt-sáng-tắt rồi nghỉ dài → khác hẳn nhịp đều của "xe tạm dừng" */
+@keyframes pulse2 {
+  0% {
+    opacity: 1;
+  }
+  12% {
+    opacity: 0.12;
+  }
+  24% {
+    opacity: 1;
+  }
+  36%,
+  100% {
+    opacity: 0.12;
+  }
+}
+@keyframes blink-fast {
+  50% {
+    opacity: 0.1;
+  }
+}
+
+/* ── Tắt hoạt ảnh: nút bấm hoặc ưu tiên hệ điều hành ─────────────────────── */
+#tru.noanim *,
+#tru.noanim *::before {
+  animation: none !important;
+  transition: none !important;
+}
+@media (prefers-reduced-motion: reduce) {
+  #tru *,
+  #tru *::before {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+
+@media (max-width: 700px) {
+  #tru {
+    margin: 0.6rem 0.6rem 0;
+  }
+}

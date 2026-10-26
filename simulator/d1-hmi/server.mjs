@@ -2,7 +2,8 @@
 //
 // LÀM GÌ
 //   - GET  /               → public/index.html (một file, không build)
-//   - GET  /events         → SSE: "hello" (snapshot + nhật ký cũ), rồi "state" (snapshot, tối đa
+//   - GET  /static/<tên>.css|js → file tĩnh trong public/ (hình trụ minh hoạ), tên đơn, chống ".."
+//   - GET  /events        → SSE: "hello" (snapshot + nhật ký cũ), rồi "state" (snapshot, tối đa
 //                            ~7 lần/giây) và "log" (từng dòng nhật ký OCPP mới)
 //   - GET  /api/state      → snapshot JSON (dùng cho smoke test)
 //   - POST /api/<hành động> body JSON → gọi station.act(<hành động>, body) → { ok, message }
@@ -38,6 +39,7 @@ const station = createStation({
 
 const PORT = num(env.HMI_PORT, 8100);
 const htmlPath = fileURLToPath(new URL('./public/index.html', import.meta.url));
+const STATIC_TYPES = { '.css': 'text/css; charset=utf-8', '.js': 'text/javascript; charset=utf-8' };
 const clients = new Set();
 const send = (res, event, data) => res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
 
@@ -62,6 +64,21 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'GET' && url.pathname === '/') {
       res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
       return res.end(await readFile(htmlPath));
+    }
+    // File tĩnh của hình trụ minh hoạ: CHỈ tên file đơn (chữ/số/gạch) trong public/, đuôi .css/.js.
+    // Chặn "..", dấu gạch chéo, gạch chéo ngược, %2e... bằng cách đòi khớp chặt regex trên pathname
+    // đã giải mã; không khớp hoặc không tồn tại → 404.
+    if (req.method === 'GET' && url.pathname.startsWith('/static/')) {
+      const name = decodeURIComponent(url.pathname.slice(8));
+      const type = STATIC_TYPES[name.slice(name.lastIndexOf('.'))];
+      if (!/^[\w-]+\.(css|js)$/.test(name) || !type) return res.writeHead(404).end('not found');
+      try {
+        const body = await readFile(new URL(`./public/${name}`, import.meta.url));
+        res.writeHead(200, { 'content-type': type, 'cache-control': 'no-cache' });
+        return res.end(body);
+      } catch {
+        return res.writeHead(404).end('not found');
+      }
     }
     if (req.method === 'GET' && url.pathname === '/events') {
       res.writeHead(200, {

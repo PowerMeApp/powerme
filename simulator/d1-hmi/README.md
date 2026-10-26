@@ -40,9 +40,34 @@ Dựng một CSMS ocpp-rpc tối thiểu trong chính script, chạy `server.mjs
 | `hmi-actions.mjs` | Lệnh người dùng bấm trên HMI |
 | `model.mjs` | Hằng số, 9 trạng thái OCPP, thẻ mẫu, đường công suất, rút gọn payload |
 | `server.mjs` | HTTP + SSE; `POST /api/<hành động>` |
-| `public/index.html` | HMI một file (CSS/JS inline, sáng/tối theo hệ thống, nút "Chữ lớn" cho máy chiếu) |
+| `public/index.html` | HMI (CSS/JS inline, sáng/tối theo hệ thống, nút "Chữ lớn" cho máy chiếu) + khung SVG của hình trụ |
+| `public/tru-sac.css`, `public/tru-sac.js` | Hình trụ sạc minh hoạ có hoạt ảnh (QA-02); phục vụ qua `GET /static/<tên>.css\|js` (chỉ tên file đơn trong `public/`, `..` và gạch chéo bị 404) |
 | `smoke.mjs` | Kiểm thử chuỗi bản tin |
 | `docs/` | Ảnh chụp HMI |
+
+## Hình trụ sạc minh hoạ (QA-02)
+
+Đầu trang HMI có khối **"Trụ sạc PowerMe"**: hình SVG tự vẽ (không logo/ảnh/kiểu dáng của hãng nào) để người xem hội đồng thấy trạng thái trụ mà không phải đọc số. Dòng chú thích cố định dưới hình: *"Hình minh hoạ — không phải ảnh sản phẩm thật"*. Hình **chỉ phản ánh** — dùng đúng snapshot SSE mà hai panel súng đang dùng (`connectors[]`, `net`, `queue`, `speed`, `cpId`), không có nguồn dữ liệu thứ hai và không điều khiển gì.
+
+Hình có: thân trụ + màn hình LCD (mỗi súng một nửa: kW, SoC, thời gian, tiền tạm tính khi sạc; "Sẵn sàng — quẹt thẻ hoặc quét QR"; "Cắm súng vào xe"; "Rút súng"; mã lỗi; dải trên cùng báo "Mất kết nối — thử lại sau N s"), hai khay súng A/B có **đèn viền**, dây cáp, xe điện trượt vào khi súng được cắm với **thanh pin đổ theo SoC thật**, ăng-ten (xanh = online, vàng = đang nối, xám gạch chéo đỏ = mất kết nối), bong bóng số bản tin chờ phát bù khi hàng đợi buffer > 0, và nhịp "Phát bù N bản tin → CSMS" (gói nhỏ bay đi) khi hàng đợi về 0 sau khi nối lại.
+
+| Trạng thái OCPP | Đèn viền | Kiểu | Nhãn trên hình |
+|---|---|---|---|
+| `Available` | xanh lá | tĩnh | Sẵn sàng |
+| `Preparing` | xanh dương | nhấp nháy chậm (2 s) | Chuẩn bị |
+| `Charging` | xanh lá | "thở" (3 s); chấm chạy dọc cáp | Đang sạc |
+| `SuspendedEV` | hổ phách | nháy đều 1,6 s | Tạm dừng · **xe tạm dừng** |
+| `SuspendedEVSE` | hổ phách | xung đôi rồi nghỉ (2 s) | Tạm dừng · **trụ tạm dừng** |
+| `Finishing` | tím | tĩnh | Kết thúc |
+| `Faulted` | đỏ | nháy nhanh (0,5 s) | Lỗi (+ mã lỗi trên LCD) |
+| `Unavailable` | xám | tĩnh | Ngừng |
+| `Reserved` | lục lam | tĩnh | Đặt trước |
+
+Chấm chạy trên cáp có tốc độ tỉ lệ công suất (`6 + 0,5·kW` đơn vị/giây); khi bấm "Tăng tốc ×10" nhanh gấp đôi (không gấp 10 để mắt còn theo được). Hiện HMI chưa có đường vào `SuspendedEV`, `SuspendedEVSE`, `Reserved` (xem "Chưa làm") nên ba kiểu đèn đó chỉ kiểm bằng dữ liệu giả đưa thẳng vào hàm vẽ, chưa kiểm bằng HMI thật.
+
+**Tắt hoạt ảnh:** nút **"Tắt hoạt ảnh"** ở góc khối (nhớ trong `localStorage`; thêm `?anim=off` vào URL để tắt riêng lần mở đó); hoặc đặt "giảm chuyển động" trong hệ điều hành (`prefers-reduced-motion: reduce` — hình tự tắt hoạt ảnh và khoá nút). Khi tắt, màu đèn và chữ vẫn giữ, chỉ mất chuyển động (xe hiện ngay, đèn sáng liên tục; hai kiểu "tạm dừng" chỉ còn phân biệt bằng nhãn chữ). Nút **"Thu gọn"** gập khối lại (cũng được nhớ). Nút "Chữ lớn" phóng to cả hình. Dưới 700 px bố cục về một cột.
+
+Ảnh chụp thật (Edge headless, 1500×1000, nối vào CSMS giả tối thiểu, lái bằng API): [`docs/tru-san-sang.png`](docs/tru-san-sang.png), [`docs/tru-dang-sac-hai-sung.png`](docs/tru-dang-sac-hai-sung.png) (và `...-khung2.png`, cách khung đầu 0,4 s để thấy chấm trên cáp dịch chỗ), [`docs/tru-rot-mang.png`](docs/tru-rot-mang.png), [`docs/tru-phat-bu.png`](docs/tru-phat-bu.png), [`docs/tru-loi-sung.png`](docs/tru-loi-sung.png), [`docs/tru-finishing.png`](docs/tru-finishing.png). Ảnh tĩnh không chứng minh được chuyển động; xem trực tiếp trên trình duyệt.
 
 ## Mô hình rớt mạng — từ MỘT lần quan sát trên SAP, không phải firmware thật
 
