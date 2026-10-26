@@ -258,6 +258,23 @@ export class ReconciliationService {
     });
   }
 
+  // WP3/T31: retain the physical start and its conflicting app binding without assigning a payer.
+  async recordAppIntentReuse(
+    ex: DbExecutor,
+    sessionId: number,
+    intentId: string,
+    boundSessionId: string,
+    frame: FrameRef,
+  ): Promise<number> {
+    return this.insert(ex, sessionId, {
+      recordType: 'conflict',
+      gapStart: frame.cpTimestamp,
+      gapEnd: frame.receivedAt,
+      energyDifferenceWh: null,
+      resolution: `app_intent_reused: intent_id=${intentId} bound_session_id=${boundSessionId} message_log_id=${frame.messageLogId}`,
+    });
+  }
+
   /** Guard của T13 #19: đã có dòng session_debit thì không đổi trạng thái, chỉ ghi record. */
   async hasSessionDebit(ex: DbExecutor, sessionId: number): Promise<boolean> {
     const rows = await ex

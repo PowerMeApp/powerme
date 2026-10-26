@@ -9,6 +9,8 @@ import { DbModule } from '../db/db.module.js';
 import { ReconciliationModule } from '../reconciliation/reconciliation.module.js';
 import { SessionsModule } from '../sessions/sessions.module.js';
 import { StationsModule } from '../stations/stations.module.js';
+import { ChargeSettlementService } from '../sessions/charge-settlement.service.js';
+import { DriverChargingService } from '../sessions/driver-charging.service.js';
 import { ConnectionRegistry } from './connection-registry.js';
 import { InboundSerializer } from './inbound-serializer.js';
 import { OcppHandlers } from './ocpp-handlers.js';
@@ -22,10 +24,18 @@ import { OfflineGraceService } from './offline-grace.service.js';
     ConnectionRegistry,
     InboundSerializer,
     OcppMessageLogger,
+    ChargeSettlementService,
+    DriverChargingService,
     OcppHandlers,
     OfflineGraceService,
     OcppServer,
   ],
-  exports: [OcppServer, ConnectionRegistry, OfflineGraceService],
+  exports: [
+    OcppServer,
+    ConnectionRegistry,
+    OfflineGraceService,
+    DriverChargingService,
+    ChargeSettlementService,
+  ],
 })
 export class OcppGatewayModule {}

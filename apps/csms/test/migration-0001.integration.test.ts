@@ -52,11 +52,12 @@ describeDb('migration 0001 — nâng cấp DB đã có 0000 và ràng buộc m�
     await db?.$client.end();
   });
 
-  it('thứ tự migration theo tên: 0000_init, 0001_quyet-dinh-be-11 rồi 0002 (T61)', () => {
+  it('thứ tự migration: 0000, 0001, 0002 (T61), 0003 (WP3/T31)', () => {
     expect(listMigrations()).toEqual([
       '0000_init',
       '0001_quyet-dinh-be-11',
       '0002_tach-ket-noi-khoi-lifecycle',
+      '0003_wp3_t31_charging',
     ]);
   });
 
@@ -110,14 +111,19 @@ describeDb('migration 0001 — nâng cấp DB đã có 0000 và ràng buộc m�
       );
     });
 
-    it('migrate() ghi nhận 0000 đã áp (không chạy lại) và áp 0001 rồi 0002 theo thứ tự', async () => {
+    it('migrate() giữ 0000 đã áp và nâng cấp tuần tự đến 0003 (WP3/T31)', async () => {
       const applied = await migrate(db.$client);
-      expect(applied).toEqual(['0001_quyet-dinh-be-11', '0002_tach-ket-noi-khoi-lifecycle']);
+      expect(applied).toEqual([
+        '0001_quyet-dinh-be-11',
+        '0002_tach-ket-noi-khoi-lifecycle',
+        '0003_wp3_t31_charging',
+      ]);
       const names = (await q('SELECT name FROM _migrations ORDER BY name')).map((r) => r['name']);
       expect(names).toEqual([
         '0000_init',
         '0001_quyet-dinh-be-11',
         '0002_tach-ket-noi-khoi-lifecycle',
+        '0003_wp3_t31_charging',
       ]);
     });
 
