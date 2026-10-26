@@ -18,11 +18,17 @@ export const staffRoleEnum = pgEnum('staff_role', ['manager', 'technician']);
 
 // ---- stations ----
 export const operatorStatusEnum = pgEnum('operator_status', ['active', 'suspended', 'closed']);
+/**
+ * Vòng đời HÀNH CHÍNH của trụ (STM-3 v0.3, ADR-0016 D-C). Kết nối online/offline KHÔNG nằm ở đây:
+ * xem `charge_points.is_online`. Giá trị `offline` là LEGACY (trước T61 registry ghi nó khi socket
+ * đóng): migration 0002 chuyển hàng cũ sang `in_service` + `is_online=false`, code không còn ghi
+ * giá trị này. Không xoá được khỏi enum Postgres một cách an toàn nên để nguyên.
+ */
 export const chargePointLifecycleEnum = pgEnum('charge_point_lifecycle', [
   'registered',
   'awaiting_connection',
   'in_service',
-  'offline',
+  'offline', // legacy — không còn được ghi (T61)
   'disabled',
   'decommissioned',
 ]);

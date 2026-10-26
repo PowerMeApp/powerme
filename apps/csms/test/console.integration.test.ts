@@ -283,6 +283,7 @@ describeDb('Bảng điều khiển vận hành — dữ liệu thật từ trace
         connected: boolean;
         current_epoch: number;
         lifecycle: string;
+        is_online: boolean;
         last_message_at: string | null;
         connectors: { connector_no: number; status: string }[];
       }[]
@@ -293,6 +294,7 @@ describeDb('Bảng điều khiển vận hành — dữ liệu thật từ trace
     expect(st?.connected).toBe(true);
     expect(st?.current_epoch).toBe(2);
     expect(st?.lifecycle).toBe('in_service');
+    expect(st?.is_online).toBe(true); // ADR-0016 D-C: kết nối là trường riêng, không gộp vào lifecycle
     expect(st?.last_message_at).not.toBeNull();
     expect(st?.connectors.map((c) => c.connector_no)).toEqual([1, 2]);
     expect(st?.connectors[1]?.status).toBe('Charging'); // (g) c2 Charging cuối trace

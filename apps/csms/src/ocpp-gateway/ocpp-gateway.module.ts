@@ -14,10 +14,18 @@ import { InboundSerializer } from './inbound-serializer.js';
 import { OcppHandlers } from './ocpp-handlers.js';
 import { OcppMessageLogger } from './ocpp-message-logger.js';
 import { OcppServer } from './ocpp-server.js';
+import { OfflineGraceService } from './offline-grace.service.js';
 
 @Module({
   imports: [DbModule, SessionsModule, ReconciliationModule, StationsModule],
-  providers: [ConnectionRegistry, InboundSerializer, OcppMessageLogger, OcppHandlers, OcppServer],
-  exports: [OcppServer, ConnectionRegistry],
+  providers: [
+    ConnectionRegistry,
+    InboundSerializer,
+    OcppMessageLogger,
+    OcppHandlers,
+    OfflineGraceService,
+    OcppServer,
+  ],
+  exports: [OcppServer, ConnectionRegistry, OfflineGraceService],
 })
 export class OcppGatewayModule {}

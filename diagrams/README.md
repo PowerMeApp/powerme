@@ -29,8 +29,8 @@ Declared here so the BM02 self-review and reviewers see them; each has an owner.
 |---|---|---|---|
 | 1 | STM-1 | Code moves a session to `orphaned` as soon as the socket closes; ADR-0016 adds an offline grace period first | Trí, T61 |
 | 2 | STM-3 | `charge_points.lifecycle` still has `offline`; ADR-0016 moves connectivity to separate attributes. `ConnectionRegistry.open()` sets `in_service` unconditionally, so a future `disabled` pillar would be re-enabled on reconnect | Trí, T61 |
-| 3 | LERD-1 v0.4 | Billing attributes (top-up expiry, late payment, refund, e-invoice error fields, account closure) are not in migrations `0000`/`0001` yet (planned for the WF-02 billing migration); loyalty types are `earn/redeem/expire/adjust` in the migration vs `earned/redeemed/restored/expired` in the ERD | Khang, Trí |
-| 4 | WF-04 sequences | `remote_commands` is now in migration `0001` and matches LERD-2 v0.3; the code that sends commands and updates their status (BE-04) is not built yet | Trí, Nghĩa |
+| 3 | LERD-1 v0.3 | Billing attributes (top-up expiry, late payment, refund, e-invoice error fields, account closure) are not in migration `0000_init.sql` yet; loyalty types are `earn/redeem/expire/adjust` in the migration vs `earned/redeemed/restored/expired` in the ERD | Khang, Trí |
+| 4 | LERD-2, WF-04 | ~~`remote_commands` is designed but not in the migration~~ **Resolved:** the table is in migration `0001_quyet-dinh-be-11.sql` (PR #36); the code that sends commands is still BE-04 | Trí, Nghĩa |
 | 5 | WF-03 class | Event names in the diagram (START_ACCEPTED, STOP_RECEIVED, FAILED) are the 23/10 draft; the code uses the T13 names (START_TRANSACTION, STOP_TRANSACTION, START_TIMEOUT, …); STM-1 v0.5 follows the code | Trí |
 | 6 | WF-01 class | The app's `SessionState` has no `reconciled`, `orphaned`, `review` or `failed` (it maps them to `unknown`/settlement); align with STM-1 before the app talks to the CSMS | Sơn |
 | 7 | CD-5 | `PillarController` (HTTP endpoints) is planned; the service layer and the connection check are in code (PR #33) | Ân |

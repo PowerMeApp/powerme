@@ -226,6 +226,10 @@ async function main() {
       SESSION_START_TIMEOUT_S: '120',
       SESSION_HARD_CAP_H: '24',
       REPLAY_SKEW_THRESHOLD_S: '5',
+      // ADR-0016 D-A: mặc định 30 s, nhưng kịch bản DS-03a rớt mạng 60 s phải còn THẤY phiên
+      // `orphaned` rồi `active`. Với 30 s thì chỉ ~30 s cuối cửa sổ mới orphan; 20 s cho khoảng
+      // thấy rõ trên bảng điều khiển mà vẫn chứng minh được ân hạn (rớt < 20 s thì không orphan).
+      OFFLINE_GRACE_S: '20',
     },
   });
   const csmsUp = await waitFor(() => portOpen(PORTS.ocpp), 60_000);
