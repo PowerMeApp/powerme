@@ -7,9 +7,11 @@
  *     đây đóng socket cũ (1012) trước khi nhận socket mới.
  *   - T13 mục 6: epoch PHẢI khởi tạo từ DB (`MAX(epoch) + 1` trong charge_point_connections),
  *     không đếm trong RAM — EXP-01 chính là ca CSMS chết, registry mất sạch.
- *   - STM-3: socket mở = `in_service` (không chờ BootNotification — EXP-01 trụ nối lại không
- *     gửi Boot); socket đóng = `offline`. Lifecycle của trụ ghi ở đây vì đây là nơi quan sát
- *     được sự kiện socket.
+ *   - ADR-0016 D-C (T61): kết nối tách khỏi `lifecycle`. Socket mở/đóng chỉ đặt `is_online` +
+ *     `online_changed_at`; lifecycle (hành chính) chỉ chuyển `awaiting_connection → in_service`
+ *     (STM-3 #3, không chờ BootNotification — EXP-01 trụ nối lại không gửi Boot) hoặc legacy
+ *     `offline → in_service`. `disabled` / `in_service` / ... giữ nguyên: trụ disabled vẫn có thể
+ *     online, trụ in_service có thể offline. `close()` KHÔNG đụng lifecycle.
  *
  * Mỗi lần mở = một dòng charge_point_connections (opened_at, remote_address); đóng = closed_at +
  * close_reason. `epoch_opened_at` giữ trong bộ nhớ để ReplayDetector phân loại không cần đọc DB.
@@ -34,6 +36,9 @@ export interface Connection {
   client: OcppClientLike;
   remoteAddress: string | null;
 }
+
+/** Trạng thái kết nối của một trụ (ADR-0016 D-C) — độc lập với `charge_points.lifecycle`. */
+export type ConnectionState = 'online' | 'offline';
 
 /** Mã đóng dùng khi CSMS thay socket cũ bằng socket mới cùng identity. */
 export const CLOSE_SUPERSEDED = { code: 1012, reason: 'Thay the boi ket noi moi' } as const;
@@ -103,7 +108,11 @@ export class ConnectionRegistry {
         .update(chargePoints)
         .set({
           currentEpoch: next,
-          lifecycle: 'in_service',
+          // STM-3 #3 (FIRST_CONNECT) + legacy offline → in_service; các lifecycle khác giữ nguyên.
+          lifecycle: sql`case when ${chargePoints.lifecycle} in ('awaiting_connection', 'offline')
+            then 'in_service'::charge_point_lifecycle else ${chargePoints.lifecycle} end`,
+          isOnline: true,
+          onlineChangedAt: openedAt,
           lastMessageAt: openedAt,
           updatedAt: openedAt,
         })
@@ -141,7 +150,7 @@ export class ConnectionRegistry {
     await this.markClosed(conn, closedAt, `${opts.code ?? '?'} ${opts.reason ?? ''}`.trim());
     await this.db
       .update(chargePoints)
-      .set({ lifecycle: 'offline', updatedAt: closedAt })
+      .set({ isOnline: false, onlineChangedAt: closedAt, updatedAt: closedAt })
       .where(eq(chargePoints.id, conn.chargePointId));
     this.logger.warn(
       `■ ${identity} ngắt (epoch ${conn.epoch}, ${opts.code ?? '?'} ${opts.reason ?? ''})`,

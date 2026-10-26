@@ -42,6 +42,33 @@ describe('mapStation', () => {
     expect(out.connectors[1]?.status_changed_at).toBeNull();
   });
 
+  it('ADR-0016 D-C: lifecycle và kết nối là hai trường độc lập (disabled vẫn online, in_service có thể offline)', () => {
+    const base = { currentEpoch: 1, lastMessageAt: null, connectors: [] };
+    const disabledOnline = mapStation(
+      {
+        ...base,
+        serialNumber: 'D',
+        lifecycle: 'disabled',
+        isOnline: true,
+        onlineChangedAt: T('10:00:00'),
+      },
+      true,
+    );
+    expect(disabledOnline.lifecycle).toBe('disabled');
+    expect(disabledOnline.connected).toBe(true);
+    expect(disabledOnline.is_online).toBe(true);
+    expect(disabledOnline.online_changed_at).toBe('2026-09-16T10:00:00.000Z');
+
+    const inServiceOffline = mapStation(
+      { ...base, serialNumber: 'S', lifecycle: 'in_service', isOnline: false },
+      false,
+    );
+    expect(inServiceOffline.lifecycle).toBe('in_service');
+    expect(inServiceOffline.connected).toBe(false);
+    expect(inServiceOffline.is_online).toBe(false);
+    expect(inServiceOffline.online_changed_at).toBeNull();
+  });
+
   it('trụ chưa từng nhắn: last_message_at = null', () => {
     const out = mapStation(
       {

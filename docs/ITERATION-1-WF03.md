@@ -41,7 +41,7 @@ apps/csms/
 │   │   └── schema/              (T11, không đổi)
 │   ├── ocpp-gateway/
 │   │   ├── ocpp-server.ts       RPCServer + vòng đời socket + processCall (đường test gọi thẳng)
-│   │   ├── connection-registry.ts  identity → client, epoch (MAX+1 từ DB), in_service/offline
+│   │   ├── connection-registry.ts  identity → client, epoch (MAX+1 từ DB), is_online (T61)
 │   │   ├── ocpp-message-logger.ts  INSERT ocpp_message_log
 │   │   ├── inbound-serializer.ts   hàng đợi promise theo trụ
 │   │   ├── ocpp-handlers.ts        action → SessionsService → payload .conf
@@ -70,8 +70,9 @@ Unit test đặt cạnh mã nguồn (`*.spec.ts`): `session-state-machine.spec.t
 
 ### 3.1 `ocpp-gateway`
 
-- **OcppServer** — tạo `RPCServer({ protocols: ['ocpp1.6'], strictMode: true })` ở `onApplicationBootstrap`, auth chỉ nhận serial đã có trong `charge_points`. Với mỗi CALL chiều vào: ghi `received_at` → xếp vào InboundSerializer → ReplayDetector phân loại → INSERT `ocpp_message_log` → handler. Frame chiều ra và CALLRESULT chiều vào ghi từ sự kiện `message` của ocpp-rpc. Socket mở → `registry.open` rồi gửi `TriggerMessage(StatusNotification)` c0/c1/c2 best-effort; socket đóng → `registry.close` rồi `SessionsService.onStationOffline`.
-- **ConnectionRegistry** — Map identity → {client, epoch, epochOpenedAt}. `open()` đóng socket cũ cùng identity (1012), lấy `MAX(epoch)+1` từ `charge_point_connections` trong transaction, ghi dòng mới, đặt `charge_points.lifecycle = in_service`, `current_epoch`. `close()` ghi `closed_at`/`close_reason`, lifecycle `offline`; bỏ qua socket cũ đã bị thay thế.
+- **OcppServer** — tạo `RPCServer({ protocols: ['ocpp1.6'], strictMode: true })` ở `onApplicationBootstrap`, auth chỉ nhận serial đã có trong `charge_points`. Với mỗi CALL chiều vào: ghi `received_at` → xếp vào InboundSerializer → ReplayDetector phân loại → INSERT `ocpp_message_log` → handler. Frame chiều ra và CALLRESULT chiều vào ghi từ sự kiện `message` của ocpp-rpc. Socket mở → `registry.open` rồi gửi `TriggerMessage(StatusNotification)` c0/c1/c2 best-effort; socket đóng → `registry.close` rồi `OfflineGraceService.onSocketClosed` (T61: hẹn giờ ân hạn; hết hạn mà chưa nối lại mới `SessionsService.onStationOffline`).
+- **ConnectionRegistry** — Map identity → {client, epoch, epochOpenedAt}. `open()` đóng socket cũ cùng identity (1012), lấy `MAX(epoch)+1` từ `charge_point_connections` trong transaction, ghi dòng mới, đặt `current_epoch`, `is_online = true`, `online_changed_at`; lifecycle chỉ chuyển `awaiting_connection` (hoặc legacy `offline`) → `in_service`, các giá trị khác (`disabled`...) giữ nguyên (T61, ADR-0016 D-C). `close()` ghi `closed_at`/`close_reason`, `is_online = false`, **không đụng lifecycle**; bỏ qua socket cũ đã bị thay thế.
+- **OfflineGraceService** (T61, ADR-0016 D-A) — `onSocketClosed(chargePointId, epoch, at)`: `OFFLINE_GRACE_S` = 0 → orphan ngay; > 0 → hẹn giờ qua interface `Scheduler` (mặc định `setTimeout`; đích là job BullMQ trễ, chưa có Redis). Đến hạn: `charge_points.current_epoch` trong DB > epoch của socket vừa đóng → trụ đã nối lại, không làm gì; ngược lại gọi `onStationOffline` (#13–#15). `onApplicationBootstrap` quét DB tìm trụ không có socket mà `is_online = true` hoặc còn phiên active/paused/stopping, đánh dấu offline và orphan ngay (nếu quá hạn tính từ `last_message_at` / `online_changed_at`) hoặc hẹn giờ phần còn lại. `onApplicationShutdown` huỷ hẹn giờ.
 - **OcppMessageLogger** — một INSERT trả id; `raw` là frame đã parse.
 - **InboundSerializer** — `run(key, task)`: nối task vào đuôi chuỗi promise của key, tác vụ lỗi không chặn tác vụ sau.
 - **OcppHandlers** — BootNotification (Accepted, interval), Heartbeat, StatusNotification, Authorize (tra `rfid_cards`: không có → Invalid), StartTransaction (luôn Accepted, transactionId từ SessionsService), MeterValues, StopTransaction (Accepted), DataTransfer (Accepted, chỉ log); khác → NotImplemented.
@@ -115,7 +116,7 @@ File: `apps/csms/src/sessions/session-state-machine.spec.ts`, mỗi dòng là m�
 | 11 | paused → closed | `STOP_TRANSACTION` | Có |
 | 12 | closed → reconciled | `RECONCILE_OK` | Có — tx1, tx2 |
 | 12a | closed → review | `RECONCILE_CONFLICT` | Có — tx3 |
-| 13 | active → orphaned | `STATION_OFFLINE` | Có — tx3 lúc socket đóng |
+| 13 | active → orphaned | `STATION_OFFLINE` | Có — tx3; từ T61 chỉ sau ân hạn (`OFFLINE_GRACE_S`) mà trụ chưa nối lại |
 | 14 | paused → orphaned | `STATION_OFFLINE` | Có |
 | 15 | stopping → orphaned | `STATION_OFFLINE` | Có |
 | 16 | orphaned → reconciled | `RECONCILE_OK` | Có (Stop phát lại tới khi còn orphaned) |
@@ -139,11 +140,11 @@ npm run build -w @powerme/csms                # tsc → dist/
 DATABASE_URL=... OCPP_PORT=9000 npm run start -w @powerme/csms
 ```
 
-Biến môi trường (xem `infra/.env.example`): `DATABASE_URL` (bắt buộc), `OCPP_PORT` (9000; dự phòng `CSMS_OCPP_WS_PORT`), `OCPP_HEARTBEAT_INTERVAL_SECONDS` (300), `SESSION_START_TIMEOUT_S` (120), `SESSION_HARD_CAP_H` (24), `REPLAY_SKEW_THRESHOLD_S` (5), `METER_VALUE_SAMPLE_INTERVAL_S` (10), `RECONCILE_GAP_FACTOR` (3), `RECONCILE_ENERGY_TOLERANCE_WH` (1).
+Biến môi trường (xem `infra/.env.example`): `DATABASE_URL` (bắt buộc), `OCPP_PORT` (9000; dự phòng `CSMS_OCPP_WS_PORT`), `OCPP_HEARTBEAT_INTERVAL_SECONDS` (300), `SESSION_START_TIMEOUT_S` (120), `SESSION_HARD_CAP_H` (24), `REPLAY_SKEW_THRESHOLD_S`, `OFFLINE_GRACE_S` (30; T61 — giây ân hạn trước `orphaned`, `0` = orphan ngay) (5), `METER_VALUE_SAMPLE_INTERVAL_S` (10), `RECONCILE_GAP_FACTOR` (3), `RECONCILE_ENERGY_TOLERANCE_WH` (1).
 
 Trụ (hoặc SAP simulator với `ws://localhost:9000/ocpp`) nối tới `ws://host:OCPP_PORT/ocpp/{serialNumber}`; serial phải có trong `charge_points` trước.
 
-**Test tích hợp** xoá sạch schema `public` của DB được trỏ tới rồi áp tuần tự `drizzle/0000_init.sql` → `0001_quyet-dinh-be-11.sql` bằng helper `test/helpers/apply-migrations.ts` — chỉ trỏ vào DB test. Thiếu `DATABASE_URL` thì describe bị skip (máy dev không có Postgres vẫn xanh).
+**Test tích hợp** xoá sạch schema `public` của DB được trỏ tới rồi áp tuần tự `drizzle/0000_init.sql` → `0001_quyet-dinh-be-11.sql` → `0002_tach-ket-noi-khoi-lifecycle.sql` bằng helper `test/helpers/apply-migrations.ts` — chỉ trỏ vào DB test. Thiếu `DATABASE_URL` thì describe bị skip (máy dev không có Postgres vẫn xanh).
 
 ---
 
@@ -172,6 +173,8 @@ Xem job CI của PR (link trong phần "Kiểm chứng" của PR). Cập nhật 
 
 Đường trạng thái thật của tx3 trong test: `active` → (socket đóng) `orphaned` #13 → (MeterValues live 796 Wh) `active` #18 → (StopTransaction phát lại) `closed` #10 → (conflict) `review` #12a → 6 mẫu muộn: giữ `review`, thêm record. Không đi #16a vì #18 đã kéo về `active` trước khi Stop tới — đúng như EXP-01 giai đoạn D.
 Từ migration 0001 đường này nằm trong `session_status_history` (test (m)): `● -START_TRANSACTION-> active`, `active -STATION_OFFLINE-> orphaned` (actor `system`), `orphaned -LIVE_MESSAGE-> active`, `active -STOP_TRANSACTION-> closed`, `closed -RECONCILE_CONFLICT-> review`; `sessions.orphaned_at` = 14:19:01.000Z (test (n)).
+
+**Cập nhật 26/10/2026 (T61, ADR-0016):** test EXP-01 phát lại trace bằng cách gọi thẳng `registry.close` rồi `SessionsService.onStationOffline`, nên nó **không đi qua ân hạn** và đường trên không đổi (chỉ khẳng định `lifecycle` giữ `in_service`, `is_online` đổi true → false → true). Ân hạn được kiểm ở `test/t61-ket-noi-va-an-han.integration.test.ts` qua `OcppServer.attach` (sự kiện `close` của socket giả → registry → `OfflineGraceService`): nối lại trong ân hạn → phiên giữ `active`, không có dòng lịch sử `orphaned`; hết ân hạn → `● -START_TRANSACTION-> active`, `active -STATION_OFFLINE-> orphaned`, rồi `orphaned -LIVE_MESSAGE-> active`.
 
 ---
 

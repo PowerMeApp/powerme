@@ -239,7 +239,7 @@ svg text { fill: var(--muted); font-size: 13px; }
       h += '<div class="st"><div class="head"><span class="dot ' + (st.connected ? 'on' : 'off') + '"></span><span class="name">' + esc(st.serial) + '</span>' +
         '<span class="badge ' + (st.connected ? 'b-active' : 'b-failed') + '">' + (st.connected ? 'đang nối' : 'mất kết nối') + '</span>' +
         '<span style="flex:1"></span><button data-disc="' + esc(st.serial) + '"' + (st.connected ? '' : ' disabled') + '>Ngắt kết nối trụ</button></div>' +
-        '<div class="meta">vòng đời: ' + esc(st.lifecycle) + ' · epoch ' + st.current_epoch + ' · lần cuối nhận tin: ' + ago(st.last_message_at) + '</div><div class="chips">';
+        '<div class="meta">vòng đời (hành chính): ' + esc(st.lifecycle) + ' · kết nối đổi lúc ' + ago(st.online_changed_at) + ' · epoch ' + st.current_epoch + ' · lần cuối nhận tin: ' + ago(st.last_message_at) + '</div><div class="chips">';
       st.connectors.forEach(function (c) {
         h += '<span class="chip c-' + esc(c.status) + '">súng ' + c.connector_no + ': <b>' + esc(c.status) + '</b></span>';
       });

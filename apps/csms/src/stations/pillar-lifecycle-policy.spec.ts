@@ -51,7 +51,7 @@ describe('PillarLifecyclePolicy (STM-3 v0.3, ADR-0016)', () => {
     expect(() => policy.transition(from, event)).toThrow(InvalidPillarTransitionError);
   });
 
-  it('treats the legacy lifecycle value "offline" as in_service (until T61)', () => {
+  it('treats the legacy lifecycle value "offline" as in_service (legacy, no longer written since T61)', () => {
     expect(policy.transition('offline', 'DISABLE')).toBe('disabled');
     expect(policy.canApply('offline', 'ONBOARD')).toBe(false);
   });

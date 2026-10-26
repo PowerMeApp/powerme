@@ -56,9 +56,16 @@ export interface StationInput {
   lifecycle: string;
   currentEpoch: number;
   lastMessageAt: Date | null;
+  /** Cột `is_online` trong DB (ADR-0016 D-C). Khác `connected` (socket trong RAM) sau khi CSMS chết. */
+  isOnline?: boolean;
+  onlineChangedAt?: Date | null;
   connectors: { connectorNo: number; status: string; statusChangedAt: Date | null }[];
 }
 
+/**
+ * `lifecycle` (hành chính) và kết nối là HAI trường độc lập (ADR-0016 D-C): `connected` = socket
+ * đang mở theo registry (RAM); `is_online` = giá trị đã ghi trong DB (lệch tạm thời sau khi CSMS chết).
+ */
 export function mapStation(row: StationInput, connected: boolean) {
   return {
     serial: row.serialNumber,
@@ -66,6 +73,8 @@ export function mapStation(row: StationInput, connected: boolean) {
     current_epoch: row.currentEpoch,
     last_message_at: iso(row.lastMessageAt),
     connected,
+    is_online: row.isOnline ?? connected,
+    online_changed_at: iso(row.onlineChangedAt),
     connectors: [...row.connectors]
       .sort((a, b) => a.connectorNo - b.connectorNo)
       .map((c) => ({
