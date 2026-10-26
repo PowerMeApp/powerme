@@ -9,7 +9,7 @@ How this draft was made:
 
 | ID | Sev. | Run 1 | Response | Owner | Due | Reason / action / commit |
 |---|---|---|---|---|---|---|
-| F01 | Medium | — | Planned | Ân | before submission | Decided 26/10/2026 (Ân): UC-ADM-08 and UC-ACC-02 are a **scope change**. The Review 2 form is not submitted yet, so both go into the proposed final form (v1.3) and are listed in its BM03 Record of Changes, each with its reason (guide §04). The SRS, SDD and Design Brief §1/6/7 must match v1.3. |
+| F01 | Medium | — | Fixed (form v1.3) | Ân | before submission | The proposed final form v1.3 (26/10/2026) lists UC-ADM-08 as the Admin part of FR-07 and the account-closure request (UC-ACC-02) under FR-01/FR-02, recorded in BM03 rows 1-2; no FR is added. Repo copy and README: T76. The SRS, SDD and Design Brief §1/6/7 must match v1.3. |
 | F02 | Low | — | Planned | Ân? | 31/10? | Tag the BR-P43, BR-P30 and FCM references in the SRS with their real priority, and label "system health" as Should (FR-19). |
 | F03 | Medium | — | Planned | Ân? | 31/10? | SRS §1 says SteVe is Should, but form RQ1 and NFR-REC-01 commit it. Fix §1 to match the form. |
 | F04 | Low | — | Planned | Ân? | 07/11? | Add measurable NFR rows for the Vietnamese/VND UI, operator data scoping, the out-of-date connector indicator and the demo acceptance script. |
@@ -47,10 +47,10 @@ How this draft was made:
 ## Statistics (draft)
 
 - Total: **34** findings.
-  - Fixed: 0.
+  - Fixed after the tag: 1 (F01).
   - Fixed in part or after the tag, plus Planned: 4 (F08, F27, F28, F31).
   - Kept + Planned: 1 (F18).
-  - Planned: 29.
+  - Planned: 28.
 - Matched to run 1: 20 findings. New: 14.
 - **High** findings (7): F06, F16, F22, F27, F29, F30, F31. None is closed, so all seven must be listed in Design Brief §5 (Known Gaps):
   - F16 → G2
