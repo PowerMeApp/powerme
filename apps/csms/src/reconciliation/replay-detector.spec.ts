@@ -55,6 +55,45 @@ describe('ReplayDetector', () => {
     expect(v.reason).toBe('skew');
   });
 
+  it('G9: tin sinh 0,2 s TRƯỚC khi socket mở rồi gửi ngay (StatusNotification lúc trụ vừa nối) → live, không phải phát lại', () => {
+    const v = detector.classify({
+      cpTimestamp: new Date('2026-09-16T14:20:22.778Z'),
+      receivedAt: new Date('2026-09-16T14:20:23.010Z'),
+      epochOpenedAt: EPOCH2,
+    });
+    expect(v.replayed).toBe(false);
+    expect(v.reason).toBeNull();
+  });
+
+  it('G9 biên: sớm hơn epoch đúng bằng dung sai 5 s → KHÔNG phát lại (luật là lớn hơn)', () => {
+    const v = detector.classify({
+      cpTimestamp: new Date('2026-09-16T14:20:17.978Z'),
+      receivedAt: EPOCH2, // tin chỉ tới được SAU khi socket mở → skew = lead = 5 s đúng ngưỡng
+      epochOpenedAt: EPOCH2,
+    });
+    expect(v.replayed).toBe(false);
+  });
+
+  it('G9 biên: sớm hơn epoch 5,001 s → before_epoch', () => {
+    const v = detector.classify({
+      cpTimestamp: new Date('2026-09-16T14:20:17.977Z'),
+      receivedAt: new Date('2026-09-16T14:20:23.010Z'),
+      epochOpenedAt: EPOCH2,
+    });
+    expect(v.replayed).toBe(true);
+    expect(v.reason).toBe('before_epoch');
+  });
+
+  it('dung sai theo cấu hình: ngưỡng 0 → hành vi cũ, sớm hơn epoch 1 ms cũng là phát lại', () => {
+    const strict = new ReplayDetector(0);
+    const v = strict.classify({
+      cpTimestamp: new Date('2026-09-16T14:20:22.977Z'),
+      receivedAt: new Date('2026-09-16T14:20:22.980Z'),
+      epochOpenedAt: EPOCH2,
+    });
+    expect(v.reason).toBe('before_epoch');
+  });
+
   it('biên: cp_timestamp đúng bằng epoch_opened_at → không phải before_epoch', () => {
     const v = detector.classify({ cpTimestamp: EPOCH2, receivedAt: EPOCH2, epochOpenedAt: EPOCH2 });
     expect(v).toEqual({ replayed: false, reason: null, skewS: 0 });

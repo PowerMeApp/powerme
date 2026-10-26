@@ -3,7 +3,14 @@
  *
  * Vì sao tồn tại: OCPP 1.6 không có cờ nào phân biệt hai loại bản tin này (EXP-01 hiện tượng 1;
  * 2.0.1 mới vá bằng `offline` + `seqNo`). CSMS phải tự suy ra từ hai mốc thời gian của ADR-0009:
- *   - luật chính:  cp_timestamp < epoch_opened_at   → bản tin sinh ra trước khi socket hiện tại mở
+ *   - luật chính:  epoch_opened_at − cp_timestamp > REPLAY_SKEW_THRESHOLD_S
+ *                  → bản tin sinh ra TRƯỚC khi socket hiện tại mở, quá dung sai.
+ *                  Dung sai chống cờ giả: trụ tạo StatusNotification vài trăm ms trước khi socket mở
+ *                  rồi gửi ngay là tin LIVE, không phải phát lại (Known Gap G9: demo 25/10 gắn nhầm
+ *                  3–4 tin; EXP-01 không lộ vì SAP không gắn timestamp cho tin trạng thái).
+ *                  Lưu ý thiết kế: tin chỉ tới được SAU khi socket mở nên skew ≥ lead; với dung sai
+ *                  bằng ngưỡng skew thì mọi ca before_epoch đều cũng thoả luật skew — `before_epoch`
+ *                  giữ vai trò NHÃN lý do (và ưu tiên hơn `skew` khi cả hai đúng), không bắt thêm ca.
  *   - luật phụ:    received_at − cp_timestamp > REPLAY_SKEW_THRESHOLD_S (T13: 5 s; EXP-01 đo
  *                  live 0,0 s, phát lại 104–127 s)
  *
@@ -38,7 +45,8 @@ export class ReplayDetector {
   classify({ cpTimestamp, receivedAt, epochOpenedAt }: ReplayInput): ReplayVerdict {
     if (cpTimestamp === null) return { replayed: false, reason: null, skewS: null };
     const skewS = (receivedAt.getTime() - cpTimestamp.getTime()) / 1000;
-    if (cpTimestamp.getTime() < epochOpenedAt.getTime()) {
+    const leadS = (epochOpenedAt.getTime() - cpTimestamp.getTime()) / 1000;
+    if (leadS > this.skewThresholdS) {
       return { replayed: true, reason: 'before_epoch', skewS };
     }
     if (skewS > this.skewThresholdS) return { replayed: true, reason: 'skew', skewS };
