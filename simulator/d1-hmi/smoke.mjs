@@ -120,6 +120,37 @@ try {
       .join(',') === '0:Available,1:Available,2:Available',
   );
 
+  // 1b. File tĩnh của hình trụ minh hoạ (QA-02): phục vụ đúng, và không đọc được file ngoài whitelist
+  const get = (p) => fetch(`http://127.0.0.1:${HMI_PORT}${p}`);
+  const js = await get('/static/tru-sac.js');
+  check(
+    'Tĩnh: /static/tru-sac.js → 200, text/javascript',
+    js.status === 200 && (js.headers.get('content-type') ?? '').startsWith('text/javascript'),
+  );
+  const css = await get('/static/tru-sac.css');
+  check(
+    'Tĩnh: /static/tru-sac.css → 200, text/css',
+    css.status === 200 && (css.headers.get('content-type') ?? '').startsWith('text/css'),
+  );
+  const evil = ['/static/..%2fserver.mjs', '/static/%2e%2e/server.mjs', '/static/..%5cserver.mjs'];
+  const evilCodes = [];
+  for (const p of evil) evilCodes.push((await get(p)).status);
+  check(
+    'Tĩnh: đường dẫn có ".." / %2e / gạch chéo → 404',
+    evilCodes.every((c) => c === 404),
+    evilCodes.join(','),
+  );
+  check(
+    'Tĩnh: file không có trong public/ hoặc sai đuôi → 404',
+    (await get('/static/khong-co.js')).status === 404 &&
+      (await get('/static/index.html')).status === 404,
+  );
+  const page = await (await get('/')).text();
+  check(
+    'Trang HMI có khối trụ + chú thích "Hình minh hoạ — không phải ảnh sản phẩm thật"',
+    page.includes('id="tru"') && page.includes('Hình minh hoạ — không phải ảnh sản phẩm thật'),
+  );
+
   // 2. Cắm súng A, quẹt thẻ hợp lệ
   await api('mode', { connector: 1, type: 'kwh', value: 5 });
   await api('plug', { connector: 1 });

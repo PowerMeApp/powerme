@@ -192,6 +192,8 @@ Chụp bằng `msedge.exe --headless=new --window-size=1920,1080 --screenshot=..
 
 ![Console phiên review](demo/console-5-phien-review-co-doi-soat.png)
 
+Hình trụ sạc minh hoạ trên HMI (QA-02, Edge headless 1500×1000): [`simulator/d1-hmi/docs/tru-*.png`](../simulator/d1-hmi/docs/) — sẵn sàng, hai súng đang sạc (kèm khung thứ hai để thấy chấm chạy), rớt mạng, phát bù, lỗi súng, finishing; mô tả và bảng màu đèn ở [`simulator/d1-hmi/README.md`](../simulator/d1-hmi/README.md).
+
 Ảnh lưu ở [`docs/demo/`](demo/). Console đã khớp với DB: hàng `#1 review` và dòng `conflict` đều có trong `show.mjs`.
 
 ## Bất ngờ khi chạy
