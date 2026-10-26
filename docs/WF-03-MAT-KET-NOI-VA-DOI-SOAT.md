@@ -410,8 +410,8 @@ classDiagram
 
 **Đọc sơ đồ:**
 
-- `ocpp-gateway` không import `sessions` hay `reconciliation`: `SessionsService.onStartTransaction/onMeterValues/onStopTransaction` là handler đăng ký qua giao diện `OcppHandler` (luật 1 của package diagram). `onStationConnection` nghe sự kiện `station.connection` do `stations` phát sau khi chuyển STM-3.
-- `ReplayDetector` thuộc `ocpp-gateway` vì cần `epoch_opened_at` ngay lúc frame tới, trước khi INSERT log. `reconciliation` **đọc lại** cờ `replayed` từ `meter_values` / `ocpp_message_log`, không tính lại.
+- > **Không còn đúng với code (26/10/2026, BM02 F33):** `OcppGatewayModule` import `SessionsModule`, `ReconciliationModule` và `StationsModule`; `OcppHandlers` gọi thẳng `SessionsService`, `OcppServer` gọi `ReplayDetector` và `PillarAuthService`. Luật đã viết lại theo code ở mục 3 `docs/PACKAGE-DIAGRAM-CSMS.md`. Câu gốc 23/10: `ocpp-gateway` không import `sessions` hay `reconciliation`: `SessionsService.onStartTransaction/onMeterValues/onStopTransaction` là handler đăng ký qua giao diện `OcppHandler` (luật 1 của package diagram). `onStationConnection` nghe sự kiện `station.connection` do `stations` phát sau khi chuyển STM-3.
+- > **Vị trí trong code (26/10/2026, BM02 F33):** lớp `ReplayDetector` nằm ở `apps/csms/src/reconciliation/replay-detector.ts`, do `ReconciliationModule` cung cấp; `ocpp-gateway` (`OcppServer`) gọi nó lúc frame tới, nên ý dưới đây (tính trước khi INSERT log) vẫn đúng. Câu gốc 23/10: `ReplayDetector` thuộc `ocpp-gateway` vì cần `epoch_opened_at` ngay lúc frame tới, trước khi INSERT log. `reconciliation` **đọc lại** cờ `replayed` từ `meter_values` / `ocpp_message_log`, không tính lại.
 - `SessionStateMachine.apply` là nơi duy nhất đổi `status`; `SessionsService.resolve` và `flagForReview` chỉ bọc lại các sự kiện `RECONCILE_OK` / `RECONCILE_CONFLICT` / `OPERATOR_RESOLVED` để `reconciliation` không phải biết bảng chuyển trạng thái.
 - `ReconciliationService.enabled` là công tắc ablation (thí nghiệm WP5): tắt đi thì mọi sự kiện bị bỏ qua, phiên `closed` không bao giờ thành `reconciled`.
 - `Resolution` liệt kê ba hành động operator **giả định** cho UC-OPS-05 — chưa có nguồn, xem mục 6.
