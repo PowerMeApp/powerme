@@ -1,6 +1,6 @@
 @startuml LERD-1_Charging-Billing
 !include _erd_style.iuml
-title LERD-1 Logical ERD: Charging & Billing (crow's foot, 3NF)\nPK = identifier · {BK} = business key · {U} = unique · (FK) = reference · /x = derived, stored as snapshot · v0.3 · 24/10/2026 (WF-02 billing attributes, Khang)
+title LERD-1 Logical ERD: Charging & Billing (crow's foot, 3NF)\nPK = identifier · {BK} = business key · {U} = unique · (FK) = reference · /x = derived, stored as snapshot · v0.4 · 25/10/2026 (v0.3 WF-02 billing attributes, Khang; v0.4 SessionStatusChange from migration 0001)
 
 entity User {
   * UserId
@@ -74,6 +74,16 @@ entity ChargingSession {
   DeliveredOffline
   /EnergyWh
   /TotalCostVnd
+}
+entity SessionStatusChange {
+  * SessionStatusChangeId
+  --
+  ChargingSession (FK) + OccurredAt {BK}
+  FromStatus (optional)
+  ToStatus
+  Event
+  Actor
+  Note (optional)
 }
 entity SessionPause {
   * SessionPauseId
@@ -221,6 +231,7 @@ Vehicle |o--o{ ChargingSession : is charged in
 RfidCard |o--o{ ChargingSession : authorises (by IdTag)
 Promotion |o--o{ ChargingSession : applies to
 Connector ||--o{ ChargingSession : hosts
+ChargingSession ||--|{ SessionStatusChange : is traced by (append-only)
 ChargingSession ||--o{ SessionPause : is paused in
 ChargingSession ||--o{ MeterReading : records
 ChargingSession ||--|{ SessionTariffSegment : is split into

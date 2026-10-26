@@ -1,6 +1,6 @@
 @startuml LERD-2_Operations-Administration
 !include _erd_style.iuml
-title LERD-2 Logical ERD: Operations & Administration (crow's foot, 3NF)\nPK = identifier · {BK} = business key · (FK) = reference · grey = Should · v0.2 · 24/10/2026 (aligned with WP2/WP4 designs, ADR-0016)
+title LERD-2 Logical ERD: Operations & Administration (crow's foot, 3NF)\nPK = identifier · {BK} = business key · (FK) = reference · grey = Should · v0.3 · 25/10/2026 (v0.2 aligned with WP2/WP4 designs, ADR-0016; v0.3 RemoteCommand and CpTimestamp from migration 0001)
 
 entity User {
   * UserId
@@ -75,17 +75,23 @@ entity ConnectorStatusEvent {
   Status
   ErrorCode
   VendorErrorCode
-  PillarTimestamp
+  CpTimestamp
   UnexpectedTransition
 }
 entity RemoteCommand {
   * RemoteCommandId
   --
   ChargingPillar (FK) + RequestedAt {BK}
+  ConnectorNo (optional)
   Action
+  Payload
   CommandStatus
-  RequestedBy (FK)
-  CompletedAt
+  RequestedBy (FK, optional)
+  IdempotencyKey {U} (optional)
+  SentAt (optional)
+  RespondedAt (optional)
+  Response (optional)
+  Error (optional)
 }
 entity FaultEvent {
   * FaultEventId
@@ -168,7 +174,7 @@ Operator ||--o{ Site : runs
 Site |o--o{ ChargingPillar : hosts
 ChargingPillar ||--|{ Connector : has (max 2)
 ChargingPillar ||--o{ RemoteCommand : receives
-OperatorStaff ||--o{ RemoteCommand : sends
+OperatorStaff |o--o{ RemoteCommand : sends (none = CSMS-issued)
 Connector ||--o{ ConnectorStatusEvent : records
 Connector ||--o{ FaultEvent : is subject of
 OperatorStaff |o--o{ FaultEvent : acknowledges
