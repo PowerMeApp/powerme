@@ -49,6 +49,8 @@ services:
       # PHẢI false trên staging: trụ không có credential bị 401 (Security Profile 2). Cố định ở
       # đây, không đọc từ .env, để không bật nhầm.
       ALLOW_LEGACY_NO_CREDENTIAL: 'false'
+      # Sau Caddy: IP trụ cho giới hạn đăng nhập sai (#40) lấy từ X-Forwarded-For, không phải IP Caddy.
+      OCPP_TRUST_PROXY: 'true'
       OFFLINE_GRACE_S: ${OFFLINE_GRACE_S:-30}
       OCPP_HEARTBEAT_INTERVAL_SECONDS: ${OCPP_HEARTBEAT_INTERVAL_SECONDS:-300}
       SESSION_START_TIMEOUT_S: ${SESSION_START_TIMEOUT_S:-120}
