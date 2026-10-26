@@ -1,7 +1,7 @@
 @startuml WF01-seq
 !include _team.iuml
-title WF-01 Sequence diagram: charging session in the Driver App (module level)
-footer Content: Lý Hoàng Sơn (WP3), t22-wf01-sequence 24/10/2026 · redrawn in the Report 4 diagram style, content unchanged
+title WF-01 Sequence diagram: charging session (module level)
+footer Content: Lý Hoàng Sơn (WP3), t22-wf01-sequence v1.1 25/10/2026 · redrawn in the Report 4 diagram style, content unchanged
 autonumber
 hide footbox
 actor "Driver" as drv
@@ -27,31 +27,33 @@ api -> be : Validate credit & start (key)
 be --> api : Start outcome
 api --> chg : Start outcome
 alt insufficient credit / rejected / unknown
-  chg -> drv : WF-02 if low credit; else recover
+  chg -> drv : WF02 if low credit; else recover
 else Accepted
   chg -> drv : Start pending
-  be -> rt : Active confirmed
-  rt -> chg : Active confirmed
-  chg -> drv : Active
-  loop session active; updates arrive
-    be -> rt : Progress + freshness
-    rt -> chg : Progress + freshness
-    chg -> drv : Progress + freshness
+  opt active confirmed (event / recovered snapshot)
+    be -> rt : Active confirmed
+    rt -> chg : Active confirmed
+    chg -> drv : Active
+    loop session active; updates arrive
+      be -> rt : Progress + freshness
+      rt -> chg : Progress + freshness
+      chg -> drv : Progress + freshness
+    end
+    drv -> chg : Stop
+    chg -> api : Request stop
+    api -> be : Request stop (key)
+    be --> api : Stop outcome
+    api --> chg : Stop outcome
+    alt Accepted
+      chg -> drv : Stop pending
+    else rejected / unknown
+      chg -> drv : Rejected / unknown; recover
+    end
   end
-  drv -> chg : Stop
-  chg -> api : Request stop
-  api -> be : Request stop (key)
-  be --> api : Stop outcome
-  api --> chg : Stop outcome
-  alt Accepted
-    chg -> drv : Stop pending
-  else rejected / unknown
-    chg -> drv : Rejected / unknown; no Closed
-  end
-  opt server confirms closed + settled csms_billed
-    be -> rt : Closed + settled; statement / points
-    rt -> chg : Closed + settled; statement / points
-    chg -> drv : Statement / balance / points
-  end
+end
+opt server confirms reconciled + posted (csms_billed)
+  be -> rt : Reconciled + posted; statement / points
+  rt -> chg : Reconciled + posted; statement / points
+  chg -> drv : Statement / balance / points
 end
 @enduml

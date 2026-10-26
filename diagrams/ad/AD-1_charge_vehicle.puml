@@ -56,7 +56,7 @@ endif
 :Debit Charging Credit;
 :CreditTransaction\n[session_debit]; <<task>>
 :Award loyalty points;
-:LoyaltyTransaction\n[earned]; <<task>>
+:LoyaltyTransaction\n[earn]; <<task>>
 :ChargingSession\n[reconciled]; <<task>>
 :Send charging statement; <<output>>
 |Driver\n«person»|
