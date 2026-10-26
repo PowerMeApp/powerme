@@ -8,6 +8,7 @@
 
 export type Route =
   | { kind: 'page' }
+  | { kind: 'health' }
   | { kind: 'stations' }
   | { kind: 'sessions'; limit: number }
   | { kind: 'session'; id: number }
@@ -72,6 +73,7 @@ export function matchRoute(method: string, rawUrl: string): RouteResult {
   };
 
   if (path === '/') return only(['GET'], () => ({ ok: true, route: { kind: 'page' } }));
+  if (path === '/health') return only(['GET'], () => ({ ok: true, route: { kind: 'health' } }));
   if (path === '/api/admin/stations') {
     return only(['GET'], () => ({ ok: true, route: { kind: 'stations' } }));
   }

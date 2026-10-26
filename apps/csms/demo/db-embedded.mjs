@@ -12,7 +12,7 @@
  * File này là thư viện (run-demo.mjs import) và cũng chạy riêng được:
  *   node demo/db-embedded.mjs        # = npm run demo:db — chỉ bật DB + seed, Ctrl+C để dừng
  *
- * Liên quan: drizzle/*.sql (migration, áp bằng demo/migrate.mjs), demo/seed.sql (dữ liệu mẫu),
+ * Liên quan: drizzle/*.sql (migration, áp bằng scripts/migrate.mjs), demo/seed.sql (dữ liệu mẫu),
  * test/helpers/apply-migrations.ts (bản TypeScript của cùng logic cho test tích hợp).
  */
 import { spawnSync } from 'node:child_process';
@@ -21,7 +21,7 @@ import { mkdir, rm } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { migrate } from './migrate.mjs';
+import { migrate } from '../scripts/migrate.mjs';
 
 const require = createRequire(import.meta.url);
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -192,7 +192,7 @@ export async function connectDemoDb(url) {
 /**
  * Áp mọi migration trong drizzle/ còn thiếu (0000, 0001, …) theo thứ tự tên, theo dõi bằng bảng
  * `_migrations`. DB demo cũ đã có 0000 sẽ tự lên các migration sau mà không mất dữ liệu.
- * Chi tiết: demo/migrate.mjs.
+ * Chi tiết: scripts/migrate.mjs.
  */
 export async function applyMigration(client, log = () => {}) {
   const applied = await migrate(client, log);

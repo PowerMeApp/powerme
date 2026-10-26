@@ -50,7 +50,8 @@ export function createStation(options = {}) {
     csmsUrl: 'ws://localhost:9000/ocpp',
     cpId: 'RH24D1-00001',
     unitPrice: 3500, // đ/kWh — chỉ để hiển thị, CSMS mới là nguồn sự thật
-    password: '123456', // mật khẩu HMI mẫu (giả)
+    password: '123456', // mật khẩu HMI mẫu (giả) — KHÁC credential OCPP bên dưới
+    authPassword: undefined, // CP_PASSWORD: mật khẩu Basic Auth gửi CSMS khi nối (OCPP Security Profile 2); bỏ trống = không gửi
     retryMs: 30_000, // EXP-01: thử lại cố định 30 s
     replayLoss: 0.25, // EXP-01: phát lại 6/8
     rebootMs: 3000,
@@ -252,6 +253,7 @@ export function createStation(options = {}) {
     const c = new RPCClient({
       endpoint: opt.csmsUrl,
       identity: opt.cpId,
+      ...(opt.authPassword ? { password: opt.authPassword } : {}),
       protocols: ['ocpp1.6'],
       strictMode: true,
       reconnect: false,

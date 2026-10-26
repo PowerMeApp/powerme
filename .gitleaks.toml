@@ -13,6 +13,7 @@ description = "Những chỗ chắc chắn là giá trị giả, không phải b
 paths = [
   # Giá trị mẫu, cố ý để lộ, cố ý vô hại
   '''infra/\.env\.example''',
+  '''infra/staging/\.env\.example''',
   # File sinh tự động, chỉ chứa hash của gói
   '''package-lock\.json''',
   # Tài liệu và tệp nhị phân tham khảo

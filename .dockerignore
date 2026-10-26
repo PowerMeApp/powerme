@@ -1,0 +1,37 @@
+# Ngữ cảnh build Docker = gốc repo (npm workspaces). Loại mọi thứ image không cần — và mọi thứ
+# có thể chứa secret hoặc dữ liệu cục bộ.
+.git
+.github
+.githooks
+.claude
+.vscode
+**/node_modules
+**/dist
+**/.demo-data
+**/coverage
+**/*.tsbuildinfo
+**/*.log
+
+# Secret / môi trường — KHÔNG BAO GIỜ vào image
+.env
+.env.*
+**/.env
+**/.env.*
+*.pem
+*.key
+
+# Tài liệu, sơ đồ, hạ tầng, dữ liệu lab: không chạy trong container
+docs
+diagrams
+ocppdl
+infra
+**/*.md
+apps/csms/lab
+apps/csms/test
+apps/csms/docs
+simulator/d1-hmi/docs
+simulator/d1-hmi/smoke.mjs
+
+# Demo chỉ cần seed.sql (scripts/seed-demo.mjs đọc nó)
+apps/csms/demo/*
+!apps/csms/demo/seed.sql

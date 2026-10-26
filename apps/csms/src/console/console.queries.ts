@@ -238,6 +238,11 @@ export class ConsoleQueries {
     return rows.map((r) => mapMessage(r, this.detector));
   }
 
+  /** GET /health: một `select 1` — chứng minh pool Postgres còn sống. */
+  async health(): Promise<void> {
+    await this.db.execute(sql`select 1`);
+  }
+
   async summary() {
     const cps = await this.db.select({ serial: chargePoints.serialNumber }).from(chargePoints);
     const bySession = await this.db

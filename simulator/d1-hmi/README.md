@@ -17,7 +17,9 @@ node simulator/d1-hmi/server.mjs
 |---|---|---|
 | `CSMS_URL` | `ws://localhost:9000/ocpp` | Endpoint CSMS (identity được nối vào cuối đường dẫn) |
 | `CP_ID` | `RH24D1-00001` | Identity của trụ |
-| `HMI_PORT` | `8100` | Cổng HMI (chỉ nghe `127.0.0.1`) |
+| `CP_PASSWORD` | (không gửi) | Mật khẩu Basic Auth gửi CSMS khi nối (username = `CP_ID`). Cần khi CSMS chạy `ALLOW_LEGACY_NO_CREDENTIAL=false` (staging). Khác mật khẩu HMI `123456` |
+| `HMI_PORT` | `8100` | Cổng HMI |
+| `HMI_HOST` | `127.0.0.1` | Địa chỉ bind. HMI chưa có xác thực — chỉ đặt `0.0.0.0` trong container khi cổng chỉ được publish ra loopback của máy chủ (staging) |
 | `STALE_METERSTOP` | tắt | `1` = sau một lần rớt mạng, `StopTransaction` mang `meterStop` **cũ** (chỉ số lúc rớt) dù trụ vẫn sạc tiếp — tái hiện hiện tượng 3 của EXP-01 để CSMS ra phiên `review`. `npm run demo` của CSMS bật sẵn (`STALE_METERSTOP=0` để tắt) |
 | `RETRY_MS` `REPLAY_LOSS` `METER_INTERVAL` `PING_SEC` `REBOOT_MS` `SPEED` | 30000 / 0.25 / 10 / 30 / 3000 / 1 | Chủ yếu cho kiểm thử; xem đầu `server.mjs` |
 
