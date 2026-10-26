@@ -357,7 +357,7 @@ Hai khác biệt đã xử lý để ra 0 khác biệt: (1) tên FK — SQL dùn
 Áp dụng migration lên Postgres thật — tuần tự, có bảng theo dõi `_migrations`:
 
 ```bash
-DATABASE_URL=postgresql://… node apps/csms/demo/migrate.mjs
+DATABASE_URL=postgresql://… node apps/csms/scripts/migrate.mjs
 ```
 
 **Migration 0002 (T61):** đã thử áp lên DB có sẵn 0000 + 0001 + dữ liệu (test `migration-0002.integration.test.ts`, và `demo/migrate.mjs` trên DB nháp ở trạng thái 0001): backfill đúng, chạy lại không áp gì. Số cột 297 là đếm bằng truy vấn trên SQL; hai cột mới ở schema TS (`stations.ts`) được khai tay khớp SQL — **chưa chạy lại phép đối chiếu máy `drizzle-kit export` cho 0002**.

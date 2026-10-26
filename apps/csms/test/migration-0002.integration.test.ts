@@ -4,7 +4,7 @@
  *
  * Vì sao tồn tại: 0002 sửa DỮ LIỆU đang có (UPDATE lifecycle) trên bảng người dùng thật. Test dựng
  * DB "như demo đã có 0001" (0000 + 0001 + bảng _migrations + vài trụ ở đủ các lifecycle), gọi
- * helper `migrate` (cùng logic demo/migrate.mjs) và kiểm: chỉ 0002 được áp, hàng `offline` →
+ * helper `migrate` (cùng logic scripts/migrate.mjs) và kiểm: chỉ 0002 được áp, hàng `offline` →
  * `in_service` + `is_online=false`, hàng khác KHÔNG bị đụng, giá trị enum `offline` vẫn còn.
  *
  * Cần DATABASE_URL (DB test riêng — test DROP SCHEMA public); thiếu thì cả describe bị skip.

@@ -246,6 +246,12 @@ describeDb('Bảng điều khiển vận hành — dữ liệu thật từ trace
     expect(played).toBe(75);
   });
 
+  it('GET /health: select 1 trên Postgres thật → 200 {ok:true, db:true}', async () => {
+    const { status, body } = await get<Record<string, unknown>>('/health');
+    expect(status).toBe(200);
+    expect(body).toEqual({ ok: true, db: true });
+  });
+
   it('GET / trả trang HTML', async () => {
     const res = await fetch(`${base}/`);
     expect(res.status).toBe(200);

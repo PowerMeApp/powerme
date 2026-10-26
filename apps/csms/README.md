@@ -20,7 +20,9 @@ npm run build -w @powerme/csms                 # tsc → dist/
 DATABASE_URL=postgresql://powerme:powerme@localhost:5432/powerme OCPP_PORT=9000 npm run start -w @powerme/csms
 ```
 
-Migration: `DATABASE_URL=... node apps/csms/demo/migrate.mjs` (áp tuần tự `drizzle/0000_…` rồi `0001_…`, ghi bảng `_migrations`; không dùng `psql -f` rời từng file vì sẽ lệch bảng theo dõi). Trụ nối tới `ws://host:9000/ocpp/{serialNumber}`; serial phải có trong `charge_points`.
+Migration: `DATABASE_URL=... node apps/csms/scripts/migrate.mjs` (áp tuần tự `drizzle/0000_…` rồi `0001_…`, ghi bảng `_migrations`; không dùng `psql -f` rời từng file vì sẽ lệch bảng theo dõi). Trụ nối tới `ws://host:9000/ocpp/{serialNumber}`; serial phải có trong `charge_points`.
+
+Staging: `apps/csms/Dockerfile` (build từ gốc repo, image chạy `node dist/main.js`, kèm `scripts/migrate.mjs` và `scripts/seed-demo.mjs`). Seed staging cần `DEMO_PILLAR_PASSWORD` (>= 16 ký tự) vì `ALLOW_LEGACY_NO_CREDENTIAL=false`.
 
 Cấu trúc `src/`: `ocpp-gateway/` (socket, registry epoch, log frame, tuần tự hoá, handler) · `sessions/` (state machine STM-1, phiên, chuỗi đo, trạng thái connector) · `reconciliation/` (phát hiện phát lại, đối soát) · `db/` (Drizzle schema + module). Test tích hợp: `test/wf03-exp01.integration.test.ts` với fixture `test/fixtures/exp1-disconnect-81s.jsonl`.
 
@@ -28,7 +30,7 @@ Cấu trúc `src/`: `ocpp-gateway/` (socket, registry epoch, log frame, tuần t
 
 `src/console/` — trang web một file + vài endpoint JSON để xem hệ thống đang chạy (demo Review 2). Mở `http://127.0.0.1:3000/` sau khi chạy CSMS. Cấu hình: `CONSOLE_ENABLED` (mặc định `true`), `CONSOLE_HOST` (mặc định `127.0.0.1`), `CONSOLE_PORT` (mặc định `3000`).
 
-- Chỉ đọc: `GET /api/admin/{stations,sessions,sessions/:id,reconciliation,messages,summary}`. Hai lệnh: `POST /api/admin/stations/:serial/disconnect` (đóng socket phía CSMS), `POST /api/admin/sessions/:id/remote-stop` (RemoteStopTransaction).
+- Chỉ đọc: `GET /api/admin/{stations,sessions,sessions/:id,reconciliation,messages,summary}`. Ngoài ra `GET /health` → `{"ok":true,"db":true}` (sau `select 1`), 503 `{"ok":false,"db":false}` nếu DB lỗi; không lộ phiên bản/chi tiết. Image Docker và staging dùng nó: xem `infra/staging/README.md`. Hai lệnh: `POST /api/admin/stations/:serial/disconnect` (đóng socket phía CSMS), `POST /api/admin/sessions/:id/remote-stop` (RemoteStopTransaction).
 - **Chưa có xác thực** (RolesGuard là việc sau — ADR-0011): đừng bind ra `0.0.0.0`. POST từ `Origin` không phải localhost bị từ chối 403.
 - **Chưa làm:** xác thực/phân quyền, realtime Socket.IO (trang poll mỗi 1 s), billing, hiển thị lịch sử chuyển trạng thái phiên (bảng `session_status_history` có từ migration 0001 nhưng chi tiết phiên của console chưa đọc nó).
 - Ảnh chụp: [docs/console.png](docs/console.png) (tổng quan), [docs/console-detail.png](docs/console-detail.png) (chi tiết phiên) — dữ liệu là trace EXP-01 phát lại qua gateway vào Postgres thử nghiệm, không phải trụ thật.

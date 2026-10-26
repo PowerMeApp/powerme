@@ -9,6 +9,7 @@
 // KHÔNG nằm trong CI. Chạy: node simulator/d1-hmi/smoke.mjs
 
 import { spawn } from 'node:child_process';
+import { randomBytes } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import ocpp from 'ocpp-rpc';
 
@@ -24,7 +25,15 @@ let cp = null; // RPCServerClient hiện tại
 let nextTx = 100;
 const known = new Set(['DEMO-CARD-0001', 'DEMO-WALLET-0001']);
 const server = new RPCServer({ protocols: ['ocpp1.6'], strictMode: true });
-server.auth((accept) => accept());
+// Mô phỏng Security Profile 2: CSMS chỉ nhận khi Basic Auth có đúng mật khẩu (CP_PASSWORD của trụ).
+const CP_SECRET = `smoke-${randomBytes(12).toString('hex')}`; // sinh lúc chạy, không phải literal
+const authSeen = []; // mật khẩu nhận được ở mỗi lần bắt tay
+server.auth((accept, reject, handshake) => {
+  const pw = handshake.password?.toString('utf8');
+  authSeen.push(pw);
+  if (pw !== CP_SECRET) return reject(401, 'Invalid credential');
+  accept();
+});
 server.on('client', (client) => {
   const conn = ++connCount;
   cp = client;
@@ -92,6 +101,7 @@ const child = spawn(process.execPath, [`${HERE}server.mjs`], {
     HMI_PORT: String(HMI_PORT),
     CSMS_URL: `ws://127.0.0.1:${csmsPort}/ocpp`,
     CP_ID: 'SMOKE-D1',
+    CP_PASSWORD: CP_SECRET,
     METER_INTERVAL: '1',
     RETRY_MS: '1000',
     REPLAY_LOSS: '0',
@@ -366,6 +376,13 @@ try {
   check(
     'Half-open: ping timeout → tự nối lại, không Boot',
     connCount === connHO + 1 && count('BootNotification') === bootsBefore,
+  );
+
+  // 8b. Basic Auth: mọi lần bắt tay (kể cả nối lại sau rớt mạng) đều mang CP_PASSWORD
+  check(
+    'Basic Auth: mọi bắt tay mang đúng CP_PASSWORD, CSMS (từ chối sai mật khẩu) vẫn nhận kết nối',
+    authSeen.length >= 2 && authSeen.every((pw) => pw === CP_SECRET),
+    `${authSeen.length} lần bắt tay`,
   );
 
   // 9. Reboot: nối lại và gửi Boot

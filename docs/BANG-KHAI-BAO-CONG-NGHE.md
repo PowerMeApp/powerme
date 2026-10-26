@@ -127,13 +127,13 @@ Số phiên bản lấy từ `package-lock.json` (`packages["node_modules/<tên>
 
 ## 4. Môi trường triển khai
 
-Nói thẳng: hiện chỉ có môi trường dev trên máy cá nhân. Staging và production chưa tồn tại.
+Nói thẳng: hiện chỉ có môi trường dev trên máy cá nhân. Staging đã có bộ cấu hình nhưng chưa có server; production chưa tồn tại.
 
 | Môi trường | Hiện trạng | Nơi chạy | Cách triển khai | Rollback | Nguồn | Trạng thái |
 |---|---|---|---|---|---|---|
 | Dev | Máy cá nhân của từng thành viên. Máy của Trí không có Docker nên chạy `npm run demo` (trong `apps/csms`): Postgres nhúng 17 beta, áp `0000_init.sql`, seed, CSMS ở cổng OCPP 9000 và console. Trụ giả lập: `node simulator/d1-hmi/server.mjs` (HMI cổng 8100). Máy có Docker chạy `npm run infra:up` (Postgres 16.4 + Redis 7.4) | Máy cá nhân | `npm ci`, rồi `npm run demo` | Không cần; `npm run demo:reset` xoá dữ liệu demo | `apps/csms/package.json` · `docs/DEMO-REVIEW-2.md` · `infra/README.md` | **Đã ghim** |
 | CI | Runner GitHub, Postgres 16.4 + Redis 7.4 theo job; không phải môi trường chạy thật | GitHub Actions | Tự chạy mỗi PR | Không áp dụng | `.github/workflows/ci.yml` | **Đã ghim** |
-| Staging | **Chưa có.** `CONTRIBUTING.md` §5 và mẫu PR yêu cầu "chạy thử trên staging" nhưng chưa có nơi nào để chạy. Đề xuất: một droplet Singapore trên ngân sách chung, nhóm quyết (`DESIGN-BRIEF-WP2-INPUT.md` G3: cần cho Defense 1.1, chưa bắt buộc cho Review 2) | — | Đề xuất: Docker Compose trên một VPS (cần thêm Dockerfile CSMS và Caddy; hiện chưa có) | Chưa có quy trình | `docs/DESIGN-BRIEF-WP2-INPUT.md` G3 · `docs/AGENDA-GAP-GVHD.md` §2.5 · `docs/WP2-KIEN-TRUC-TECHSTACK.md` | **Chưa quyết** |
+| Staging | **Đã có bộ cấu hình, chưa triển khai — chưa có server.** Repo có sẵn Dockerfile CSMS và simulator, Docker Compose (Caddy + CSMS + Postgres 16.4, simulator theo profile), script deploy/rollback/seed và workflow `deploy-staging.yml` (T04/T84). **Chưa chạy thử trên Docker hay VPS thật** (máy Trí không có Docker; chỉ kiểm bằng mô phỏng, xem PR). Còn việc làm tay: thuê VPS, DNS, cài Docker, secrets GitHub, biến `STAGING_ENABLED`. Giới hạn đã biết: console vận hành chưa có xác thực (chỉ xem qua SSH tunnel), chưa có dashboard, một máy không HA, sao lưu cùng máy, chưa giám sát. Quyết định ngân sách VPS vẫn của nhóm (`DESIGN-BRIEF-WP2-INPUT.md` G3) | VPS Singapore (đề xuất ~2 vCPU/4 GB), **chưa thuê** | Docker Compose trên một VPS; CI build ảnh lên GHCR rồi SSH chạy `deploy.sh <tag>` | `rollback.sh`: lùi ảnh chỉ an toàn khi lần deploy không áp migration; còn lại khôi phục DB từ bản sao lưu (mất dữ liệu sau đó). Chưa kiểm chứng trên môi trường thật | `infra/staging/README.md` · `apps/csms/Dockerfile` · `.github/workflows/deploy-staging.yml` · `docs/DESIGN-BRIEF-WP2-INPUT.md` G3 | **Cấu hình sẵn sàng, chưa triển khai** |
 | Production | **Chưa có.** Vùng hosting chưa quyết: AWS Singapore (rẻ hơn, nhưng là chuyển dữ liệu xuyên biên giới theo PDPL/NĐ 13/2023) so với AWS Hanoi Local Zone (GA 19/06/2026, đắt hơn, dữ liệu trong nước) | — | — | — | `docs/PHAN-TICH-TAI-LIEU-WP1.md` §6.2 | **Chưa quyết** |
 | Rollback (chung) | Chưa có quy trình. Đề xuất: migration SQL viết tay kèm file đảo ngược cho mỗi file tiến (hiện chỉ có `0000_init.sql`, chưa có file đảo ngược) và tag phát hành để quay về bản đã tag. Chưa kiểm chứng | — | — | Đề xuất như trên | ADR-0008 | **Đề xuất, chưa ghim** |
 
@@ -157,7 +157,7 @@ Chỉ gồm những mục còn mở. Hạn: cần chốt trong họp nhóm (khô
 | # | Việc còn mở | Trạng thái | Người quyết (đề xuất) | Hạn |
 |---|---|---|---|---|
 | 1 | Vùng hosting: AWS Singapore hay Hanoi Local Zone; nếu chọn Singapore thì ghi rõ chấp nhận đơn giản hoá PDPL cho phạm vi capstone | Chưa quyết | Ân (WP1) + Trí | Cần chốt trong họp nhóm |
-| 2 | Staging: droplet Singapore bằng ngân sách chung hay xin credit từ trường (agenda 2.5 với GVHD); kèm Dockerfile CSMS, Caddy, workflow deploy | Chưa quyết | Ân (WP1) + Trí | Cần chốt trong họp nhóm |
+| 2 | Staging: bộ cấu hình đã có (Dockerfile, Compose, Caddy, deploy/rollback, workflow). Còn lại việc của nhóm: chọn nguồn tiền cho VPS Singapore (ngân sách chung hay credit của trường, agenda 2.5 với GVHD), thuê VPS, DNS, secrets GitHub — xem `infra/staging/README.md` | Cấu hình sẵn sàng; **chưa có server** | Ân (WP1) + Trí | Cần chốt trong họp nhóm |
 | 3 | Quy trình rollback: file migration đảo ngược + tag phát hành | Đề xuất, chưa ghim | Trí (WP2) + Khang (WP5) | Cần chốt trong họp nhóm |
 | 4 | Postgres: demo chạy 17 beta, CI 16.4; đồng bộ hoặc chấp nhận và ghi vào Report | Đề xuất, chưa ghim | Trí (WP2) | Cần chốt trong họp nhóm |
 | 5 | Flutter: khi WP3 nộp mã thì ghim Flutter SDK và thêm `pubspec.yaml` | Chưa có trong repo | Sơn (WP3) | Cần chốt trong họp nhóm |

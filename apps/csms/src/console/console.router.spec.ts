@@ -8,6 +8,11 @@ describe('matchRoute — đường dẫn hợp lệ', () => {
     expect(matchRoute('GET', '/')).toEqual({ ok: true, route: { kind: 'page' } });
   });
 
+  it('GET /health → health; POST → 405', () => {
+    expect(matchRoute('GET', '/health')).toEqual({ ok: true, route: { kind: 'health' } });
+    expect(matchRoute('POST', '/health')).toMatchObject({ ok: false, status: 405 });
+  });
+
   it('các GET chỉ đọc', () => {
     expect(matchRoute('GET', '/api/admin/stations')).toEqual({
       ok: true,

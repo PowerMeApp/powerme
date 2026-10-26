@@ -58,8 +58,8 @@ DATABASE_URL=postgresql://powerme:powerme@127.0.0.1:54330/powerme_test npm test 
 | File                   | Việc                                                              |
 | ---------------------- | ----------------------------------------------------------------- |
 | `run-demo.mjs`         | Điều phối: DB → build → CSMS → HMI/console → bảng tóm tắt → dừng sạch |
-| `db-embedded.mjs`      | Postgres nhúng, áp migration (qua `migrate.mjs`), nạp `seed.sql`, dừng sạch |
-| `migrate.mjs`          | Áp tuần tự `drizzle/*.sql` còn thiếu, theo dõi bằng bảng `_migrations` (DB demo cũ tự lên 0001) |
+| `db-embedded.mjs`      | Postgres nhúng, áp migration (qua `scripts/migrate.mjs`), nạp `seed.sql`, dừng sạch |
+| `../scripts/migrate.mjs` | Áp tuần tự `drizzle/*.sql` còn thiếu, theo dõi bằng bảng `_migrations` (DB demo cũ tự lên 0001) |
 | `seed.sql`             | Dữ liệu mẫu, idempotent                                           |
 | `scripted-station.mjs` | Trụ kịch bản cho DS-01a/b, DS-03a/b/c/d                           |
 | `show.mjs`             | Truy vấn nhanh DB demo                                            |

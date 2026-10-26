@@ -1,0 +1,26 @@
+# TLS cho mọi thứ (OCPP Security Profile 2 cần wss). Let's Encrypt tự cấp cho $DOMAIN
+# (cần DNS A record trỏ về VPS và cổng 80/443 mở).
+#
+# CHỈ có hai đường dẫn ra internet. Console vận hành (/api/admin/*, gồm POST ngắt kết nối và
+# RemoteStop) CHƯA có xác thực nên TUYỆT ĐỐI không được proxy ở đây — xem bằng SSH tunnel.
+# Khi có xác thực (users + RolesGuard) và REST/realtime cho app thì mới thêm route.
+{$DOMAIN} {
+	encode gzip
+
+	# OCPP-J 1.6: wss://DOMAIN/ocpp/{serialNumber}. Basic Auth do CSMS kiểm lúc nâng cấp WebSocket;
+	# TLS kết thúc ở đây nên mật khẩu không đi trần trên internet. Caddy tự xử lý Upgrade.
+	handle /ocpp/* {
+		reverse_proxy csms:9000
+	}
+
+	# Chỉ đúng đường dẫn /health (khớp tuyệt đối) của console: {"ok":true,"db":true} hoặc 503.
+	# Không lộ phiên bản hay chi tiết. Cho giám sát bên ngoài; phần còn lại của console không ra.
+	handle /health {
+		reverse_proxy csms:3000
+	}
+
+	# Mọi đường dẫn khác: một dòng chữ. Chưa có dashboard/REST (apps/dashboard chưa có build).
+	handle {
+		respond "PowerMe CSMS staging. OCPP-J endpoint: wss://{$DOMAIN}/ocpp/<serialNumber> (Basic Auth)." 200
+	}
+}

@@ -48,6 +48,7 @@ export class ConsoleServer implements OnModuleInit, OnModuleDestroy {
   async start(): Promise<void> {
     const server = createServer(
       createConsoleListener({
+        health: () => this.queries.health(),
         stations: () => this.queries.stations(),
         sessions: (limit) => this.queries.sessions(limit),
         session: (id) => this.queries.session(id),

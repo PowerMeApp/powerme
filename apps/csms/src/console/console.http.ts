@@ -29,6 +29,8 @@ export class ConsoleError extends Error {
 }
 
 export interface ConsoleBackend {
+  /** `select 1` trên DB; ném lỗi nếu DB không trả lời. Dùng cho GET /health. */
+  health(): Promise<void>;
   stations(): Promise<unknown>;
   sessions(limit: number): Promise<unknown>;
   session(id: number): Promise<unknown>;
@@ -117,6 +119,17 @@ export function createConsoleListener(backend: ConsoleBackend): RequestListener 
             'Cache-Control': 'no-store',
           });
           return;
+        case 'health':
+          // Tối thiểu có chủ đích: không phiên bản, không chi tiết lỗi DB (chỉ vào log).
+          try {
+            await backend.health();
+          } catch (err) {
+            logger.error(
+              `health: DB không trả lời: ${err instanceof Error ? err.message : String(err)}`,
+            );
+            return sendJson(res, 503, { ok: false, db: false }, cors);
+          }
+          return sendJson(res, 200, { ok: true, db: true }, cors);
         case 'stations':
           return sendJson(res, 200, await backend.stations(), cors);
         case 'sessions':

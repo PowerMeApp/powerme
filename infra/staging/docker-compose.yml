@@ -1,0 +1,110 @@
+# PowerMe staging (T04/T84, kiến trúc ARCH-2): một VPS, Docker Compose. Image lấy từ GHCR, gắn tag
+# bởi CI (.github/workflows/deploy-staging.yml). Hướng dẫn, rủi ro và việc làm tay: README.md.
+#
+# Biến ${...} đọc từ infra/staging/.env (xem .env.example). Mỗi dịch vụ nhận CHỈ những biến nó cần
+# qua `environment:` — không dùng `env_file`, để secret của Postgres/simulator không lọt sang
+# dịch vụ khác. Khác với kit ban đầu, KHÔNG có: dashboard (apps/dashboard chưa có mã build —
+# thêm lại khi WP4 có), redis (apps/csms không dùng), JWT/VNPay/e-invoice (code không đọc).
+name: powerme
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: '10m'
+    max-file: '5'
+
+services:
+  caddy:
+    image: caddy:2.11.7-alpine
+    restart: unless-stopped
+    ports:
+      - '80:80'
+      - '443:443'
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    environment:
+      DOMAIN: ${DOMAIN:?DOMAIN chưa đặt trong .env}
+    depends_on:
+      csms:
+        condition: service_healthy
+    logging: *default-logging
+
+  csms:
+    image: ${REGISTRY:?REGISTRY chưa đặt trong .env}/powerme-csms:${TAG:?TAG chưa đặt trong .env}
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      OCPP_PORT: '9000'
+      OCPP_PUBLIC_URL: wss://${DOMAIN}/ocpp
+      # Console vận hành CHƯA có xác thực. Trong container phải bind 0.0.0.0 thì cổng publish của
+      # Docker mới tới được; mức an toàn nằm ở chỗ khác: (1) `ports` bên dưới chỉ publish ra
+      # 127.0.0.1 của máy chủ, (2) Caddyfile KHÔNG proxy console (chỉ /ocpp/* và /health).
+      # Xem bằng SSH tunnel (README.md). Đừng đổi hai điều kiện đó khi chưa có xác thực.
+      CONSOLE_ENABLED: 'true'
+      CONSOLE_HOST: 0.0.0.0
+      CONSOLE_PORT: '3000'
+      # PHẢI false trên staging: trụ không có credential bị 401 (Security Profile 2). Cố định ở
+      # đây, không đọc từ .env, để không bật nhầm.
+      ALLOW_LEGACY_NO_CREDENTIAL: 'false'
+      OFFLINE_GRACE_S: ${OFFLINE_GRACE_S:-30}
+      OCPP_HEARTBEAT_INTERVAL_SECONDS: ${OCPP_HEARTBEAT_INTERVAL_SECONDS:-300}
+      SESSION_START_TIMEOUT_S: ${SESSION_START_TIMEOUT_S:-120}
+      SESSION_HARD_CAP_H: ${SESSION_HARD_CAP_H:-24}
+      REPLAY_SKEW_THRESHOLD_S: ${REPLAY_SKEW_THRESHOLD_S:-5}
+      METER_VALUE_SAMPLE_INTERVAL_S: ${METER_VALUE_SAMPLE_INTERVAL_S:-10}
+      RECONCILE_GAP_FACTOR: ${RECONCILE_GAP_FACTOR:-3}
+      RECONCILE_ENERGY_TOLERANCE_WH: ${RECONCILE_ENERGY_TOLERANCE_WH:-1}
+    ports:
+      - '127.0.0.1:3000:3000' # console — chỉ loopback của VPS, truy cập bằng SSH tunnel
+    expose:
+      - '9000' # OCPP-J, chỉ trong mạng compose; Caddy proxy /ocpp/* tới đây
+    depends_on:
+      postgres:
+        condition: service_healthy
+    logging: *default-logging
+
+  postgres:
+    image: postgres:16.4-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}']
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    logging: *default-logging
+
+  # Trụ D1 giả lập có HMI, cho demo. Bật: docker compose --profile sim up -d simulator
+  simulator:
+    profiles: ['sim']
+    image: ${REGISTRY}/powerme-simulator:${TAG}
+    restart: unless-stopped
+    environment:
+      # Mặc định đi qua Caddy thật (TLS + Basic Auth). Nếu VPS không tự nối được tới IP công khai
+      # của nó (hairpin NAT), đặt SIM_CSMS_URL=ws://csms:9000/ocpp trong .env (README.md).
+      CSMS_URL: ${SIM_CSMS_URL:-wss://${DOMAIN}/ocpp}
+      CP_ID: RH24D1-00001
+      CP_PASSWORD: ${DEMO_PILLAR_PASSWORD:-}
+      # HMI chưa có xác thực — cùng nguyên tắc với console: bind 0.0.0.0 trong container,
+      # chỉ publish ra 127.0.0.1 của máy chủ, truy cập bằng SSH tunnel.
+      HMI_HOST: 0.0.0.0
+      HMI_PORT: '8100'
+    ports:
+      - '127.0.0.1:8100:8100'
+    depends_on:
+      csms:
+        condition: service_healthy
+    logging: *default-logging
+
+volumes:
+  pgdata:
+  caddy_data:
+  caddy_config:

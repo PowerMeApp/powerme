@@ -3,7 +3,7 @@
  *
  * Vì sao tồn tại: trước BE-11 mỗi test tự đọc cứng `0000_init.sql`. Có migration thứ hai thì
  * phải áp TUẦN TỰ theo tên file, và phải có bảng theo dõi để DB đã có 0000 (DB demo) lên 0001
- * mà không mất dữ liệu. Logic này giống `demo/migrate.mjs` (đó là bản .mjs cho script demo).
+ * mà không mất dữ liệu. Logic này giống `scripts/migrate.mjs` (bản .mjs dùng cho demo và staging).
  *
  * - `migrate(client)` : áp những file chưa có trong `_migrations`, theo thứ tự tên.
  * - `resetAndMigrate(client)` : DROP SCHEMA public rồi `migrate` — dùng cho test (DB riêng!).

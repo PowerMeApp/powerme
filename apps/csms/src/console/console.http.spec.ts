@@ -9,7 +9,11 @@ import { Logger } from '@nestjs/common';
 import { ConsoleBackend, ConsoleError, createConsoleListener } from './console.http.js';
 
 const calls: string[] = [];
+let dbDown = false;
 const backend: ConsoleBackend = {
+  health: async () => {
+    if (dbDown) throw new Error('connect ECONNREFUSED 10.0.0.5:5432 password=hunter2');
+  },
   stations: async () => (calls.push('stations'), [{ serial: 'S1' }]),
   sessions: async (limit) => (calls.push(`sessions:${limit}`), []),
   session: async (id) => {
@@ -54,6 +58,34 @@ describe('GET /', () => {
     expect(html).toContain('chưa có xác thực');
     expect(html).not.toMatch(/<script[^>]+src=/);
     expect(html).not.toMatch(/https?:\/\/(?!console\.local)[a-z]/i);
+  });
+});
+
+describe('GET /health', () => {
+  afterEach(() => {
+    dbDown = false;
+  });
+
+  it('DB trả lời → 200 {ok:true, db:true}, không thêm trường nào', async () => {
+    const res = await fetch(`${base}/health`);
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-type')).toBe('application/json; charset=utf-8');
+    expect(await res.json()).toEqual({ ok: true, db: true });
+  });
+
+  it('DB lỗi → 503 {ok:false, db:false}, không rò chi tiết lỗi', async () => {
+    dbDown = true;
+    const res = await fetch(`${base}/health`);
+    expect(res.status).toBe(503);
+    const text = await res.text();
+    expect(JSON.parse(text)).toEqual({ ok: false, db: false });
+    expect(text).not.toContain('hunter2');
+    expect(text).not.toContain('ECONNREFUSED');
+  });
+
+  it('POST /health → 405', async () => {
+    const res = await fetch(`${base}/health`, { method: 'POST' });
+    expect(res.status).toBe(405);
   });
 });
 

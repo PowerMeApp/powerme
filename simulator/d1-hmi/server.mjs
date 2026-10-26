@@ -28,6 +28,7 @@ const env = process.env;
 const station = createStation({
   csmsUrl: env.CSMS_URL ?? 'ws://localhost:9000/ocpp',
   cpId: env.CP_ID ?? 'RH24D1-00001',
+  ...(env.CP_PASSWORD ? { authPassword: env.CP_PASSWORD } : {}),
   retryMs: num(env.RETRY_MS, 30_000),
   replayLoss: num(env.REPLAY_LOSS, 0.25),
   meterInterval: num(env.METER_INTERVAL, 10),
@@ -110,9 +111,14 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-server.listen(PORT, '127.0.0.1', () => {
-  console.log(`HMI trụ D1 tại http://127.0.0.1:${PORT}  (CSMS ${station.snapshot().csmsUrl})`);
+// HMI không có xác thực: mặc định chỉ loopback. HMI_HOST=0.0.0.0 CHỈ dùng trong container, khi
+// cổng được publish riêng cho loopback của máy chủ (infra/staging/docker-compose.yml).
+const HOST = env.HMI_HOST || '127.0.0.1';
+server.listen(PORT, HOST, () => {
+  console.log(`HMI trụ D1 tại http://${HOST}:${PORT}  (CSMS ${station.snapshot().csmsUrl})`);
   station.start();
 });
 
-process.on('SIGINT', () => station.close().finally(() => process.exit(0)));
+for (const sig of ['SIGINT', 'SIGTERM']) {
+  process.on(sig, () => station.close().finally(() => process.exit(0)));
+}

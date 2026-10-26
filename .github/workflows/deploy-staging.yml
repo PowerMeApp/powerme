@@ -1,0 +1,127 @@
+# Build ảnh Docker khi đẩy tag (review-* / v*) hoặc chạy tay, rồi triển khai lên VPS staging qua SSH.
+# Hướng dẫn và việc làm tay: infra/staging/README.md.
+#
+# Job `deploy` CHỈ chạy khi repository variable STAGING_ENABLED = 'true'. Chưa có VPS thì đẩy tag
+# vẫn build + đẩy ảnh lên GHCR, deploy bị bỏ qua (không làm workflow đỏ).
+# Secrets cho deploy (đặt ở environment `staging`): STAGING_HOST, STAGING_USER, STAGING_SSH_KEY.
+name: deploy-staging
+
+on:
+  push:
+    tags: ['review-*', 'v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag git cần build và triển khai (ví dụ review-2)'
+        required: true
+        type: string
+
+# Quyền tối thiểu mặc định; job build xin thêm packages: write.
+permissions:
+  contents: read
+
+# Không để hai lần deploy chồng nhau, cũng không huỷ lần đang chạy giữa chừng (DB đang migrate).
+concurrency:
+  group: deploy-staging
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    name: Xác định tag
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.vars.outputs.tag }}
+      owner: ${{ steps.vars.outputs.owner }}
+    steps:
+      - id: vars
+        env:
+          INPUT_TAG: ${{ github.event.inputs.tag }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          tag="${INPUT_TAG:-$REF_NAME}"
+          # Tag đi vào tên ảnh và vào lệnh SSH: chỉ nhận ký tự an toàn.
+          if ! [[ "$tag" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$ ]]; then
+            echo "Tag không hợp lệ: '$tag'" >&2
+            exit 1
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          # GHCR yêu cầu tên ảnh viết thường.
+          echo "owner=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: Build ${{ matrix.name }}
+    needs: prepare
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: powerme-csms, dockerfile: apps/csms/Dockerfile }
+          - { name: powerme-simulator, dockerfile: simulator/d1-hmi/Dockerfile }
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Khi chạy tay, build đúng tag được chọn (không phải nhánh đang đứng).
+          ref: ${{ needs.prepare.outputs.tag }}
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ needs.prepare.outputs.owner }}/${{ matrix.name }}
+          tags: |
+            type=raw,value=${{ needs.prepare.outputs.tag }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.name }}
+
+  deploy:
+    name: Triển khai staging
+    needs: [prepare, build]
+    # Chưa có VPS (biến chưa đặt) thì bỏ qua, không đỏ.
+    if: ${{ vars.STAGING_ENABLED == 'true' }}
+    runs-on: ubuntu-latest
+    environment: staging
+    permissions:
+      contents: read
+    steps:
+      - name: Deploy qua SSH
+        uses: appleboy/ssh-action@v1.2.5
+        env:
+          DEPLOY_TAG: ${{ needs.prepare.outputs.tag }}
+        with:
+          host: ${{ secrets.STAGING_HOST }}
+          username: ${{ secrets.STAGING_USER }}
+          key: ${{ secrets.STAGING_SSH_KEY }}
+          envs: DEPLOY_TAG
+          script_stop: true
+          command_timeout: 20m
+          # Lấy đúng phiên bản script ứng với tag (deploy.sh/compose đi cùng ảnh), rồi deploy.
+          # .env (secret) nằm ngoài git nên không bị đụng.
+          script: |
+            cd ~/powerme
+            git fetch --tags --force origin
+            git checkout --detach "refs/tags/$DEPLOY_TAG"
+            cd infra/staging
+            ./deploy.sh "$DEPLOY_TAG"
