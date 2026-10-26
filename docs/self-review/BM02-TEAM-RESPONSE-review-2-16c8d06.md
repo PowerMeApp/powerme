@@ -9,7 +9,7 @@ How this draft was made:
 
 | ID | Sev. | Run 1 | Response | Owner | Due | Reason / action / commit |
 |---|---|---|---|---|---|---|
-| F01 | Medium | — | Fixed (README) + Planned (BM03) | Ân | 31/10? | Decided 26/10/2026 (Ân): UC-ADM-08 and UC-ACC-02 are a **scope change**, recorded in BM03 as such. `docs/requirements/README.md` no longer says "No changes" (this PR). Planned: fill the BM03 row and tell the supervisor. |
+| F01 | Medium | — | Planned | Ân | before submission | Decided 26/10/2026 (Ân): UC-ADM-08 and UC-ACC-02 are a **scope change**. The Review 2 form is not submitted yet, so both go into the proposed final form (v1.3) and are listed in its BM03 Record of Changes, each with its reason (guide §04). The SRS, SDD and Design Brief §1/6/7 must match v1.3. |
 | F02 | Low | — | Planned | Ân? | 31/10? | Tag the BR-P43, BR-P30 and FCM references in the SRS with their real priority, and label "system health" as Should (FR-19). |
 | F03 | Medium | — | Planned | Ân? | 31/10? | SRS §1 says SteVe is Should, but form RQ1 and NFR-REC-01 commit it. Fix §1 to match the form. |
 | F04 | Low | — | Planned | Ân? | 07/11? | Add measurable NFR rows for the Vietnamese/VND UI, operator data scoping, the out-of-date connector indicator and the demo acceptance script. |
@@ -36,7 +36,7 @@ How this draft was made:
 | F25 | Low | F40 | Planned | Trí | 31/10 | Decide on free vend = `unattributed` (ADR-0012 decision 3) vs `free` (schema). Run 1 F40 left this open. |
 | F26 | Medium | F32, F35 | Planned | Trí | 31/10 | Add the console, HMI, SteVe stack and demo to ARCH-1/2. Move the console off port 3000. |
 | F27 | **High** | F31 | Planned (part after the tag) | Trí + team | 14/11 | Dockerfile, Caddy and deploy scripts were added in #48 (after the tag, not deployed). The other "target" parts need a "built / target" legend in ARCH/PKG. Known Gaps G1, G16, G17. |
-| F28 | Medium | — | Fixed after the tag (ADR) + Planned | Ân (ADR), Trí (suggestions) | 31/10? | ADR-0013..0016 added as files on branch `wp1/t67-adr-0013-0016` (PR pending). Suggestions module owner decided 26/10/2026: **Trí (WP2)**, his choice. ARCH-1 (says WP3), PKG-1 (no module) and the form §3.2g (says WP4) must be updated to match; the form change goes into BM03. Add FCM to ARCH-1, or drop it (ADR-0016: FCM is outside Review 2 scope). |
+| F28 | Medium | — | Fixed after the tag (ADR) + Planned | Ân (ADR), Trí (suggestions) | 31/10? | ADR-0013..0016 added as files on branch `wp1/t67-adr-0013-0016` (PR pending). Suggestions module owner decided 26/10/2026: **Trí (WP2)**, his choice. ARCH-1 (says WP3), PKG-1 (no module) and the form §3.2g (says WP4) must be updated to match. The form change goes into the proposed final form v1.3 and its BM03. Add FCM to ARCH-1, or drop it (ADR-0016: FCM is outside Review 2 scope). |
 | F29 | **High** | F22, F40 | Planned | Trí | 31/10 | Authorize and `classifyIdTag` must check `card.status`, the linked driver, credit (BR-P18, BR-P23) and `free_vend_tag`. Update the test that locks in `free`. |
 | F30 | **High** | F34 | Planned | Trí | 14/11 | Reconciliation on/off switch for the RQ1 baseline. Known Gap G14. |
 | F31 | **High** | F37, F44 | Fixed in part + Planned | Trí (TLS, RolesGuard), Ân (rate limit) | 14/11 | Basic Auth per pillar is done; credential-less pillars are rejected by default (#33, #35). TLS via Caddy is in #48 (after the tag, not deployed). Rate limit on failed logins: T74, issue #40 (PR pending). RolesGuard: run 1 F44. Known Gap G16. |

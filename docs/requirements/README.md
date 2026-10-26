@@ -26,7 +26,7 @@ Report 4 (Software Design Document) is not copied: it is built from the diagram 
 | FR-16 | Charging pillar | OCPP 1.6J central system; record every session; no double billing; reconcile after a connection loss | UC-INT-01 – UC-INT-04 | Must |
 | FR-18 – FR-20 | Operator, Admin, Driver | Maintenance tickets, analytics; policy templates, platform health; reservation | UC-OPS-08/09, UC-ADM-06/07, UC-CHG-06 | Should |
 
-UC-ADM-08 Handle Billing Exceptions was added on 24/10/2026 by the WF-02 design; it is the Admin side of the FR-07 top-up and e-invoice flow, so the form's FR list is unchanged. UC-ADM-08 and UC-ACC-02 (account closure) were added after the form was accepted; on 26/10/2026 they were decided to be a **scope change**, recorded in BM03 (BM02 run 2, F01).
+UC-ADM-08 Handle Billing Exceptions was added on 24/10/2026 by the WF-02 design; it is the Admin side of the FR-07 top-up and e-invoice flow, so the form's FR list is unchanged. UC-ADM-08 and UC-ACC-02 (account closure) were added after the form was accepted; on 26/10/2026 they were decided to be a **scope change**, to be written into the proposed final form for Review 2 (v1.3) and listed in its BM03 Record of Changes (BM02 run 2, F01).
 
 ## STM-1 ChargingSession: transition → UC / FR
 
