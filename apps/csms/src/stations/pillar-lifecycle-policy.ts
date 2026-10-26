@@ -13,8 +13,10 @@
  *   #5 disabled            → in_service           ENABLE         Operator returns it to service
  *   #6 disabled            → decommissioned       DECOMMISSION   Admin retires the device
  *
- * Until T61 (Trí) removes the legacy `offline` value from `charge_point_lifecycle`, a pillar whose
- * lifecycle reads `offline` is treated as `in_service` here: it has been in service before.
+ * T61 (ADR-0016 D-C) moved connectivity to `charge_points.is_online`; the gateway no longer writes
+ * `offline` and migration 0002 rewrote old rows to `in_service`. The enum value itself cannot be
+ * dropped from Postgres safely, so it stays as LEGACY and a pillar whose lifecycle still reads
+ * `offline` is treated as `in_service` here: it has been in service before.
  */
 export type PillarLifecycle =
   'registered' | 'awaiting_connection' | 'in_service' | 'offline' | 'disabled' | 'decommissioned';
@@ -49,7 +51,7 @@ export const STM3_TRANSITIONS: readonly Transition[] = [
   { no: 6, from: 'disabled', event: 'DECOMMISSION', to: 'decommissioned' },
 ];
 
-/** Legacy value written by ConnectionRegistry on socket close (pre-ADR-0016); see header. */
+/** Legacy value written by ConnectionRegistry on socket close (pre-T61, no longer written); see header. */
 function normalise(state: PillarLifecycle | null): PillarLifecycle | null {
   return state === 'offline' ? 'in_service' : state;
 }

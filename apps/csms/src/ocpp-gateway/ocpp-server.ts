@@ -10,10 +10,11 @@
  *   5. OcppHandlers.dispatch → SessionsService
  * Frame chiều ra và CALLRESULT/CALLERROR chiều vào được ghi từ sự kiện `message` của ocpp-rpc.
  *
- * Vòng đời socket (STM-3): `client` event → registry.open (epoch = MAX+1 từ DB, in_service) →
- * TriggerMessage(StatusNotification) c0/c1/c2 best-effort (T13 2.4, EXP-01: trụ nối lại không gửi
- * lại StatusNotification) · `close` event → registry.close (offline) → SessionsService.onStationOffline
- * (#13–#15).
+ * Vòng đời socket (STM-3, ADR-0016): `client` event → registry.open (epoch = MAX+1 từ DB,
+ * is_online=true, awaiting_connection → in_service) → TriggerMessage(StatusNotification) c0/c1/c2
+ * best-effort (T13 2.4, EXP-01: trụ nối lại không gửi lại StatusNotification) · `close` event →
+ * registry.close (is_online=false, không đụng lifecycle) → OfflineGraceService (hẹn giờ ân hạn;
+ * hết hạn mà chưa nối lại mới gọi SessionsService.onStationOffline, #13–#15).
  *
  * Mọi thứ phụ thuộc socket thật nằm trong `start()`; constructor không tạo RPCServer để test
  * dựng được OcppServer mà không mở cổng.
@@ -35,6 +36,7 @@ import { PillarAuthService } from '../stations/pillar-auth.service.js';
 import { Connection, ConnectionRegistry } from './connection-registry.js';
 import { InboundSerializer } from './inbound-serializer.js';
 import type { InboundContext } from './inbound-context.js';
+import { OfflineGraceService } from './offline-grace.service.js';
 import { OcppHandlers } from './ocpp-handlers.js';
 import { OcppMessageLogger } from './ocpp-message-logger.js';
 import { cpTimestampOf, InboundCall, MESSAGE_TYPE, parseFrame } from './ocpp-types.js';
@@ -54,6 +56,11 @@ export class OcppServer implements OnApplicationBootstrap, OnApplicationShutdown
     private readonly sessions: SessionsService,
     /** WF-05 (SD-5b): lifecycle + Basic-auth check. Optional so WF-03 tests can build the server without it. */
     @Optional() private readonly pillarAuth?: PillarAuthService,
+    /**
+     * ADR-0016 D-A: ân hạn trước khi orphan. Optional để test WF-03 dựng server không cần nó —
+     * thiếu thì socket đóng orphan NGAY (hành vi trước T61 = ân hạn 0).
+     */
+    @Optional() private readonly grace?: OfflineGraceService,
   ) {}
 
   async onApplicationBootstrap(): Promise<void> {
@@ -176,7 +183,8 @@ export class OcppServer implements OnApplicationBootstrap, OnApplicationShutdown
       void this.serializer.run(identity, async () => {
         const conn = await this.registry.close(client, { code, reason, closedAt });
         if (!conn) return; // socket cũ đã bị thay thế — không phải trụ mất kết nối
-        await this.sessions.onStationOffline(conn.chargePointId, closedAt);
+        if (this.grace) await this.grace.onSocketClosed(conn.chargePointId, conn.epoch, closedAt);
+        else await this.sessions.onStationOffline(conn.chargePointId, closedAt);
       });
     });
   }
