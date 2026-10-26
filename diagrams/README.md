@@ -14,10 +14,9 @@ dot -Tpng report3/Fig01_Business-Context-Diagram.dot -o png/fig01_bcd.png
 | `arch/` | ARCH-1 component, ARCH-2 deployment (staging) | WP1 | Report 4 §1.1 |
 | `stm/` | STM-1 … STM-8 state machines (STM-4/5/7 confirmed by Khang) | WP1, owners confirm | Report 4 §3.1.2 |
 | `erd/` | LERD-1 v0.4 (Charging & Billing), LERD-2 v0.3 (Operations & Administration), aligned with migration `0001` on 25/10 | WP1, WP5 | Report 4 §2 |
+| `wf02/` | CD-2 class, SD-2a create top-up, SD-2b IPN credit + e-invoice, SD-2c timeout / late payment / refund | WP5 (Khang) | Report 4 §3.3 |
 | `wf05/` | CD-5 class, SD-5a onboard, SD-5b first connection | WP1 (Ân) | Report 4 §3.6 |
 | `team/` | PKG-1 CSMS and WF-03 class + 2 sequences (Trí), PKG-2 dashboard and WF-04 class + 2 sequences (Nghĩa), PKG-3 driver app and WF-01 class + sequence (Sơn): redrawn in one style, content unchanged | WP2, WP3, WP4 | Report 4 §1.2, §3.2, §3.4, §3.5 |
-
-WF-02 (CD-2, SD-2a, SD-2b, SD-2c) sources are kept by Lê Bảo Khang (WP5) and will be added in `wf02/` by him.
 
 ## Known differences between the diagrams and the code
 

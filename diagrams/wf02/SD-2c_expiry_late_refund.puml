@@ -1,0 +1,94 @@
+@startuml SD-2c_expiry_late_refund
+!include ../team/_team.iuml
+title SD-2c (WF-02) Exceptions: no result before timeout, late payment, Admin refund\n<size:11>STM-4 #4–#7 · PENDING_TIMEOUT 15 min, LATE_WINDOW 1 h · BR-P13, BR-P14, BR-P21 · tests TC-STM4-04/05/06/07/12/13/14/15</size>
+footer PowerMe · WF-02 owner Lê Bảo Khang (WP5) · v0.1 · 24/10/2026 · late-payment columns = option A (proposal for ERD T10)
+autonumber
+hide footbox
+actor "Admin" as adm
+participant "Admin Console" as web
+participant "VNPay sandbox" as vnp <<external>>
+box "billing (WP5)" #FAFBFD
+participant "TopUpTimeout\nProcessor" as tjob
+participant "AdminTopUp\nController" as actl
+participant "TopUpService" as svc
+participant "VnpayAdapter" as vnpA
+participant "CreditLedger\nService" as led
+participant "Loyalty\nService" as loy
+participant "EInvoice\nService" as inv
+end box
+database "PostgreSQL" as db
+database "Redis\n(BullMQ)" as q
+
+== C — pending timeout (15 min after create, no IPN yet) ==
+q -> tjob : topup.timeout {topUpId}
+tjob -> svc : onPendingTimeout(topUpId)
+svc -> db : SELECT top_ups FOR UPDATE
+alt status ≠ pending (IPN already handled)
+  svc -> svc : nothing to do
+else still pending
+  svc -> vnpA : queryTransaction(gatewayRef) (querydr)
+  vnpA -> vnp : HTTPS querydr
+  vnp --> vnpA : transaction status
+  alt gateway says paid, amount matches
+    svc -> svc : credit(topUp) — same steps as SD-2b A, pending → credited
+  else gateway says not paid
+    svc -> svc : TopUpStateMachine: pending → expired (TIMEOUT_NOT_PAID)
+    svc -> db : UPDATE top_ups SET status = expired
+  else query fails (VNPay down)
+    svc -> q : re-queue topup.timeout (+5 min); status stays pending
+  end
+end
+
+== D — success IPN for an expired top-up ==
+vnp -> svc : IPN success (signature and amount checked as in SD-2b)
+svc -> db : SELECT top_ups FOR UPDATE → status = expired
+alt now ≤ expiresAt + LATE_WINDOW (1 h)
+  svc -> svc : TopUpStateMachine: expired → credited (LATE_PAYMENT_OK)
+  svc -> svc : credit(topUp) — ledger, points, e-invoice as SD-2b A (credited once)
+  svc --> vnp : RspCode 00
+else after LATE_WINDOW, lateGatewayRef not yet stored
+  svc -> db : UPDATE top_ups SET late_gateway_ref, late_paid_at,\nlate_amount_vnd (status stays expired)
+  note right of svc
+    No ledger row, no points, no invoice.
+    Admin sees it in "late payments to refund" (TC-STM4-06).
+  end note
+  svc --> vnp : RspCode 00 (stop VNPay retries)
+else same late IPN again (late_gateway_ref already stored)
+  svc --> vnp : RspCode 02, nothing written (TC-STM4-15)
+end
+
+== E — Admin refunds a credited top-up (STM-4 #7, manual, to the original source) ==
+adm -> web : Refund top-up
+web -> actl : POST /api/admin/billing/top-ups/{id}/refund
+actl -> svc : refund(topUpId, adminId) [RolesGuard: Admin]
+group one database transaction
+  svc -> db : SELECT top_ups, credit_accounts FOR UPDATE
+  alt status ≠ credited (e.g. already refunded)
+    svc --> actl : InvalidTransition → 409 (TC-STM4-14)
+  else balance < amountVnd (partly spent or in shortfall)
+    svc --> actl : RefundNotAllowed → 422, nothing written (TC-STM4-12)
+  else balance ≥ amountVnd
+    svc -> svc : TopUpStateMachine: credited → refunded (REFUND)
+    svc -> led : post(accountId, refund, −amountVnd, topUpId)
+    led -> db : INSERT credit_transactions (refund), UPDATE balance (≥ 0)
+    opt pointsRedeemed > 0
+      svc -> loy : restoreForTopUp(topUp)
+      loy -> db : INSERT loyalty_transactions (restored,\n+points, original expiry)
+    end
+    svc -> inv : adjustForRefund(topUp, amountPaidVnd)
+    inv -> db : INSERT invoice_adjustments (amount = amount collected)\noriginal e_invoices row unchanged (BR-P14)
+    svc -> db : UPDATE top_ups SET status = refunded
+  end
+end
+opt refund accepted
+  svc -> vnpA : refund(topUp, amountPaidVnd)
+  vnpA -> vnp : HTTPS refund (amount collected, e.g. 195,000)
+  vnp --> vnpA : accepted
+  svc -> q : job einvoice.adjust (send adjustment to provider)
+  actl --> web : 200 {status: refunded}
+end
+note over svc, vnpA
+  Open: if the gateway refund call fails after commit, keep a
+  refund_status (requested / done / failed) and retry it — not modelled yet.
+end note
+@enduml

@@ -1,0 +1,105 @@
+@startuml SD-2b_ipn_credit_invoice
+!include ../team/_team.iuml
+title SD-2b (WF-02) VNPay IPN credits the top-up once, then the e-invoice is issued\n<size:11>STM-4 #2, #3 · STM-5 in_shortfall → active · STM-7 #1–#5 · BR-P04, BR-P13 · tests TC-STM4-02/03/08/09/10, TC-STM5-03/05, TC-STM7-01..05</size>
+footer PowerMe · WF-02 owner Lê Bảo Khang (WP5) · v0.1 · 24/10/2026 · IPN response codes per VNPay IPN spec (to confirm in the sandbox docs)
+autonumber
+hide footbox
+participant "VNPay sandbox" as vnp <<external>>
+participant "Caddy" as caddy
+box "billing (WP5)" #FAFBFD
+participant "VnpayIpn\nController" as ipn
+participant "TopUpService" as svc
+participant "VnpayAdapter" as vnpA
+participant "CreditLedger\nService" as led
+participant "Loyalty\nService" as loy
+participant "EInvoice\nService" as inv
+participant "EInvoiceJob\nProcessor" as job
+participant "EInvoiceProvider\nAdapter" as einvA
+end box
+database "PostgreSQL" as db
+database "Redis\n(BullMQ)" as q
+participant "RealtimeGateway" as rt
+participant "E-invoice provider\n(sandbox / stub)" as einv <<external>>
+
+== A — IPN received and checked ==
+vnp -> caddy : GET /api/v1/billing/vnpay/ipn?vnp_TxnRef&vnp_Amount\n&vnp_ResponseCode&vnp_TransactionNo&vnp_SecureHash…
+caddy -> ipn : forward
+ipn -> svc : applyPaymentResult(ipn)
+svc -> vnpA : verifySignature(params)
+alt signature invalid
+  vnpA --> svc : false
+  svc --> ipn : IpnAck(97)
+  ipn --> vnp : {"RspCode":"97","Message":"Invalid signature"}
+else signature valid
+  vnpA --> svc : true
+  group one database transaction
+    svc -> db : SELECT top_ups WHERE gateway_ref = vnp_TxnRef FOR UPDATE
+    alt no such top-up
+      svc --> ipn : IpnAck(01) order not found
+    else status ≠ pending (credited, failed, refunded) — duplicate or stale IPN
+      svc -> svc : TopUpStateMachine.canApply → false, nothing written
+      svc --> ipn : IpnAck(02) already confirmed
+      note right of svc
+        TC-STM4-08, TC-STM4-10. An expired top-up is not here:
+        late results follow SD-2c.
+      end note
+    else vnp_Amount / 100 ≠ amountPaidVnd
+      svc -> db : log amount mismatch (status stays pending)
+      svc --> ipn : IpnAck(04) invalid amount
+    else vnp_ResponseCode ≠ 00 (payment failed, or 24 = driver cancelled)
+      svc -> svc : TopUpStateMachine: pending → failed (PAYMENT_FAILED)
+      svc -> db : UPDATE top_ups SET status = failed, completed_at
+      note right of svc
+        No ledger row, no points spent, no invoice (TC-STM4-03).
+      end note
+      svc --> ipn : IpnAck(00)
+    else payment succeeded and amount matches
+      svc -> svc : TopUpStateMachine: pending → credited (PAYMENT_OK)
+      svc -> db : UPDATE top_ups SET status = credited,\ngateway_txn_no, completed_at
+      svc -> led : post(accountId, top_up, +amountVnd, topUpId)
+      led -> db : INSERT credit_transactions (type top_up, full amount)\nUNIQUE (top_up_id, type) → credited once
+      led -> db : UPDATE credit_accounts SET balance = balance + amount
+      opt balance was < 0 and is now ≥ 0
+        led -> db : UPDATE credit_accounts SET status = active\n(STM-5 in_shortfall → active; shortfall settled by the same entry)
+      end
+      opt pointsRedeemed > 0
+        svc -> loy : redeemForTopUp(topUp)
+        loy -> db : INSERT loyalty_transactions (redeemed, −points, top_up_id)
+      end
+      svc -> inv : requestForTopUp(topUp)
+      inv -> db : INSERT e_invoices (status = requested,\namount = amountPaidVnd, VAT, attempt_count = 0)\nUNIQUE (top_up_id)
+      svc --> ipn : IpnAck(00)
+    end
+  end
+  svc -> q : after commit: add job einvoice.issue {invoiceId}
+  svc -> rt : after commit: credit.updated, topup.status
+  ipn --> vnp : {"RspCode":"00" | "01" | "02" | "04", "Message": …}
+end
+
+newpage SD-2b (WF-02) continued: e-invoice issued after the credit
+== B — e-invoice issued asynchronously (never blocks the credit) ==
+q -> job : einvoice.issue {invoiceId}
+job -> inv : issue(invoiceId)
+inv -> einvA : issueInvoice(buyer, items, amount collected,\npoints shown as discount, VAT)
+einvA -> einv : HTTPS create invoice
+alt provider returns an invoice number
+  einv --> einvA : invoiceNo
+  einvA --> inv : invoiceNo
+  inv -> db : UPDATE e_invoices SET status = issued,\ninvoice_no, issued_at (STM-7 #2)
+  inv -> rt : invoice.issued (driver history, FR-08)
+else provider error or timeout
+  einv --> einvA : 5xx / timeout
+  einvA --> inv : ProviderError
+  inv -> db : UPDATE e_invoices SET status = failed,\nattempt_count + 1, last_error_kind, last_error_message (STM-7 #3)
+  alt attempt_count < 3 (RETRY_LIMIT)
+    inv -> q : delayed retry (5 min, 30 min, 2 h)\n→ failed → requested (STM-7 #4)
+  else attempt_count = 3
+    inv -> db : UPDATE e_invoices SET status = needs_review (STM-7 #5)
+    inv -> rt : alert to Admin (UC-ADM-08 retry: one attempt, counter not reset, STM-7 #6)
+  end
+  note right of inv
+    The top-up stays credited and the
+    balance is unaffected (TC-STM7-03).
+  end note
+end
+@enduml
