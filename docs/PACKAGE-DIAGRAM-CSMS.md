@@ -96,6 +96,7 @@ flowchart TB
 - Toàn bộ **đường đi giao dịch** `StartTransaction → sessions → reconciliation → billing` nằm trong tiến trình, không chạm Redis pub/sub. Redis chỉ xuất hiện ở hai chỗ: Socket.IO adapter (fan-out giao diện, mất được) và BullMQ (job nền, có lưu bền).
 - Không có module `admin`. Endpoint `/api/admin/*` nằm trong controller của từng module nghiệp vụ và được `RolesGuard` (do `users` cung cấp) bảo vệ.
 - Cổng `3000` / `3001` và đường dẫn `/ocpp` khớp `CSMS_HTTP_PORT`, `CSMS_OCPP_WS_PORT`, `CSMS_OCPP_PATH_PREFIX` trong `infra/.env.example`. Dev không cần Caddy — simulator nối thẳng `ws://localhost:3001/ocpp/{serialNumber}`.
+  > **Không còn đúng (26/10/2026, BM02 F35):** code đọc `OCPP_PORT` (dự phòng `CSMS_OCPP_WS_PORT`), mặc định **9000** như `docs/WP2-KIEN-TRUC-TECHSTACK.md` và `infra/staging`; không đọc `CSMS_HTTP_PORT`, `CSMS_OCPP_PATH_PREFIX` (`apps/csms/src/config.ts`). Cổng `3000` hiện là của **console vận hành** (`CONSOLE_PORT`), chưa có REST. Dev nối `ws://localhost:9000/ocpp/{serialNumber}`. Việc đổi cổng console khỏi 3000 để dành 3000 cho REST: xem phản hồi F35 trong `docs/self-review/BM02-TEAM-RESPONSE.md`.
 
 ---
 
@@ -161,6 +162,8 @@ Luật chung: **mỗi bảng có đúng một module chủ; module khác muốn 
 ---
 
 ## 4. Trạng thái hiện thực (23/10/2026)
+
+> **Superseded (26/10/2026, BM02 F36).** Bảng dưới là ảnh chụp ngày 23/10, giữ nguyên làm lịch sử. Câu "Không có mã NestJS nào" **không còn đúng**: `apps/csms/src` hiện có `ocpp-gateway`, `stations`, `sessions`, `reconciliation`, `console`, `db`. Phụ thuộc thật giữa các module: mục 3.1. Module chưa có code: `users`, `billing`, `tariffs`, `realtime` (Known Gaps G1, G16, G17 trong `docs/DESIGN-BRIEF-WP2-INPUT.md`).
 
 Trung thực về hiện trạng, để không ai đọc sơ đồ trên rồi tưởng đã có:
 

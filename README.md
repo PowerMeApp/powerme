@@ -11,8 +11,9 @@
 
 | | |
 |---|---|
-| Sprint hiện tại | S1 — Khởi động và đặc tả (24/08 – 06/09) |
-| Cột mốc kế tiếp | **M1 — 06/09/2026** · Đặc tả chốt, simulator chạy |
+| Sprint hiện tại | S5 — Tiền và vận hành (19/10 – 01/11) · Review 2 (tag `review-2`) |
+| Cột mốc kế tiếp | **M4 — 01/11/2026** · Tính tiền và vận hành thông |
+| Hiện trạng code | `apps/csms` (NestJS): gateway OCPP, onboarding trụ, phiên sạc, đối soát, console vận hành; trụ giả lập `simulator/d1-hmi`; cấu hình staging `infra/staging` (chưa chạy trên VPS). Chi tiết và việc chưa làm: [docs/DESIGN-BRIEF-WP2-INPUT.md](docs/DESIGN-BRIEF-WP2-INPUT.md) (Known Gaps) |
 | Kế hoạch đầy đủ | [docs/KE-HOACH-POWERME.md](docs/KE-HOACH-POWERME.md) |
 
 ---

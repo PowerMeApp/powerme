@@ -8,6 +8,8 @@
 **Nguồn:**
 `apps/csms/lab/EXP-01-ngat-ket-noi-81s.md` và `apps/csms/lab/README.md` (nhánh `wp2/be-02-*`, định dạng trace `received_at` / `cp_timestamp` / `epoch` / `epoch_opened_at`) · `docs/adr/` ADR-0005, 0006, 0009, 0010 (nhánh `wp2/be-01-tach-adr-rieng`) · `docs/PACKAGE-DIAGRAM-CSMS.md` (nhánh `wp2/be-01-package-diagram-csms`) · STM-1 phiên sạc (T12, đã được T13 xác nhận) · STM-3 trụ.
 
+> **Superseded một phần (26/10/2026, BM02 F36):** câu "Trên `main` chưa có mã NestJS nào" bên dưới là hiện trạng ngày 23/10. Code đã có từ Iteration 1 (`apps/csms/src`); chỗ code khác sơ đồ được ghi tại chỗ (mục 1, mục 3) và trong `docs/ITERATION-1-WF03.md`.
+
 > Sơ đồ mô tả **thiết kế đích** của `ocpp-gateway`, `sessions`, `reconciliation`, `realtime`. Trên `main` chưa có mã NestJS nào (xem mục 4 của package diagram). Số liệu trong note là số thật của EXP-01 — hành vi của **SAP simulator v4.12.0**, **chưa xác nhận trên firmware Ruihua**.
 
 ---
