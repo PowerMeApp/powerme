@@ -3,8 +3,9 @@
  *
  * Vì sao tồn tại: gom SQL ở một chỗ; định dạng JSON nằm ở console.mappers.ts (thuần, có spec).
  * Không ghi DB, không gọi service nghiệp vụ. Trạng thái "đang nối socket" lấy từ
- * ConnectionRegistry (RAM) chứ không từ cột lifecycle — sau khi CSMS khởi động lại, lifecycle
- * trong DB có thể còn `in_service` dù chưa trụ nào nối lại (EXP-01).
+ * ConnectionRegistry (RAM); `lifecycle` chỉ là vòng đời hành chính (ADR-0016 D-C, T61) và hiển
+ * thị riêng. Cột `is_online` trong DB cũng được trả ra (`is_online`) — sau khi CSMS chết nó có thể
+ * lệch registry cho tới khi OfflineGraceService quét lúc khởi động.
  *
  * Giới hạn đã biết: `message_frames` dùng count(*) trên cả bảng log (đủ cho demo; ở quy mô lớn
  * phải thay bằng ước lượng). Cờ replayed dựng lại bằng chính ReplayDetector (xem mappers).
@@ -93,6 +94,8 @@ export class ConsoleQueries {
           lifecycle: cp.lifecycle,
           currentEpoch: cp.currentEpoch,
           lastMessageAt: cp.lastMessageAt,
+          isOnline: cp.isOnline,
+          onlineChangedAt: cp.onlineChangedAt,
           connectors: conns.filter((c) => c.chargePointId === cp.id),
         },
         this.registry.get(cp.serialNumber) !== undefined,

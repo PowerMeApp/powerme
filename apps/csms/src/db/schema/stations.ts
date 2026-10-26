@@ -83,7 +83,15 @@ export const chargePoints = pgTable(
     currentEpoch: integer('current_epoch').notNull().default(0),
     /** Băm scrypt của mật khẩu Basic Auth, dạng `scrypt$N$r$p$salt$hash` (Security Profile 2, ADR-0011 sửa 25/10). Chỉ hiển thị một lần lúc onboarding. */
     basicAuthPasswordHash: text('basic_auth_password_hash'),
+    /** Lần cuối nhận tin từ trụ (CSMS clock) — đóng vai `last_seen_at` của ADR-0016 D-C. */
     lastMessageAt: timestamp('last_message_at', { withTimezone: true }),
+    /**
+     * Kết nối OCPP đang mở hay không (ADR-0016 D-C, migration 0002). Do ocpp-gateway đặt khi mở/đóng
+     * socket (và quét khởi động lại); KHÔNG phụ thuộc `lifecycle`: trụ `disabled` vẫn có thể online.
+     */
+    isOnline: boolean('is_online').notNull().default(false),
+    /** Lần cuối `is_online` đổi giá trị. Null nếu chưa từng kết nối. */
+    onlineChangedAt: timestamp('online_changed_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },

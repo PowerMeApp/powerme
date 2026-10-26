@@ -52,8 +52,12 @@ describeDb('migration 0001 — nâng cấp DB đã có 0000 và ràng buộc m�
     await db?.$client.end();
   });
 
-  it('thứ tự migration theo tên: 0000_init rồi 0001_quyet-dinh-be-11', () => {
-    expect(listMigrations()).toEqual(['0000_init', '0001_quyet-dinh-be-11']);
+  it('thứ tự migration theo tên: 0000_init, 0001_quyet-dinh-be-11 rồi 0002 (T61)', () => {
+    expect(listMigrations()).toEqual([
+      '0000_init',
+      '0001_quyet-dinh-be-11',
+      '0002_tach-ket-noi-khoi-lifecycle',
+    ]);
   });
 
   describe('đường nâng cấp (DB demo cũ: có 0000, KHÔNG có bảng _migrations, có dữ liệu)', () => {
@@ -106,11 +110,15 @@ describeDb('migration 0001 — nâng cấp DB đã có 0000 và ràng buộc m�
       );
     });
 
-    it('migrate() ghi nhận 0000 đã áp (không chạy lại) và chỉ áp 0001', async () => {
+    it('migrate() ghi nhận 0000 đã áp (không chạy lại) và áp 0001 rồi 0002 theo thứ tự', async () => {
       const applied = await migrate(db.$client);
-      expect(applied).toEqual(['0001_quyet-dinh-be-11']);
+      expect(applied).toEqual(['0001_quyet-dinh-be-11', '0002_tach-ket-noi-khoi-lifecycle']);
       const names = (await q('SELECT name FROM _migrations ORDER BY name')).map((r) => r['name']);
-      expect(names).toEqual(['0000_init', '0001_quyet-dinh-be-11']);
+      expect(names).toEqual([
+        '0000_init',
+        '0001_quyet-dinh-be-11',
+        '0002_tach-ket-noi-khoi-lifecycle',
+      ]);
     });
 
     it('chạy lại migrate() không áp gì nữa', async () => {

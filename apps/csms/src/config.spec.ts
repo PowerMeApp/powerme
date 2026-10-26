@@ -29,3 +29,22 @@ describe('loadConfig — ALLOW_LEGACY_NO_CREDENTIAL', () => {
     );
   });
 });
+
+describe('loadConfig — OFFLINE_GRACE_S (ADR-0016 D-A)', () => {
+  it('mặc định 30 giây khi không khai báo hoặc rỗng', () => {
+    expect(loadConfig({ ...base }).offlineGraceS).toBe(30);
+    expect(loadConfig({ ...base, OFFLINE_GRACE_S: '' }).offlineGraceS).toBe(30);
+  });
+
+  it('"0" hợp lệ = tắt ân hạn (orphan ngay)', () => {
+    expect(loadConfig({ ...base, OFFLINE_GRACE_S: '0' }).offlineGraceS).toBe(0);
+  });
+
+  it('đọc số nguyên dương', () => {
+    expect(loadConfig({ ...base, OFFLINE_GRACE_S: '20' }).offlineGraceS).toBe(20);
+  });
+
+  it.each(['-1', '1.5', 'abc', 'NaN'])('"%s" ném lỗi rõ ràng', (v) => {
+    expect(() => loadConfig({ ...base, OFFLINE_GRACE_S: v })).toThrow(/OFFLINE_GRACE_S/);
+  });
+});

@@ -4,8 +4,9 @@
 **Task:** T11 / BE-06 — thiết kế CSDL mức vật lý
 **Người chịu trách nhiệm:** Ngô Văn Minh Trí (WP2)
 **Nguồn:** mô hình logic T10 (Ân, 20/10/2026) · state machine T12/T13 · ADR-0005, 0007, 0008, 0009, 0010, 0011, 0012 · `docs/PACKAGE-DIAGRAM-CSMS.md` (bảng → module chủ) · `apps/csms/lab/README.md` (định dạng trace)
-**Sản phẩm:** `apps/csms/src/db/schema/*.ts` (Drizzle) · `apps/csms/drizzle/0000_init.sql` + `apps/csms/drizzle/0001_quyet-dinh-be-11.sql` (migration viết tay) · tài liệu này
+**Sản phẩm:** `apps/csms/src/db/schema/*.ts` (Drizzle) · `apps/csms/drizzle/0000_init.sql` + `apps/csms/drizzle/0001_quyet-dinh-be-11.sql` + `apps/csms/drizzle/0002_tach-ket-noi-khoi-lifecycle.sql` (migration viết tay) · tài liệu này
 **Cập nhật 25/10/2026 (BE-11):** áp migration 0001 — `payment_mode` có `unattributed`, đổi `pillar_timestamp` → `cp_timestamp`, thêm bảng `remote_commands` và `session_status_history`, cột `orphaned_at` / `replayed` / `epoch`, `reconciliation_record_type` có `conflict` + `late_sample`. Nhật ký từng thay đổi và cách kiểm: `docs/NHAT-KY-MIGRATION-0001.md`.
+**Cập nhật 26/10/2026 (T61, ADR-0016 D-C):** áp migration 0002 — `charge_points` có thêm `is_online boolean not null default false` và `online_changed_at timestamptz null`; `lifecycle` chỉ còn nghĩa hành chính, giá trị enum `offline` thành **legacy** (không còn được ghi; hàng cũ được backfill sang `in_service` + `is_online=false`). `last_message_at` đóng vai `last_seen_at` của ADR-0016 nên **không thêm cột trùng**.
 
 > Nguồn sự thật về cấu trúc DB là **migration SQL viết tay** (ADR-0008). Schema Drizzle phải khớp từng cột với SQL — mục 8 ghi cách đối chiếu đã chạy.
 
@@ -26,9 +27,9 @@
 | Cột dẫn xuất (`/x` trong ERD) | cột thường, **cập nhật cùng transaction với dòng ledger** | T10 §5.6 |
 | Partition | `meter_values`, `ocpp_message_log` — `PARTITION BY RANGE (received_at)` theo tháng, tạo sẵn 2026-10 → 2027-01 + `DEFAULT` | ADR-0007 |
 
-Số liệu sau migration 0001 (**đếm bằng truy vấn trên Postgres thật đã áp 0000 + 0001**, không đếm trên văn bản): **34 bảng** (+10 partition con của `meter_values`, `ocpp_message_log`), **29 enum** (117 giá trị), **100 index** (kể cả index do PK/UNIQUE tạo, trong đó 9 partial), **27 CHECK**, 53 FK, 295 cột, 5 sequence cho số nghiệp vụ, 2 trigger append-only (`ocpp_message_log`, `session_status_history`).
+Số liệu sau migration 0002 (**đếm bằng truy vấn trên Postgres thật đã áp 0000 + 0001 + 0002**, không đếm trên văn bản): **34 bảng** (+10 partition con của `meter_values`, `ocpp_message_log`), **29 enum** (117 giá trị), **100 index** (kể cả index do PK/UNIQUE tạo, trong đó 9 partial), **27 CHECK**, 53 FK, **297 cột**, 5 sequence cho số nghiệp vụ, 2 trigger append-only (`ocpp_message_log`, `session_status_history`).
 
-Cách đếm (bỏ partition con và bảng theo dõi `_migrations`): bảng = `pg_class` có `relkind IN ('r','p')` và `NOT relispartition`; index = `pg_indexes`; partial index = `pg_index.indpred IS NOT NULL`; **CHECK = `pg_constraint` với `contype = 'c'`** (không tính NOT NULL — Postgres 17 không lưu NOT NULL ở đây, Postgres 18 lưu với `contype = 'n'` nên phải loại); enum = `count(DISTINCT enumtypid)` của `pg_enum`; sequence nghiệp vụ = `relkind = 'S'` không phải sequence của cột identity. Số cũ sau 0000 (32 / 28 / 94 / 7 / 24) tái hiện đúng bằng cùng truy vấn; 0001 cộng 2 bảng, 1 enum, 6 index (2 partial), 3 CHECK, 3 FK, 25 cột, 1 trigger.
+Cách đếm (bỏ partition con và bảng theo dõi `_migrations`): bảng = `pg_class` có `relkind IN ('r','p')` và `NOT relispartition`; index = `pg_indexes`; partial index = `pg_index.indpred IS NOT NULL`; **CHECK = `pg_constraint` với `contype = 'c'`** (không tính NOT NULL — Postgres 17 không lưu NOT NULL ở đây, Postgres 18 lưu với `contype = 'n'` nên phải loại); enum = `count(DISTINCT enumtypid)` của `pg_enum`; sequence nghiệp vụ = `relkind = 'S'` không phải sequence của cột identity. Số cũ sau 0000 (32 / 28 / 94 / 7 / 24) tái hiện đúng bằng cùng truy vấn; 0001 cộng 2 bảng, 1 enum, 6 index (2 partial), 3 CHECK, 3 FK, 25 cột, 1 trigger; **0002 chỉ cộng 2 cột** (`is_online`, `online_changed_at`: 295 → 297; các số còn lại không đổi — đếm lại bằng đúng truy vấn ở cả trạng thái 0001 và 0002).
 
 ---
 
@@ -113,7 +114,7 @@ Các FK "người xử lý" (`fault_events.acknowledged_by`, `fault_reports.clea
 **`sites`** — trạm/địa điểm của operator. Cột: `site_code` (BK), `operator_id` (FK), `site_name`, `address`, `latitude`/`longitude` `numeric(9,6)`. UNIQUE `site_code`.
 
 **`charge_points`** — trụ sạc (ChargingPillar).
-Cột: `serial_number` (BK, định danh kỹ thuật, đuôi URL `/ocpp/{serialNumber}` — ADR-0009), `display_code` (mã người vận hành đọc, `PM-D1-HCM-0001`, null tới khi onboard — ADR-0009), `site_id` (FK, null tới khi gắn trạm), `model`, `firmware_version`, `rated_power_kw numeric(7,2)`, `warranty_until date`, `lifecycle` (`registered` → `awaiting_connection` → `in_service` ⇄ `offline` · `disabled` · `decommissioned`), `free_vend_tag` (idTag của chế độ free vend, ADR-0012), `reports_soc`, `supports_reservation`, `current_epoch` (lần kết nối hiện tại), `basic_auth_password_hash` (scrypt, dạng `scrypt$N$r$p$salt$hash`, Security Profile 2 — ADR-0011 sửa 25/10), `last_message_at`.
+Cột: `serial_number` (BK, định danh kỹ thuật, đuôi URL `/ocpp/{serialNumber}` — ADR-0009), `display_code` (mã người vận hành đọc, `PM-D1-HCM-0001`, null tới khi onboard — ADR-0009), `site_id` (FK, null tới khi gắn trạm), `model`, `firmware_version`, `rated_power_kw numeric(7,2)`, `warranty_until date`, `lifecycle` (vòng đời **hành chính**, STM-3 v0.3: `registered` → `awaiting_connection` → `in_service` ⇄ `disabled` → `decommissioned`; giá trị `offline` còn trong enum nhưng là **legacy**, không còn được ghi — T61), `free_vend_tag` (idTag của chế độ free vend, ADR-0012), `reports_soc`, `supports_reservation`, `current_epoch` (lần kết nối hiện tại), `basic_auth_password_hash` (scrypt, dạng `scrypt$N$r$p$salt$hash`, Security Profile 2 — ADR-0011 sửa 25/10), `last_message_at` (lần cuối nhận tin, CSMS clock = `last_seen_at` của ADR-0016), `is_online` (socket OCPP đang mở; **độc lập với `lifecycle`**: trụ `disabled` vẫn có thể online, `in_service` có thể offline; do `ocpp-gateway` đặt khi mở/đóng socket và khi quét khởi động lại), `online_changed_at` (lần cuối `is_online` đổi; null nếu chưa từng kết nối).
 Khoá: UNIQUE `serial_number`, UNIQUE `display_code`; index `site_id`.
 
 **`connectors`** — súng sạc, tối đa 2 mỗi trụ.
@@ -358,6 +359,8 @@ Hai khác biệt đã xử lý để ra 0 khác biệt: (1) tên FK — SQL dùn
 ```bash
 DATABASE_URL=postgresql://… node apps/csms/demo/migrate.mjs
 ```
+
+**Migration 0002 (T61):** đã thử áp lên DB có sẵn 0000 + 0001 + dữ liệu (test `migration-0002.integration.test.ts`, và `demo/migrate.mjs` trên DB nháp ở trạng thái 0001): backfill đúng, chạy lại không áp gì. Số cột 297 là đếm bằng truy vấn trên SQL; hai cột mới ở schema TS (`stations.ts`) được khai tay khớp SQL — **chưa chạy lại phép đối chiếu máy `drizzle-kit export` cho 0002**.
 
 DB demo đã có 0000 (dựng trước khi có `_migrations`) được ghi nhận 0000 là đã áp rồi chạy 0001 lên dữ liệu hiện có (đã thử trên DB demo thật và bằng test `migration-0001.integration.test.ts`). Dùng `psql -f` rời từng file vẫn chạy được SQL nhưng không ghi `_migrations`.
 
