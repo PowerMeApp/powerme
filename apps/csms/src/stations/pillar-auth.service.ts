@@ -47,7 +47,7 @@ export class PillarAuthService {
       .from(chargePoints)
       .where(eq(chargePoints.serialNumber, identity))
       .limit(1);
-    if (!cp) return { ok: false, status: 404, reason: 'Charge point chua dang ky' };
+    if (!cp) return { ok: false, status: 404, reason: 'Charge point not registered' };
     if (!this.policy.mayConnect(cp.lifecycle)) {
       return {
         ok: false,

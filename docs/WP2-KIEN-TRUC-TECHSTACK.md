@@ -144,7 +144,7 @@ Unique trên `(charge_point_id, connector_id, id_tag, meter_start_wh, cp_timesta
 
 ### ADR-0011 · Bảo mật OCPP: Security Profile 2 — *Đề xuất*
 
-TLS kết thúc tại Caddy + Basic Auth riêng từng trụ; mật khẩu sinh lúc onboarding, hiện một lần, băm argon2. Security Profile 3 để hướng phát triển.
+TLS kết thúc tại Caddy + Basic Auth riêng từng trụ; mật khẩu sinh lúc onboarding, hiện một lần, băm scrypt (ADR-0011 sửa 25/10; hiện chưa có TLS, CSMS chạy `ws://` tới khi dựng Caddy trên staging). Security Profile 3 để hướng phát triển.
 → [adr/0011-ocpp-security-profile-2.md](adr/0011-ocpp-security-profile-2.md)
 
 ### ADR-0012 · Phiên sạc bằng thẻ ví và free vend — *Đề xuất, cần cả nhóm chốt*

@@ -1,14 +1,16 @@
 /**
  * Pillar credential for OCPP Security Profile 2 (HTTP Basic auth over TLS, ADR-0011).
+ * Today the CSMS listens on plain ws:// (TLS comes with Caddy on staging, T04), so until then the
+ * password crosses the network in clear text: Profile 2 is the target, not the current state.
  *
  * Why it exists: SD-5a issues one password per pillar at onboarding and shows it ONCE; only a
  * salted hash is stored in `charge_points.basic_auth_password_hash`. SD-5b verifies it at the
  * WebSocket upgrade.
  *
  * Hash = scrypt from `node:crypto` (memory-hard, no native dependency), stored as
- * `scrypt$N$r$p$<salt b64url>$<hash b64url>`. ADR-0011 and the schema comment say argon2; scrypt is
- * used so the CSMS keeps zero native add-ons on Windows dev machines. The format is self-describing,
- * so switching to argon2 later only needs a new prefix (decision for Trí, noted in the PR).
+ * `scrypt$N$r$p$<salt b64url>$<hash b64url>`. scrypt keeps the CSMS free of native add-ons on Windows
+ * dev machines; accepted by Trí in the review of PR #33 and recorded in ADR-0011 (amended 25/10).
+ * The format is self-describing, so argon2 can be added later under its own prefix.
  *
  * OCPP 1.6 Security Whitepaper: AuthorizationKey is 16–40 characters. 18 random bytes in base64url
  * give 24 characters, ~144 bits of entropy.
