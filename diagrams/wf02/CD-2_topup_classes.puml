@@ -10,7 +10,7 @@ skinparam class<<proposed>> {
   BorderStyle dashed
 }
 hide empty members
-title CD-2 (WF-02) Class diagram: top up Charging Credit (billing module, WP5)\n<size:11>Status values = STM-4 TopUp / STM-5 CreditAccount / STM-7 EInvoice · entities = LERD-1 v0.2 · dashed attribute block = proposed, not in the ERD yet</size>
+title CD-2 (WF-02) Class diagram: top up Charging Credit (billing module, WP5)\n<size:11>Status values = STM-4 TopUp / STM-5 CreditAccount / STM-7 EInvoice · entities = LERD-1 v0.4 · dashed attribute block = proposed, not in the ERD yet</size>
 footer PowerMe · WF-02 owner Lê Bảo Khang (WP5) · v0.1 · 24/10/2026 · class/method names to align with the CSMS repo (apps/csms/billing)
 
 together {
