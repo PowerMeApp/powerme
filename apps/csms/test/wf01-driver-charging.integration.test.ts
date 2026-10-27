@@ -887,7 +887,7 @@ describeDb('WP3/T31 WF-01 service journey with real OCPP + Postgres', () => {
     await sendStop();
     // WP3/T72: explicit synthetic billing fixture, not measured production timestamps or outcomes.
     await q(
-      `UPDATE sessions SET received_started_at=$2,received_stopped_at=$3,meter_stop_wh=$4,
+      `UPDATE sessions SET received_started_at=$2,received_stopped_at=$3,cp_started_at=$2,cp_stopped_at=$3,meter_stop_wh=$4,
       energy_wh=$5,status='reconciled' WHERE id=$1`,
       [sid, from, to, 1000 + energyWh, energyWh],
     );
@@ -949,6 +949,22 @@ describeDb('WP3/T31 WF-01 service journey with real OCPP + Postgres', () => {
       await q('SELECT 1 FROM session_tariff_segments WHERE session_id=$1', [sid]),
     ).toHaveLength(2);
     expect((await service.statement(driver, sid)).amount_vnd).toBe('1');
+  });
+  it('T72 offline-delivered session settles on the pillar clock, not the reconnect time (BR-P20)', async () => {
+    // Trụ mất mạng: sạc 11:00–11:30 (giờ VN, khung 1 VND/kWh), StopTransaction tới lúc nối lại
+    // 13:00 (khung 1000 VND/kWh). Phải trừ tiền một lần theo khung lúc điện thật sự được giao.
+    await twoBands();
+    await q("UPDATE tariff_periods SET price_per_kwh_vnd=1000 WHERE time_start='12:00'");
+    const sid = await pricingFixture(utcTime(4, 0), utcTime(4, 30), 800);
+    await q('UPDATE sessions SET delivered_offline=true,received_stopped_at=$2 WHERE id=$1', [
+      sid,
+      utcTime(6, 0),
+    ]);
+    expect(await settlement.settle(sid)).toBe('posted');
+    expect((await service.statement(driver, sid)).amount_vnd).toBe('1');
+    expect(
+      await q('SELECT 1 FROM session_tariff_segments WHERE session_id=$1', [sid]),
+    ).toHaveLength(1);
   });
   it.each(['suspended', 'closed'] as const)(
     'T72 inactive operator %s cannot submit tariff boundary evidence',

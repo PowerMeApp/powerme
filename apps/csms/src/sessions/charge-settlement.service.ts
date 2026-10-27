@@ -16,6 +16,8 @@ interface BillableSession {
   payment_mode: string;
   received_started_at: Date;
   received_stopped_at: Date | null;
+  cp_started_at: Date;
+  cp_stopped_at: Date | null;
   promotion_id: string | null;
   delivered_offline: boolean;
   operator_id: string;
@@ -106,10 +108,12 @@ export class ChargeSettlementService {
         )
       ).rows[0];
       if (!row) throw new Error('not_found');
+      // Mốc giá đo theo đồng hồ trụ, cùng trục với pricedSegments (xem chú thích ở đó).
       if (
         !row.received_stopped_at ||
-        boundaryAt <= row.received_started_at ||
-        boundaryAt >= row.received_stopped_at ||
+        !row.cp_stopped_at ||
+        boundaryAt <= row.cp_started_at ||
+        boundaryAt >= row.cp_stopped_at ||
         meterWh < Number(row.meter_start_wh) ||
         row.meter_stop_wh === null ||
         meterWh > Number(row.meter_stop_wh)
@@ -188,17 +192,17 @@ export class ChargeSettlementService {
         session.meter_stop_wh === null ||
         session.energy_wh === null ||
         !session.received_stopped_at ||
-        session.promotion_id ||
-        session.delivered_offline
+        !session.cp_stopped_at ||
+        session.promotion_id
       )
+        // Phiên delivered_offline KHÔNG bị giữ lại: SRS §3.4.2 / BR-P20 — trụ offline hay dữ liệu tới
+        // muộn thì vẫn trừ một lần, số dư được âm. Giá tính theo đồng hồ trụ nên không lệch khung.
         return pending(
           session.status !== 'reconciled'
             ? 'awaiting_reconciliation'
             : session.promotion_id
               ? 'promotion_unsupported'
-              : session.delivered_offline
-                ? 'offline_pricing_review'
-                : 'missing_meter',
+              : 'missing_meter',
         );
       if (
         (
@@ -318,8 +322,11 @@ export class ChargeSettlementService {
   }
 
   private async pricedSegments(c: PoolClient, session: BillableSession) {
-    const start = session.received_started_at;
-    const end = session.received_stopped_at!;
+    // Trục thời gian là đồng hồ TRỤ (cp_*), không phải lúc CSMS nhận: phiên sạc lúc trụ offline có
+    // StopTransaction tới khi nối lại, received_stopped_at lệch hàng giờ và rơi sang khung giá khác.
+    // Đối soát (status = reconciled) đã kiểm chuỗi công tơ trên cùng trục cp_timestamp.
+    const start = session.cp_started_at;
+    const end = session.cp_stopped_at!;
     if (end < start || end.getTime() - start.getTime() > 366 * 86400000) return undefined;
     const { rows } = await c.query<{ id: string; price: string; starts: Date; ends: Date }>(
       `
@@ -357,7 +364,7 @@ export class ChargeSettlementService {
         const sample = (
           await c.query<{ wh: string }>(
             `SELECT CASE WHEN unit='kWh' THEN value*1000 ELSE value END AS wh
-          FROM meter_values WHERE session_id=$1 AND received_at=$2 AND measurand='Energy.Active.Import.Register'
+          FROM meter_values WHERE session_id=$1 AND cp_timestamp=$2 AND measurand='Energy.Active.Import.Register'
           AND phase IS NULL AND (unit IN ('Wh','kWh') OR unit IS NULL)`,
             [session.id, new Date(right)],
           )
