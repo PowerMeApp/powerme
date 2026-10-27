@@ -1,7 +1,7 @@
 # Design Brief — WP2 input (for BM01, sections 3, 4, 5, 6, 7, 8 and Appendix A)
 
 **Author:** Ngô Văn Minh Trí (WP2, Team Leader) · **First version:** 23/10/2026 · **This revision:** 28/10/2026 for Review 2 on **Thursday 29/10/2026** · **Status:** input for the team Design Brief; Ân assembles the final 4-page document.
-**Repo:** `github.com/PowerMeApp/powerme`. Self-review (BM02) was run on tag `review-2` = `16c8d06` (26/10). **The council reviews code on `main`** (agreed 27/10); every number below is from `main` at `fa13170` (27/10, after PR #44–#63) unless a tag is named.
+**Repo:** `github.com/PowerMeApp/powerme`. Tag `review-2` = **`1cead5d`** (moved by Trí on 28/10 to `main` after PR #64; the first tag `16c8d06` of 26/10 is the commit the self-review BM02 was run on and stays referenced by the BM02 files). **The council reviews code on `main`** (agreed 27/10); every number below is from `main` at `fa13170`–`1cead5d` (27/10, after PR #44–#64) unless a commit is named.
 **Honesty note:** every number is taken from a file, a test run or a CI run in the repo. Cells that still need the registration form v1.3 FR identifiers say **"map from form v1.3"**.
 
 **What changed since 23/10 (one line each, so Ân can update BM01 §1.1 and the council can trace):** offline grace 120 s before `orphaned` (ADR-0016, #44, #59) · `gap_detected` now ends in `reconciled`, not `review` (#56) · RFID card accepted only when `status = active` (#56) · false-replay tolerance 5 s (#45) · billing schema `0003` matching LERD-1 v0.4 with 4 money-safety constraints (#60) · pillar login rate limit (#54) · staging kit (#48, #63) · WP3 charging service with settlement (#58) and WP4 fault handling with remote Reset (#61) now sit on the OCPP path owned by WP2.
