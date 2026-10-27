@@ -223,10 +223,9 @@ export const topUpsRelations = relations(topUps, ({ one, many }) => ({
     fields: [topUps.creditAccountId],
     references: [creditAccounts.id],
   }),
-  creditTransaction: one(creditTransactions, {
-    fields: [topUps.id],
-    references: [creditTransactions.topUpId],
-  }),
+  // Từ migration 0003: tối đa một dòng `top_up` và một dòng `refund` cho mỗi top-up.
+  creditTransactions: many(creditTransactions),
+  refunder: one(users, { fields: [topUps.refundedBy], references: [users.id] }),
   eInvoice: one(eInvoices, { fields: [topUps.id], references: [eInvoices.topUpId] }),
   loyaltyTransactions: many(loyaltyTransactions),
 }));
