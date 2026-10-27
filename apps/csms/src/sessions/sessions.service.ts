@@ -84,6 +84,13 @@ interface FlatSample {
 }
 
 export type AuthorizeStatus = 'Accepted' | 'Blocked' | 'Invalid';
+export type RfidCardStatus = (typeof rfidCards.$inferSelect)['status'];
+
+/** STM-8 → idTagInfo.status của OCPP 1.6. Chỉ `active` là Accepted (BR-P06, BM02 F22). */
+export function authorizeStatusFor(status: RfidCardStatus): AuthorizeStatus {
+  if (status === 'active') return 'Accepted';
+  return status === 'blocked' ? 'Blocked' : 'Invalid';
+}
 
 @Injectable()
 export class SessionsService {
@@ -100,7 +107,14 @@ export class SessionsService {
   // Authorize
   // ---------------------------------------------------------------------------
 
-  /** T13 mục 4: thẻ không có trong sổ → Invalid; blocked → Blocked. */
+  /**
+   * T13 mục 4 + STM-8 (BM02 F22): chỉ thẻ `active` được Accepted (BR-P06).
+   *   - không có trong sổ → Invalid;
+   *   - `blocked` → Blocked;
+   *   - `unlinked` (đã đăng ký, chưa gắn/kích hoạt — STM-8, AD-6 "unlinked → refuse") → Invalid.
+   *     OCPP 1.6 không có trạng thái riêng cho "chưa gắn"; Invalid = "không được phép dùng".
+   * Chưa xét số dư Charging Credit (BR-P23) — chưa có module billing.
+   */
   async authorize(idTag: string): Promise<AuthorizeStatus> {
     const [card] = await this.db
       .select({ status: rfidCards.status })
@@ -108,7 +122,7 @@ export class SessionsService {
       .where(eq(rfidCards.cardIdentifier, idTag))
       .limit(1);
     if (!card) return 'Invalid';
-    return card.status === 'blocked' ? 'Blocked' : 'Accepted';
+    return authorizeStatusFor(card.status);
   }
 
   // ---------------------------------------------------------------------------
@@ -194,6 +208,19 @@ export class SessionsService {
           `idTag lạ "${req.idTag}" trên ${ctx.identity} c${req.connectorId} — payment_mode=unattributed (ADR-0012)`,
         );
         await this.reconciliation.recordUnknownIdTag(tx, created.id, req.idTag);
+      } else if (tag.cardNotAccepted) {
+        // BM02 F22: thẻ có trong sổ nhưng không `active` mà phiên vẫn đã diễn ra (trụ tự cho
+        // sạc, thường là lúc offline). Ghi nhận, không bỏ (BR-P06), nhưng không thu tiền tài
+        // xế: unattributed + một record cho operator xem.
+        this.logger.warn(
+          `thẻ "${req.idTag}" ở trạng thái ${tag.cardNotAccepted} vẫn mở phiên trên ${ctx.identity} c${req.connectorId} — payment_mode=unattributed (BR-P06)`,
+        );
+        await this.reconciliation.recordUnknownIdTag(
+          tx,
+          created.id,
+          req.idTag,
+          tag.cardNotAccepted,
+        );
       }
       if (ctx.replay.replayed) {
         await this.reconciliation.recordReplay(tx, created.id, frame, ctx.replay);
@@ -655,6 +682,11 @@ export class SessionsService {
   /**
    * ADR-0012 / T13 mục 4: card_kind quyết payment_mode. Thẻ lạ → vẫn mở phiên với
    * payment_mode = unattributed (chưa biết ai thu tiền; migration 0001), ghi unknown_id_tag.
+   *
+   * BM02 F22: thẻ có trong sổ nhưng `status` ≠ `active` (blocked / unlinked — STM-8) thì
+   * StartTransaction đã diễn ra vẫn được ghi (BR-P06: không bỏ phiên), nhưng KHÔNG phân loại
+   * theo card_kind: payment_mode = unattributed, driver_id = null (không gán tiền cho tài xế
+   * khi thẻ không Accepted), rfid_card_id giữ lại để operator lần ra thẻ nào.
    */
   private async classifyIdTag(
     chargePointId: number,
@@ -665,12 +697,24 @@ export class SessionsService {
     rfidCardId: number | null;
     driverId: number | null;
     unknown: boolean;
+    /** Trạng thái thẻ khi thẻ có trong sổ nhưng không `active`; null nếu không phải trường hợp đó. */
+    cardNotAccepted: Exclude<RfidCardStatus, 'active'> | null;
   }> {
     const [card] = await this.db
       .select()
       .from(rfidCards)
       .where(eq(rfidCards.cardIdentifier, idTag))
       .limit(1);
+    if (card && card.status !== 'active') {
+      return {
+        origin: card.cardKind === 'free_vend' ? 'free_vend' : 'rfid',
+        paymentMode: 'unattributed',
+        rfidCardId: card.id,
+        driverId: null,
+        unknown: false,
+        cardNotAccepted: card.status,
+      };
+    }
     if (card) {
       const paymentMode =
         card.cardKind === 'online'
@@ -684,6 +728,7 @@ export class SessionsService {
         rfidCardId: card.id,
         driverId: card.driverId,
         unknown: false,
+        cardNotAccepted: null,
       };
     }
     const [cp] = await this.db
@@ -698,6 +743,7 @@ export class SessionsService {
         rfidCardId: null,
         driverId: null,
         unknown: false,
+        cardNotAccepted: null,
       };
     }
     return {
@@ -706,6 +752,7 @@ export class SessionsService {
       rfidCardId: null,
       driverId: null,
       unknown: true,
+      cardNotAccepted: null,
     };
   }
 

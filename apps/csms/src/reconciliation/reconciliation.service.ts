@@ -247,14 +247,26 @@ export class ReconciliationService {
     });
   }
 
-  /** idTag không có trong rfid_cards (ADR-0012 quyết định 5). */
-  async recordUnknownIdTag(ex: DbExecutor, sessionId: number, idTag: string): Promise<number> {
+  /**
+   * idTag không có trong rfid_cards (ADR-0012 quyết định 5), hoặc — BM02 F22 — thẻ có trong sổ
+   * nhưng không `active` (`cardStatus` = blocked / unlinked) mà phiên vẫn đã diễn ra. Enum
+   * record_type chưa có loại riêng cho trường hợp sau; phân biệt bằng `card_status=` trong
+   * resolution (cùng cách 0000 từng dùng tiền tố resolution cho conflict).
+   */
+  async recordUnknownIdTag(
+    ex: DbExecutor,
+    sessionId: number,
+    idTag: string,
+    cardStatus?: string,
+  ): Promise<number> {
     return this.insert(ex, sessionId, {
       recordType: 'unknown_id_tag',
       gapStart: null,
       gapEnd: null,
       energyDifferenceWh: null,
-      resolution: `unknown_id_tag: id_tag=${idTag}`,
+      resolution:
+        `unknown_id_tag: id_tag=${idTag}` +
+        (cardStatus ? ` card_status=${cardStatus} (the co trong so, khong Accepted)` : ''),
     });
   }
 

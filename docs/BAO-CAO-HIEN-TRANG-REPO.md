@@ -1,5 +1,7 @@
 # Báo cáo hiện trạng repo — T63
 
+> **Superseded (26/10/2026, BM02 F36).** Đây là ảnh chụp ngày 23/10/2026, giữ nguyên để làm lịch sử; **không dùng làm hiện trạng** và không chép vào SDD. Từ đó `main` đã có mã NestJS ở `apps/csms` (gateway, sessions, reconciliation, stations, console), migration 0000–0002, hơn 20 bộ test và CI chạy test tích hợp trên Postgres 16.4. Hiện trạng mới: `README.md` (mục Trạng thái), Known Gaps trong `docs/DESIGN-BRIEF-WP2-INPUT.md`, `docs/ITERATION-1-WF03.md`.
+
 **Ngày:** 23/10/2026 · **Lập:** Ngô Văn Minh Trí (WP2, Team Leader) · **Cho:** Ân (WP1) viết Report 4, và cả nhóm trước Review 2 (26/10)
 **Repo:** `github.com/PowerMeApp/powerme` · `main` tại `59abc4a` (16/09/2026)
 **Mở khoá:** T11, T18, T19, T30 và mọi việc phụ thuộc T63. Mục 10 là danh sách thiếu sót cho T55.

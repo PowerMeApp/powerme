@@ -1,51 +1,73 @@
 @startuml ARCH-2_deployment
 !include _arch_style.iuml
-title ARCH-2 Deployment diagram: staging (Review 2 demo environment)\n<size:11>UML 2.5 deployment · one VPS, Docker Compose · production follows the same layout</size>
+title ARCH-2 Deployment diagram: staging (Review 2 demo environment) and the local demo\n<size:11>UML 2.5 deployment · one VPS, Docker Compose (infra/staging) · production follows the same layout</size>\n<size:11>v1.2 · 26/10 (BM02 F32): drawn from infra/staging and apps/csms/demo · staging config is in the repo but NOT yet run on a VPS (none provisioned)</size>
 
 node "Driver phone\n<<device>>\nAndroid / iOS" as phone {
-  artifact "PowerMe Driver App\n(Flutter build)" as appA
+  artifact "PowerMe Driver App\n(Flutter build — target,\nno app route in Caddyfile yet)" as appA
 }
 node "Operator / Admin PC\n<<device>>" as pc {
-  artifact "Web browser" as br
+  artifact "Web browser\n+ SSH client (tunnel)" as br
 }
 node "Developer / CI\n<<execution environment>>\nGitHub Actions" as ci {
-  artifact "CI workflow:\nlint, unit + e2e tests,\nbuild images" as wf
+  artifact "ci.yml: format, lint, typecheck,\nunit + integration tests (Postgres 16.4), build" as wf
+  artifact "deploy-staging.yml: on tag, build\npowerme-csms + powerme-simulator → GHCR;\nSSH deploy only if STAGING_ENABLED" as wfd
 }
 
 node "Staging VPS\n<<device>>\nUbuntu 24.04 LTS, region Singapore" as vps {
   node "Docker Engine + Compose\n<<execution environment>>" as dk {
     node "caddy\n<<container>>" as caddy {
-      artifact "Caddy 2: TLS (Let's Encrypt),\nreverse proxy, static web build" as cad
+      artifact "Caddy 2.11.7: TLS (Let's Encrypt),\nproxies ONLY /ocpp/* and /health;\nother paths: one text line" as cad
     }
     node "csms\n<<container>>" as csms {
-      artifact "apps/csms NestJS (Node.js 24):\nREST + Socket.IO :3000, OCPP WS :3001" as nest
+      artifact "powerme-csms (apps/csms/Dockerfile, Node.js 24):\nOCPP-J :9000 (compose network only),\noperator console :3000 (published on\n127.0.0.1 of the VPS only, no auth yet)" as nest
     }
     node "postgres\n<<container>>" as pg {
       artifact "PostgreSQL 16.4\n+ volume pgdata" as pga
     }
-    node "redis\n<<container>>" as rd {
-      artifact "Redis 7.4\n(Socket.IO adapter, BullMQ)" as rda
-    }
-    node "simulator\n<<container>>" as sim {
-      artifact "SAP e-mobility charging\nstations simulator (OCPP 1.6J)" as sima
+    node "simulator\n<<container>>\nprofile sim" as sim {
+      artifact "powerme-simulator (simulator/d1-hmi):\nD1 pillar RH24D1-00001 (Basic Auth)\n+ HMI :8100 on 127.0.0.1 only" as sima
     }
   }
-  artifact "deploy.sh / rollback.sh\nseed script" as scripts
+  artifact "deploy.sh / rollback.sh / seed.sh\n(backup DB, pull, migrate, seed,\nhealth check on /health)" as scripts
 }
 
-cloud "External services" as ext {
+node "Developer laptop\n<<device>>\nWindows, no Docker (Review 2 demo)" as lap {
+  node "Node.js 24\n<<execution environment>>\nnpm run demo -w @powerme/csms" as nodeenv {
+    artifact "demo/run-demo.mjs\n(demo runner)" as runner
+    artifact "embedded Postgres 17 beta\n127.0.0.1:54330 (.demo-data)" as epg
+    artifact "csms node dist/main.js:\nOCPP :9000, console :3000" as lcsms
+    artifact "simulator/d1-hmi server.mjs:\nHMI :8100" as lhmi
+  }
+  artifact "Web browser" as lbr
+}
+
+cloud "External services (target, not called by code yet)" as ext {
   node "VNPay sandbox" as vnp
   node "E-invoice sandbox" as einv
   node "Map & routing API" as map
   node "FCM" as fcm
 }
 
-phone --> caddy : HTTPS 443 / WSS
-pc --> caddy : HTTPS 443 / WSS
-caddy --> csms : HTTP :3000 /api, /realtime\nWS :3001 /ocpp (internal)
-sim --> caddy : WSS 443 /ocpp/{serialNumber}
+phone ..> caddy : HTTPS 443 (target)
+pc --> caddy : HTTPS 443 /health
+pc --> vps : SSH tunnel → 127.0.0.1:3000 console,\n127.0.0.1:8100 HMI
+caddy --> csms : WS :9000 /ocpp/*\nHTTP :3000 /health only
+sim --> caddy : WSS 443 /ocpp/{serialNumber}\n(or ws://csms:9000/ocpp if no hairpin NAT)
 csms --> pg : TCP 5432 (internal)
-csms --> rd : TCP 6379 (internal)
-csms --> ext : HTTPS
-ci --> vps : SSH: pull image tag,\ncompose up, migrate, seed
+csms ..> ext : (target)
+ci --> vps : SSH: pull image tag,\nbackup, migrate, (seed), compose up
+
+runner --> epg : start, migrate, seed
+runner --> lcsms : spawn
+runner --> lhmi : spawn
+lhmi --> lcsms : ws://localhost:9000/ocpp/RH24D1-00001
+lcsms --> epg : TCP 54330
+lbr --> lcsms : http://localhost:3000 console
+lbr --> lhmi : http://localhost:8100 HMI
+
+note bottom of dk
+  Not in staging: Redis (apps/csms has no Redis client),
+  dashboard (apps/dashboard has no build), REST / Socket.IO
+  routes (added when users + RolesGuard exist).
+end note
 @enduml

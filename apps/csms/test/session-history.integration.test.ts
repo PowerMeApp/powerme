@@ -7,6 +7,10 @@
  * StopTransaction, lỗ hổng thuần (meter_gap) và phân loại payment_mode của idTag đều phải để lại
  * dấu vết đúng. Test gọi thẳng SessionsService (không qua gateway) với InboundContext dựng tay.
  *
+ * BM02 F22/F29 (26/10): thêm Authorize theo rfid_cards.status, StartTransaction với thẻ
+ * blocked/unlinked, thẻ card_kind=free_vend, guard "đã trừ tiền" của #19 (hasSessionDebit),
+ * cờ unexpected_transition được lưu, và nội dung session_pauses (pause_cause, resumed_at).
+ *
  * Cần DATABASE_URL (DB test riêng — test DROP SCHEMA public); thiếu thì cả describe bị skip.
  */
 import { Logger } from '@nestjs/common';
@@ -15,6 +19,7 @@ import type { CsmsConfig } from '../src/config.js';
 import { createDb, Db } from '../src/db/db.module.js';
 import {
   chargePoints,
+  connectorStatusEvents,
   connectors,
   meterValues,
   reconciliationRecords,
@@ -143,6 +148,9 @@ describeDb(
       await db.insert(rfidCards).values([
         { cardIdentifier: 'CARD-ONLINE', cardKind: 'online', status: 'active' },
         { cardIdentifier: 'CARD-WALLET', cardKind: 'wallet', status: 'active' },
+        { cardIdentifier: 'CARD-BLOCKED', cardKind: 'online', status: 'blocked' },
+        { cardIdentifier: 'CARD-UNLINKED', cardKind: 'online', status: 'unlinked' },
+        { cardIdentifier: 'CARD-FREEVEND', cardKind: 'free_vend', status: 'active' },
       ]);
       svc = new SessionsService(
         db,
@@ -200,9 +208,14 @@ describeDb(
       const s = await session(tx);
       expect(s.status).toBe('reconciled');
       expect(s.orphanedAt).toBeNull();
-      expect(
-        await db.select().from(sessionPauses).where(eq(sessionPauses.sessionId, s.id)),
-      ).toHaveLength(1);
+      const pauses = await db.select().from(sessionPauses).where(eq(sessionPauses.sessionId, s.id));
+      expect(pauses).toHaveLength(1);
+      // #5 mở pause (SuspendedEV → ev), #6 đóng đúng pause đó lúc Charging tới
+      expect(pauses[0]).toMatchObject({
+        pauseCause: 'ev',
+        pausedAt: T('00:05'),
+        resumedAt: T('00:08'),
+      });
     });
 
     it('orphaned → reconciled thẳng (#16); orphaned_at giữ lần ĐẦU dù orphaned lần hai', async () => {
@@ -310,6 +323,120 @@ describeDb(
       for (const tx of [online, wallet, free]) {
         expect((await records(tx)).map((r) => r.recordType)).not.toContain('unknown_id_tag');
       }
+    });
+
+    it('Authorize theo rfid_cards.status (STM-8, BR-P06): active → Accepted, blocked → Blocked, unlinked → Invalid, thẻ lạ → Invalid', async () => {
+      expect(await svc.authorize('CARD-ONLINE')).toBe('Accepted');
+      expect(await svc.authorize('CARD-WALLET')).toBe('Accepted');
+      expect(await svc.authorize('CARD-FREEVEND')).toBe('Accepted');
+      expect(await svc.authorize('CARD-BLOCKED')).toBe('Blocked');
+      expect(await svc.authorize('CARD-UNLINKED')).toBe('Invalid');
+      expect(await svc.authorize('KHONG-CO-TRONG-SO')).toBe('Invalid');
+    });
+
+    it('StartTransaction với thẻ blocked / unlinked vẫn được ghi (BR-P06) nhưng unattributed, không gán tài xế, có record card_status', async () => {
+      const blocked = await start(1, 'CARD-BLOCKED', 2000, T('09:00'));
+      const unlinked = await start(1, 'CARD-UNLINKED', 2000, T('09:01'));
+      const [blockedCard] = await db
+        .select()
+        .from(rfidCards)
+        .where(eq(rfidCards.cardIdentifier, 'CARD-BLOCKED'));
+
+      expect(await session(blocked)).toMatchObject({
+        status: 'active',
+        paymentMode: 'unattributed',
+        origin: 'rfid',
+        driverId: null,
+        rfidCardId: blockedCard?.id,
+      });
+      expect(await session(unlinked)).toMatchObject({
+        status: 'active',
+        paymentMode: 'unattributed',
+        driverId: null,
+      });
+      const recB = await records(blocked);
+      expect(recB.map((r) => r.recordType)).toEqual(['unknown_id_tag']);
+      expect(recB[0]?.resolution).toMatch(
+        /^unknown_id_tag: id_tag=CARD-BLOCKED card_status=blocked/,
+      );
+      const recU = await records(unlinked);
+      expect(recU[0]?.resolution).toMatch(/card_status=unlinked/);
+      expect(await chain(blocked)).toEqual(['● -START_TRANSACTION-> active']);
+    });
+
+    it('thẻ card_kind = free_vend trong sổ (không phải free_vend_tag của trụ) → origin free_vend, payment_mode free', async () => {
+      const tx = await start(1, 'CARD-FREEVEND', 3000, T('09:10'));
+      expect(await session(tx)).toMatchObject({ origin: 'free_vend', paymentMode: 'free' });
+      expect(await records(tx)).toHaveLength(0);
+    });
+
+    it('#19 guard: đã có session_debit thì mẫu muộn đổi kết luận KHÔNG kéo reconciled → review, chỉ ghi late_sample', async () => {
+      const tx = await start(1, 'CARD-ONLINE', 0, T('11:00'));
+      await meter(tx, 50, T('11:05'));
+      await stop(tx, 100, T('11:10'));
+      const s = await session(tx);
+      expect(s.status).toBe('reconciled');
+
+      // Dựng tay một dòng trừ tiền (chưa có module billing ghi bảng này).
+      const { rows: users } = await db.$client.query<{ id: string }>(
+        `INSERT INTO users (email, full_name, role) VALUES ('debit@test.local', 'Debit Test', 'driver') RETURNING id`,
+      );
+      const userId = users[0]?.id;
+      await db.$client.query(
+        `INSERT INTO drivers (user_id, consent_version, consent_given_at) VALUES ($1, 'v1', now())`,
+        [userId],
+      );
+      const { rows: accounts } = await db.$client.query<{ id: string }>(
+        `INSERT INTO credit_accounts (driver_id) VALUES ($1) RETURNING id`,
+        [userId],
+      );
+      await db.$client.query(
+        `INSERT INTO credit_transactions (credit_account_id, entry_no, transaction_type, amount_vnd, balance_after_vnd, session_id)
+         VALUES ($1, 1, 'session_debit', -1000, -1000, $2)`,
+        [accounts[0]?.id, s.id],
+      );
+
+      await meter(tx, 500, T('11:08'), T('12:00'), true);
+
+      expect((await session(tx)).status).toBe('reconciled');
+      expect(await chain(tx)).toEqual([
+        '● -START_TRANSACTION-> active',
+        'active -STOP_TRANSACTION-> closed',
+        'closed -RECONCILE_OK-> reconciled',
+      ]);
+      const recs = await records(tx);
+      expect(recs.map((r) => r.recordType)).toEqual(['replay', 'late_sample']);
+      expect(recs[1]?.resolution).toMatch(/^conflict \(late_sample\):/);
+    });
+
+    it('StatusNotification chuyển ngoài bảng OCPP (Finishing → Charging) → connector_status_events.unexpected_transition = true, vẫn ghi', async () => {
+      // súng 2 đang Charging từ test tạm dừng; Charging → Finishing là hợp lệ
+      const notify = (status: 'Finishing' | 'Charging', at: Date) =>
+        svc.onStatusNotification(
+          { connectorId: 2, errorCode: 'NoError', status, timestamp: at.toISOString() },
+          ctx(at),
+        );
+      await notify('Finishing', T('13:00'));
+      await notify('Charging', T('13:05'));
+
+      const events = await db
+        .select({
+          status: connectorStatusEvents.status,
+          unexpected: connectorStatusEvents.unexpectedTransition,
+          receivedAt: connectorStatusEvents.receivedAt,
+        })
+        .from(connectorStatusEvents)
+        .where(eq(connectorStatusEvents.connectorNo, 2))
+        .orderBy(asc(connectorStatusEvents.id));
+      expect(events.slice(-2)).toEqual([
+        { status: 'Finishing', unexpected: false, receivedAt: T('13:00') },
+        { status: 'Charging', unexpected: true, receivedAt: T('13:05') },
+      ]);
+      const [c2] = await db
+        .select({ status: connectors.status })
+        .from(connectors)
+        .where(eq(connectors.connectorNo, 2));
+      expect(c2?.status).toBe('Charging'); // phản chiếu trụ, không từ chối (T13 2.1)
     });
 
     it('UPDATE sessions.status và dòng lịch sử cùng transaction: lịch sử không ghi được thì phiên không đổi trạng thái', async () => {
