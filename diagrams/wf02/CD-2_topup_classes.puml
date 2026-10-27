@@ -6,17 +6,22 @@ skinparam ranksep 50
 skinparam LegendBackgroundColor #FFFFFF
 skinparam LegendBorderColor #9AA5B1
 skinparam LegendFontSize 10
-skinparam class<<proposed>> {
-  BorderStyle dashed
+skinparam class<<ref>> {
+  BackgroundColor #F4F4F4
+  BorderColor #999999
+  FontColor #555555
 }
 hide empty members
-title CD-2 (WF-02) Class diagram: top up Charging Credit (billing module, WP5)\n<size:11>Status values = STM-4 TopUp / STM-5 CreditAccount / STM-7 EInvoice · entities = LERD-1 v0.4 · dashed attribute block = proposed, not in the ERD yet</size>
-footer PowerMe · WF-02 owner Lê Bảo Khang (WP5) · v0.1 · 24/10/2026 · class/method names to align with the CSMS repo (apps/csms/billing)
+title CD-2 (WF-02) Class diagram: Charging Credit top-up, refund, closure, e-invoice (billing module, WP5)\n<size:11>Entities and attributes = LERD-1 v0.4 · status values = STM-4 TopUp / STM-5 CreditAccount / STM-7 EInvoice · loyalty type values = DB enum (decision 26/10) · grey = entity owned by another WF</size>
+footer PowerMe · WF-02 owner Lê Bảo Khang (WP5) · v0.2 · 27/10/2026 · based on LERD-1 v0.4 (25/10) · class/method names to align with apps/csms/billing when coded (migration T73)
 
 together {
 package "users" {
   class RolesGuard <<guard>> {
     + canActivate(ctx): boolean
+  }
+  class UserAccountService <<service>> {
+    + disableLogin(userId): void
   }
 }
 
@@ -29,23 +34,35 @@ package "realtime" as RTP {
 
 package "billing (WP5)" {
   class TopUpController <<controller>> {
+    POST/GET /api/v1/billing/top-ups
     + create(dto, idempotencyKey, driver): TopUpCreatedDto
     + get(topUpId, driver): TopUpDto
   }
   class VnpayIpnController <<controller>> {
+    GET /api/v1/billing/vnpay/ipn
     + handleIpn(query): IpnAck
   }
-  class AdminTopUpController <<controller>> {
-    + refund(topUpId, admin): TopUpDto
+  class AccountClosureController <<controller>> {
+    POST /api/v1/account/close
+    + requestClosure(driver): ClosureDto
+  }
+  class AdminBillingController <<controller>> {
+    /api/admin/billing/… (UC-ADM-08)
+    + listExceptions(admin): BillingExceptionsDto
+    + refundTopUp(topUpId, admin): TopUpDto
+    + refundLatePayment(topUpId, admin): TopUpDto
+    + executeClosureRefund(accountId, admin): ClosureDto
+    + retryInvoice(invoiceId, admin): EInvoiceDto
   }
   class TopUpService <<service>> {
     + create(driverId, dto, idempotencyKey): TopUpCreated
     + applyPaymentResult(ipn: VnpayIpn): IpnAck
     + onPendingTimeout(topUpId): void
     + refund(topUpId, adminId): TopUp
-    - assertLimits(account, amount)
-    - assertNoOpenTopUp(accountId)
-    - credit(topUp, gatewayTxnNo)
+    + refundLatePayment(topUpId, adminId): TopUp
+    - assertLimits(account, amountVnd)
+    - assertNoOpenTopUp(creditAccountId)
+    - credit(topUp, gatewayTransactionNo)
     - recordLatePayment(topUp, ipn)
   }
   class TopUpStateMachine <<domain>> {
@@ -59,9 +76,16 @@ package "billing (WP5)" {
     LATE_PAYMENT_OK
     REFUND
   }
+  class AccountClosureService <<service>> {
+    + requestClosure(driverId): CreditAccount
+    + executeClosureRefund(accountId, adminId): CreditAccount
+    - assertCanClose(account)
+    - allocateNewestFirst(account, balanceVnd): RefundPart[]
+  }
   class CreditLedgerService <<service>> {
     + post(accountId, type, amountVnd, ref): CreditTransaction
-    + getBalance(accountId): number
+    + getBalance(accountId): bigint
+    - nextEntryNo(accountId): int
     - updateAccountStatus(account)
   }
   class LoyaltyService <<service>> {
@@ -72,7 +96,7 @@ package "billing (WP5)" {
   class EInvoiceService <<service>> {
     + requestForTopUp(topUp): EInvoice
     + issue(invoiceId): void
-    + retryFailed(): void
+    + retryByAdmin(invoiceId, adminId): EInvoice
     + adjustForRefund(topUp, amountVnd): InvoiceAdjustment
   }
   class TopUpTimeoutProcessor <<job>> {
@@ -80,15 +104,15 @@ package "billing (WP5)" {
     + process(job: {topUpId})
   }
   class EInvoiceJobProcessor <<job>> {
-    BullMQ: issue + retry (5 min, 30 min, 2 h)
-    + process(job: {invoiceId})
+    BullMQ: issue, retry (5 min, 30 min, 2 h), adjust
+    + process(job: {invoiceId | adjustmentId})
   }
   class VnpayAdapter <<adapter>> {
     HTTPS → VNPay sandbox
-    + buildPaymentUrl(topUp, expireAt): string
+    + buildPaymentUrl(topUp): string
     + verifySignature(params): boolean
-    + queryTransaction(txnRef): GatewayStatus
-    + refund(topUp, amountVnd): GatewayRefund
+    + queryTransaction(gatewayReference): GatewayStatus
+    + refund(gatewayReference, gatewayTransactionNo, amountVnd, full): GatewayRefund
   }
   class EInvoiceProviderAdapter <<adapter>> {
     HTTPS → e-invoice sandbox / stub
@@ -97,74 +121,87 @@ package "billing (WP5)" {
   }
 }
 
-
-
 package "entities" {
   class "CreditAccount\n<size:9>credit_accounts</size>" as CreditAccount <<entity>> {
     + id: bigint
-    + driverId: bigint {unique}
-    + status: AccountStatus
-    + balanceVnd: bigint  «snapshot = Σ ledger»
+    + driverId: bigint {BK, unique}
+    + accountStatus: AccountStatus
+    + balanceVnd: bigint  «/derived = Σ ledger, snapshot»
+    + closedAt: Date [0..1]
+    + closureRefundedAt: Date [0..1]
   }
   class "CreditTransaction\n<size:9>credit_transactions (append-only)</size>" as CreditTransaction <<entity>> {
     + id: bigint
     + creditAccountId: bigint
-    + entryNo: int
-    + type: CreditTxnType
+    + entryNo: int  «BK = creditAccountId + entryNo»
+    + transactionType: CreditTxnType
     + amountVnd: bigint
-    + balanceAfterVnd: bigint
-    + topUpId: bigint [0..1]
+    + balanceAfterVnd: bigint  «/derived»
     + sessionId: bigint [0..1]
+    + topUpId: bigint [0..1]
     + createdAt: Date
   }
   class "TopUp\n<size:9>top_ups</size>" as TopUp <<entity>> {
     + id: bigint
+    + gatewayReference: string {BK}  «vnp_TxnRef, NOT NULL»
     + creditAccountId: bigint
-    + gatewayRef: string {unique}  «vnp_TxnRef»
-    + idempotencyKey: string {unique}
     + amountVnd: bigint
     + pointsRedeemed: int
     + pointsDiscountVnd: bigint
-    + amountPaidVnd: bigint  «= amount − discount»
-    + status: TopUpStatus
-    + createdAt, expiresAt, completedAt: Date
-    -- proposed (option A, ERD T10) --
-    + gatewayTxnNo: string [0..1]  «vnp_TransactionNo»
+    + amountPaidVnd: bigint  «/derived = amount − discount»
+    + topUpStatus: TopUpStatus
+    + idempotencyKey: string {unique}
+    + gatewayTransactionNo: string [0..1]  «vnp_TransactionNo»
+    + createdAt, expiresAt: Date
+    + completedAt: Date [0..1]
+    + refundedAt: Date [0..1]
+    + refundedBy: bigint [0..1]  «FK User, role Admin»
     + lateGatewayRef: string [0..1] {unique}
     + latePaidAt, lateRefundedAt: Date [0..1]
     + lateAmountVnd: bigint [0..1]
   }
   class "EInvoice\n<size:9>e_invoices</size>" as EInvoice <<entity>> {
     + id: bigint
+    + invoiceNo: string [0..1]  «set when issued»
     + topUpId: bigint {unique}
-    + invoiceNo: string [0..1]
-    + status: InvoiceStatus
+    + invoiceStatus: InvoiceStatus
     + amountVnd: bigint  «= amount collected»
     + vatAmountVnd: bigint
-    + attemptCount: int
     + issuedAt: Date [0..1]
+    + attemptCount: int
+    + lastErrorKind: InvoiceErrorKind [0..1]
+    + lastErrorMessage: string [0..1]
+    + lastAttemptAt: Date [0..1]
   }
   class "InvoiceAdjustment\n<size:9>invoice_adjustments</size>" as InvoiceAdjustment <<entity>> {
     + id: bigint
     + eInvoiceId: bigint
-    + adjustmentNo: int
+    + adjustmentNo: int  «BK = eInvoiceId + adjustmentNo»
     + reason: string
-    + amountVnd: bigint  «= amount refunded»
+    + amountVnd: bigint  «= amount refunded to source»
     + issuedAt: Date
   }
   class "LoyaltyAccount\n<size:9>loyalty_accounts</size>" as LoyaltyAccount <<entity>> {
     + id: bigint
-    + driverId: bigint {unique}
-    + pointsBalance: int
+    + driverId: bigint {BK, unique}
+    + pointsBalance: int  «/derived»
   }
   class "LoyaltyTransaction\n<size:9>loyalty_transactions</size>" as LoyaltyTransaction <<entity>> {
     + id: bigint
     + loyaltyAccountId: bigint
-    + type: LoyaltyTxnType
+    + entryNo: int  «BK = loyaltyAccountId + entryNo»
+    + transactionType: LoyaltyTxnType
     + points: int
     + expiresAt: Date
-    + topUpId: bigint [0..1]
     + sessionId: bigint [0..1]
+    + topUpId: bigint [0..1]
+    + createdAt: Date
+  }
+  class "Driver\n<size:9>users / drivers (WF-05)</size>" as Driver <<ref>> {
+    + userId: bigint
+  }
+  class "ChargingSession\n<size:9>charging_sessions (WF-01/03)</size>" as ChargingSession <<ref>> {
+    + sessionId: bigint
   }
   enum TopUpStatus <<enumeration>> {
     pending
@@ -184,6 +221,10 @@ package "entities" {
     failed
     needs_review
   }
+  enum InvoiceErrorKind <<enumeration>> {
+    transient
+    data
+  }
   enum CreditTxnType <<enumeration>> {
     top_up
     session_debit
@@ -191,18 +232,23 @@ package "entities" {
     adjustment
   }
   enum LoyaltyTxnType <<enumeration>> {
-    earned
-    redeemed
-    restored
-    expired
+    earn
+    redeem
+    restore
+    expire
+    adjust
   }
 }
 
 TopUpController ..> RolesGuard : Driver
-AdminTopUpController ..> RolesGuard : Admin
+AccountClosureController ..> RolesGuard : Driver
+AdminBillingController ..> RolesGuard : Admin
 TopUpController --> TopUpService
 VnpayIpnController --> TopUpService
-AdminTopUpController --> TopUpService
+AdminBillingController --> TopUpService
+AdminBillingController --> AccountClosureService
+AdminBillingController --> EInvoiceService
+AccountClosureController --> AccountClosureService
 TopUpTimeoutProcessor --> TopUpService : onPendingTimeout
 TopUpService --> TopUpStateMachine
 TopUpStateMachine ..> TopUpEvent
@@ -210,20 +256,29 @@ TopUpService --> CreditLedgerService
 TopUpService --> LoyaltyService
 TopUpService --> EInvoiceService
 TopUpService --> VnpayAdapter
+AccountClosureService --> CreditLedgerService
+AccountClosureService --> EInvoiceService
+AccountClosureService --> VnpayAdapter
+AccountClosureService --> UserAccountService : disable login
 TopUpService ..> RealtimeGateway : credit.updated,\ntopup.status
 EInvoiceJobProcessor --> EInvoiceService
 EInvoiceService --> EInvoiceProviderAdapter
 
+Driver "1" -- "1" CreditAccount : has
+Driver "1" -- "1" LoyaltyAccount : has
 CreditAccount "1" *-- "0..*" CreditTransaction : logs
 CreditAccount "1" -- "0..*" TopUp : is topped up by
-TopUp "1" -- "0..1" CreditTransaction : is credited by\n(type top_up)
+TopUp "0..1" -- "0..*" CreditTransaction : is credited / refunded by\n{≤ 1 per transactionType}
+ChargingSession "0..1" -- "0..1" CreditTransaction : is settled by\n(session_debit)
 TopUp "1" -- "0..1" EInvoice : is invoiced by
 EInvoice "1" *-- "0..*" InvoiceAdjustment : is corrected by
 LoyaltyAccount "1" *-- "0..*" LoyaltyTransaction : logs
-TopUp "0..1" -- "0..*" LoyaltyTransaction : redeems
+TopUp "0..1" -- "0..*" LoyaltyTransaction : redeems / restores
+ChargingSession "0..1" -- "0..*" LoyaltyTransaction : earns
 TopUp --> TopUpStatus
 CreditAccount --> AccountStatus
 EInvoice --> InvoiceStatus
+EInvoice --> InvoiceErrorKind
 CreditTransaction --> CreditTxnType
 LoyaltyTransaction --> LoyaltyTxnType
 TopUpEvent -[hidden]down- CreditAccount
@@ -232,12 +287,15 @@ EInvoiceProviderAdapter -[hidden]down- TopUp
 legend bottom right
   <b>Design rules</b>
   • <b>TopUpStateMachine</b> is the single place for STM-4 transitions; an invalid one throws InvalidTransition (TC-STM4-08/10/14).
-     Guard REFUND: balance ≥ amountVnd, no partial refund (STM-4 #7, TC-STM4-12/13).
-  • <b>CreditLedgerService.post</b> runs in the caller's DB transaction: INSERT ledger row, UPDATE balance snapshot,
-     then STM-5 (in_shortfall → active when balance ≥ 0). Invariant: balance = Σ amountVnd (Risk R3, D6).
-  • Writers: TopUpService → top_ups · CreditLedgerService → credit_accounts, credit_transactions (INSERT only)
-     · LoyaltyService → loyalty_* · EInvoiceService → e_invoices, invoice_adjustments.
-  • Uniques that enforce "once": top_ups.gateway_ref, top_ups.idempotency_key, top_ups.late_gateway_ref,
-     credit_transactions (top_up_id, type), e_invoices.top_up_id (BR-P13, BR-P14).
+     Guard REFUND: balance ≥ amountVnd, full refund only (STM-4 #7, TC-STM4-12/13). Guard create: one open top-up per account (TC-STM4-18).
+  • <b>CreditLedgerService.post</b> runs in the caller's DB transaction: next entryNo, INSERT ledger row with balanceAfterVnd,
+     UPDATE balance snapshot, then STM-5 (in_shortfall → active when balance ≥ 0). Invariant: balance = Σ amountVnd (D6).
+  • <b>AccountClosureService</b>: STM-5 #4 active → closed only if balance ≥ 0, no open top-up, no running session (BR-P21);
+     refund entry takes the balance to 0; the Admin later refunds to the newest credited top-ups first (UC-ACC-02, UC-ADM-08).
+  • Writers: TopUpService → top_ups · CreditLedgerService → credit_accounts.balance, credit_transactions (INSERT only)
+     · AccountClosureService → credit_accounts.status / closed_at / closure_refunded_at · LoyaltyService → loyalty_*
+     · EInvoiceService → e_invoices, invoice_adjustments.
+  • Uniques that enforce "once": top_ups.gateway_reference, top_ups.idempotency_key, top_ups.late_gateway_ref,
+     credit_transactions (top_up_id, transaction_type), e_invoices.top_up_id (BR-P13, BR-P04).
 endlegend
 @enduml
