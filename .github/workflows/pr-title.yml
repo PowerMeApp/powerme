@@ -16,7 +16,7 @@ jobs:
     steps:
       # Tiêu đề PR trở thành commit message trên main (squash merge),
       # nên nó phải đúng quy ước ngay từ đầu — xem CONTRIBUTING.md mục 3.
-      - uses: amannn/action-semantic-pull-request@v5
+      - uses: amannn/action-semantic-pull-request@v6
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
