@@ -52,11 +52,12 @@ describeDb('migration 0001 — nâng cấp DB đã có 0000 và ràng buộc m�
     await db?.$client.end();
   });
 
-  it('thứ tự migration theo tên: 0000_init, 0001_quyet-dinh-be-11, 0002 (T61) rồi 0007 (FE-04)', () => {
+  it('thứ tự migration theo tên: 0000_init, 0001_quyet-dinh-be-11, 0002 (T61), 0003 (T73) rồi 0007 (FE-04)', () => {
     expect(listMigrations()).toEqual([
       '0000_init',
       '0001_quyet-dinh-be-11',
       '0002_tach-ket-noi-khoi-lifecycle',
+      '0003_billing-wf02',
       '0007_fe04-fault-events-wf04',
     ]);
   });
@@ -111,11 +112,12 @@ describeDb('migration 0001 — nâng cấp DB đã có 0000 và ràng buộc m�
       );
     });
 
-    it('migrate() ghi nhận 0000 đã áp (không chạy lại) và áp 0001, 0002, 0007 theo thứ tự', async () => {
+    it('migrate() ghi nhận 0000 đã áp (không chạy lại) và áp 0001, 0002, 0003, 0007 theo thứ tự', async () => {
       const applied = await migrate(db.$client);
       expect(applied).toEqual([
         '0001_quyet-dinh-be-11',
         '0002_tach-ket-noi-khoi-lifecycle',
+        '0003_billing-wf02',
         '0007_fe04-fault-events-wf04',
       ]);
       const names = (await q('SELECT name FROM _migrations ORDER BY name')).map((r) => r['name']);
@@ -123,6 +125,7 @@ describeDb('migration 0001 — nâng cấp DB đã có 0000 và ràng buộc m�
         '0000_init',
         '0001_quyet-dinh-be-11',
         '0002_tach-ket-noi-khoi-lifecycle',
+        '0003_billing-wf02',
         '0007_fe04-fault-events-wf04',
       ]);
     });

@@ -2,7 +2,7 @@
  * Enum Postgres (`CREATE TYPE ... AS ENUM`) dùng chung cho toàn schema.
  *
  * Giá trị PHẢI khớp chính xác với state machine T12/T13 và migration
- * `drizzle/0000_init.sql` + `drizzle/0001_quyet-dinh-be-11.sql`. Thêm giá trị mới = thêm
+ * `drizzle/0000_init.sql` … `drizzle/0003_billing-wf02.sql`. Thêm giá trị mới = thêm
  * migration `ALTER TYPE ... ADD VALUE` (giá trị mới không dùng được trong cùng transaction).
  */
 import { pgEnum } from 'drizzle-orm/pg-core';
@@ -120,12 +120,19 @@ export const eInvoiceStatusEnum = pgEnum('e_invoice_status', [
   'failed',
   'needs_review',
 ]);
+/**
+ * `restore` thêm ở migration 0003 (BR-P37: trả điểm đã dùng cho top-up bị hoàn). `adjust` lo bút
+ * toán bù cho phiên bị sửa/hoàn. Quyết định 26/10/2026: KHÔNG dùng tên earned/redeemed/… của ERD.
+ */
 export const loyaltyTransactionTypeEnum = pgEnum('loyalty_transaction_type', [
   'earn',
   'redeem',
   'expire',
   'adjust',
+  'restore',
 ]);
+/** Loại lỗi lần gọi nhà cung cấp HĐĐT gần nhất (BR-P44, migration 0003). */
+export const eInvoiceErrorKindEnum = pgEnum('e_invoice_error_kind', ['transient', 'data']);
 
 // ---- ops ----
 export const faultSourceEnum = pgEnum('fault_source', ['ocpp', 'driver_report', 'operator']);

@@ -4,9 +4,10 @@
 **Task:** T11 / BE-06 — thiết kế CSDL mức vật lý
 **Người chịu trách nhiệm:** Ngô Văn Minh Trí (WP2)
 **Nguồn:** mô hình logic T10 (Ân, 20/10/2026) · state machine T12/T13 · ADR-0005, 0007, 0008, 0009, 0010, 0011, 0012 · `docs/PACKAGE-DIAGRAM-CSMS.md` (bảng → module chủ) · `apps/csms/lab/README.md` (định dạng trace)
-**Sản phẩm:** `apps/csms/src/db/schema/*.ts` (Drizzle) · `apps/csms/drizzle/0000_init.sql` + `apps/csms/drizzle/0001_quyet-dinh-be-11.sql` + `apps/csms/drizzle/0002_tach-ket-noi-khoi-lifecycle.sql` (migration viết tay) · tài liệu này
+**Sản phẩm:** `apps/csms/src/db/schema/*.ts` (Drizzle) · `apps/csms/drizzle/0000_init.sql` + `apps/csms/drizzle/0001_quyet-dinh-be-11.sql` + `apps/csms/drizzle/0002_tach-ket-noi-khoi-lifecycle.sql` + `apps/csms/drizzle/0003_billing-wf02.sql` (migration viết tay) · tài liệu này
 **Cập nhật 25/10/2026 (BE-11):** áp migration 0001 — `payment_mode` có `unattributed`, đổi `pillar_timestamp` → `cp_timestamp`, thêm bảng `remote_commands` và `session_status_history`, cột `orphaned_at` / `replayed` / `epoch`, `reconciliation_record_type` có `conflict` + `late_sample`. Nhật ký từng thay đổi và cách kiểm: `docs/NHAT-KY-MIGRATION-0001.md`.
 **Cập nhật 26/10/2026 (T61, ADR-0016 D-C):** áp migration 0002 — `charge_points` có thêm `is_online boolean not null default false` và `online_changed_at timestamptz null`; `lifecycle` chỉ còn nghĩa hành chính, giá trị enum `offline` thành **legacy** (không còn được ghi; hàng cũ được backfill sang `in_service` + `is_online=false`). `last_message_at` đóng vai `last_seen_at` của ADR-0016 nên **không thêm cột trùng**.
+**Cập nhật 27/10/2026 (T73, LERD-1 v0.4):** áp migration 0003 — thuộc tính billing WF-02: `top_ups` thêm `gateway_transaction_no`, `points_redeemed`, `expires_at` (NOT NULL, hàng cũ backfill `created_at + 15 phút`), `refunded_at`, `refunded_by`, `late_gateway_ref` (UNIQUE), `late_paid_at`, `late_amount_vnd`, `late_refunded_at`; `top_ups.gateway_reference` **đổi nghĩa** thành `vnp_TxnRef` (do CSMS sinh) và thành NOT NULL; `e_invoices` thêm `last_error_kind` (enum mới `e_invoice_error_kind`), `last_error_message`, `last_attempt_at`; `credit_accounts` thêm `closed_at`, `closure_refunded_at`; UNIQUE sổ cái theo top-up đổi thành `(top_up_id, transaction_type)`; `loyalty_transaction_type` thêm `restore`; 12 CHECK mới và UNIQUE partial `gateway_transaction_no` (trong đó 4 ràng buộc Trí duyệt bổ sung 27/10/2026 trên PR #60). Không làm ở DB: cửa sổ trả muộn 1 giờ (service kiểm, tham số cấu hình) và `refund_status` (Planned). Mỗi ràng buộc kèm use case: mục 4 và `docs/NHAT-KY-MIGRATION-0003.md` mục 2.
 
 > Nguồn sự thật về cấu trúc DB là **migration SQL viết tay** (ADR-0008). Schema Drizzle phải khớp từng cột với SQL — mục 8 ghi cách đối chiếu đã chạy.
 
@@ -27,9 +28,9 @@
 | Cột dẫn xuất (`/x` trong ERD) | cột thường, **cập nhật cùng transaction với dòng ledger** | T10 §5.6 |
 | Partition | `meter_values`, `ocpp_message_log` — `PARTITION BY RANGE (received_at)` theo tháng, tạo sẵn 2026-10 → 2027-01 + `DEFAULT` | ADR-0007 |
 
-Số liệu sau migration 0002 (**đếm bằng truy vấn trên Postgres thật đã áp 0000 + 0001 + 0002**, không đếm trên văn bản): **34 bảng** (+10 partition con của `meter_values`, `ocpp_message_log`), **29 enum** (117 giá trị), **100 index** (kể cả index do PK/UNIQUE tạo, trong đó 9 partial), **27 CHECK**, 53 FK, **297 cột**, 5 sequence cho số nghiệp vụ, 2 trigger append-only (`ocpp_message_log`, `session_status_history`).
+Số liệu sau migration 0003 (**đếm bằng truy vấn trên Postgres thật đã áp 0000 → 0003**, không đếm trên văn bản): **34 bảng** (+10 partition con của `meter_values`, `ocpp_message_log`), **30 enum** (120 giá trị), **102 index** (kể cả index do PK/UNIQUE tạo, trong đó 10 partial), **39 CHECK**, **54 FK**, **311 cột**, 5 sequence cho số nghiệp vụ, 2 trigger append-only (`ocpp_message_log`, `session_status_history`).
 
-Cách đếm (bỏ partition con và bảng theo dõi `_migrations`): bảng = `pg_class` có `relkind IN ('r','p')` và `NOT relispartition`; index = `pg_indexes`; partial index = `pg_index.indpred IS NOT NULL`; **CHECK = `pg_constraint` với `contype = 'c'`** (không tính NOT NULL — Postgres 17 không lưu NOT NULL ở đây, Postgres 18 lưu với `contype = 'n'` nên phải loại); enum = `count(DISTINCT enumtypid)` của `pg_enum`; sequence nghiệp vụ = `relkind = 'S'` không phải sequence của cột identity. Số cũ sau 0000 (32 / 28 / 94 / 7 / 24) tái hiện đúng bằng cùng truy vấn; 0001 cộng 2 bảng, 1 enum, 6 index (2 partial), 3 CHECK, 3 FK, 25 cột, 1 trigger; **0002 chỉ cộng 2 cột** (`is_online`, `online_changed_at`: 295 → 297; các số còn lại không đổi — đếm lại bằng đúng truy vấn ở cả trạng thái 0001 và 0002).
+Cách đếm (bỏ partition con và bảng theo dõi `_migrations`): bảng = `pg_class` có `relkind IN ('r','p')` và `NOT relispartition`; index = `pg_indexes`; partial index = `pg_index.indpred IS NOT NULL`; **CHECK = `pg_constraint` với `contype = 'c'`** (không tính NOT NULL — Postgres 17 không lưu NOT NULL ở đây, Postgres 18 lưu với `contype = 'n'` nên phải loại); enum = `count(DISTINCT enumtypid)` của `pg_enum`; sequence nghiệp vụ = `relkind = 'S'` không phải sequence của cột identity. Số cũ sau 0000 (32 / 28 / 94 / 7 / 24) tái hiện đúng bằng cùng truy vấn; 0001 cộng 2 bảng, 1 enum, 6 index (2 partial), 3 CHECK, 3 FK, 25 cột, 1 trigger; **0002 chỉ cộng 2 cột** (`is_online`, `online_changed_at`: 295 → 297; các số còn lại không đổi — đếm lại bằng đúng truy vấn ở cả trạng thái 0001 và 0002). **0003** cộng 1 enum (`e_invoice_error_kind`) và 3 giá trị enum (`restore`, `transient`, `data`: 117 → 120), 14 cột (297 → 311), 12 CHECK (27 → 39), 1 FK (`top_ups.refunded_by`), 2 index (UNIQUE `late_gateway_ref`, UNIQUE partial `gateway_transaction_no`: 9 → 10 partial; index partial ledger được thay, không cộng) — đếm bằng cùng truy vấn ở trạng thái 0002 (tái hiện 34/29/117/100/9/27/53/297) và 0003.
 
 ---
 
@@ -187,20 +188,20 @@ Quy ước ghi từ 0001 (`ReconciliationService.recordVerdict`): đối soát d
 
 ### 3.6. Module `billing` (WP5)
 
-**`credit_accounts`** — ví tín dụng, **đúng một mỗi tài xế** (UNIQUE `driver_id`). `status` (`active` · `in_shortfall` · `closed`), `balance_vnd` (dẫn xuất).
+**`credit_accounts`** — ví tín dụng, **đúng một mỗi tài xế** (UNIQUE `driver_id`). `status` (`active` · `in_shortfall` · `closed`), `balance_vnd` (dẫn xuất), (0003) `closed_at` (CHECK: có giá trị ⇔ `status = 'closed'`), `closure_refunded_at` (lúc Admin hoàn xong số dư khi đóng ví, BR-P21; CHECK: chỉ khi đã có `closed_at` và không trước nó).
 
-**`top_ups`** — nạp ví qua cổng. `gateway_reference` (BK, null tới khi cổng trả về — UNIQUE khi có), `credit_account_id`, `amount_vnd`, `points_discount_vnd`, `amount_paid_vnd` (dẫn xuất, CHECK `= amount_vnd - points_discount_vnd`), `status` (`pending` · `credited` · `failed` · `expired` · `refunded`), `idempotency_key` (UNIQUE — app retry không tạo trùng), `completed_at`.
+**`top_ups`** — nạp ví qua cổng. `gateway_reference` (BK, UNIQUE; **từ 0003 là `vnp_TxnRef` do CSMS sinh lúc tạo top-up, NOT NULL** — trước 0003 mô tả là `vnp_TransactionNo`, nullable), `credit_account_id`, `amount_vnd`, `points_redeemed` (0003, `integer ≥ 0`, mặc định 0), `points_discount_vnd` (CHECK 0003: `points_redeemed = 0` ⇔ `points_discount_vnd = 0`, tỉ lệ không ghi cứng), `amount_paid_vnd` (dẫn xuất, CHECK `= amount_vnd - points_discount_vnd`), `status` (`pending` · `credited` · `failed` · `expired` · `refunded`), `idempotency_key` (UNIQUE — app retry không tạo trùng), `gateway_transaction_no` (0003, `vnp_TransactionNo`, null tới khi cổng báo đã trả; UNIQUE partial khi có), `expires_at` (0003, NOT NULL không DEFAULT — TopUpService đặt tạo + 15 phút theo BR-P13; CHECK `> created_at`), `completed_at`, `refunded_at` / `refunded_by` (0003, FK → `users`, Admin — DB không kiểm role; CHECK: `refunded_at` có ⇔ `status = 'refunded'`, `refunded_by` chỉ khi có `refunded_at`, `refunded` bắt buộc có `refunded_by`), `late_gateway_ref` (0003, UNIQUE) / `late_paid_at` / `late_amount_vnd` (CHECK: ba cột cùng null hoặc cùng có, `late_amount_vnd ≥ 0`, chỉ khi `status = 'expired'`) / `late_refunded_at` (CHECK: chỉ khi có `late_paid_at` và không trước nó) — thanh toán tới sau cửa sổ 1 giờ, không cộng ví, chờ Admin hoàn (SD-2c D). Cửa sổ 1 giờ **không** là CHECK: LATE_WINDOW là tham số cấu hình, TopUpService kiểm. `refund_status` (thử lại khi gọi hoàn tiền với cổng thất bại, SD-2c) là **Planned**, chưa có cột.
 
 **`credit_transactions`** — sổ cái ví, append-only. `entry_no` tăng dần trong từng ví (BK cùng `credit_account_id`), `transaction_type` (`top_up` · `session_debit` · `refund` · `adjustment`), `amount_vnd` (âm = trừ), `balance_after_vnd` (dẫn xuất), `session_id`, `top_up_id`.
-Khoá: partial UNIQUE `(session_id) WHERE transaction_type = 'session_debit'` — một phiên chỉ bị trừ một lần; partial UNIQUE `(top_up_id) WHERE top_up_id IS NOT NULL` — một top-up chỉ vào ledger một lần; CHECK loại `session_debit` phải có `session_id`, loại `top_up` phải có `top_up_id`.
+Khoá: partial UNIQUE `(session_id) WHERE transaction_type = 'session_debit'` — một phiên chỉ bị trừ một lần; partial UNIQUE `(top_up_id, transaction_type) WHERE top_up_id IS NOT NULL` (`credit_transactions_one_per_top_up_and_type`, từ 0003; trước là `(top_up_id)`) — một top-up có tối đa một dòng `top_up` (cộng một lần) và một dòng `refund`; CHECK loại `session_debit` phải có `session_id`, loại `top_up` phải có `top_up_id`.
 
-**`e_invoices`** — hoá đơn VAT cho top-up credited. `invoice_no` (BK, null khi còn `requested`/`failed`), `top_up_id` (**UNIQUE** — một hoá đơn mỗi top-up), `status` (`requested` · `issued` · `failed` · `needs_review`), `amount_vnd`, `vat_amount_vnd`, `issued_at`, `attempt_count`. CHECK: `issued` phải có `invoice_no` và `issued_at`.
+**`e_invoices`** — hoá đơn VAT cho top-up credited. `invoice_no` (BK, null khi còn `requested`/`failed`), `top_up_id` (**UNIQUE** — một hoá đơn mỗi top-up), `status` (`requested` · `issued` · `failed` · `needs_review`), `amount_vnd`, `vat_amount_vnd`, `issued_at`, `attempt_count`, (0003) `last_error_kind` (enum `e_invoice_error_kind`: `transient` · `data`), `last_error_message`, `last_attempt_at`. CHECK: `issued` phải có `invoice_no` và `issued_at`; `last_error_kind` chỉ khi có `last_attempt_at`.
 
 **`invoice_adjustments`** — `e_invoice_id` + `adjustment_no` (BK), `reason`, `amount_vnd`, `issued_at`.
 
 **`loyalty_accounts`** — đúng một mỗi tài xế (UNIQUE `driver_id`); `points_balance` (dẫn xuất).
 
-**`loyalty_transactions`** — `loyalty_account_id` + `entry_no` (BK), `transaction_type` (`earn` · `redeem` · `expire` · `adjust`), `points`, `expires_at`, `session_id`, `top_up_id`.
+**`loyalty_transactions`** — `loyalty_account_id` + `entry_no` (BK), `transaction_type` (`earn` · `redeem` · `expire` · `adjust` · `restore` — `restore` thêm ở 0003 cho điểm trả lại khi top-up bị hoàn, BR-P37; quyết định 26/10/2026 giữ tên của 0000, không dùng `earned/redeemed/restored/expired` của ERD), `points`, `expires_at`, `session_id`, `top_up_id`.
 
 ### 3.7. Vận hành (LERD-2) — `fault_events`, `fault_reports`, «Should»
 
@@ -237,8 +238,10 @@ Khoá: CHECK `connector_no IS NULL OR connector_no IN (0,1,2)`; CHECK `sent_at >
 |---|---|---|---|
 | 1 | UNIQUE `credit_accounts.driver_id`, UNIQUE `loyalty_accounts.driver_id` | billing | một ví và một tài khoản điểm cho mỗi tài xế (T10 §5.1) |
 | 2 | CHECK `connector_no IN (1,2)` + UNIQUE `(charge_point_id, connector_no)` | connectors | tối đa 2 súng mỗi trụ (T10 §5.2) |
-| 3a | UNIQUE `top_ups.gateway_reference`, UNIQUE `top_ups.idempotency_key` | billing | không ghi nhận một lần nạp hai lần (T10 §5.3) |
-| 3b | partial UNIQUE `credit_transactions (top_up_id) WHERE top_up_id IS NOT NULL` | billing | một top-up tối đa một dòng ledger (T10 §5.3) |
+| 3a | UNIQUE `top_ups.gateway_reference` (NOT NULL từ 0003), UNIQUE `top_ups.idempotency_key` | billing | IPN của VNPay luôn tìm được đúng một top-up bằng `vnp_TxnRef`; app retry không tạo top-up thứ hai (T10 §5.3, BR-P13, UC-PAY-01) |
+| 3b | partial UNIQUE `credit_transactions (top_up_id, transaction_type) WHERE top_up_id IS NOT NULL` (0003; trước là `(top_up_id)`) | billing | một top-up cộng ví đúng một lần (`top_up`) và hoàn tối đa một lần (`refund`); index cũ chặn luôn dòng hoàn (T10 §5.3, BR-P13, BR-P21, SD-2c E) |
+| 3c | UNIQUE `top_ups.late_gateway_ref` (0003) | billing | IPN muộn bị VNPay gửi lại không ghi khoản muộn lần hai (BR-P13, SD-2c D) |
+| 3d | partial UNIQUE `top_ups (gateway_transaction_no) WHERE gateway_transaction_no IS NOT NULL` (0003, duyệt 27/10) | billing | một giao dịch VNPay chỉ cộng cho đúng một top-up — IPN phát lại / lỗi code gắn cùng `vnp_TransactionNo` vào top-up thứ hai bị từ chối (BR-P13) |
 | 4 | partial UNIQUE `credit_transactions (session_id) WHERE transaction_type = 'session_debit'` | billing | một phiên chỉ bị trừ tiền một lần (T10 §5.4) |
 | 5 | UNIQUE `e_invoices.top_up_id` | billing | một hoá đơn cho mỗi top-up (T10 §5.5) |
 | 6 | mọi cột tiền/Wh là `bigint`; cột dẫn xuất là cột thường có chú thích | toàn bộ | không lỗi làm tròn; snapshot cập nhật cùng transaction (T10 §5.6, ADR-0009) |
@@ -263,6 +266,20 @@ Khoá: CHECK `connector_no IS NULL OR connector_no IN (0,1,2)`; CHECK `sent_at >
 | CHECK `amount_paid_vnd = amount_vnd - points_discount_vnd` | top_ups | cột dẫn xuất không lệch nguồn |
 | CHECK loại `session_debit` phải có `session_id`; loại `top_up` phải có `top_up_id` | credit_transactions | ledger không có dòng "trừ tiền phiên" mà không biết phiên nào |
 | CHECK `issued` ⇒ có `invoice_no` và `issued_at` | e_invoices | không có hoá đơn "đã phát hành" mà không có số |
+| `expires_at` NOT NULL; CHECK `expires_at > created_at` (0003) | top_ups | mọi top-up có hạn để job hết hạn quét được, hạn không trước lúc tạo (BR-P13) |
+| CHECK `points_redeemed >= 0` (0003) | top_ups | không có top-up "dùng âm điểm" làm tăng số dư điểm (BR-P35) |
+| CHECK `(points_redeemed = 0) = (points_discount_vnd = 0)` (0003, duyệt 27/10) | top_ups | đổi 500 điểm lấy 5.000 VND: lỗi ghi giảm giá mà 0 điểm sẽ cho tiêu điểm không trừ số dư, và hoàn (STM-4 #7) không trả đúng số điểm (BR-P35, BR-P37, UC-PAY-03); tỉ lệ 100 điểm = 1.000 VND là chính sách, không ghi cứng |
+| CHECK `(status = 'refunded') = (refunded_at IS NOT NULL)` (0003) | top_ups | màn Billing Exceptions và đối soát biết top-up được hoàn lúc nào (STM-4 #7, UC-ADM-08) |
+| CHECK `refunded_by` ⇒ `refunded_at`; FK `refunded_by` → `users` (0003) | top_ups | không có "người hoàn" cho top-up chưa hoàn; người hoàn là tài khoản có thật (UC-ADM-08; role do `RolesGuard` kiểm, DB không kiểm) |
+| CHECK `status <> 'refunded' OR refunded_by IS NOT NULL` (0003, duyệt 27/10) | top_ups | hoàn top-up là thao tác tay của Admin, sổ kiểm toán phải biết Admin nào hoàn (STM-4 #7, UC-ADM-08); hoàn khi đóng ví ghi ở `credit_accounts`, không bị ảnh hưởng |
+| CHECK ba cột `late_*` cùng null hoặc cùng có, `late_amount_vnd >= 0` (0003) | top_ups | Admin thấy đủ mã, lúc nhận, số tiền của khoản muộn cần hoàn (SD-2c D, UC-ADM-08) |
+| CHECK `late_gateway_ref IS NULL OR status = 'expired'` (0003, duyệt 27/10) | top_ups | chỉ top-up `expired` nhận khoản muộn (SD-2c D); chặn service lỗi ghi khoản muộn lên top-up `credited` — nhận tiền hai lần (BR-P13) |
+| CHECK `late_refunded_at` ⇒ có `late_paid_at` và `>=` nó (0003) | top_ups | Admin chỉ hoàn khoản muộn đã thực nhận (BR-P13, UC-ADM-08) |
+| CHECK `last_error_kind` ⇒ `last_attempt_at`; kiểu enum `e_invoice_error_kind` (0003) | e_invoices | job chỉ tự thử lại lỗi `transient`, lỗi `data` sang `needs_review`; Admin biết lần lỗi xảy ra lúc nào (BR-P44, UC-ADM-08) |
+| CHECK `(status = 'closed') = (closed_at IS NOT NULL)` (0003) | credit_accounts | biết ví đóng lúc nào để hoàn số dư về các top-up gần nhất (UC-ACC-02, BR-P21) |
+| CHECK `closure_refunded_at` ⇒ có `closed_at` và `>=` nó (0003) | credit_accounts | số dư chỉ được hoàn khi ví đã đóng (BR-P21, UC-ADM-08) |
+
+**Đã cân nhắc, không làm ở DB (Trí, 27/10/2026):** CHECK `late_paid_at > expires_at + 1 giờ` — LATE_WINDOW (BR-P13) là tham số cấu hình; ghi cứng thì đổi tham số phải viết migration, nên TopUpService kiểm. `refund_status` (requested / done / failed) cho lần gọi hoàn tiền với cổng thất bại (SD-2c "not modelled yet") — **Planned**.
 | CHECK `(status='closed') = (closed_at IS NOT NULL)` | maintenance_tickets | đóng phiếu phải có thời điểm |
 | CHECK `(message_type = 2) = (action IS NOT NULL)` | ocpp_message_log | CALL có action; CALLRESULT/CALLERROR không |
 | CHECK `(reviewed_by IS NULL) = (reviewed_at IS NULL)` | reconciliation_records | "đã xử lý" phải có cả người lẫn lúc |
@@ -319,7 +336,7 @@ Những chỗ tôi phải chọn một giá trị để schema biên dịch đư
 
 9. **`tariff_periods` không có ràng buộc chống chồng khung giờ** giữa các dòng (cần `EXCLUDE USING gist` + extension `btree_gist`). Hiện chỉ UNIQUE 5 cột. Có cần không?
 10. **`session_tariff_segments` PK `(session_id, tariff_period_id)`** theo ERD: một phiên không thể đi qua cùng một khung giá hai lần (ví dụ phiên dài qua hai ngày). Với `SESSION_HARD_CAP_H=24` thì vẫn có thể xảy ra ở biên. Chấp nhận, hay đổi PK sang `id` + UNIQUE `(session_id, segment_start)`?
-11. **`top_ups.gateway_reference` nullable** (chưa có khi tạo lệnh nạp). ERD để BK — cần xác nhận với luồng VNPay thật: `vnp_TxnRef` do mình sinh (có ngay) hay `vnp_TransactionNo` của VNPay (có sau)?
+11. ~~**`top_ups.gateway_reference` nullable** (chưa có khi tạo lệnh nạp). ERD để BK — cần xác nhận với luồng VNPay thật: `vnp_TxnRef` do mình sinh (có ngay) hay `vnp_TransactionNo` của VNPay (có sau)?~~ **Đã chốt 26/10/2026, làm ở 0003:** `gateway_reference` = `vnp_TxnRef` (NOT NULL), `vnp_TransactionNo` ở cột mới `gateway_transaction_no`.
 12. **`e_invoices.invoice_no` nullable** khi còn `requested`/`failed`.
 13. **`promotions.discount_value bigint`** dùng chung cho percent (0..100) và VND; tách hai cột nếu Khang muốn rõ hơn.
 
@@ -361,6 +378,8 @@ DATABASE_URL=postgresql://… node apps/csms/scripts/migrate.mjs
 ```
 
 **Migration 0002 (T61):** đã thử áp lên DB có sẵn 0000 + 0001 + dữ liệu (test `migration-0002.integration.test.ts`, và `demo/migrate.mjs` trên DB nháp ở trạng thái 0001): backfill đúng, chạy lại không áp gì. Số cột 297 là đếm bằng truy vấn trên SQL; hai cột mới ở schema TS (`stations.ts`) được khai tay khớp SQL — **chưa chạy lại phép đối chiếu máy `drizzle-kit export` cho 0002**.
+
+**Migration 0003 (T73):** test `migration-0003.integration.test.ts` (31 test) dựng DB ở 0002 có ví, 2 top-up, dòng ledger, hoá đơn, điểm rồi áp 0003 (backfill, dữ liệu còn nguyên, mỗi ràng buộc mới có ca hợp lệ và ca bị từ chối, tiền kiểm 4 kịch bản: `gateway_reference` NULL, top-up `refunded`, giảm giá điểm, ví `closed`). Đã chạy thêm: DB ở 0002 + `demo/seed.sql` bản `main` cũ → `scripts/migrate.mjs` áp 0003 → `scripts/seed-demo.mjs` (seed mới) thoát 0. **Đối chiếu máy chạy lại cho 0003** (`drizzle-kit export --sql` nạp vào DB nháp, sau khi tạo trước 5 sequence nghiệp vụ mà DDL Drizzle tham chiếu, so với DB đã áp 0000 → 0003 trên Postgres 17 beta nhúng): **311/311 cột, 160/160 ràng buộc PK/UNIQUE/FK/CHECK (so cả định nghĩa CHECK), 30/30 enum (so cả thứ tự giá trị), 102/102 index**; khác biệt duy nhất là 6 index của hai bảng partition (`ON ONLY` ở SQL), đúng ADR-0008.
 
 DB demo đã có 0000 (dựng trước khi có `_migrations`) được ghi nhận 0000 là đã áp rồi chạy 0001 lên dữ liệu hiện có (đã thử trên DB demo thật và bằng test `migration-0001.integration.test.ts`). Dùng `psql -f` rời từng file vẫn chạy được SQL nhưng không ghi `_migrations`.
 

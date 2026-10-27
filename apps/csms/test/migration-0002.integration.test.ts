@@ -4,8 +4,8 @@
  *
  * Vì sao tồn tại: 0002 sửa DỮ LIỆU đang có (UPDATE lifecycle) trên bảng người dùng thật. Test dựng
  * DB "như demo đã có 0001" (0000 + 0001 + bảng _migrations + vài trụ ở đủ các lifecycle), gọi
- * helper `migrate` (cùng logic scripts/migrate.mjs) và kiểm: chỉ 0002 được áp, hàng `offline` →
- * `in_service` + `is_online=false`, hàng khác KHÔNG bị đụng, giá trị enum `offline` vẫn còn.
+ * helper `migrate` (cùng logic scripts/migrate.mjs) và kiểm: 0002 (rồi 0003) được áp, hàng
+ * `offline` → `in_service` + `is_online=false`, hàng khác KHÔNG bị đụng, enum `offline` vẫn còn.
  *
  * Cần DATABASE_URL (DB test riêng — test DROP SCHEMA public); thiếu thì cả describe bị skip.
  */
@@ -49,9 +49,10 @@ describeDb('migration 0002 — tách kết nối khỏi lifecycle (nâng cấp D
     await db?.$client.end();
   });
 
-  it('migrate() áp 0002 (0000 và 0001 đã ghi trong _migrations), rồi các migration sau nó', async () => {
+  it('migrate() áp 0002 rồi 0003, 0007 (0000 và 0001 đã ghi trong _migrations)', async () => {
     expect(await migrate(db.$client)).toEqual([
       '0002_tach-ket-noi-khoi-lifecycle',
+      '0003_billing-wf02',
       '0007_fe04-fault-events-wf04',
     ]);
     expect(await migrate(db.$client)).toEqual([]); // chạy lại không áp gì
