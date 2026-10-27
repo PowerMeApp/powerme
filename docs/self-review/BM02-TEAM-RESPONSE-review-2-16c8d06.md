@@ -34,25 +34,25 @@ How this draft was made:
 | F23 | Medium | (F21, F45) | Planned | Ân (endpoint), Trí (TLS, GetConfiguration) | 14/11 | HTTP endpoint waits for the `users` module and RolesGuard. TLS: Caddy is in #48 (after the tag), not deployed. The capability read is run 1 F45. |
 | F24 | Medium | F05, F38 | Planned | Ân (AD-2), Trí, Nghĩa (900 s watchdog, G19) | 14/11 | Update AD-2 for the grace period (ADR-0016; value decided 26/10 = 120 s, code still 30 s). Post-reconciliation steps belong to F22. |
 | F25 | Low | F40 | Planned | Trí | 31/10 | Decide on free vend = `unattributed` (ADR-0012 decision 3) vs `free` (schema). Run 1 F40 left this open. |
-| F26 | Medium | F32, F35 | Planned | Trí | 31/10 | Add the console, HMI, SteVe stack and demo to ARCH-1/2. Move the console off port 3000. |
+| F26 | Medium | F32, F35 | Fixed in part after the tag + Planned | Trí | 31/10 (port: when REST lands) | Fixed after the tag in [c4019a2](https://github.com/PowerMeApp/powerme/commit/c4019a2e4ecf7ecf6fbbf79d93a2a5777206a4d2) (#56): ARCH-1 adds the operator console, the D1 HMI simulator and the demo runner; ARCH-2 is redrawn from `infra/staging`. Planned: the SteVe stack is not drawn yet; moving the console off port 3000 is deferred until the REST API exists, because port 3000 is used in about 25 places, including untested staging config and the rehearsed demo (run 1 F35). |
 | F27 | **High** | F31 | Planned (part after the tag) | Trí + team | 14/11 | Dockerfile, Caddy and deploy scripts were added in #48 (after the tag, not deployed). The other "target" parts need a "built / target" legend in ARCH/PKG. Known Gaps G1, G16, G17. |
 | F28 | Medium | — | Fixed after the tag (ADR, ARCH-1) + Planned | Ân | 31/10? | ADR-0013..0016 added as files on branch `wp1/t67-adr-0013-0016` (PR #52). Ownership decided 26/10/2026 (late): the suggestion service stays with **Nghĩa (WP4)**, as form §3.2g says; ARCH-1 said WP3 and is fixed to Nghĩa (T76). Connector status and time-left estimation move to **Trí (WP2)**; this goes into the proposed final form v1.3 (BM03 row 3). PKG-1 has no suggestions module yet. Add FCM to ARCH-1, or drop it (ADR-0016: FCM is outside Review 2 scope). |
-| F29 | **High** | F22, F40 | Planned | Trí | 31/10 | Authorize and `classifyIdTag` must check `card.status`, the linked driver, credit (BR-P18, BR-P23) and `free_vend_tag`. Update the test that locks in `free`. |
+| F29 | **High** | F22, F40 | Fixed in part after the tag + Planned | Trí | 31/10 (card status, done); 07/11 (linked driver, credit) | Fixed after the tag in [c4019a2](https://github.com/PowerMeApp/powerme/commit/c4019a2e4ecf7ecf6fbbf79d93a2a5777206a4d2) (#56): `authorize` returns Accepted only for an `active` card (`blocked` → Blocked, `unlinked` → Invalid); a StartTransaction that already happened with a non-active card is still recorded, as `unattributed` with an `unknown_id_tag` record (BR-P06); tests added, including a `free_vend` card. Planned: an online card must have a linked driver (BR-P23) and enough credit (BR-P18), with WF-01; the free vend value (`free` vs `unattributed`) is decided under F25. Still open, so it stays in Known Gaps. |
 | F30 | **High** | F34 | Planned | Trí | 14/11 | Reconciliation on/off switch for the RQ1 baseline. Known Gap G14. |
 | F31 | **High** | F37, F44 | Fixed in part + Planned | Trí (TLS, RolesGuard), Ân (rate limit) | 14/11 | Basic Auth per pillar is done; credential-less pillars are rejected by default (#33, #35). TLS via Caddy is in #48 (after the tag, not deployed). Rate limit on failed logins: T74, issue #40 (PR pending). RolesGuard: run 1 F44. Known Gap G16. |
-| F32 | Medium | F33 | Planned | Trí | 31/10 | Rewrite the PKG-1 dependency rules to match the code, or split behind interfaces. |
+| F32 | Medium | F33 | Fixed after the tag | Trí | — | [c4019a2](https://github.com/PowerMeApp/powerme/commit/c4019a2e4ecf7ecf6fbbf79d93a2a5777206a4d2) (#56): rules 1, 2, 3 and 10 of `docs/PACKAGE-DIAGRAM-CSMS.md` and `diagrams/team/PKG-1_csms.puml` rewritten from the real module imports (gateway imports SessionsModule), with a table of actual dependencies. No code refactor. |
 | F33 | Medium | F27, F45 | Planned | Trí | 14/11 | GetConfiguration/ChangeConfiguration at boot, SupportedFeatureProfiles, `reports_soc` / `supports_reservation`. |
 | F34 | Low | — | Planned | Ân? | 31/10? | Update SRS UC-OPS-01 and Table 5 #19 to the two-step flow (Admin registers, operator onboards), as in AD-8 v2.0 and CD-5. |
 
 ## Statistics (draft)
 
 - Total: **34** findings.
-  - Fixed after the tag: 1 (F01).
-  - Fixed in part or after the tag, plus Planned: 4 (F08, F27, F28, F31).
+  - Fixed after the tag: 2 (F01, F32).
+  - Fixed in part or after the tag, plus Planned: 6 (F08, F26, F27, F28, F29, F31).
   - Kept + Planned: 1 (F18).
-  - Planned: 28.
+  - Planned: 25.
 - Matched to run 1: 20 findings. New: 14.
-- **High** findings (7): F06, F16, F22, F27, F29, F30, F31. None is closed, so all seven must be listed in Design Brief §5 (Known Gaps):
+- **High** findings (7): F06, F16, F22, F27, F29, F30, F31. None is fully closed (F29 and F31 are fixed only in part), so all seven must be listed in Design Brief §5 (Known Gaps):
   - F16 → G2
   - F22, F27 → G17 (F27 also G1, G16)
   - F30 → G14
