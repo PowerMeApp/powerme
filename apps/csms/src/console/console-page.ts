@@ -54,7 +54,7 @@ header h1 { font-size: 22px; margin: 0; flex: 1; }
 #live.err b { background: var(--bad); }
 main {
   flex: 1; min-height: 0; padding: 12px 16px 46px; display: grid; gap: 12px;
-  grid-template-rows: auto 1fr;
+  grid-template-rows: auto auto 1fr;
 }
 #tiles { display: grid; grid-template-columns: 1.1fr 3fr 1fr; gap: 12px; }
 .tile { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 10px 16px; }
@@ -137,6 +137,17 @@ footer {
 .kv div { font-size: 16px; } .kv span { display: block; font-size: 13px; color: var(--muted); text-transform: uppercase; }
 svg text { fill: var(--muted); font-size: 13px; }
 .legend { font-size: 14px; color: var(--muted); display: flex; gap: 16px; flex-wrap: wrap; margin: 4px 0 10px; }
+#faults { display: none; background: var(--panel); border: 1px solid var(--line); border-left: 6px solid var(--bad); border-radius: 10px; padding: 8px 14px; max-height: 190px; overflow: auto; }
+#faults.show { display: block; }
+#faults h2 { margin: 0 0 6px; font-size: 18px; }
+#faults h2 small { font-weight: 400; font-size: 14px; color: var(--muted); }
+#faults table { width: 100%; border-collapse: collapse; font-size: 15px; }
+#faults td { padding: 3px 8px; border-top: 1px solid var(--line); vertical-align: top; }
+#faults .hint { color: var(--muted); font-size: 14px; }
+#faults button { font: inherit; font-size: 14px; padding: 1px 10px; margin-right: 4px; cursor: pointer; }
+.b-raised, .b-critical { background: var(--badbg); color: var(--bad); }
+.b-acknowledged, .b-major { background: var(--warnbg); color: var(--warn); }
+.b-resetting, .b-minor { background: var(--infobg); color: var(--info); }
 #toast { position: fixed; left: 50%; bottom: 52px; transform: translateX(-50%); background: var(--ink); color: var(--bg); padding: 8px 18px; border-radius: 8px; display: none; z-index: 9; font-size: 17px; }
 </style>
 </head>
@@ -151,6 +162,7 @@ svg text { fill: var(--muted); font-size: 13px; }
     <div class="tile"><h3>Phiên sạc theo trạng thái</h3><div class="statusrow" id="t-sess"></div></div>
     <div class="tile"><h3>Đối soát: conflict</h3><div class="big" id="t-conf">—</div></div>
   </section>
+  <section id="faults"><h2>Cảnh báo sự cố (WF-04) <small id="n-faults"></small></h2><table><tbody id="fault-rows"></tbody></table></section>
   <section id="grid">
     <div class="panel" id="p-stations"><h2>Trụ &amp; súng <small id="n-st"></small></h2><div class="body" id="stations"></div></div>
     <div class="panel" id="p-sessions"><h2>Phiên sạc <small>bấm một hàng để xem chi tiết</small></h2><div class="body" id="sessions"></div></div>
@@ -397,6 +409,24 @@ svg text { fill: var(--muted); font-size: 13px; }
     $('drawer').innerHTML = h + '</div>';
     $('drawer').className = 'open';
   }
+
+  // ---- sự cố (WF-04, STM-6) ----
+  function renderFaults(list) {
+    var box = $('faults');
+    if (!list.length) { box.className = ''; return; }
+    box.className = 'show';
+    $('n-faults').textContent = list.length + ' sự cố mở · xác nhận → Reset từ xa, hoặc đóng sau khi kiểm tra tại chỗ';
+    var h = '';
+    list.forEach(function (f) {
+      var acts = '';
+      if (f.status === 'raised') acts = '<button data-fault-act="acknowledge" data-fid="' + f.id + '">Xác nhận</button>';
+      if (f.status === 'acknowledged') acts = '<button data-fault-act="reset" data-fid="' + f.id + '"' + (f.station_online ? '' : ' disabled title="trụ offline"') + '>Reset</button><button data-fault-act="close" data-fid="' + f.id + '">Đóng</button>';
+      if (f.status === 'resetting') acts = '<span class="hint">chờ súng hoạt động lại…</span>';
+      h += '<tr><td><b>#' + f.event_no + '</b></td><td>' + esc(f.station) + ' / ' + (f.connector_no === 0 ? 'cả trụ' : dash(f.connector_no)) + '</td><td>' + esc(dash(f.error_code)) + ' <span class="badge b-' + esc(f.severity) + '">' + esc(f.severity) + '</span><div class="hint">' + esc(f.hint) + '</div></td><td>' + badge(f.status) + (f.reset_command_status ? ' <small>Reset: ' + esc(f.reset_command_status) + '</small>' : '') + '</td><td>' + hms(f.raised_at) + '</td><td>' + acts + '</td></tr>';
+    });
+    $('fault-rows').innerHTML = h;
+  }
+
   function refreshDrawer() {
     if (openSessionId === null) return Promise.resolve();
     return getJson('/api/admin/sessions/' + openSessionId).then(renderDrawer, function () {});
@@ -410,6 +440,8 @@ svg text { fill: var(--muted); font-size: 13px; }
     Promise.all([getJson('/api/admin/summary'), getJson('/api/admin/stations'), getJson('/api/admin/sessions?limit=50'), getJson('/api/admin/reconciliation?limit=50'), getJson(msgPath)])
       .then(function (r) {
         renderSummary(r[0]); renderStations(r[1]); renderSessions(r[2]); renderRecon(r[3]); takeMessages(r[4]);
+        // Cảnh báo sự cố tách riêng: CSMS chưa nạp FaultService (503) thì bảng chỉ ẩn đi.
+        getJson('/api/admin/faults?limit=20').then(renderFaults, function () { renderFaults([]); });
         $('live').className = 'ok'; $('live').lastChild.textContent = 'trực tiếp · cập nhật ' + hms(new Date().toISOString());
         return refreshDrawer();
       })
@@ -427,6 +459,26 @@ svg text { fill: var(--muted); font-size: 13px; }
       if (!window.confirm('Ngắt kết nối trụ ' + serial + ' phía CSMS?\nPhiên đang sạc sẽ chuyển sang "orphaned" cho tới khi trụ nối lại.')) return;
       post('/api/admin/stations/' + encodeURIComponent(serial) + '/disconnect').then(function (r) {
         toast(r.ok ? 'Đã đóng socket của ' + serial : 'Lỗi: ' + r.body.detail); tick();
+      });
+      return;
+    }
+    var fa = t.closest('[data-fault-act]');
+    if (fa) {
+      var act = fa.getAttribute('data-fault-act');
+      var fid = fa.getAttribute('data-fid');
+      var ask = { acknowledge: 'Xác nhận đã thấy cảnh báo này?', reset: 'Gửi Reset (Soft) tới trụ?\nSự cố chuyển sang "resetting" cho tới khi súng hoạt động lại hoặc hết hạn chờ.', close: 'Đóng sự cố sau khi đã kiểm tra tại chỗ?' }[act];
+      if (!window.confirm(ask)) return;
+      var url = '/api/admin/faults/' + fid + '/' + act;
+      var done = function (r) {
+        toast(r.ok ? (act === 'reset' ? 'Trụ trả lời Reset: ' + r.body.reset_status + ' · sự cố ' + r.body.fault_status + (r.body.forced ? ' · đã cắt phiên đang sạc' : '') : 'Sự cố → ' + r.body.status) : 'Lỗi: ' + r.body.detail); tick();
+      };
+      post(url).then(function (r) {
+        // Reset khởi động lại CẢ trụ: còn phiên sạc ở súng khác thì hỏi lần hai rồi gửi force.
+        if (!r.ok && r.body.error === 'sessions_active') {
+          if (!window.confirm(r.body.detail + '\n\nVẫn Reset và cắt các phiên này?')) { toast('Đã huỷ Reset'); return; }
+          return post(url + '?force=true').then(done);
+        }
+        done(r);
       });
       return;
     }

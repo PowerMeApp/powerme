@@ -39,6 +39,11 @@ export interface ConsoleBackend {
   summary(): Promise<unknown>;
   disconnect(serial: string): Promise<unknown>;
   remoteStop(sessionId: number): Promise<unknown>;
+  /** WF-04 (FE-04): danh sách cảnh báo và ba hành động của operator. */
+  faults(filter: 'open' | 'all', limit: number): Promise<unknown>;
+  acknowledgeFault(id: number): Promise<unknown>;
+  resetFault(id: number, type: 'Soft' | 'Hard', force: boolean): Promise<unknown>;
+  closeFault(id: number): Promise<unknown>;
 }
 
 const LOCAL_ORIGIN = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/;
@@ -146,6 +151,19 @@ export function createConsoleListener(backend: ConsoleBackend): RequestListener 
           return sendJson(res, 200, await backend.disconnect(route.serial), cors);
         case 'remoteStop':
           return sendJson(res, 200, await backend.remoteStop(route.id), cors);
+        case 'faults':
+          return sendJson(res, 200, await backend.faults(route.filter, route.limit), cors);
+        case 'faultAcknowledge':
+          return sendJson(res, 200, await backend.acknowledgeFault(route.id), cors);
+        case 'faultReset':
+          return sendJson(
+            res,
+            200,
+            await backend.resetFault(route.id, route.type, route.force),
+            cors,
+          );
+        case 'faultClose':
+          return sendJson(res, 200, await backend.closeFault(route.id), cors);
       }
     } catch (err) {
       if (err instanceof ConsoleError) {

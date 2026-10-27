@@ -48,3 +48,20 @@ describe('loadConfig — OFFLINE_GRACE_S (ADR-0016 D-A)', () => {
     expect(() => loadConfig({ ...base, OFFLINE_GRACE_S: v })).toThrow(/OFFLINE_GRACE_S/);
   });
 });
+
+describe('loadConfig — FAULT_RESET_TIMEOUT_S (WF-04, STM-6 t6)', () => {
+  it('mặc định 120 giây khi không khai báo hoặc rỗng', () => {
+    expect(loadConfig({ ...base }).faultResetTimeoutS).toBe(120);
+    expect(loadConfig({ ...base, FAULT_RESET_TIMEOUT_S: '' }).faultResetTimeoutS).toBe(120);
+  });
+
+  it('đọc số nguyên dương', () => {
+    expect(loadConfig({ ...base, FAULT_RESET_TIMEOUT_S: '45' }).faultResetTimeoutS).toBe(45);
+  });
+
+  it.each(['0', '-1', '1.5', 'abc'])('"%s" ném lỗi rõ ràng (hạn chờ phải > 0)', (v) => {
+    expect(() => loadConfig({ ...base, FAULT_RESET_TIMEOUT_S: v })).toThrow(
+      /FAULT_RESET_TIMEOUT_S/,
+    );
+  });
+});

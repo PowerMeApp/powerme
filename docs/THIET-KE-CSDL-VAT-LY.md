@@ -207,7 +207,7 @@ Khoá: partial UNIQUE `(session_id) WHERE transaction_type = 'session_debit'` �
 
 ### 3.7. Vận hành (LERD-2) — `fault_events`, `fault_reports`, «Should»
 
-**`fault_events`** — sự cố trên trụ/súng. `event_no` (BK, sequence), `charge_point_id`, `connector_id` (null = toàn trụ), `source` (`ocpp` · `driver_report` · `operator`), `error_code` (ChargePointErrorCode nguyên văn), `status` (`raised` · `acknowledged` · `resetting` · `resolved`), `raised_at`, `acknowledged_by` (FK → `operator_staff`), `acknowledged_at`, `resolved_at`. Partial index `WHERE status <> 'resolved'`.
+**`fault_events`** — sự cố trên trụ/súng. `event_no` (BK, sequence), `charge_point_id`, `connector_id` (null = toàn trụ), `source` (`ocpp` · `driver_report` · `operator`), `error_code` (ChargePointErrorCode nguyên văn), `status` (`raised` · `acknowledged` · `resetting` · `resolved`), `raised_at`, `acknowledged_by` (FK → `operator_staff`), `acknowledged_at`, `resolved_at`, `reset_command_id` (FK → `remote_commands`, null được — lệnh Reset đang chờ khi `resetting`; migration `0008`, FE-04). Partial index `WHERE status <> 'resolved'`; UNIQUE `(charge_point_id, COALESCE(connector_id, 0)) WHERE status <> 'resolved'` — một sự cố mở cho mỗi connector (migration `0008`).
 
 **`fault_reports`** — tài xế báo lỗi từ app. `report_no` (BK), `driver_id`, `connector_id`, `description`, `reported_at`, `fault_event_id` (null tới khi operator gắn), `cleared_at`, `cleared_by` (FK → `operator_staff`).
 

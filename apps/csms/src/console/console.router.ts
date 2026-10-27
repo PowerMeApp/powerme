@@ -16,7 +16,12 @@ export type Route =
   | { kind: 'messages'; limit: number; after: number | null }
   | { kind: 'summary' }
   | { kind: 'disconnect'; serial: string }
-  | { kind: 'remoteStop'; id: number };
+  | { kind: 'remoteStop'; id: number }
+  // WF-04 (FE-04): cảnh báo sự cố và ba hành động của operator (STM-6 t2, t4, t7).
+  | { kind: 'faults'; filter: 'open' | 'all'; limit: number }
+  | { kind: 'faultAcknowledge'; id: number }
+  | { kind: 'faultReset'; id: number; type: 'Soft' | 'Hard'; force: boolean }
+  | { kind: 'faultClose'; id: number };
 
 export interface RouteError {
   status: 400 | 404 | 405;
@@ -121,6 +126,57 @@ export function matchRoute(method: string, rawUrl: string): RouteResult {
         ok: true,
         route: isStop ? { kind: 'remoteStop', id: id.value } : { kind: 'session', id: id.value },
       };
+    });
+  }
+
+  if (path === '/api/admin/faults') {
+    return only(['GET'], () => {
+      const status = q.get('status') ?? 'open';
+      if (status !== 'open' && status !== 'all') {
+        return fail(400, 'bad_request', 'status phải là open hoặc all');
+      }
+      const limit = parseIntParam(q.get('limit'), 'limit', {
+        min: 1,
+        max: MAX_LIMIT,
+        fallback: 100,
+      });
+      if (!limit.ok) return fail(400, 'bad_request', limit.detail);
+      return { ok: true, route: { kind: 'faults', filter: status, limit: limit.value as number } };
+    });
+  }
+
+  const faultMatch = /^\/api\/admin\/faults\/([^/]+)\/(acknowledge|reset|close)$/.exec(path);
+  if (faultMatch) {
+    return only(['POST'], () => {
+      const id = parseIntParam(faultMatch[1] ?? null, 'id', {
+        min: 1,
+        max: Number.MAX_SAFE_INTEGER,
+        fallback: null,
+      });
+      if (!id.ok || id.value === null) {
+        return fail(400, 'bad_request', 'id sự cố phải là số nguyên dương');
+      }
+      switch (faultMatch[2]) {
+        case 'acknowledge':
+          return { ok: true, route: { kind: 'faultAcknowledge', id: id.value } };
+        case 'close':
+          return { ok: true, route: { kind: 'faultClose', id: id.value } };
+        default: {
+          const type = q.get('type') ?? 'Soft';
+          if (type !== 'Soft' && type !== 'Hard') {
+            return fail(400, 'bad_request', 'type phải là Soft hoặc Hard');
+          }
+          // force=true: operator đã xác nhận lần hai rằng Reset sẽ cắt phiên đang sạc trên trụ.
+          const force = q.get('force') ?? 'false';
+          if (force !== 'true' && force !== 'false') {
+            return fail(400, 'bad_request', 'force phải là true hoặc false');
+          }
+          return {
+            ok: true,
+            route: { kind: 'faultReset', id: id.value, type, force: force === 'true' },
+          };
+        }
+      }
     });
   }
 
