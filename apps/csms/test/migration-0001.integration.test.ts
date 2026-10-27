@@ -52,14 +52,22 @@ describeDb('migration 0001 — nâng cấp DB đã có 0000 và ràng buộc m�
     await db?.$client.end();
   });
 
-  it('thứ tự migration theo tên: 0000_init, 0001_quyet-dinh-be-11, 0002 (T61), 0003 (T73) rồi 0007 (FE-04)', () => {
-    expect(listMigrations()).toEqual([
+  // Chỉ chốt các migration đã có trên main; migration mới thêm sau 0003 không phải sửa test này
+  // (trước đây mỗi PR thêm migration phải sửa danh sách ở đây → hai PR song song luôn đụng nhau).
+  it('thứ tự migration theo tên: 0000_init, 0001_quyet-dinh-be-11, 0002 (T61), 0003 (T73) rồi các migration sau', () => {
+    expect(listMigrations().slice(0, 4)).toEqual([
       '0000_init',
       '0001_quyet-dinh-be-11',
       '0002_tach-ket-noi-khoi-lifecycle',
       '0003_billing-wf02',
-      '0007_fe04-fault-events-wf04',
     ]);
+  });
+
+  // Runner chỉ sort theo tên nên hai file cùng số (vd. 0007_a và 0007_b) vẫn áp được — chặn ở đây
+  // để PR merge sau phải đổi số thay vì lặng lẽ tạo hai migration cùng số.
+  it('mỗi số migration chỉ dùng một lần', () => {
+    const numbers = listMigrations().map((name) => name.slice(0, 4));
+    expect(new Set(numbers).size).toBe(numbers.length);
   });
 
   describe('đường nâng cấp (DB demo cũ: có 0000, KHÔNG có bảng _migrations, có dữ liệu)', () => {
@@ -112,22 +120,16 @@ describeDb('migration 0001 — nâng cấp DB đã có 0000 và ràng buộc m�
       );
     });
 
-    it('migrate() ghi nhận 0000 đã áp (không chạy lại) và áp 0001, 0002, 0003, 0007 theo thứ tự', async () => {
+    it('migrate() ghi nhận 0000 đã áp (không chạy lại) và áp 0001, 0002, 0003… theo thứ tự', async () => {
       const applied = await migrate(db.$client);
-      expect(applied).toEqual([
+      expect(applied.slice(0, 3)).toEqual([
         '0001_quyet-dinh-be-11',
         '0002_tach-ket-noi-khoi-lifecycle',
         '0003_billing-wf02',
-        '0007_fe04-fault-events-wf04',
       ]);
+      expect(applied).toEqual(listMigrations().slice(1));
       const names = (await q('SELECT name FROM _migrations ORDER BY name')).map((r) => r['name']);
-      expect(names).toEqual([
-        '0000_init',
-        '0001_quyet-dinh-be-11',
-        '0002_tach-ket-noi-khoi-lifecycle',
-        '0003_billing-wf02',
-        '0007_fe04-fault-events-wf04',
-      ]);
+      expect(names).toEqual(listMigrations());
     });
 
     it('chạy lại migrate() không áp gì nữa', async () => {

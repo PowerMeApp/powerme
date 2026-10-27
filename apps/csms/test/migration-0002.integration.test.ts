@@ -12,7 +12,7 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { createDb, Db } from '../src/db/db.module.js';
-import { MIGRATIONS_DIR, migrate } from './helpers/apply-migrations.js';
+import { listMigrations, MIGRATIONS_DIR, migrate } from './helpers/apply-migrations.js';
 
 const DATABASE_URL = process.env['DATABASE_URL'];
 const describeDb = DATABASE_URL ? describe : describe.skip;
@@ -49,12 +49,10 @@ describeDb('migration 0002 — tách kết nối khỏi lifecycle (nâng cấp D
     await db?.$client.end();
   });
 
-  it('migrate() áp 0002 rồi 0003, 0007 (0000 và 0001 đã ghi trong _migrations)', async () => {
-    expect(await migrate(db.$client)).toEqual([
-      '0002_tach-ket-noi-khoi-lifecycle',
-      '0003_billing-wf02',
-      '0007_fe04-fault-events-wf04',
-    ]);
+  it('migrate() áp 0002 rồi các migration sau (0000 và 0001 đã ghi trong _migrations)', async () => {
+    const applied = await migrate(db.$client);
+    expect(applied[0]).toBe('0002_tach-ket-noi-khoi-lifecycle');
+    expect(applied).toEqual(listMigrations().slice(2));
     expect(await migrate(db.$client)).toEqual([]); // chạy lại không áp gì
   });
 
