@@ -129,7 +129,7 @@ Yêu cầu: đã `--seed` (để trụ tồn tại và có credential), `DEMO_PI
 
 `rollback.sh` có hai chế độ; chọn sai sẽ gây hỏng.
 
-**Migration không đảo ngược được bằng lùi ảnh.** Migration 0001/0002 có `ALTER TYPE … ADD VALUE` (Postgres không có `DROP VALUE`) và đổi tên/kiểu cột (ví dụ `cp_timestamp`, `payment_mode`). Ảnh cũ viết cho schema cũ sẽ lỗi trên schema mới. **Cụ thể: ảnh `review-2-v0` KHÔNG tương thích schema sau 0001** — không lùi về nó và không deploy nó lên DB đã migrate.
+**Migration không đảo ngược được bằng lùi ảnh.** Migration 0001 và 0003 có `ALTER TYPE … ADD VALUE` (Postgres không có `DROP VALUE`: `payment_mode.unattributed`, `reconciliation_record_type.conflict/late_sample` ở 0001; `loyalty_transaction_type.restore` ở 0003); 0001 đổi tên cột (`cp_timestamp`); 0002 chỉ thêm cột và sửa dữ liệu `lifecycle`; 0003 đặt `NOT NULL` cho `top_ups.gateway_reference`/`expires_at`, thay UNIQUE sổ cái theo top-up và thêm CHECK. Ảnh cũ viết cho schema cũ sẽ lỗi trên schema mới (ví dụ ảnh trước 0003 INSERT `top_ups` không có `expires_at` sẽ bị từ chối). **Cụ thể: ảnh `review-2-v0` KHÔNG tương thích schema sau 0001** — không lùi về nó và không deploy nó lên DB đã migrate. Lùi qua 0003 chỉ đúng bằng `--restore-db` (bản sao lưu chụp trước lần deploy áp 0003).
 
 - `deploy.sh` ghi lại migration nào mỗi lần deploy đã áp (`.deploy/migrated_<tag>`).
 - `./rollback.sh` (lùi ảnh) **từ chối** nếu lần deploy đang chạy đã áp migration, và in danh sách file; với file có `RENAME`/`DROP`/`ALTER TYPE`/`SET NOT NULL`/`ALTER COLUMN` nó cảnh báo thêm là không additive. Phát hiện này chỉ là gợi ý theo từ khoá, không thay cho việc đọc migration.
