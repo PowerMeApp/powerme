@@ -10,11 +10,17 @@ import { Module } from '@nestjs/common';
 import { DbModule } from '../db/db.module.js';
 import { FaultService } from './faults/fault.service.js';
 import { PillarAuthService } from './pillar-auth.service.js';
+import { PillarLoginLimiter } from './pillar-login-limiter.js';
 import { PillarOnboardingService } from './pillar-onboarding.service.js';
 
 @Module({
   imports: [DbModule],
-  providers: [PillarOnboardingService, PillarAuthService, FaultService],
+  providers: [
+    PillarOnboardingService,
+    PillarAuthService,
+    { provide: PillarLoginLimiter, useFactory: () => new PillarLoginLimiter() },
+    FaultService,
+  ],
   exports: [PillarOnboardingService, PillarAuthService, FaultService],
 })
 export class StationsModule {}

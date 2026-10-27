@@ -46,6 +46,7 @@ export const sites = pgTable(
       .notNull()
       .references(() => operators.id),
     siteName: text('site_name').notNull(),
+    vinfastOnly: boolean('vinfast_only').notNull().default(false),
     address: text('address'),
     latitude: numeric('latitude', { precision: 9, scale: 6 }),
     longitude: numeric('longitude', { precision: 9, scale: 6 }),

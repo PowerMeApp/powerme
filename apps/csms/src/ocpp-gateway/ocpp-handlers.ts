@@ -13,6 +13,7 @@ import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { createRPCError } from 'ocpp-rpc';
 import { CONFIG, CsmsConfig } from '../config.js';
 import { SessionsService } from '../sessions/sessions.service.js';
+import { DriverChargingService } from '../sessions/driver-charging.service.js';
 import { FaultService } from '../stations/faults/fault.service.js';
 import type { InboundContext } from './inbound-context.js';
 import type {
@@ -31,6 +32,7 @@ export class OcppHandlers {
   constructor(
     private readonly sessions: SessionsService,
     @Inject(CONFIG) private readonly config: CsmsConfig,
+    @Optional() private readonly driverCharging?: DriverChargingService,
     /** WF-04 (FE-04). Optional để test WF-03/WF-05/T61 dựng handler không cần nó. */
     @Optional() private readonly faults?: FaultService,
   ) {}
@@ -70,7 +72,9 @@ export class OcppHandlers {
         return {};
       }
       case 'Authorize': {
-        const status = await this.sessions.authorize((params as AuthorizeRequest).idTag);
+        const idTag = (params as AuthorizeRequest).idTag;
+        const appStatus = await this.driverCharging?.authorizeAppTag(idTag, ctx);
+        const status = appStatus ?? (await this.sessions.authorize(idTag));
         return { idTagInfo: { status } };
       }
       case 'StartTransaction': {
@@ -83,9 +87,24 @@ export class OcppHandlers {
       }
       case 'MeterValues':
         await this.sessions.onMeterValues(params as MeterValuesRequest, ctx);
+        // WP3/T31: release the inbound queue before a RemoteStop can produce StopTransaction.
+        if (this.driverCharging && (params as MeterValuesRequest).transactionId !== undefined) {
+          const transactionNo = (params as MeterValuesRequest).transactionId!;
+          setImmediate(() => {
+            void this.driverCharging!.onMeter(transactionNo).catch((error) =>
+              this.logger.error(`WP3/T31 limit check pending: ${String(error)}`),
+            );
+          });
+        }
         return {};
       case 'StopTransaction':
         await this.sessions.onStopTransaction(params as StopTransactionRequest, ctx);
+        try {
+          await this.driverCharging?.onStopped((params as StopTransactionRequest).transactionId);
+        } catch {
+          // WP3/T72: the persisted stop trigger queued settlement before this best-effort attempt.
+          this.logger.error('WP3/T72 stop persisted; settlement recovery will retry');
+        }
         return { idTagInfo: { status: 'Accepted' } };
       case 'DataTransfer':
         // Chỉ log (đã nằm trong ocpp_message_log); chưa có nghiệp vụ vendor-specific.

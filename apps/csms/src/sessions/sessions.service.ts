@@ -23,7 +23,7 @@
  * stopping/RemoteStop (#7, #8, #9a), hard cap (#16a nhánh timer), operator resolve (#17).
  */
 import { Inject, Injectable, Logger } from '@nestjs/common';
-import { and, desc, eq, inArray, isNull } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
 import { CONFIG, CsmsConfig } from '../config.js';
 import { DB, Db, DbExecutor, Tx } from '../db/db.module.js';
 import {
@@ -144,6 +144,37 @@ export class SessionsService {
     const frame = this.frameRef('StartTransaction', ctx);
 
     return this.db.transaction(async (tx) => {
+      // WP3/T31: correlate a durable app intent; only this frame supplies session meter/time.
+      let app = (
+        await tx.execute<{
+          id: string;
+          driver_id: string;
+          vehicle_id: string;
+          energy_limit_wh: string;
+          session_id: string | null;
+        }>(sql`SELECT i.* FROM driver_charge_intents i JOIN remote_commands r ON r.id=i.command_id
+        WHERE i.id_tag=${req.idTag} AND i.connector_id=${connector.id}
+        AND r.charge_point_id=${ctx.chargePointId} AND i.session_id IS NULL
+        FOR UPDATE OF i`)
+      ).rows[0];
+      // WP3/T72: bound tags need no intent lock, avoiding session→intent / intent→session cycles.
+      if (!app)
+        app = (
+          await tx.execute<typeof app & object>(sql`SELECT i.* FROM driver_charge_intents i
+        JOIN remote_commands r ON r.id=i.command_id WHERE i.id_tag=${req.idTag}
+        AND i.connector_id=${connector.id} AND r.charge_point_id=${ctx.chargePointId}`)
+        ).rows[0];
+      const appStart = app && app.session_id === null ? app : undefined;
+      // WP3/T31: a bound app tag cannot authorize another physical session, even if it matches RFID.
+      const reusedApp = app && app.session_id !== null ? app : undefined;
+      const sessionTag = reusedApp
+        ? {
+            origin: 'app_qr' as const,
+            paymentMode: 'unattributed' as const,
+            driverId: null,
+            rfidCardId: null,
+          }
+        : tag;
       const inserted = await tx
         .insert(sessions)
         .values({
@@ -151,16 +182,26 @@ export class SessionsService {
           chargePointId: ctx.chargePointId,
           connectorNo: connector.connectorNo,
           idTag: req.idTag,
-          driverId: tag.driverId,
-          rfidCardId: tag.rfidCardId,
-          origin: tag.origin,
-          paymentMode: tag.paymentMode,
+          driverId: sessionTag.driverId,
+          rfidCardId: sessionTag.rfidCardId,
+          origin: sessionTag.origin,
+          paymentMode: sessionTag.paymentMode,
           status,
           cpStartedAt,
           receivedStartedAt: ctx.receivedAt,
           meterStartWh: req.meterStart,
           deliveredOffline: ctx.replay.replayed,
           updatedAt: ctx.receivedAt,
+          ...(appStart
+            ? {
+                driverId: Number(appStart.driver_id),
+                vehicleId: Number(appStart.vehicle_id),
+                origin: 'app_qr' as const,
+                paymentMode: 'csms_billed' as const,
+                billingMode: 'energy_kwh' as const,
+                limitValue: Number(appStart.energy_limit_wh),
+              }
+            : {}),
         })
         .onConflictDoNothing({
           target: [
@@ -198,12 +239,31 @@ export class SessionsService {
         return { transactionId: existing.transactionNo, duplicate: true };
       }
 
+      if (appStart) {
+        // WP3/T31: pending belongs to the command intent; STM-1 #2 records observed session start.
+        await tx.execute(sql`UPDATE driver_charge_intents SET session_id=${created.id},state='effect',rejection_reason=NULL,
+          billing_review_required=(connector_released_at IS NOT NULL OR state='rejected'),
+          reserved_vnd=greatest(reserved_vnd,coalesce((SELECT released_vnd FROM driver_start_recoveries WHERE intent_id=${appStart.id}),0)),version=version+1
+          WHERE id=${appStart.id}`);
+        await tx.execute(sql`INSERT INTO driver_charge_intent_events(intent_id,event)
+          SELECT id,'late_start_after_release' FROM driver_charge_intents
+          WHERE id=${appStart.id} AND billing_review_required`);
+      }
+
       // T13 #2: INITIAL ● → active. Cùng transaction với INSERT sessions.
       await this.recordHistory(tx, created.id, null, status, 'START_TRANSACTION', ctx.receivedAt, {
         note: this.frameNote(ctx),
       });
 
-      if (tag.unknown) {
+      if (reusedApp) {
+        await this.reconciliation.recordAppIntentReuse(
+          tx,
+          created.id,
+          reusedApp.id,
+          reusedApp.session_id!,
+          frame,
+        );
+      } else if (tag.unknown && !appStart) {
         this.logger.warn(
           `idTag lạ "${req.idTag}" trên ${ctx.identity} c${req.connectorId} — payment_mode=unattributed (ADR-0012)`,
         );
@@ -226,7 +286,7 @@ export class SessionsService {
         await this.reconciliation.recordReplay(tx, created.id, frame, ctx.replay);
       }
       this.logger.log(
-        `tx ${created.transactionNo} mở: ${ctx.identity} c${req.connectorId} idTag=${req.idTag} meterStart=${req.meterStart}` +
+        `tx ${created.transactionNo} mở: ${ctx.identity} c${req.connectorId} meterStart=${req.meterStart}` +
           (ctx.replay.replayed ? ' (phát lại, delivered_offline)' : ''),
       );
       return { transactionId: created.transactionNo, duplicate: false };
@@ -249,6 +309,7 @@ export class SessionsService {
       this.logger.warn(`MeterValues cho transactionId ${req.transactionId} không tồn tại — bỏ qua`);
       return;
     }
+    if (session.chargePointId !== ctx.chargePointId) throw new Error('session_pillar_mismatch');
     const frame = this.frameRef('MeterValues', ctx);
     await this.db.transaction(async (tx) => {
       const { inserted, skipped } = await this.ingestSamples(tx, session.id, req.meterValue, ctx);
@@ -286,6 +347,7 @@ export class SessionsService {
       );
       return;
     }
+    if (session.chargePointId !== ctx.chargePointId) throw new Error('session_pillar_mismatch');
     await this.db.transaction(async (tx) => {
       if (session.meterStopWh !== null || !OPEN_STATUSES.includes(session.status)) {
         this.logger.warn(
@@ -483,11 +545,22 @@ export class SessionsService {
   /** Chuỗi Energy.Active.Import.Register của phiên theo cp_timestamp. */
   async getEnergySeries(ex: DbExecutor, sessionId: number): Promise<EnergySample[]> {
     const rows = await ex
-      .select({ cpTimestamp: meterValues.cpTimestamp, value: meterValues.value })
+      .select({
+        cpTimestamp: meterValues.cpTimestamp,
+        value: meterValues.value,
+        unit: meterValues.unit,
+        phase: meterValues.phase,
+      })
       .from(meterValues)
       .where(and(eq(meterValues.sessionId, sessionId), eq(meterValues.measurand, ENERGY_MEASURAND)))
       .orderBy(meterValues.cpTimestamp);
-    return rows.map((r) => ({ cpTimestamp: r.cpTimestamp, wh: Number(r.value) }));
+    // WP3/T31: reconcile aggregate energy in Wh while preserving original OCPP samples.
+    return rows
+      .filter((r) => r.phase === null && [null, 'Wh', 'kWh'].includes(r.unit))
+      .map((r) => ({
+        cpTimestamp: r.cpTimestamp,
+        wh: Number(r.value) * (r.unit === 'kWh' ? 1000 : 1),
+      }));
   }
 
   // ---------------------------------------------------------------------------

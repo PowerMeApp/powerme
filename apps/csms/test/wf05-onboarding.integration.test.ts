@@ -34,6 +34,7 @@ import { ReplayDetector } from '../src/reconciliation/replay-detector.js';
 import { SessionStateMachine } from '../src/sessions/session-state-machine.js';
 import { SessionsService } from '../src/sessions/sessions.service.js';
 import { PillarAuthService } from '../src/stations/pillar-auth.service.js';
+import { PillarLoginLimiter } from '../src/stations/pillar-login-limiter.js';
 import { resetAndMigrate } from './helpers/apply-migrations.js';
 import {
   OnboardingError,
@@ -365,5 +366,25 @@ describeDb('WF-05 — onboard a pillar and bring it into service (SD-5a, SD-5b)'
       { no: 1, status: 'Available' },
       { no: 2, status: 'Available' },
     ]);
+  });
+
+  // ---- Issue #40: failed logins are rate-limited before hashing ---------------------------
+
+  it('5 wrong passwords → the 6th attempt gets 429 even with the right password; accepted again after 15 min', async () => {
+    let now = Date.now();
+    const auth = new PillarAuthService(db, CONFIG, new PillarLoginLimiter(undefined, () => now));
+    const ip = '203.0.113.7';
+    for (let i = 0; i < 5; i++) {
+      expect(await auth.verify(SERIAL, 'wrong-password-123456', ip)).toMatchObject({ status: 401 });
+    }
+    expect(await auth.verify(SERIAL, password, ip)).toMatchObject({ ok: false, status: 429 });
+    // The real pillar on its own connection is not locked out by a stranger who knows the serial.
+    expect(await auth.verify(SERIAL, password, '198.51.100.1')).toMatchObject({ ok: true });
+
+    now += 15 * 60_000;
+    expect(await auth.verify(SERIAL, password, ip)).toMatchObject({
+      ok: true,
+      credentialChecked: true,
+    });
   });
 });

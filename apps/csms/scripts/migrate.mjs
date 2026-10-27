@@ -39,6 +39,16 @@ export async function migrate(client, log = () => {}, dir = MIGRATIONS_DIR) {
     (await client.query('SELECT name FROM _migrations')).rows.map((r) => r.name),
   );
   const names = listMigrations(dir);
+  // WP3/T72: renamed unpublished migrations require an explicit upgrade; never rerun their DDL.
+  const legacy = [...done].filter((name) =>
+    /^(0003_wp3_t31_charging|0004_wp3_t72_recovery|0005_wp3_station_search|0006_wp3_stop_attempts)$/.test(
+      name,
+    ),
+  );
+  if (legacy.length)
+    throw new Error(
+      `legacy_wp3_migration_history: ${legacy.join(', ')}; back up this database and reconcile its migration history before upgrading; no migration was applied`,
+    );
 
   if (names[0] && done.size === 0) {
     const { rows } = await client.query("SELECT to_regclass('public.charge_points') AS t");

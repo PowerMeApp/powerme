@@ -213,7 +213,7 @@ describeDb('WF-04 — sự cố trụ, cảnh báo và Reset từ xa (STM-6, FE-
       new OcppMessageLogger(db),
       serializer,
       new ReplayDetector(CONFIG.replaySkewThresholdS),
-      new OcppHandlers(sessionsService, CONFIG, faults),
+      new OcppHandlers(sessionsService, CONFIG, undefined, faults),
       sessionsService,
     );
     pillar = new ScriptedPillar(CP);

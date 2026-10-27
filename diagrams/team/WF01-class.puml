@@ -4,8 +4,8 @@ skinparam linetype polyline
 skinparam nodesep 30
 skinparam ranksep 50
 hide empty members
-title WF-01 Class diagram: Driver App (find a station and charge)
-footer Content: Lý Hoàng Sơn (WP3), t22-wf01-class 24/10/2026 · redrawn in the Report 4 diagram style, content unchanged
+title WF-01 Class diagram: Driver App (logical design)
+footer Content: Lý Hoàng Sơn (WP3), t22-wf01-class v1.1 25/10/2026 (SessionState aligned with STM-1) · redrawn in the Report 4 diagram style, content unchanged
 
 package "Stations" {
   interface StationRepository {
@@ -116,6 +116,11 @@ package "Charging" {
     paused
     stopping
     closed
+    reconciled
+    orphaned
+    review
+    failed
+    -- Client fallback --
     unknown
   }
   enum SettlementState <<enumeration>> {

@@ -21,7 +21,7 @@ package "PowerMe platform" {
     component "billing (WP5)\n<size:10>money, invoices, adjustments, VNPay IPN;</size>\n<size:10>+ Charging Credit ledger, top-ups, loyalty</size>" as bil
     component "tariffs (WP5)" as tar
     component "realtime\n<size:10>Socket.IO gateway, listens to events only</size>" as rt
-    component "suggestions (Sơn)\n<size:10>read-only ranking, routing API</size>" <<new>> as sug
+    component "suggestions (Nghĩa)\n<size:10>read-only ranking, routing API</size>" <<new>> as sug
   }
   database "PostgreSQL 16.4\n<size:10>Drizzle; each module owns its tables</size>" as db
   database "Redis 7.4\n<size:10>Socket.IO adapter, BullMQ jobs</size>" as redis
