@@ -574,7 +574,15 @@ describeDb('T61 — quét phục hồi khi CSMS khởi động lại (hẹn gi�
     // Hết hạn: B và C (không nối lại) → orphaned
     const timers = scheduler.live;
     for (const t of timers) t.fn();
-    await new Promise((r) => setTimeout(r, 150));
+    // Handler hết hạn chạy bất đồng bộ; chờ cố định 150 ms không đủ khi máy bận (đỏ 1/3 lần chạy
+    // cả 32 suite, 28/10) → chờ tới khi cả hai phiên orphaned, tối đa 5 s.
+    const deadline = Date.now() + 5_000;
+    while (
+      Date.now() < deadline &&
+      ((await status(b.tx)) !== 'orphaned' || (await status(c.tx)) !== 'orphaned')
+    ) {
+      await new Promise((r) => setTimeout(r, 50));
+    }
     expect(await status(b.tx)).toBe('orphaned');
     expect(await status(c.tx)).toBe('orphaned');
     expect(await status(d.tx)).toBe('active');
