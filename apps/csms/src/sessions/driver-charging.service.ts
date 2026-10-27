@@ -913,10 +913,14 @@ export class DriverChargingService {
   // WP3/T72: only this trusted ingress hook can request an account-independent system cutoff.
   async onMeter(transactionNo: number): Promise<void> {
     if (!this.policy || !Number.isSafeInteger(transactionNo) || transactionNo < 1) return;
+    // Chỉ phiên mở từ app (có driver_charge_intents) — stopCommand() JOIN intent nên phiên quẹt
+    // thẻ RFID có driver_id sẽ ném not_found mỗi MeterValues (thấy trong demo 27/10). Cắt credit
+    // cho phiên thẻ (BR-P19) chưa làm: Design Brief gap G5/G8.
     const row = (
       await this.db.$client.query<{ id: string; driver_id: string }>(
-        `SELECT id,driver_id FROM sessions WHERE transaction_no=$1 AND driver_id IS NOT NULL
-       AND status IN ('active','paused')`,
+        `SELECT s.id,s.driver_id FROM sessions s WHERE s.transaction_no=$1 AND s.driver_id IS NOT NULL
+       AND s.status IN ('active','paused')
+       AND EXISTS(SELECT 1 FROM driver_charge_intents i WHERE i.session_id=s.id AND i.driver_id=s.driver_id)`,
         [transactionNo],
       )
     ).rows[0];

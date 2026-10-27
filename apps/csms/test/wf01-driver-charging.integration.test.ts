@@ -840,6 +840,33 @@ describeDb('WP3/T31 WF-01 service journey with real OCPP + Postgres', () => {
     ]);
   });
 
+  it('onMeter ignores an RFID-started session that has a driver but no app intent', async () => {
+    // Demo 27/10: thẻ RFID gắn tài xế → onMeter gọi stopCommand() → JOIN driver_charge_intents rỗng
+    // → ERROR not_found mỗi MeterValues. Phiên thẻ phải được bỏ qua êm (cắt credit cho thẻ: gap G5/G8).
+    await q(
+      "INSERT INTO rfid_cards(card_identifier,card_kind,driver_id,status) VALUES('T31-RFID','online',$1,'active')",
+      [driver],
+    );
+    const rfid = (await client.call('StartTransaction', {
+      connectorId: 1,
+      idTag: 'T31-RFID',
+      meterStart: 1000,
+      timestamp: new Date().toISOString(),
+    })) as { transactionId: number };
+    expect(
+      (
+        await q('SELECT origin,driver_id FROM sessions WHERE transaction_no=$1', [
+          rfid.transactionId,
+        ])
+      )[0],
+    ).toMatchObject({ origin: 'rfid', driver_id: String(driver) });
+    await expect(service.onMeter(rfid.transactionId)).resolves.toBeUndefined();
+    expect(
+      await q("SELECT 1 FROM remote_commands WHERE action='RemoteStopTransaction'"),
+    ).toHaveLength(0);
+    expect(await q('SELECT 1 FROM driver_charge_intents')).toHaveLength(0);
+  });
+
   it('T72 wrong pillar meter and stop cannot mutate another pillar session', async () => {
     const sid = await observedStart();
     const ctx = {
