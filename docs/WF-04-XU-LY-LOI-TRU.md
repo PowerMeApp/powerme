@@ -8,7 +8,7 @@
 **Sources:**
 `AD-7_fault_and_alert.png` (AD-7 v1.0, WP1, 05/10/2026) · STM-6 FaultEvent, STM-2 Connector, STM-3 ChargingPillar, STM-1 ChargingSession (T12 v0.2, 20/10/2026) · `docs/XAC-NHAN-STATE-MACHINE-T13.md` · `docs/THIET-KE-CSDL-VAT-LY.md` §3.7 · `apps/csms/src/db/schema/ops.ts`, `stations.ts`, `enums.ts` · `docs/PACKAGE-DIAGRAM-CSMS.md` · `docs/WP2-KIEN-TRUC-TECHSTACK.md` §4.2–4.3 · `simulator/d1-hmi/hmi-actions.mjs` (`fault` / `clearfault`).
 
-> The diagrams show the **target design**. **Iteration 1 (FE-04, 27/10/2026)** implements the OCPP-driven part: `OcppHandlers` passes every `StatusNotification` to `SessionsService` and then to `FaultService` (`apps/csms/src/stations/faults/`), and the console sends the Reset. `remote_commands` exists since migration `0001`; `fault_events.reset_command_id` was added in migration `0007`. Driver reports, tickets, hiding the connector, the 900 s signal and realtime events are not built yet — see `ITERATION-1-WF04.md` §8.
+> The diagrams show the **target design**. **Iteration 1 (FE-04, 27/10/2026)** implements the OCPP-driven part: `OcppHandlers` passes every `StatusNotification` to `SessionsService` and then to `FaultService` (`apps/csms/src/stations/faults/`), and the console sends the Reset. `remote_commands` exists since migration `0001`; `fault_events.reset_command_id` was added in migration `0008`. Driver reports, tickets, hiding the connector, the 900 s signal and realtime events are not built yet — see `ITERATION-1-WF04.md` §8.
 
 ---
 
@@ -30,7 +30,8 @@
    - decides a site visit is needed.
 
 **Outcome.**
-- If the connector reports `Available` again, it is shown in search and the alert becomes `resolved`. This can happen after a reset (STM-6 t5) or on its own (STM-6 t3).
+- If the connector works again, it is shown in search and the alert becomes `resolved`. This can happen after a reset (STM-6 t5) or on its own (STM-6 t3). "Works again" means `Available`, or a status where it already serves a driver (`Preparing`, `Charging`, …): OCPP lets a connector leave `Faulted` for any status, so a fault that clears while a driver is plugged in never passes through `Available` (Q6).
+- Before a remote reset, the platform checks the other connector: OCPP `Reset` reboots the whole pillar, so a session charging there would be cut. The Operator must confirm a second time to reset anyway (Q12).
 - If the reset is refused, times out, or the connector is still `Faulted`, the alert returns to `acknowledged` (STM-6 t6). The Operator then opens a maintenance ticket (UC-OPS-08, «Should») or closes the alert after the site visit (STM-6 t7).
 
 **Invariants.**
@@ -97,9 +98,10 @@ Editable source: [`diagrams/wf-04-class.drawio`](diagrams/wf-04-class.drawio).
 | 3 | **Reset timeout value** for `resetting → acknowledged` (open in STM-6) | A timer per fault: `FAULT_RESET_TIMEOUT_S`, default 120 s (reboot + Boot + StatusNotification), built in FE-04 | Nghĩa |
 | 4 | **Manual close in Must scope** (STM-6 t7, open point 3 of AD-7) | Allowed when tickets are out of scope (diagram 2, phase H) | Nghĩa |
 | 5 | **AD-7 has no self-clearing path or explicit "acknowledge" step**, while STM-6 has t2 and t3. AD-7 also goes from a failed reset straight to the ticket, while STM-6 goes back to `acknowledged` | Follow STM-6: acknowledge is an explicit action, self-clearing is allowed, and a failed reset returns to `acknowledged` | WP1 (Ân) aligns AD-7 and STM-6 |
-| 6 | **`Faulted → Unavailable`** (confirmed in T13) is missing from STM-2 v0.1. A fault must also resolve when the connector reaches `Available` through `Unavailable` | Resolve on the first `Available` after `Faulted`, whatever is in between | WP1 (STM-2 v0.3) |
-| 7 | **Link between a fault and its reset command.** ~~`fault_events` has no column for it, and `remote_commands` does not exist~~ **Done:** `remote_commands` (migration `0001`) and `fault_events.reset_command_id` (migration `0007`, FE-04) | — | Trí, Nghĩa (done) |
+| 6 | **`Faulted → Unavailable`** (confirmed in T13) is missing from STM-2 v0.1, and so are `Faulted → Preparing / Charging / …` (OCPP table I1–I8). A fault must resolve whichever way the connector leaves `Faulted` | **Updated after PR #61 review:** resolve on the first working status after `Faulted` (`Available`, `Preparing`, `Charging`, `SuspendedEV`, `SuspendedEVSE`, `Finishing`, `Reserved`); `Unavailable` (reboot) does not resolve. Trigger name stays `CONNECTOR_AVAILABLE` | WP1 (STM-2 v0.3) |
+| 7 | **Link between a fault and its reset command.** ~~`fault_events` has no column for it, and `remote_commands` does not exist~~ **Done:** `remote_commands` (migration `0001`) and `fault_events.reset_command_id` (migration `0008`, FE-04) | — | Trí, Nghĩa (done) |
 | 8 | **New realtime events** `alert.updated` and `alert.resolved` are not in the WP2 §4.3 contract (only `alert.raised` is) | Add both to `packages/shared/src/realtime` | Trí + Nghĩa (wp1 + wp2 review) |
 | 9 | **Admin endpoints** `/api/admin/faults/{id}/acknowledge`, `/close`, `/tickets` and `/api/v1/fault-reports` are not in the WP2 §4.2 table | Endpoints live in the `stations` controllers with `RolesGuard` (package diagram rule 8) | Trí + Nghĩa |
 | 10 | **Which module handles `StatusNotification`.** Code: `SessionsService.onStatusNotification`. Package diagram: `stations` (BM02 F33) | Diagrams use `StationsService` (target design) | Trí |
 | 11 | **Severity** values and whether some codes should disable the pillar automatically (STM-3 `disabled`) | No automatic disable; severity only orders the alert list | WP1 + Nghĩa |
+| 12 | **Reset on a pillar where the other connector is charging.** OCPP `Reset` reboots the whole pillar; BR-P07 asks for communicated downtime | Refuse (409 `sessions_active`) unless the Operator confirms a second time (`force`); the forced command is recorded. A notice to the affected driver needs a WP3 app event | Nghĩa + WP3 |

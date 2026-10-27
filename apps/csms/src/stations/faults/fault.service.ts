@@ -12,11 +12,15 @@
  *
  * Bất biến:
  *   - Một sự cố MỞ (status <> resolved) cho mỗi connector; connector 0 = cả trụ (connector_id
- *     null). Tìm sự cố mở bằng SELECT … FOR UPDATE; chỉ mục UNIQUE của migration 0007 là rào cuối.
+ *     null). Tìm sự cố mở bằng SELECT … FOR UPDATE; chỉ mục UNIQUE của migration 0008 là rào cuối.
  *   - Faulted lặp lại → gắn vào sự cố đang mở, GIỮ error_code đầu tiên (mã sau xem ở
  *     connector_status_events).
- *   - Chỉ `Available` mới kết thúc sự cố (t3/t5/t7); `Unavailable` sau khi trụ khởi động lại thì
- *     chưa (WF-04 câu hỏi 6, T13: Faulted → Unavailable → Available).
+ *   - Súng về trạng thái hoạt động ({@link RECOVERED_STATUSES}: Available hoặc bắt đầu phục vụ
+ *     ngay — Preparing, Charging…) thì kết thúc sự cố (t3/t5/t7). `Unavailable` sau khi trụ khởi
+ *     động lại thì chưa (WF-04 câu hỏi 6, T13: Faulted → Unavailable → Available).
+ *   - Thời điểm sự cố lấy theo đồng hồ trụ khi frame là bản PHÁT LẠI (`occurredAt`, do gateway
+ *     chọn): trụ mất mạng 30 phút rồi gửi lại Faulted lúc 10:05 thì raised_at = 10:05, không phải
+ *     lúc CSMS nhận.
  *   - Hẹn giờ chờ Reset nằm trong RAM ({@link Scheduler}); khởi động lại thì quét DB dựng lại
  *     (cùng cách OfflineGraceService của T61).
  *
@@ -32,12 +36,18 @@ import {
   OnApplicationShutdown,
   Optional,
 } from '@nestjs/common';
-import { and, desc, eq, isNull, ne, sql } from 'drizzle-orm';
+import { and, desc, eq, isNull, ne, SQL, sql, SQLWrapper } from 'drizzle-orm';
 import { ScheduledTask, Scheduler, TimeoutScheduler } from '../../common/scheduler.js';
 import { CONFIG, CsmsConfig, DEFAULT_FAULT_RESET_TIMEOUT_S } from '../../config.js';
 import { DB, Db, DbExecutor } from '../../db/db.module.js';
 import { chargePoints, connectors, faultEvents, remoteCommands } from '../../db/schema/index.js';
-import { guideFor, compareSeverity, FaultSeverity } from './error-code-guide.js';
+import {
+  CHARGE_POINT_ERROR_CODES,
+  ERROR_CODE_GUIDE,
+  FaultSeverity,
+  guideFor,
+  severityRank,
+} from './error-code-guide.js';
 import {
   FaultStateMachine,
   FaultStatus,
@@ -71,7 +81,29 @@ export interface ConnectorStatusInput {
   status: string;
   errorCode: string | null;
   receivedAt: Date;
+  /**
+   * Lúc sự việc xảy ra: đồng hồ trụ (`timestamp` trong payload) nếu frame là bản phát lại, ngược
+   * lại `receivedAt` (ADR-0009: received_at là đồng hồ tin cậy cho frame live). Ghi raised_at /
+   * resolved_at. Bỏ trống = `receivedAt`.
+   */
+  occurredAt?: Date;
 }
+
+/**
+ * Trạng thái súng coi là ĐÃ HỒI PHỤC (trigger CONNECTOR_AVAILABLE của STM-6). OCPP 1.6 cho súng
+ * thoát Faulted sang bất kỳ trạng thái nào (bảng I1…I8, `valid-transitions.ts`): lỗi tự hết rồi tài
+ * xế cắm sạc luôn thì súng đi Faulted → Preparing → Charging, không qua Available. `Unavailable`
+ * KHÔNG nằm đây: đó là bước giữa lúc trụ khởi động lại (T13 2.3 #14), lỗi có thể vẫn còn.
+ */
+export const RECOVERED_STATUSES: ReadonlySet<string> = new Set([
+  'Available',
+  'Preparing',
+  'Charging',
+  'SuspendedEV',
+  'SuspendedEVSE',
+  'Finishing',
+  'Reserved',
+]);
 
 export interface BeginResetResult {
   faultId: number;
@@ -100,6 +132,18 @@ export interface FaultListItem {
   resetCommandId: number | null;
   resetCommandStatus: string | null;
   isOnline: boolean;
+}
+
+/**
+ * `CASE error_code WHEN 'GroundFailure' THEN 0 … ELSE <hạng của OtherError> END` — hạng nặng nhẹ của
+ * ErrorCodeGuide đưa vào ORDER BY để sắp trước LIMIT. Mã và số đều là hằng của bảng tĩnh (không
+ * phải dữ liệu người dùng) nên ghép thẳng vào SQL.
+ */
+function severityRankSql(column: SQLWrapper): SQL {
+  const whens = CHARGE_POINT_ERROR_CODES.map((code) =>
+    sql.raw(`WHEN '${code}' THEN ${severityRank(ERROR_CODE_GUIDE[code].severity)}`),
+  );
+  return sql`CASE ${column} ${sql.join(whens, sql` `)} ELSE ${sql.raw(String(severityRank(guideFor(null).severity)))} END`;
 }
 
 /** Trạng thái lệnh `remote_commands` còn chưa có kết quả. */
@@ -159,11 +203,14 @@ export class FaultService implements OnApplicationBootstrap, OnApplicationShutdo
 
   /**
    * Gọi SAU khi SessionsService đã phản chiếu StatusNotification (frame của một trụ được tuần tự
-   * hoá nên thứ tự an toàn). `Faulted` → t1 hoặc gắn vào sự cố mở; `Available` → kết thúc sự cố mở.
-   * Trạng thái khác: không làm gì.
+   * hoá nên thứ tự an toàn). `Faulted` → t1 hoặc gắn vào sự cố mở; trạng thái hồi phục
+   * ({@link RECOVERED_STATUSES}) → kết thúc sự cố mở. `Unavailable` / status lạ: không làm gì.
    */
   async onConnectorStatus(input: ConnectorStatusInput): Promise<StatusOutcome> {
-    if (input.status !== 'Faulted' && input.status !== 'Available') return { kind: 'none' };
+    if (input.status !== 'Faulted' && !RECOVERED_STATUSES.has(input.status)) {
+      return { kind: 'none' };
+    }
+    const at = input.occurredAt ?? input.receivedAt;
     const connectorId = await this.resolveConnectorId(input.chargePointId, input.connectorNo);
     if (connectorId === undefined) return { kind: 'none' };
 
@@ -182,7 +229,7 @@ export class FaultService implements OnApplicationBootstrap, OnApplicationShutdo
             source: 'ocpp',
             errorCode: input.errorCode,
             status: this.sm.initial(),
-            raisedAt: input.receivedAt,
+            raisedAt: at,
           })
           .returning({ id: faultEvents.id });
         if (!row) throw new Error('INSERT fault_events không trả id');
@@ -192,7 +239,7 @@ export class FaultService implements OnApplicationBootstrap, OnApplicationShutdo
       const step = this.sm.apply(open.status, 'CONNECTOR_AVAILABLE');
       await tx
         .update(faultEvents)
-        .set({ status: step.to, resolvedAt: input.receivedAt })
+        .set({ status: step.to, resolvedAt: at })
         .where(eq(faultEvents.id, open.id));
       return { kind: 'resolved', faultId: open.id, from: open.status } as const;
     });
@@ -229,7 +276,7 @@ export class FaultService implements OnApplicationBootstrap, OnApplicationShutdo
    */
   async beginReset(
     faultId: number,
-    opts: { type: ResetType; requestedBy: number | null; at?: Date },
+    opts: { type: ResetType; requestedBy: number | null; at?: Date; force?: boolean },
   ): Promise<BeginResetResult> {
     const at = opts.at ?? new Date();
     const result = await this.db.transaction(async (tx) => {
@@ -240,7 +287,7 @@ export class FaultService implements OnApplicationBootstrap, OnApplicationShutdo
         .values({
           chargePointId: fault.chargePointId,
           action: 'Reset',
-          payload: { type: opts.type },
+          payload: opts.force ? { type: opts.type, force: true } : { type: opts.type },
           status: 'pending',
           requestedBy: opts.requestedBy,
           requestedAt: at,
@@ -369,7 +416,10 @@ export class FaultService implements OnApplicationBootstrap, OnApplicationShutdo
   // Đọc
   // ---------------------------------------------------------------------------------------------
 
-  /** Danh sách cảnh báo: sự cố mở trước, nặng trước, mới trước. */
+  /**
+   * Danh sách cảnh báo: sự cố mở trước, nặng trước, mới trước — sắp XẾP TRONG SQL rồi mới LIMIT, để
+   * 25 lỗi nhẹ mới hơn không đẩy một lỗi nghiêm trọng cũ ra khỏi trang (review #61).
+   */
   async list(filter: 'open' | 'all', limit: number): Promise<FaultListItem[]> {
     const rows = await this.db
       .select({
@@ -392,9 +442,14 @@ export class FaultService implements OnApplicationBootstrap, OnApplicationShutdo
       .leftJoin(connectors, eq(connectors.id, faultEvents.connectorId))
       .leftJoin(remoteCommands, eq(remoteCommands.id, faultEvents.resetCommandId))
       .where(filter === 'open' ? ne(faultEvents.status, 'resolved') : undefined)
-      .orderBy(desc(faultEvents.raisedAt), desc(faultEvents.id))
+      .orderBy(
+        sql`(${faultEvents.status} = 'resolved')`,
+        severityRankSql(faultEvents.errorCode),
+        desc(faultEvents.raisedAt),
+        desc(faultEvents.id),
+      )
       .limit(limit);
-    const items = rows.map((r) => {
+    return rows.map((r) => {
       const g = guideFor(r.errorCode);
       return {
         ...r,
@@ -403,12 +458,6 @@ export class FaultService implements OnApplicationBootstrap, OnApplicationShutdo
         hint: g.hint,
       };
     });
-    // Sắp ổn định: mở trước, rồi severity, giữ thứ tự thời gian của SQL trong cùng nhóm.
-    return items.sort(
-      (a, b) =>
-        Number(a.status === 'resolved') - Number(b.status === 'resolved') ||
-        compareSeverity(a.severity, b.severity),
-    );
   }
 
   /** Một sự cố (không khoá) — để người gọi kiểm trước khi gửi lệnh. */
@@ -456,7 +505,7 @@ export class FaultService implements OnApplicationBootstrap, OnApplicationShutdo
     const timeoutMs = this.resetTimeoutS * 1000;
     for (const r of rows) {
       if (r.commandId === null) {
-        // Dữ liệu trước migration 0007 / sửa tay: không biết lệnh nào → coi như hết hạn.
+        // Dữ liệu trước migration 0008 / sửa tay: không biết lệnh nào → coi như hết hạn.
         await this.db
           .update(faultEvents)
           .set({ status: this.sm.apply('resetting', 'RESET_FAILED').to })

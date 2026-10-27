@@ -13,7 +13,7 @@
  * Cần DATABASE_URL (DB test riêng — test DROP SCHEMA public); thiếu thì cả describe bị skip.
  */
 import { Logger } from '@nestjs/common';
-import { and, asc, eq } from 'drizzle-orm';
+import { and, asc, eq, inArray } from 'drizzle-orm';
 import type { ScheduledTask, Scheduler } from '../src/common/scheduler.js';
 import type { CsmsConfig } from '../src/config.js';
 import { ConsoleCommands } from '../src/console/console.commands.js';
@@ -342,7 +342,7 @@ describeDb('WF-04 — sự cố trụ, cảnh báo và Reset từ xa (STM-6, FE-
         source: 'operator',
         status: 'raised',
       }),
-    ).rejects.toThrow(); // fault_events_one_open_per_connector_key (migration 0007)
+    ).rejects.toThrow(); // fault_events_one_open_per_connector_key (migration 0008)
   });
 
   it('IT-2b: Faulted trên hai súng → hai sự cố độc lập', async () => {
@@ -559,6 +559,159 @@ describeDb('WF-04 — sự cố trụ, cảnh báo và Reset từ xa (STM-6, FE-
     ]);
     const all = await getFaults('all');
     expect(all.map((f) => f.status)).toEqual(['raised', 'resolved']);
+  });
+
+  it('IT-12: lỗi tự hết rồi tài xế cắm sạc luôn — Faulted → Preparing → Charging cũng đóng sự cố (t3, t7); Unavailable thì chưa', async () => {
+    await status(1, 'Faulted', 'GroundFailure');
+    await status(1, 'Preparing');
+    expect((await onlyFault()).status).toBe('resolved'); // t3, không qua Available
+    await status(1, 'Charging');
+    expect(await faultRows()).toHaveLength(1); // Charging sau đó không tạo/đụng sự cố nào
+
+    await db.delete(faultEvents);
+    await status(2, 'Faulted', 'GroundFailure');
+    await post(`/api/admin/faults/${(await onlyFault()).id}/acknowledge`);
+    await status(2, 'Unavailable');
+    expect((await onlyFault()).status).toBe('acknowledged');
+    await status(2, 'Charging');
+    expect((await onlyFault()).status).toBe('resolved'); // t7
+    await status(1, 'Available');
+    await status(2, 'Available');
+  });
+
+  it('IT-13: Reset khi súng khác đang sạc → 409 sessions_active, không ghi lệnh; force=true thì gửi và ghi payload.force; phiên trên chính súng lỗi không chặn', async () => {
+    async function startOn(connectorId: number): Promise<number> {
+      const at = tick();
+      const r = (await send(
+        'StartTransaction',
+        { connectorId, idTag: 'WF04TAG', meterStart: 0, timestamp: at.toISOString() },
+        at,
+      )) as { transactionId: number };
+      await status(connectorId, 'Charging');
+      return r.transactionId;
+    }
+    async function stop(transactionId: number) {
+      const at = tick();
+      await send(
+        'StopTransaction',
+        { transactionId, meterStop: 0, timestamp: at.toISOString(), reason: 'Local' },
+        at,
+      );
+    }
+
+    const tx2 = await startOn(2);
+    await status(1, 'Faulted', 'GroundFailure');
+    const id = (await onlyFault()).id;
+    await post(`/api/admin/faults/${id}/acknowledge`);
+
+    const refused = await post<{ error: string; detail: string }>(`/api/admin/faults/${id}/reset`);
+    expect(refused).toMatchObject({ status: 409, body: { error: 'sessions_active' } });
+    expect(refused.body.detail).toContain('súng 2');
+    expect(await db.select().from(remoteCommands)).toHaveLength(0);
+    expect(pillar.calls).toHaveLength(0);
+    expect((await onlyFault()).status).toBe('acknowledged');
+
+    const forced = await post<{ forced: boolean; fault_status: string; command_id: number }>(
+      `/api/admin/faults/${id}/reset?force=true`,
+    );
+    expect(forced.body).toMatchObject({ forced: true, fault_status: 'resetting' });
+    const [cmd] = await db
+      .select({ payload: remoteCommands.payload })
+      .from(remoteCommands)
+      .where(eq(remoteCommands.id, forced.body.command_id));
+    expect(cmd!.payload).toEqual({ type: 'Soft', force: true });
+    await stop(tx2);
+
+    // Phiên trên chính súng lỗi (AD-7: Faulted tới trước StopTransaction) không chặn Reset.
+    faults.cancelAll();
+    await db.delete(faultEvents);
+    await db.delete(remoteCommands);
+    await status(1, 'Available');
+    const tx1 = await startOn(1);
+    await status(1, 'Faulted', 'GroundFailure');
+    const own = (await onlyFault()).id;
+    await post(`/api/admin/faults/${own}/acknowledge`);
+    const ok = await post<{ forced: boolean; fault_status: string }>(
+      `/api/admin/faults/${own}/reset`,
+    );
+    expect(ok).toMatchObject({ status: 200, body: { forced: false, fault_status: 'resetting' } });
+    await stop(tx1);
+  });
+
+  it('IT-14: bản phát lại giữ giờ trụ — Faulted 10:05 và Available 10:07 tới lúc 10:35 → raised_at 10:05, resolved_at 10:07; frame live vẫn dùng received_at', async () => {
+    const receivedAt = tick(1800);
+    const faultedAt = new Date(receivedAt.getTime() - 30 * 60_000);
+    const availableAt = new Date(faultedAt.getTime() + 2 * 60_000);
+    const frames = [
+      ['Faulted', 'GroundFailure', faultedAt, receivedAt],
+      ['Available', 'NoError', availableAt, tick()],
+    ] as const;
+    for (const [st, code, cp, rx] of frames) {
+      await send(
+        'StatusNotification',
+        { connectorId: 1, errorCode: code, status: st, timestamp: cp.toISOString() },
+        rx,
+      );
+    }
+    const replayed = await onlyFault();
+    expect(replayed.raisedAt.toISOString()).toBe(faultedAt.toISOString());
+    expect(replayed.resolvedAt!.toISOString()).toBe(availableAt.toISOString());
+
+    await db.delete(faultEvents);
+    const liveAt = tick();
+    await send(
+      'StatusNotification',
+      {
+        connectorId: 1,
+        errorCode: 'GroundFailure',
+        status: 'Faulted',
+        timestamp: liveAt.toISOString(),
+      },
+      liveAt,
+    );
+    expect((await onlyFault()).raisedAt.toISOString()).toBe(liveAt.toISOString());
+    await status(1, 'Available');
+  });
+
+  it('IT-15: danh sách sắp theo mức nặng TRƯỚC khi cắt limit — 25 lỗi nhẹ mới hơn không đẩy lỗi nghiêm trọng cũ ra khỏi ?limit=20', async () => {
+    // 13 trụ × 2 súng = 26 súng, mỗi súng một sự cố mở (bất biến một sự cố mở mỗi súng).
+    const pillars = await db
+      .insert(chargePoints)
+      .values(
+        Array.from({ length: 13 }, (_, i) => ({
+          serialNumber: `RH24D1-WF04-L${String(i).padStart(2, '0')}`,
+          model: 'D1-120',
+          lifecycle: 'in_service' as const,
+        })),
+      )
+      .returning({ id: chargePoints.id });
+    const conns = await db
+      .insert(connectors)
+      .values(
+        pillars.flatMap((p) => [1, 2].map((connectorNo) => ({ chargePointId: p.id, connectorNo }))),
+      )
+      .returning({ id: connectors.id, chargePointId: connectors.chargePointId });
+    const t0 = Date.parse('2026-10-27T06:00:00Z');
+    await db.insert(faultEvents).values(
+      conns.map((c, i) => ({
+        chargePointId: c.chargePointId,
+        connectorId: c.id,
+        source: 'ocpp' as const,
+        errorCode: i === 0 ? 'GroundFailure' : 'WeakSignal',
+        status: 'raised' as const,
+        raisedAt: new Date(t0 + i * 60_000), // GroundFailure là cũ nhất
+      })),
+    );
+    const res = await fetch(`${base}/api/admin/faults?limit=20`);
+    const list = (await res.json()) as FaultJson[];
+    expect(list).toHaveLength(20);
+    expect(list[0]).toMatchObject({ error_code: 'GroundFailure', severity: 'critical' });
+    expect(list.slice(1).every((f) => f.severity === 'minor')).toBe(true);
+
+    await db.delete(faultEvents);
+    const ids = pillars.map((p) => p.id);
+    await db.delete(connectors).where(inArray(connectors.chargePointId, ids));
+    await db.delete(chargePoints).where(inArray(chargePoints.id, ids));
   });
 
   it('khởi động lại CSMS: sự cố resetting quá hạn → acknowledged; còn trong hạn → hẹn giờ phần còn lại', async () => {

@@ -34,7 +34,10 @@ const backend: ConsoleBackend = {
     if (id === 9) throw new ConsoleError(409, 'invalid_transition', 'đã acknowledged');
     return { id, status: 'acknowledged' };
   },
-  resetFault: async (id, type) => (calls.push(`reset:${id}:${type}`), { fault_id: id }),
+  resetFault: async (id, type, force) => (
+    calls.push(`reset:${id}:${type}${force ? ':force' : ''}`),
+    { fault_id: id }
+  ),
   closeFault: async (id) => ({ id, status: 'resolved' }),
 };
 
@@ -187,12 +190,15 @@ describe('WF-04 — API sự cố (FE-04)', () => {
     expect(calls).toEqual(['faults:all:5']);
   });
 
-  it('POST reset mang type xuống backend; mặc định Soft', async () => {
+  it('POST reset mang type và force xuống backend; mặc định Soft, không force', async () => {
     expect(
       (await fetch(`${base}/api/admin/faults/3/reset?type=Hard`, { method: 'POST' })).status,
     ).toBe(200);
     expect((await fetch(`${base}/api/admin/faults/4/reset`, { method: 'POST' })).status).toBe(200);
-    expect(calls).toEqual(['reset:3:Hard', 'reset:4:Soft']);
+    expect(
+      (await fetch(`${base}/api/admin/faults/5/reset?force=true`, { method: 'POST' })).status,
+    ).toBe(200);
+    expect(calls).toEqual(['reset:3:Hard', 'reset:4:Soft', 'reset:5:Soft:force']);
   });
 
   it('ConsoleError 409 của backend → {error, detail}', async () => {

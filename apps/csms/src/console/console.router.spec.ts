@@ -143,13 +143,15 @@ describe('matchRoute — WF-04 sự cố (FE-04)', () => {
   it.each([
     ['acknowledge', { kind: 'faultAcknowledge', id: 7 }],
     ['close', { kind: 'faultClose', id: 7 }],
-    ['reset', { kind: 'faultReset', id: 7, type: 'Soft' }],
-    ['reset?type=Hard', { kind: 'faultReset', id: 7, type: 'Hard' }],
+    ['reset', { kind: 'faultReset', id: 7, type: 'Soft', force: false }],
+    ['reset?type=Hard', { kind: 'faultReset', id: 7, type: 'Hard', force: false }],
+    ['reset?force=true', { kind: 'faultReset', id: 7, type: 'Soft', force: true }],
+    ['reset?type=Hard&force=false', { kind: 'faultReset', id: 7, type: 'Hard', force: false }],
   ])('POST /api/admin/faults/7/%s', (suffix, route) => {
     expect(matchRoute('POST', `/api/admin/faults/7/${suffix}`)).toEqual({ ok: true, route });
   });
 
-  it('hành động: GET → 405, id không phải số dương → 400, type lạ → 400, hành động lạ → 404', () => {
+  it('hành động: GET → 405, id không phải số dương → 400, type / force lạ → 400, hành động lạ → 404', () => {
     expect(matchRoute('GET', '/api/admin/faults/7/acknowledge')).toMatchObject({
       status: 405,
       allow: ['POST'],
@@ -157,6 +159,9 @@ describe('matchRoute — WF-04 sự cố (FE-04)', () => {
     expect(matchRoute('POST', '/api/admin/faults/abc/close')).toMatchObject({ status: 400 });
     expect(matchRoute('POST', '/api/admin/faults/0/close')).toMatchObject({ status: 400 });
     expect(matchRoute('POST', '/api/admin/faults/7/reset?type=Medium')).toMatchObject({
+      status: 400,
+    });
+    expect(matchRoute('POST', '/api/admin/faults/7/reset?force=yes')).toMatchObject({
       status: 400,
     });
     expect(matchRoute('POST', '/api/admin/faults/7/delete')).toMatchObject({ status: 404 });

@@ -1,6 +1,6 @@
 # Iteration 1 — WF-04 "xử lý lỗi trụ" (pillar fault, alert and remote recovery) — FE-04
 
-**Date:** 27/10/2026 · **Owner:** Trần Trọng Nghĩa (WP4) · **Branch:** `wp4/fe-04-iteration-1-wf04` (from `main` @ `34ec95a`)
+**Date:** 27/10/2026 (updated after review of PR #61, see §10) · **Owner:** Trần Trọng Nghĩa (WP4) · **Branch:** `wp4/fe-04-iteration-1-wf04` (from `main` @ `34ec95a`, merged with `main` @ `c107c94`)
 
 **Sources:**
 - Design: `docs/WF-04-XU-LY-LOI-TRU.md` (sequence diagrams 1–2, class diagram, mapping table §5, open questions §6), `diagrams/team/WF04-*`, AD-7 (`diagrams/ad/AD-7_fault_and_alert.puml`).
@@ -20,8 +20,8 @@ This is the first product code for WF-04. A pillar fault becomes an operator ale
 | **STM-6 FaultEvent**: a pure class with 7 transitions (t2–t7) and creation t1. Every transition and the full 4 × 6 sweep are tested | **Driver fault report** (UC-CHG-05): no app API yet |
 | **Fault raised** from `StatusNotification Faulted`, including **connector 0** (whole pillar, `connector_id` null) | **Maintenance tickets** (UC-OPS-08, «Should») |
 | **One open fault per connector**: a repeated `Faulted` attaches to the open fault (the first `error_code` is kept), enforced in code (`SELECT … FOR UPDATE`) and in the DB (unique index, migration `0007`) | **Hide connector + void reservations** (AD-4, «Should») |
-| **Auto-resolve** on `Available`: t3 from `raised`, t5 from `resetting`, t7 from `acknowledged`. `Unavailable` after a reboot does **not** resolve | **Offline > 900 s → fault** (G19, ADR-0016): the timer location is to be agreed with Trí |
-| **Acknowledge** (t2), **remote Reset** (t4) with a `remote_commands` row and a timeout timer, **Reset failed / rejected / timeout** (t6), **manual close** (t7 `OPERATOR_CLOSE`) | **Realtime** `alert.*` events (BE-08), **dashboard alerts page** (WP4 UI) |
+| **Auto-resolve** when the connector works again: `Available`, or straight to `Preparing` / `Charging` / `SuspendedEV(SE)` / `Finishing` / `Reserved` (t3 from `raised`, t5 from `resetting`, t7 from `acknowledged`). `Unavailable` after a reboot does **not** resolve | **Offline > 900 s → fault** (G19, ADR-0016): the timer location is to be agreed with Trí |
+| **Acknowledge** (t2), **remote Reset** (t4) with a `remote_commands` row and a timeout timer, refused with 409 while another connector is charging unless the operator forces it, **Reset failed / rejected / timeout** (t6), **manual close** (t7 `OPERATOR_CLOSE`) | **Realtime** `alert.*` events (BE-08), **dashboard alerts page** (WP4 UI) |
 | **Error-code guide**: all 16 OCPP 1.6 `ChargePointErrorCode` values with severity and an operator hint | Final hints for the four SRS hardware codes (waiting on WP1) |
 | **Console API + "Faults" table**: list, acknowledge, reset, close | Login / `RolesGuard` (ADR-0011): `acknowledged_by` stays null from the console |
 
@@ -33,7 +33,7 @@ The session on the faulted connector needs **no new code**. The pillar sends `St
 
 ```
 apps/csms/
-├── drizzle/0007_fe04-fault-events-wf04.sql   NEW: fault_events.reset_command_id + one-open-fault unique index
+├── drizzle/0008_fe04-fault-events-wf04.sql   NEW: fault_events.reset_command_id + one-open-fault unique index
 ├── src/
 │   ├── common/scheduler.ts                   NEW: Scheduler / TimeoutScheduler moved out of offline-grace (shared)
 │   ├── config.ts (+ spec)                    FAULT_RESET_TIMEOUT_S (default 120)
@@ -54,12 +54,11 @@ apps/csms/
 │       ├── console.server.ts, console.module.ts  wiring (+ StationsModule)
 │       └── console-page.ts                   "Faults" panel with buttons (hidden when nothing is open)
 └── test/
-    ├── wf04-fault.integration.test.ts        NEW: 19 tests
-    └── migration-0001/0002.integration.test.ts   migration lists now include 0007
+    └── wf04-fault.integration.test.ts        NEW: 23 tests
 infra/.env.example                            + FAULT_RESET_TIMEOUT_S
 ```
 
-**Why migration 0007.** WP3's open branches already use `0003`–`0006`. The `migrate` helper applies every file not yet in `_migrations` in name order, so either merge order works, and the two sets touch different tables.
+**Why migration 0008.** `main` has `0003` (T73 billing) and PR #58 (WP3) uses `0004`–`0007`; since #62 a test on `main` refuses two migrations with the same number. The first version of this PR used `0007` and collided with #58. The `migrate` helper applies every file not yet in `_migrations` in name order, so either merge order works, and the two sets touch different tables. A local DB that already applied the old `0007` must be rebuilt once (`npm run demo:reset`; integration tests call `resetAndMigrate`).
 
 ---
 
@@ -75,8 +74,9 @@ infra/.env.example                            + FAULT_RESET_TIMEOUT_S
 
 - **`onConnectorStatus(...)`** is called by `OcppHandlers` **after** `SessionsService.onStatusNotification`. Frames of one pillar are serialized, so the order is safe.
   - `Faulted`: t1, or attach to the open fault.
-  - `Available`: t3 / t5 / t7.
-  - Any other status: nothing.
+  - A working status (`RECOVERED_STATUSES`: `Available`, `Preparing`, `Charging`, `SuspendedEV`, `SuspendedEVSE`, `Finishing`, `Reserved`): t3 / t5 / t7. OCPP 1.6 lets a connector leave `Faulted` for any status (table I1–I8, `valid-transitions.ts`), so a fault that clears while a driver is already plugged in goes Faulted → Preparing → Charging and must close too. The STM-6 trigger keeps its name `CONNECTOR_AVAILABLE`.
+  - `Unavailable` (reboot in progress) or an unknown status: nothing.
+  - `raised_at` / `resolved_at` use the pillar's `timestamp` when the frame is **replayed** (`ctx.replay.replayed`), otherwise `received_at`. A pillar offline for 30 min that replays `Faulted` at 10:05 and `Available` at 10:07 gets those times, not the 10:35 reconnect.
   - An error here is logged and never turns a `StatusNotification` into a CALLERROR. CSMS mirrors status and never rejects one (T13).
 - **`acknowledge`** → t2.
 - **`beginReset`** → t4 in one transaction: INSERT `remote_commands` (Reset, pending) and set `fault_events.reset_command_id`. It then arms a timer of `FAULT_RESET_TIMEOUT_S`.
@@ -87,10 +87,12 @@ infra/.env.example                            + FAULT_RESET_TIMEOUT_S
   - A late result for a command no longer attached to a `resetting` fault only updates the command.
 - **`onResetTimeout`** → t6, but only for the same command. A command with no result yet becomes `timeout`; an `accepted` command stays `accepted`.
 - **`close`** → t7 `OPERATOR_CLOSE`.
-- **`list`**: open faults first, then by severity, then newest.
+- **`list`**: open faults first, then by severity, then newest — ordered **in SQL before `LIMIT`** (`CASE error_code …` built from `ERROR_CODE_GUIDE`), so newer minor faults never push an older critical one off the console's 20 rows.
 - **`recoverAfterRestart`** runs at bootstrap. Timers are in RAM, as in T61. Each `resetting` fault is timed out if its command is older than the timeout, or re-armed for the remaining time.
 
-**Who sends the Reset CALL.** `stations` must not import `ocpp-gateway` (ADR-0016 D-F), so the console sends it through `ConnectionRegistry`, the same way `remoteStop` does. The order is: check (409 if not `acknowledged` or the pillar is offline; nothing is written) → `beginReset` → `markSent` → `client.call('Reset', {type})` → `onResetResult`.
+**Who sends the Reset CALL.** `stations` must not import `ocpp-gateway` (ADR-0016 D-F), so the console sends it through `ConnectionRegistry`, the same way `remoteStop` does. The order is: check (409 if not `acknowledged`, the pillar is offline, or another connector has an `active` / `paused` / `stopping` session; nothing is written) → `beginReset` → `markSent` → `client.call('Reset', {type})` → `onResetResult`.
+
+**Reset on a busy pillar.** OCPP `Reset` reboots the whole pillar, so a driver charging on the other connector would be cut off without notice (BR-P07 asks for communicated downtime). The console answers 409 `sessions_active` with the connectors and session ids; the page asks a second confirmation and resends with `force=true`. The command is then stored with `payload = {type, force: true}` and the response carries `forced: true`. A session on the faulted connector itself does not block: WF-04 step 1 closes it.
 
 ### 3.3 `ErrorCodeGuide`
 
@@ -104,10 +106,10 @@ infra/.env.example                            + FAULT_RESET_TIMEOUT_S
 |---|---|---|
 | GET | `/api/admin/faults?status=open\|all&limit=` | list (default `open`, 100) · 400 for a bad status or limit |
 | POST | `/api/admin/faults/{id}/acknowledge` | `{id, status}` · 404 · 409 `invalid_transition` |
-| POST | `/api/admin/faults/{id}/reset?type=Soft\|Hard` | `{fault_id, command_id, reset_status, fault_status}` · 409 `fault_not_acknowledged` / `station_offline` · 502 `station_error` |
+| POST | `/api/admin/faults/{id}/reset?type=Soft\|Hard&force=true\|false` | `{fault_id, command_id, reset_status, fault_status, forced}` · 409 `fault_not_acknowledged` / `station_offline` / `sessions_active` · 502 `station_error` |
 | POST | `/api/admin/faults/{id}/close` | `{id, status}` · 404 · 409 |
 
-The reset type is a query parameter because the console's HTTP layer reads no request bodies.
+The reset type and `force` are query parameters because the console's HTTP layer reads no request bodies.
 
 ---
 
@@ -117,13 +119,13 @@ File: `apps/csms/src/stations/faults/fault-state-machine.spec.ts`. Names look li
 
 | t | From → To | Trigger | Real trigger path in Iteration 1 | Integration test |
 |---|---|---|---|---|
-| t1 | ● → raised | `initial()` | `StatusNotification Faulted` | IT-1a, IT-1b, IT-2, IT-10, IT-11 |
+| t1 | ● → raised | `initial()` | `StatusNotification Faulted` (live or replayed) | IT-1a, IT-1b, IT-2, IT-10, IT-11, IT-14 |
 | t2 | raised → acknowledged | `ACKNOWLEDGE` | `POST …/acknowledge` | IT-5 |
-| t3 | raised → resolved | `CONNECTOR_AVAILABLE` | `StatusNotification Available` | IT-3, IT-4 |
-| t4 | acknowledged → resetting | `RESET_SENT` | `POST …/reset` | IT-6 |
+| t3 | raised → resolved | `CONNECTOR_AVAILABLE` | `StatusNotification` with a working status | IT-3, IT-4, IT-12, IT-14 |
+| t4 | acknowledged → resetting | `RESET_SENT` | `POST …/reset` (`force=true` when another connector charges) | IT-6, IT-13 |
 | t5 | resetting → resolved | `CONNECTOR_AVAILABLE` | `Available` after the reboot | IT-6 |
 | t6 | resetting → acknowledged | `RESET_FAILED` | Reset `Rejected` / bad reply / timeout | IT-7, IT-7b, IT-8, IT-8b |
-| t7 | acknowledged → resolved | `CONNECTOR_AVAILABLE` / `OPERATOR_CLOSE` | `Available` / `POST …/close` | IT-5 / IT-9 |
+| t7 | acknowledged → resolved | `CONNECTOR_AVAILABLE` / `OPERATOR_CLOSE` | working status / `POST …/close` | IT-5, IT-12 / IT-9 |
 
 **Sweep.** 4 states × 6 triggers = **24 pairs**: exactly **7 valid**, **3 no-ops** (`SIGNAL` on raised / acknowledged / resetting) and **14 rejected**. `canApply` agrees with `apply` on all 24.
 
@@ -137,11 +139,11 @@ File: `apps/csms/src/stations/faults/fault-state-machine.spec.ts`. Names look li
 |---|---|
 | `fault-state-machine.spec.ts` | 23: the 7 rows, t1, 3 no-ops, `resolved` is final, 6 named invalid pairs, error payload, 24-pair sweep, `canApply` = `apply` |
 | `error-code-guide.spec.ts` | 20: 16 codes, 15 non-`NoError` entries have a severity and a hint, fallback for unknown codes, the 4 codes pending WP1, severity order |
-| `console.router.spec.ts` | +7: defaults, 400 / 405 / 404, reset type |
-| `console.http.spec.ts` | +3: filter and limit pass-through, reset type, 409 shape |
+| `console.router.spec.ts` | +9: defaults, 400 / 405 / 404, reset type, `force` (true / false / bad value) |
+| `console.http.spec.ts` | +3: filter and limit pass-through, reset type and `force`, 409 shape |
 | `config.spec.ts` | +6: `FAULT_RESET_TIMEOUT_S` default, valid value, and `0` / negative / decimal / text rejected |
 
-### 5.2 Integration (real Postgres; frames through `OcppServer.processCall`; console over real HTTP): `test/wf04-fault.integration.test.ts`, 19 tests
+### 5.2 Integration (real Postgres; frames through `OcppServer.processCall`; console over real HTTP): `test/wf04-fault.integration.test.ts`, 23 tests
 
 | ID | Scenario | Checks |
 |---|---|---|
@@ -160,6 +162,10 @@ File: `apps/csms/src/stations/faults/fault-state-machine.spec.ts`. Names look li
 | IT-9 | close before acknowledge → 409; acknowledge → close → close again | `resolved`, then 409 `invalid_transition`; connector stays `Faulted` |
 | IT-10 | `Faulted` on connector 0 | `connector_id` null; c1 `Available` doesn't resolve it; c0 `Available` does |
 | IT-11 | fault → resolved → fault again | new fault with a higher `event_no` |
+| IT-12 | `Faulted` → `Preparing` → `Charging`; and acknowledged → `Unavailable` → `Charging` | resolved at `Preparing` (t3) without passing `Available`; still `acknowledged` after `Unavailable`, resolved at `Charging` (t7) |
+| IT-13 | session on c2, fault on c1 acknowledged, reset; then reset with `force=true`; then a session on c1 itself | 409 `sessions_active` naming c2, **no** command and **no** CALL; forced reset `resetting` with `payload = {type: Soft, force: true}`; own-connector session does not block (`forced: false`) |
+| IT-14 | replayed `Faulted` (cp 10:05) and `Available` (cp 10:07) received ~30 min later; then a live `Faulted` | `raised_at` 10:05, `resolved_at` 10:07; live frame uses `received_at` |
+| IT-15 | 26 open faults: one old `GroundFailure`, 25 newer `WeakSignal`; `GET …?limit=20` | 20 rows, the critical one first |
 | console 409 / 404 | reset when not acknowledged, unknown id, pillar offline | correct codes; **no** `remote_commands` row and **no** CALL sent |
 | console list | open-only by default, severity first; `?status=all` | ordering |
 | restart sweep | two `resetting` faults, one past the timeout and one not | `{timedOut: 1, scheduled: 1}`, remaining delay = 90 s |
@@ -200,12 +206,12 @@ New environment variable: `FAULT_RESET_TIMEOUT_S` (integer seconds > 0, default 
 | Check | Result |
 |---|---|
 | `format:check`, `typecheck`, `build` | pass |
-| Unit (no DB) | **243 passed** (59 new), 16 suites |
-| Unit + integration (`DATABASE_URL`) | **366 passed, 25 suites**: every existing WF-03 / WF-05 / T61 / console / migration test still passes |
-| WF-04 integration | **19 / 19** |
+| Unit (no DB) | **245 passed**, 16 suites |
+| Unit + integration (`DATABASE_URL`) | **404 passed, 26 suites** (after merging `main` @ `c107c94`): every existing WF-03 / WF-05 / T61 / T73 / console / migration test still passes |
+| WF-04 integration | **23 / 23** |
 | Real end-to-end (section 5.3) | raised → acknowledged → resetting → (timeout) acknowledged → resetting → resolved |
 
-CI has not run, because the branch is not pushed.
+CI runs on PR #61.
 
 ---
 
@@ -231,3 +237,19 @@ The WF-04 §6 questions still apply. New ones from this iteration:
 | 5 | Add `fault_events.closed_by` / `resolved_by`? | Not yet (log only) | Nghĩa + WP1 (LERD-2) |
 | 6 | Are these the right four SRS codes (`pendingWp1`)? | GroundFailure, HighTemperature, OverCurrentFailure, PowerMeterFailure | WP1 |
 | 7 | Where does the offline > 900 s fault timer live (G19)? | Out of scope | Trí + Nghĩa |
+| 8 | A **replayed** `Faulted` that arrives **after** a live recovery would open a fault that is already over. | Not handled: EXP-01 replays queued frames in order before live ones on the same connector | Trí + Nghĩa |
+| 9 | STM-2 v0.1 draws only `Faulted → Available` ("fault cleared"); OCPP allows `Faulted` → any status | Code resolves on every working status (§3.2); STM-2 should add the other exits | WP1 (Ân) |
+| 10 | Should a forced Reset be allowed for operators, or only after the driver is warned in the app (BR-P07)? | Console allows `force` after a second confirmation; no driver notice yet | Nghĩa + WP3 |
+
+---
+
+## 10. Changes after review of PR #61 (27/10/2026)
+
+| Finding | Level | Change | Test |
+|---|---|---|---|
+| Reset does not check charging sessions, but Reset hits the whole pillar | blocking | 409 `sessions_active` unless `force=true`; second confirmation in the console; `payload.force` recorded | IT-13, router / http specs |
+| Migration `0007` collides with PR #58 | blocking | Renamed to `0008`; merged `main` (#62 makes the migration tests list-independent and refuses duplicate numbers) | migration-0001 "each number once" |
+| A fault only closes on `Available` | should fix | Any working status resolves (`RECOVERED_STATUSES`) | IT-12 |
+| Replay flag ignored for `raised_at` | should fix | Replayed frames use the pillar's `timestamp` | IT-14 |
+| List limited before sorting by severity | should fix | Order in SQL, then `LIMIT` | IT-15 |
+| PR also carried UC-ADM-08 and the dashboard package diagram; empty description | minor | Moved to `wp4/fe-09-billing-exceptions-uc-adm-08`; PR description written | — |

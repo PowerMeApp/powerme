@@ -421,7 +421,7 @@ svg text { fill: var(--muted); font-size: 13px; }
       var acts = '';
       if (f.status === 'raised') acts = '<button data-fault-act="acknowledge" data-fid="' + f.id + '">Xác nhận</button>';
       if (f.status === 'acknowledged') acts = '<button data-fault-act="reset" data-fid="' + f.id + '"' + (f.station_online ? '' : ' disabled title="trụ offline"') + '>Reset</button><button data-fault-act="close" data-fid="' + f.id + '">Đóng</button>';
-      if (f.status === 'resetting') acts = '<span class="hint">chờ súng Available…</span>';
+      if (f.status === 'resetting') acts = '<span class="hint">chờ súng hoạt động lại…</span>';
       h += '<tr><td><b>#' + f.event_no + '</b></td><td>' + esc(f.station) + ' / ' + (f.connector_no === 0 ? 'cả trụ' : dash(f.connector_no)) + '</td><td>' + esc(dash(f.error_code)) + ' <span class="badge b-' + esc(f.severity) + '">' + esc(f.severity) + '</span><div class="hint">' + esc(f.hint) + '</div></td><td>' + badge(f.status) + (f.reset_command_status ? ' <small>Reset: ' + esc(f.reset_command_status) + '</small>' : '') + '</td><td>' + hms(f.raised_at) + '</td><td>' + acts + '</td></tr>';
     });
     $('fault-rows').innerHTML = h;
@@ -466,10 +466,19 @@ svg text { fill: var(--muted); font-size: 13px; }
     if (fa) {
       var act = fa.getAttribute('data-fault-act');
       var fid = fa.getAttribute('data-fid');
-      var ask = { acknowledge: 'Xác nhận đã thấy cảnh báo này?', reset: 'Gửi Reset (Soft) tới trụ?\nSự cố chuyển sang "resetting" cho tới khi súng báo Available hoặc hết hạn chờ.', close: 'Đóng sự cố sau khi đã kiểm tra tại chỗ?' }[act];
+      var ask = { acknowledge: 'Xác nhận đã thấy cảnh báo này?', reset: 'Gửi Reset (Soft) tới trụ?\nSự cố chuyển sang "resetting" cho tới khi súng hoạt động lại hoặc hết hạn chờ.', close: 'Đóng sự cố sau khi đã kiểm tra tại chỗ?' }[act];
       if (!window.confirm(ask)) return;
-      post('/api/admin/faults/' + fid + '/' + act).then(function (r) {
-        toast(r.ok ? (act === 'reset' ? 'Trụ trả lời Reset: ' + r.body.reset_status + ' · sự cố ' + r.body.fault_status : 'Sự cố → ' + r.body.status) : 'Lỗi: ' + r.body.detail); tick();
+      var url = '/api/admin/faults/' + fid + '/' + act;
+      var done = function (r) {
+        toast(r.ok ? (act === 'reset' ? 'Trụ trả lời Reset: ' + r.body.reset_status + ' · sự cố ' + r.body.fault_status + (r.body.forced ? ' · đã cắt phiên đang sạc' : '') : 'Sự cố → ' + r.body.status) : 'Lỗi: ' + r.body.detail); tick();
+      };
+      post(url).then(function (r) {
+        // Reset khởi động lại CẢ trụ: còn phiên sạc ở súng khác thì hỏi lần hai rồi gửi force.
+        if (!r.ok && r.body.error === 'sessions_active') {
+          if (!window.confirm(r.body.detail + '\n\nVẫn Reset và cắt các phiên này?')) { toast('Đã huỷ Reset'); return; }
+          return post(url + '?force=true').then(done);
+        }
+        done(r);
       });
       return;
     }

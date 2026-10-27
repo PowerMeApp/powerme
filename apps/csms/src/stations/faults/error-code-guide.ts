@@ -122,6 +122,11 @@ export function guideFor(code: string | null | undefined): ErrorCodeEntry {
   return isChargePointErrorCode(code) ? ERROR_CODE_GUIDE[code] : ERROR_CODE_GUIDE.OtherError;
 }
 
+/** Hạng để sắp xếp: 0 = critical … 3 = none (FaultService dựng CASE trong SQL từ hàm này). */
+export function severityRank(severity: FaultSeverity): number {
+  return SEVERITY_RANK[severity];
+}
+
 /** So sánh để sắp xếp cảnh báo: nặng trước. */
 export function compareSeverity(a: FaultSeverity, b: FaultSeverity): number {
   return SEVERITY_RANK[a] - SEVERITY_RANK[b];

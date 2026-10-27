@@ -50,7 +50,7 @@ export const faultEvents = pgTable(
     ),
     acknowledgedAt: timestamp('acknowledged_at', { withTimezone: true }),
     resolvedAt: timestamp('resolved_at', { withTimezone: true }),
-    /** Lệnh Reset đang chờ khi `resetting` (STM-6 t4); giữ lại để truy vết. Migration 0007 (FE-04). */
+    /** Lệnh Reset đang chờ khi `resetting` (STM-6 t4); giữ lại để truy vết. Migration 0008 (FE-04). */
     resetCommandId: bigint('reset_command_id', { mode: 'number' }).references(
       () => remoteCommands.id,
     ),

@@ -49,9 +49,10 @@ export class OcppHandlers {
       case 'StatusNotification': {
         const req = params as StatusNotificationRequest;
         await this.sessions.onStatusNotification(req, ctx);
-        // Sau khi đã phản chiếu connector: Faulted → sự cố, Available → kết thúc sự cố (STM-6).
-        // Lỗi ghi cảnh báo không được làm trụ nhận CALLERROR cho một StatusNotification đã ghi
-        // xong (CSMS phản chiếu, không từ chối — T13): chỉ log, frame vẫn nằm trong ocpp_message_log.
+        // Sau khi đã phản chiếu connector: Faulted → sự cố, súng hoạt động lại → kết thúc sự cố
+        // (STM-6). Lỗi ghi cảnh báo không được làm trụ nhận CALLERROR cho một StatusNotification đã
+        // ghi xong (CSMS phản chiếu, không từ chối — T13): chỉ log, frame vẫn nằm trong
+        // ocpp_message_log. Bản phát lại mang giờ trụ: sự cố ghi theo lúc nó xảy ra (review #61).
         try {
           await this.faults?.onConnectorStatus({
             chargePointId: ctx.chargePointId,
@@ -59,6 +60,7 @@ export class OcppHandlers {
             status: req.status,
             errorCode: req.errorCode,
             receivedAt: ctx.receivedAt,
+            occurredAt: ctx.replay.replayed && ctx.cpTimestamp ? ctx.cpTimestamp : ctx.receivedAt,
           });
         } catch (err) {
           this.logger.error(

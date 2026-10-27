@@ -1,6 +1,6 @@
 @startuml LERD-2_Operations-Administration
 !include _erd_style.iuml
-title LERD-2 Logical ERD: Operations & Administration (crow's foot, 3NF)\nPK = identifier · {BK} = business key · (FK) = reference · grey = Should · v0.4 · 27/10/2026 (v0.2 aligned with WP2/WP4 designs, ADR-0016; v0.3 RemoteCommand and CpTimestamp from migration 0001; v0.4 FaultEvent.ResetCommand from migration 0007, FE-04)
+title LERD-2 Logical ERD: Operations & Administration (crow's foot, 3NF)\nPK = identifier · {BK} = business key · (FK) = reference · grey = Should · v0.4 · 27/10/2026 (v0.2 aligned with WP2/WP4 designs, ADR-0016; v0.3 RemoteCommand and CpTimestamp from migration 0001; v0.4 FaultEvent.ResetCommand from migration 0008, FE-04)
 
 entity User {
   * UserId

@@ -42,7 +42,7 @@ export interface ConsoleBackend {
   /** WF-04 (FE-04): danh sách cảnh báo và ba hành động của operator. */
   faults(filter: 'open' | 'all', limit: number): Promise<unknown>;
   acknowledgeFault(id: number): Promise<unknown>;
-  resetFault(id: number, type: 'Soft' | 'Hard'): Promise<unknown>;
+  resetFault(id: number, type: 'Soft' | 'Hard', force: boolean): Promise<unknown>;
   closeFault(id: number): Promise<unknown>;
 }
 
@@ -156,7 +156,12 @@ export function createConsoleListener(backend: ConsoleBackend): RequestListener 
         case 'faultAcknowledge':
           return sendJson(res, 200, await backend.acknowledgeFault(route.id), cors);
         case 'faultReset':
-          return sendJson(res, 200, await backend.resetFault(route.id, route.type), cors);
+          return sendJson(
+            res,
+            200,
+            await backend.resetFault(route.id, route.type, route.force),
+            cors,
+          );
         case 'faultClose':
           return sendJson(res, 200, await backend.closeFault(route.id), cors);
       }

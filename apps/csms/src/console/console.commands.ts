@@ -12,12 +12,13 @@
  * không được import gateway (ADR-0016 D-F) — cùng cách RemoteStop bên dưới.
  *
  * Mã lỗi: 404 trụ/phiên/sự cố không tồn tại hoặc trụ không nối · 409 trạng thái phiên/sự cố không
- * cho phép, hoặc trụ đang offline · 502 trụ trả lỗi/quá hạn.
+ * cho phép, trụ đang offline, hoặc trụ còn phiên đang sạc khi Reset (trừ khi `force`) · 502 trụ trả
+ * lỗi/quá hạn.
  */
 import { Inject, Injectable, Optional } from '@nestjs/common';
-import { eq } from 'drizzle-orm';
+import { and, eq, inArray, ne, or, isNull } from 'drizzle-orm';
 import { DB, Db } from '../db/db.module.js';
-import { chargePoints, sessions } from '../db/schema/index.js';
+import { chargePoints, connectors, faultEvents, sessions } from '../db/schema/index.js';
 import { ConnectionRegistry } from '../ocpp-gateway/connection-registry.js';
 import {
   FaultNotFoundError,
@@ -29,6 +30,8 @@ import { ConsoleError } from './console.http.js';
 
 /** Trạng thái phiên còn "sống" — RemoteStop chỉ có nghĩa với các trạng thái này. */
 const STOPPABLE = new Set(['pending', 'active', 'paused', 'stopping']);
+/** Phiên đang cấp điện — Reset (luôn áp cho CẢ trụ, OCPP 1.6) sẽ cắt ngang các phiên này. */
+const CHARGING = ['active', 'paused', 'stopping'] as const;
 const REMOTE_STOP_TIMEOUT_MS = 15_000;
 const RESET_CALL_TIMEOUT_MS = 15_000;
 
@@ -130,10 +133,14 @@ export class ConsoleCommands {
 
   /**
    * t4 rồi gửi CALL Reset. Kiểm trước (không ghi gì): sự cố phải `acknowledged`, trụ phải đang
-   * nối. Accepted → sự cố giữ `resetting` chờ Available / hết hạn; Rejected → `acknowledged` (t6);
+   * nối, và trụ không còn phiên đang sạc trên súng KHÁC — Reset của OCPP 1.6 khởi động lại cả trụ,
+   * tài xế ở súng bên cạnh sẽ bị cắt ngang không báo trước (review #61, BR-P07 "communicated
+   * downtime"). Operator xác nhận lần hai thì gửi `force` và lệnh ghi `payload.force = true`.
+   * Phiên trên chính súng lỗi không tính: WF-04 bước 1 đã đóng nó (StopTransaction reason Other).
+   * Accepted → sự cố giữ `resetting` chờ súng hồi phục / hết hạn; Rejected → `acknowledged` (t6);
    * trụ không trả lời hợp lệ → lệnh `failed`, sự cố `acknowledged`, HTTP 502.
    */
-  async resetFault(id: number, type: ResetType) {
+  async resetFault(id: number, type: ResetType, force = false) {
     const faults = this.requireFaults();
     const fault = await this.mapFaultErrors(() => faults.get(id));
     if (!faults.canApply(fault.status, 'RESET_SENT')) {
@@ -147,8 +154,17 @@ export class ConsoleCommands {
     if (!conn) {
       throw new ConsoleError(409, 'station_offline', `Trụ ${fault.serial} đang offline`);
     }
+    const charging = await this.chargingSessionsBesideFault(id);
+    if (charging.length > 0 && !force) {
+      const list = charging.map((s) => `súng ${s.connectorNo} (phiên ${s.sessionId})`).join(', ');
+      throw new ConsoleError(
+        409,
+        'sessions_active',
+        `Trụ ${fault.serial} đang có phiên sạc ở ${list}; Reset sẽ cắt các phiên này. Gửi lại với force=true nếu chắc chắn.`,
+      );
+    }
     const begun = await this.mapFaultErrors(() =>
-      faults.beginReset(id, { type, requestedBy: null }),
+      faults.beginReset(id, { type, requestedBy: null, force: charging.length > 0 }),
     );
     await faults.markSent(begun.commandId);
     let reply: unknown;
@@ -175,7 +191,30 @@ export class ConsoleCommands {
       serial: fault.serial,
       reset_status: status,
       fault_status: result.faultStatus,
+      forced: charging.length > 0,
     };
+  }
+
+  /**
+   * Phiên đang sạc trên trụ của sự cố, trừ súng của chính sự cố. Sự cố connector 0 (cả trụ,
+   * connector_id null) thì mọi phiên đều tính.
+   */
+  private async chargingSessionsBesideFault(
+    faultId: number,
+  ): Promise<{ sessionId: number; connectorNo: number }[]> {
+    return this.db
+      .select({ sessionId: sessions.id, connectorNo: connectors.connectorNo })
+      .from(faultEvents)
+      .innerJoin(sessions, eq(sessions.chargePointId, faultEvents.chargePointId))
+      .innerJoin(connectors, eq(connectors.id, sessions.connectorId))
+      .where(
+        and(
+          eq(faultEvents.id, faultId),
+          inArray(sessions.status, [...CHARGING]),
+          or(isNull(faultEvents.connectorId), ne(sessions.connectorId, faultEvents.connectorId)),
+        ),
+      )
+      .orderBy(connectors.connectorNo);
   }
 
   private requireFaults(): FaultService {

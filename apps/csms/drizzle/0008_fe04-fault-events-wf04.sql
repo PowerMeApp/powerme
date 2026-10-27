@@ -1,12 +1,14 @@
 -- =============================================================================
--- PowerMe CSMS — migration 0007_fe04-fault-events-wf04 (WF-04 xử lý lỗi trụ, FE-04, WP4)
+-- PowerMe CSMS — migration 0008_fe04-fault-events-wf04 (WF-04 xử lý lỗi trụ, FE-04, WP4)
 --
 -- Migration VIẾT TAY (ADR-0008), áp LÊN DB đã có 0000 … 0002. Schema Drizzle
 -- (apps/csms/src/db/schema/ops.ts) phải khớp từng cột với file này.
 --
--- Vì sao số 0007: các nhánh WP3 đang mở đã dùng 0003–0006 (T31, T72, station search, stop
--- attempts). Helper `migrate` áp mọi file CHƯA có trong `_migrations` theo thứ tự tên, nên 0007 lên
--- main trước hay sau 0003–0006 đều áp được; hai nhóm không đụng cùng bảng.
+-- Vì sao số 0008: main có 0003 (T73 billing), PR #58 của WP3 dùng 0004–0007 (T31, T72, station
+-- search, stop attempts); test migration-0001 chặn hai file cùng số (#62). Helper `migrate` áp mọi
+-- file CHƯA có trong `_migrations` theo thứ tự tên, nên 0008 lên main trước hay sau 0004–0007 đều
+-- áp được; hai nhóm không đụng cùng bảng. (Bản đầu của PR #61 đặt số 0007 — DB local đã áp bản
+-- đó cần dựng lại: `npm run demo:reset`, test tích hợp tự `resetAndMigrate`.)
 --
 -- Nội dung:
 --   A. fault_events.reset_command_id → remote_commands(id), null được. STM-6 `resetting` cần biết

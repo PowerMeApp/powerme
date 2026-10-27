@@ -20,7 +20,7 @@ export type Route =
   // WF-04 (FE-04): cảnh báo sự cố và ba hành động của operator (STM-6 t2, t4, t7).
   | { kind: 'faults'; filter: 'open' | 'all'; limit: number }
   | { kind: 'faultAcknowledge'; id: number }
-  | { kind: 'faultReset'; id: number; type: 'Soft' | 'Hard' }
+  | { kind: 'faultReset'; id: number; type: 'Soft' | 'Hard'; force: boolean }
   | { kind: 'faultClose'; id: number };
 
 export interface RouteError {
@@ -166,7 +166,15 @@ export function matchRoute(method: string, rawUrl: string): RouteResult {
           if (type !== 'Soft' && type !== 'Hard') {
             return fail(400, 'bad_request', 'type phải là Soft hoặc Hard');
           }
-          return { ok: true, route: { kind: 'faultReset', id: id.value, type } };
+          // force=true: operator đã xác nhận lần hai rằng Reset sẽ cắt phiên đang sạc trên trụ.
+          const force = q.get('force') ?? 'false';
+          if (force !== 'true' && force !== 'false') {
+            return fail(400, 'bad_request', 'force phải là true hoặc false');
+          }
+          return {
+            ok: true,
+            route: { kind: 'faultReset', id: id.value, type, force: force === 'true' },
+          };
         }
       }
     });
