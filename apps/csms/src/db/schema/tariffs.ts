@@ -8,6 +8,7 @@ import {
   check,
   date,
   index,
+  numeric,
   pgTable,
   primaryKey,
   text,
@@ -90,9 +91,13 @@ export const sessionTariffSegments = pgTable(
     segmentEnd: timestamp('segment_end', { withTimezone: true }).notNull(),
     energyWh: bigint('energy_wh', { mode: 'number' }).notNull(),
     amountVnd: bigint('amount_vnd', { mode: 'number' }).notNull(),
+    exactAmountMilliVnd: numeric('exact_amount_milli_vnd', { precision: 40, scale: 0 }),
   },
   (t) => [
-    primaryKey({ name: 'session_tariff_segments_pkey', columns: [t.sessionId, t.tariffPeriodId] }),
+    primaryKey({
+      name: 'session_tariff_segments_pkey',
+      columns: [t.sessionId, t.tariffPeriodId, t.segmentStart],
+    }),
     check('session_tariff_segments_range_check', sql`${t.segmentEnd} >= ${t.segmentStart}`),
     check('session_tariff_segments_nonneg_check', sql`${t.energyWh} >= 0 AND ${t.amountVnd} >= 0`),
   ],

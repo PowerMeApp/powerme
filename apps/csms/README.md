@@ -52,3 +52,83 @@ Cấu trúc `src/`: `ocpp-gateway/` (socket, registry epoch, log frame, tuần t
 - **CSMS là nguồn sự thật cho bản ghi phiên và bản tính giá** (ADR-0012 thu hẹp từ "cho hoá đơn"). Giá trên trụ chỉ để hiển thị. Mọi lệch so với Settlement của trụ phải sinh bản ghi đối soát.
 - Phải nhận được `StartTransaction` với `idTag` lạ (quẹt RFID / nhập mật khẩu trên HMI) và ghi nhận thành phiên vãng lai.
 - Mọi frame OCPP ghi vào `ocpp_message_log` **trước** khi xử lý (ADR-0005); CALL chiều vào xử lý **tuần tự theo trụ** (ADR-0004).
+
+## WP3 — T31/T72 service contracts
+
+This slice exposes backend services and PostgreSQL/OCPP integration tests. It does not expose
+Driver HTTP endpoints or connect Flutter; the existing mobile UI still uses simulated data.
+Callers must obtain principal IDs from authenticated server context before invoking these services.
+
+- `DriverChargingService.start/getStart/stop/progress/statement`: energy-limit charging,
+  principal-scoped idempotency and separate command/session/settlement outcomes. Accepted is not
+  a confirmed start. `progress` includes settlement reason, retry time and held credit.
+- `beginStartRecovery/startRecovery/completeStartRecovery/restoreRecoveredConnector`: an active
+  staff member of the owning active operator records evidence, fences the connector with
+  `ChangeAvailability(Inoperative)`, and requires observed Unavailable in the same connection epoch
+  before releasing an unbound start's credit. Elapsed time alone never releases an unknown start.
+  Restore requires a subsequent observed Available before another start. `retryStartRecovery`
+  repeats only availability commands, never RemoteStart. Late starts retain attribution and require
+  audited `approveLateStart` before billing.
+- `ChargeSettlementService.settle/retryPending`: stop evidence atomically creates a durable billing
+  job. Billing errors cannot reject an already persisted StopTransaction. The recovery worker runs
+  at bootstrap and every 10 seconds; due pending jobs retry after 30 seconds. Ledger/statement
+  constraints and session locks prevent duplicate debit/points under retries or concurrent workers.
+- Pricing temporarily follows BR-P45 from Ân's `wp1/t71-br-p45-rounding` at `7e91f34` as authorized:
+  exact milli-VND portions are summed, then rounded half up once per session. Points use the rounded
+  debit. Repeated daily tariff segments are distinguished by segment start. No policy branch is merged.
+  CSMS receipt timestamps define tariff portions. Each boundary needs an exact aggregate meter sample
+  at that receipt time, or audited `recordTariffBoundary` evidence from the owning active operator.
+  Missing evidence, tariff gaps/overlaps, reconciliation review, promotions and offline-delivered sessions
+  remain observable pending with their credit liability retained; they are not silently priced.
+- `findStations(driverId, vehicleId, input)` returns `{items,total,page,pageSize}` grouped by site,
+  with compatible connectors and string resource IDs. Input supports literal accent-insensitive Vietnamese
+  name/code/address search, availability, optional coordinates/radius, name/distance sort, page/pageSize
+  (maximum 100), and explicit VinFast-only override. Distance is straight-line metres, not route/ETA.
+  Disabled pillars/inactive operators are excluded; connectivity, raw status and freshness remain separate.
+  Stale/future status cannot promise Available. `resolveConnector` uses exact code/gun lookup independently
+  of pagination. Ranking, travel/wait/charging estimates and recommendations remain WP4 dependencies.
+
+Apply migrations through `0006_wp3_stop_attempts.sql` using the existing migration runner before
+starting this build. `CHARGE_*` configuration is listed in `infra/.env.example`; minimum/cutoff values
+remain configurable proposals. Integration tests require the dedicated `powerme_test` database and
+reset only its schema. Run `npm test -w @powerme/csms -- --runInBand` with that DATABASE_URL.
+
+
+## WP3 — review fixes: stop attempts and start freshness
+
+- Public `stop(driverId,key,sessionId)` still requires an active authenticated Driver with an owned
+  app session. The `limit:` key namespace is reserved for the internal cutoff hook. Account suspension
+  cannot disable an existing session's system energy/credit cutoff: the private command path rechecks
+  app attribution, `csms_billed`, energy mode, live aggregate telemetry and cutoff eligibility under
+  the session lock. System commands have `requested_by=NULL`; history actor is `system`.
+- Automatic cutoff follows the latest stop intent for the session, including a manual stop. It adds
+  a persisted command attempt only after confirmed Rejected and newer live telemetry received after
+  backoff (1, 2, 4, 8, 16, then 30 seconds). Session locks and the open-intent constraint prevent parallel
+  commands. Unknown/Accepted never enter this automatic rejection retry path. Retry waits for actual
+  telemetry; the timer does not invent meter readings or treat silence as failure.
+- `recoverStop(operatorId,sessionId,previousCommandId,note)` is an authorized service method, not an
+  exposed endpoint. Active staff of the owning active operator can append an audited attempt to the
+  **same business intent and physical transaction** after an unknown/sent or Accepted-without-effect stop.
+  There is no new client business key. Persisted linkage to the previous command makes duplicate requests
+  return the same attempt, including historical requests after a newer recovery. Recovery requires the
+  current registry/DB epoch, online pillar, current Charging/Suspended status and non-replayed aggregate
+  meter evidence in that epoch. Evidence must be newer than the previous command's timeout window and
+  response, non-future and within the configured freshness window; a new connection requires new evidence.
+  Conflicting open sessions, stopped sessions and absent evidence are refused. Dispatch checks the epoch
+  again. A crash after preparing an attempt leaves a queryable sent/unknown outcome; fresh evidence and
+  explicit operator recovery are required, rather than blindly resending on restart.
+- Recovery does not fabricate `REMOTE_STOP_REJECTED` or change the STM-1 table. A rejected recovery
+  attempt leaves the unresolved stop intent unknown. Only actual StopTransaction evidence confirms
+  effect and allows normal settlement; recovery itself releases no credit and posts no debit/points.
+  Late responses update their own command history without overwriting a newer intent or completed effect.
+- Start now requires current-epoch Available evidence linked to the recorded StatusNotification, an
+  online matching registry epoch, and non-future/fresh last-message times. A Heartbeat after reconnect
+  cannot reuse Available from the prior connection. Replayed/future-dated status is refused; a new valid
+  StatusNotification permits start. Dispatch checks the selected epoch again. Missing optional pillar
+  status timestamps are accepted as a known OCPP limitation when the receipt/epoch evidence is valid.
+  Provided pillar timestamps are checked conservatively against the connection and CSMS receipt times;
+  a legitimately skewed pillar clock can therefore require resynchronization. No real-pillar compatibility
+  or hardware safety certification is claimed.
+
+Migration 0006 backfills existing stop intents into immutable attempt history. These are still backend
+service contracts: operator/Driver HTTP endpoints and Flutter integration remain outside this slice.
