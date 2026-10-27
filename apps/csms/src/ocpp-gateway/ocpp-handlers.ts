@@ -48,7 +48,9 @@ export class OcppHandlers {
         await this.sessions.onStatusNotification(params as StatusNotificationRequest, ctx);
         return {};
       case 'Authorize': {
-        const status = await this.sessions.authorize((params as AuthorizeRequest).idTag);
+        const idTag = (params as AuthorizeRequest).idTag;
+        const appStatus = await this.driverCharging?.authorizeAppTag(idTag, ctx);
+        const status = appStatus ?? (await this.sessions.authorize(idTag));
         return { idTagInfo: { status } };
       }
       case 'StartTransaction': {

@@ -3,6 +3,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import type { PoolClient } from 'pg';
 import { DB, Db } from '../db/db.module.js';
 import { ConnectionRegistry } from '../ocpp-gateway/connection-registry.js';
+import type { InboundContext } from '../ocpp-gateway/inbound-context.js';
 import { CHARGE_POLICY, ChargeSettlementService } from './charge-settlement.service.js';
 import { ChargePolicy, startCreditPolicy, validateChargePolicy } from './charge-start-policy.js';
 import { chargeTransaction } from './charge-sql.js';
@@ -48,6 +49,74 @@ export class DriverChargingService {
     @Optional() @Inject(CHARGE_POLICY) private readonly policy?: ChargePolicy,
   ) {
     if (policy) validateChargePolicy(policy);
+  }
+
+  // WP3/T72: app tags authorize only their reserved pending intent on the original live connection.
+  async authorizeAppTag(
+    idTag: string,
+    ctx: InboundContext,
+  ): Promise<'Accepted' | 'Invalid' | null> {
+    const app = await this.db.$client.query(
+      'SELECT id FROM driver_charge_intents WHERE id_tag=$1',
+      [idTag],
+    );
+    if (!app.rowCount) return null;
+    const connection = this.registry.get(ctx.identity);
+    if (
+      !connection ||
+      connection.chargePointId !== ctx.chargePointId ||
+      connection.epoch !== ctx.epoch ||
+      connection.epochOpenedAt.getTime() !== ctx.epochOpenedAt.getTime()
+    )
+      return 'Invalid';
+    const pending = (
+      await this.db.$client.query<{
+        available_vnd: string;
+        energy_limit_wh: string;
+        reserved_vnd: string;
+        price: string | null;
+      }>(
+        `SELECT i.energy_limit_wh,i.reserved_vnd,
+        a.balance_vnd-coalesce((SELECT sum(other.reserved_vnd) FROM driver_charge_intents other
+          WHERE other.driver_id=i.driver_id AND other.id<>i.id
+          AND other.state NOT IN ('rejected','settled','released')),0) AS available_vnd,
+        (SELECT max(t.price_per_kwh_vnd) FROM tariff_periods t WHERE t.operator_id=st.operator_id
+          AND t.effective_from<=(now() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date
+          AND (t.effective_to IS NULL OR t.effective_to>=(now() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date)) AS price
+      FROM driver_charge_intents i JOIN remote_commands r ON r.id=i.command_id
+      JOIN connectors c ON c.id=i.connector_id JOIN charge_points cp ON cp.id=c.charge_point_id
+      JOIN charge_point_connections conn ON conn.charge_point_id=cp.id AND conn.epoch=cp.current_epoch
+      JOIN sites st ON st.id=cp.site_id JOIN operators o ON o.id=st.operator_id
+      JOIN users u ON u.id=i.driver_id JOIN drivers d ON d.user_id=u.id
+      JOIN credit_accounts a ON a.driver_id=i.driver_id
+      JOIN vehicles v ON v.id=i.vehicle_id AND v.driver_id=i.driver_id
+      JOIN vehicle_models m ON m.id=v.vehicle_model_id AND m.connector_type=c.connector_type
+      WHERE i.id_tag=$1 AND i.session_id IS NULL AND i.state IN ('sent','accepted','unknown')
+        AND i.connector_released_at IS NULL AND NOT i.billing_review_required
+        AND i.created_at<=$5 AND r.action='RemoteStartTransaction' AND r.status IN ('sent','accepted','timeout')
+        AND r.charge_point_id=cp.id AND r.connector_no=c.connector_no
+        AND r.payload->>'idTag'=i.id_tag AND r.payload->>'connectorId'=c.connector_no::text
+        AND r.sent_at>=conn.opened_at AND r.sent_at<=$5
+        AND cp.id=$2 AND cp.serial_number=$3 AND cp.current_epoch=$4 AND cp.is_online
+        AND conn.opened_at=$6 AND conn.closed_at IS NULL
+        AND cp.lifecycle='in_service' AND o.status='active' AND c.status IN ('Available','Preparing')
+        AND u.role='driver' AND u.account_status='active' AND a.status='active'
+        AND NOT EXISTS(SELECT 1 FROM sessions s WHERE s.connector_id=c.id
+          AND s.received_stopped_at IS NULL AND s.status IN ('pending','active','paused','stopping','orphaned'))`,
+        [idTag, ctx.chargePointId, ctx.identity, ctx.epoch, ctx.receivedAt, ctx.epochOpenedAt],
+      )
+    ).rows[0];
+    if (!pending || pending.price === null) return 'Invalid';
+    // WP3/T72: keep this intent's own hold available; subtracting it again would reject valid credit.
+    const decision = startCreditPolicy(
+      Number(pending.available_vnd),
+      Number(pending.energy_limit_wh),
+      Number(pending.price),
+      this.requirePolicy(),
+    );
+    return decision.outcome === 'eligible' && Number(pending.reserved_vnd) >= decision.reserveVnd
+      ? 'Accepted'
+      : 'Invalid';
   }
 
   // WP3/T31: energy-only start; oversized requests require explicit consent to the offered cap.

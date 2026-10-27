@@ -85,6 +85,9 @@ describeDb('WP3/T31 WF-01 service journey with real OCPP + Postgres', () => {
   let stopEffectBeforeReply: boolean;
   let triggerCount: number;
   let startBeforeReply: boolean;
+  let authorizeRemoteStart: boolean;
+  let remoteAuthorizeStatus: string | undefined;
+  let extraClients: RPCClient[];
   const q = async (sql: string, args: unknown[] = []) => (await db.$client.query(sql, args)).rows;
 
   beforeAll(async () => {
@@ -94,6 +97,7 @@ describeDb('WP3/T31 WF-01 service journey with real OCPP + Postgres', () => {
     db = createDb(url);
   });
   beforeEach(async () => {
+    extraClients = [];
     await resetAndMigrate(db.$client);
     const op = (
       await q("INSERT INTO operators(tax_code,legal_name) VALUES('T31','T31 Test') RETURNING id")
@@ -228,6 +232,8 @@ describeDb('WP3/T31 WF-01 service journey with real OCPP + Postgres', () => {
     stopResponse = 'Accepted';
     stopEffectBeforeReply = false;
     startBeforeReply = false;
+    authorizeRemoteStart = false;
+    remoteAuthorizeStatus = undefined;
     triggerCount = 0;
     client.handle('TriggerMessage', async () => {
       triggerCount++;
@@ -236,6 +242,17 @@ describeDb('WP3/T31 WF-01 service journey with real OCPP + Postgres', () => {
     client.handle('RemoteStartTransaction', async ({ params }) => {
       startCount++;
       tag = (params as { idTag: string }).idTag;
+      if (authorizeRemoteStart) {
+        await client.call('StatusNotification', {
+          connectorId: 1,
+          errorCode: 'NoError',
+          status: 'Preparing',
+        });
+        remoteAuthorizeStatus = (
+          (await client.call('Authorize', { idTag: tag })) as { idTagInfo: { status: string } }
+        ).idTagInfo.status;
+        if (remoteAuthorizeStatus !== 'Accepted') return { status: 'Rejected' };
+      }
       if (startBeforeReply) {
         startTimestamp = new Date().toISOString();
         transaction = (
@@ -277,6 +294,7 @@ describeDb('WP3/T31 WF-01 service journey with real OCPP + Postgres', () => {
     };
   });
   afterEach(async () => {
+    for (const extra of extraClients) await extra.close({ force: true });
     await client?.close({ force: true });
     await server?.stop();
     await until(
@@ -325,6 +343,173 @@ describeDb('WP3/T31 WF-01 service journey with real OCPP + Postgres', () => {
       reason: 'Remote',
     });
   }
+
+  async function secondPillar() {
+    const cp = (
+      await q(`INSERT INTO charge_points(serial_number,site_id,lifecycle,basic_auth_password_hash)
+      SELECT 'T72-SECOND',site_id,'awaiting_connection',basic_auth_password_hash FROM charge_points
+      WHERE serial_number='T31-PILLAR' RETURNING id`)
+    )[0]!.id;
+    await q('INSERT INTO connectors(charge_point_id,connector_no) VALUES($1,1)', [cp]);
+    const second = new RPCClient({
+      endpoint: `ws://127.0.0.1:${config.ocppPort}/ocpp`,
+      identity: 'T72-SECOND',
+      password: pillarPassword,
+      protocols: ['ocpp1.6'],
+      strictMode: true,
+      reconnect: false,
+    } as unknown as ConstructorParameters<typeof RPCClient>[0]);
+    extraClients.push(second);
+    second.handle('TriggerMessage', async () => ({ status: 'Accepted' }));
+    await second.connect();
+    await second.call('BootNotification', { chargePointVendor: 'Test', chargePointModel: 'D1' });
+    return second;
+  }
+
+  async function authorize(idTag = tag, caller = client) {
+    return caller.call('Authorize', { idTag });
+  }
+
+  it('T72 AuthorizeRemoteTxRequests accepts a reserved P3 intent before RemoteStart replies and starts once', async () => {
+    await q('UPDATE credit_accounts SET balance_vnd=50000 WHERE driver_id=$1', [driver]);
+    authorizeRemoteStart = true;
+    startBeforeReply = true;
+    const result = await service.start(driver, 'authorize-before-reply', input);
+    expect(remoteAuthorizeStatus).toBe('Accepted');
+    expect(result).toMatchObject({ outcome: 'active', effectConfirmed: true });
+    expect(startCount).toBe(1);
+    expect(
+      await q("SELECT 1 FROM sessions WHERE driver_id=$1 AND payment_mode='csms_billed'", [driver]),
+    ).toHaveLength(1);
+    expect(await authorize()).toEqual({ idTagInfo: { status: 'Invalid' } });
+  });
+
+  it('T72 Authorize accepts a pending intent repeatedly without creating sessions or double-reserving credit', async () => {
+    await service.start(driver, 'auth-pending', input);
+    const before = await q('SELECT * FROM driver_charge_intents');
+    for (let i = 0; i < 2; i++)
+      expect(await authorize()).toEqual({ idTagInfo: { status: 'Accepted' } });
+    expect(await q('SELECT * FROM driver_charge_intents')).toEqual(before);
+    expect(await q('SELECT 1 FROM sessions')).toHaveLength(0);
+  });
+
+  it('T72 Authorize keeps a timed-out pending start recoverable within its original connection', async () => {
+    startResponse = 'silence';
+    expect((await service.start(driver, 'auth-unknown', input)).outcome).toBe('unknown');
+    expect(await authorize()).toEqual({ idTagInfo: { status: 'Accepted' } });
+    expect((await service.getStart(driver, 'auth-unknown')).outcome).toBe('unknown');
+    expect(startCount).toBe(1);
+  });
+
+  it('T72 Authorize refuses forged P3 tags and a valid intent sent by another authenticated pillar', async () => {
+    await service.start(driver, 'auth-binding', input);
+    expect(await authorize('P3000000000000000000')).toEqual({ idTagInfo: { status: 'Invalid' } });
+    expect(await authorize(tag, await secondPillar())).toEqual({
+      idTagInfo: { status: 'Invalid' },
+    });
+    expect(await authorize()).toEqual({ idTagInfo: { status: 'Accepted' } });
+    expect(await q('SELECT 1 FROM sessions')).toHaveLength(0);
+  });
+
+  it.each([
+    ['rejected', "UPDATE driver_charge_intents SET state='rejected',reserved_vnd=0"],
+    [
+      'released',
+      "UPDATE driver_charge_intents SET state='released',reserved_vnd=0,connector_released_at=now()",
+    ],
+    ['settled', "UPDATE driver_charge_intents SET state='settled'"],
+    ['effect', "UPDATE driver_charge_intents SET state='effect'"],
+    ['suspended driver', "UPDATE users SET account_status='suspended' WHERE role='driver'"],
+    ['closed credit', "UPDATE credit_accounts SET status='closed',closed_at=now()"],
+    ['insufficient credit', 'UPDATE credit_accounts SET balance_vnd=30000'],
+    ['released reserve', 'UPDATE driver_charge_intents SET reserved_vnd=0'],
+    ['disabled pillar', "UPDATE charge_points SET lifecycle='disabled'"],
+    ['inactive operator', "UPDATE operators SET status='suspended'"],
+    ['unowned vehicle', 'UPDATE vehicles SET driver_id=(SELECT max(user_id) FROM drivers)'],
+    [
+      'command mismatch',
+      "UPDATE remote_commands SET payload=jsonb_set(payload,'{idTag}','\"forged\"')",
+    ],
+  ])('T72 Authorize refuses a pending app tag after %s', async (_reason, mutation) => {
+    await service.start(driver, 'auth-deny', input);
+    await q(mutation);
+    const before = await q('SELECT * FROM driver_charge_intents');
+    expect(await authorize()).toEqual({ idTagInfo: { status: 'Invalid' } });
+    expect(await q('SELECT * FROM driver_charge_intents')).toEqual(before);
+    expect(await q('SELECT 1 FROM sessions')).toHaveLength(0);
+  });
+
+  it('T72 Authorize refuses a previous-epoch intent after a real reconnect', async () => {
+    await service.start(driver, 'auth-old-epoch', input);
+    await client.close({ force: true });
+    await until(async () => !registry.get('T31-PILLAR'));
+    client = new RPCClient({
+      endpoint: `ws://127.0.0.1:${config.ocppPort}/ocpp`,
+      identity: 'T31-PILLAR',
+      password: pillarPassword,
+      protocols: ['ocpp1.6'],
+      strictMode: true,
+      reconnect: false,
+    } as unknown as ConstructorParameters<typeof RPCClient>[0]);
+    client.handle('TriggerMessage', async () => ({ status: 'Accepted' }));
+    await client.connect();
+    expect(await authorize()).toEqual({ idTagInfo: { status: 'Invalid' } });
+    expect((await service.getStart(driver, 'auth-old-epoch')).outcome).toBe('accepted');
+  });
+
+  it.each(['MeterValues', 'StopTransaction'] as const)(
+    'T72 session_pillar_mismatch rejects %s over authenticated OCPP without business mutation',
+    async (action) => {
+      const sid = await observedStart();
+      const second = await secondPillar();
+      const snapshot = async () =>
+        Promise.all([
+          q('SELECT * FROM sessions ORDER BY id'),
+          q('SELECT * FROM meter_values ORDER BY id'),
+          q('SELECT * FROM reconciliation_records ORDER BY id'),
+          q('SELECT * FROM session_status_history ORDER BY id'),
+          q('SELECT * FROM driver_charge_intents ORDER BY id'),
+          q('SELECT * FROM charge_settlement_jobs ORDER BY session_id'),
+          q('SELECT * FROM credit_transactions ORDER BY id'),
+          q('SELECT * FROM loyalty_transactions ORDER BY id'),
+        ]);
+      const before = await snapshot();
+      const sample = [
+        { timestamp: new Date().toISOString(), sampledValue: [{ value: '11000', unit: 'Wh' }] },
+      ];
+      const params =
+        action === 'MeterValues'
+          ? { connectorId: 1, transactionId: transaction, meterValue: sample }
+          : {
+              transactionId: transaction,
+              meterStop: 11000,
+              timestamp: new Date().toISOString(),
+              transactionData: sample,
+            };
+      await expect(second.call(action, params)).rejects.toMatchObject({
+        rpcErrorCode: 'GenericError',
+        message: 'session_pillar_mismatch',
+      });
+      expect(await snapshot()).toEqual(before);
+      expect(
+        await q(
+          `SELECT 1 FROM ocpp_message_log l JOIN charge_points cp ON cp.id=l.charge_point_id
+        WHERE cp.serial_number='T72-SECOND' AND l.action=$1 AND l.direction='in' AND l.message_type=2`,
+          [action],
+        ),
+      ).toHaveLength(1);
+      if (action === 'MeterValues') {
+        expect(await client.call(action, params)).toEqual({});
+        expect(await q('SELECT 1 FROM meter_values WHERE session_id=$1', [sid])).toHaveLength(1);
+      } else {
+        expect(await client.call(action, params)).toEqual({ idTagInfo: { status: 'Accepted' } });
+        expect((await service.progress(driver, sid)).status).toBe('reconciled');
+        expect(
+          await q('SELECT 1 FROM charge_settlement_jobs WHERE session_id=$1', [sid]),
+        ).toHaveLength(1);
+      }
+    },
+  );
 
   it('DS01 full app service journey: find/QR/start/progress/limit/statement, debit and earn once', async () => {
     expect((await service.findStations(driver, vehicle)).items).toHaveLength(1);
@@ -1620,7 +1805,7 @@ describeDb('WP3/T31 WF-01 service journey with real OCPP + Postgres', () => {
       [driver, sid, command],
     );
     await db.$client.query(
-      readFileSync(path.join(MIGRATIONS_DIR, '0006_wp3_stop_attempts.sql'), 'utf8'),
+      readFileSync(path.join(MIGRATIONS_DIR, '0007_wp3_stop_attempts.sql'), 'utf8'),
     );
     expect((await q('SELECT command_id,attempt_no,kind FROM driver_stop_attempts'))[0]).toEqual({
       command_id: command,
