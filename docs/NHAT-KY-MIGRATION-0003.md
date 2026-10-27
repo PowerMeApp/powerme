@@ -107,5 +107,5 @@ Mỗi test tiền kiểm dựng DB ở 0002 có đúng một hàng vi phạm, g�
 - **BM02 run 2 F12** (giá trị miền tariff band / origin / payment mode): không đụng.
 - **Code billing** (TopUpService, CreditLedgerService, LoyaltyService, EInvoiceService, job hết hạn/thử lại): việc của WP5. Cửa sổ 1 giờ phải được kiểm ở TopUpService (mục 2).
 - **`refund_status`:** Planned (mục 2).
-- **AD-1** đã đổi sang `[earn]` ở PR #51 (85834c3). **CD-2 (PR #47, chưa merge)** vẫn ghi `earned/redeemed/restored/expired`: không sửa nhánh của người khác; cần Khang đổi theo quyết định 26/10/2026.
+- **AD-1** đã đổi sang `[earn]` ở PR #51 (85834c3). **CD-2** đã dùng `earn/redeem/restore/expire/adjust` theo quyết định 26/10/2026 khi PR #47 merge (5d3cdff).
 - **PR #58** (Sơn, chưa merge) có migration đánh số 0003–0006 đụng `loyalty_transactions` và `session_tariff_segments`: khi rebase phải đổi số thành 0004+ và kiểm lại hai bảng đó trên schema sau 0003.
