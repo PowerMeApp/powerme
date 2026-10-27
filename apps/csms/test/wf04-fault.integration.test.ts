@@ -714,6 +714,100 @@ describeDb('WF-04 — sự cố trụ, cảnh báo và Reset từ xa (STM-6, FE-
     await db.delete(chargePoints).where(inArray(chargePoints.id, ids));
   });
 
+  it('IT-16: bản phát lại cũ không đóng sự cố live và không mở lại sự cố đã đóng', async () => {
+    // Faulted live mở sự cố; sau đó Charging phát lại từ TRƯỚC lúc lỗi (hàng đợi offline) tới.
+    await status(1, 'Faulted', 'GroundFailure');
+    const fault = await onlyFault();
+    const old = new Date(fault.raisedAt.getTime() - 10 * 60_000);
+    const rx = tick();
+    await send(
+      'StatusNotification',
+      { connectorId: 1, errorCode: 'NoError', status: 'Charging', timestamp: old.toISOString() },
+      rx,
+    );
+    expect((await onlyFault()).status).toBe('raised');
+
+    // Súng hồi phục thật (live) → resolved; rồi Faulted phát lại từ trước lúc đóng → không mở lại.
+    await status(1, 'Available');
+    const closed = await onlyFault();
+    expect(closed.status).toBe('resolved');
+    const before = new Date(closed.resolvedAt!.getTime() - 60_000);
+    await send(
+      'StatusNotification',
+      {
+        connectorId: 1,
+        errorCode: 'GroundFailure',
+        status: 'Faulted',
+        timestamp: before.toISOString(),
+      },
+      tick(),
+    );
+    expect(await faultRows()).toHaveLength(1);
+    await status(1, 'Available');
+  });
+
+  it('IT-17: đồng hồ trụ sai — giờ trụ ở tương lai hoặc quá 30 ngày trước → ghi theo received_at', async () => {
+    const rx1 = tick();
+    await faults.onConnectorStatus({
+      chargePointId: cpId,
+      connectorNo: 1,
+      status: 'Faulted',
+      errorCode: 'GroundFailure',
+      receivedAt: rx1,
+      occurredAt: new Date('1970-01-01T00:00:00Z'),
+    });
+    expect((await onlyFault()).raisedAt.toISOString()).toBe(rx1.toISOString());
+    const rx2 = tick();
+    await faults.onConnectorStatus({
+      chargePointId: cpId,
+      connectorNo: 1,
+      status: 'Available',
+      errorCode: 'NoError',
+      receivedAt: rx2,
+      occurredAt: new Date(rx2.getTime() + 3 * 3600_000),
+    });
+    expect((await onlyFault()).resolvedAt!.toISOString()).toBe(rx2.toISOString());
+  });
+
+  it('IT-18: Reset khi súng khác có phiên orphaned / pending → 409; khi sự cố khác của trụ đang resetting → 409 reset_in_progress', async () => {
+    const at = tick();
+    const { transactionId } = (await send(
+      'StartTransaction',
+      { connectorId: 2, idTag: 'WF04TAG', meterStart: 0, timestamp: at.toISOString() },
+      at,
+    )) as { transactionId: number };
+    await status(1, 'Faulted', 'GroundFailure');
+    const id = (await onlyFault()).id;
+    await post(`/api/admin/faults/${id}/acknowledge`);
+    for (const st of ['orphaned', 'pending'] as const) {
+      await db
+        .update(sessions)
+        .set({ status: st })
+        .where(eq(sessions.transactionNo, transactionId));
+      const r = await post<{ error: string }>(`/api/admin/faults/${id}/reset`);
+      expect(r).toMatchObject({ status: 409, body: { error: 'sessions_active' } });
+    }
+    await db
+      .update(sessions)
+      .set({ status: 'active' })
+      .where(eq(sessions.transactionNo, transactionId));
+    const stopAt = tick();
+    await send(
+      'StopTransaction',
+      { transactionId, meterStop: 0, timestamp: stopAt.toISOString(), reason: 'Local' },
+      stopAt,
+    );
+    expect(await db.select().from(remoteCommands)).toHaveLength(0);
+
+    await status(2, 'Faulted', 'GroundFailure');
+    const second = (await faultRows()).find((f) => f.id !== id)!.id;
+    await post(`/api/admin/faults/${second}/acknowledge`);
+    expect((await post(`/api/admin/faults/${id}/reset`)).status).toBe(200); // c1 → resetting
+    const r = await post<{ error: string }>(`/api/admin/faults/${second}/reset`);
+    expect(r).toMatchObject({ status: 409, body: { error: 'reset_in_progress' } });
+    expect(pillar.calls.filter((c) => c.method === 'Reset')).toHaveLength(1);
+  });
+
   it('khởi động lại CSMS: sự cố resetting quá hạn → acknowledged; còn trong hạn → hẹn giờ phần còn lại', async () => {
     await status(1, 'Faulted', 'GroundFailure');
     await status(2, 'Faulted', 'GroundFailure');

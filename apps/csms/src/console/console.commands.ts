@@ -30,8 +30,13 @@ import { ConsoleError } from './console.http.js';
 
 /** Trạng thái phiên còn "sống" — RemoteStop chỉ có nghĩa với các trạng thái này. */
 const STOPPABLE = new Set(['pending', 'active', 'paused', 'stopping']);
-/** Phiên đang cấp điện — Reset (luôn áp cho CẢ trụ, OCPP 1.6) sẽ cắt ngang các phiên này. */
-const CHARGING = ['active', 'paused', 'stopping'] as const;
+/**
+ * Phiên mà Reset (luôn áp cho CẢ trụ, OCPP 1.6) sẽ cắt ngang: đang cấp điện, sắp bắt đầu
+ * (`pending` — RemoteStart đã Accepted, tài xế sắp cắm), hoặc `orphaned` — trụ nối lại nhưng phiên
+ * chưa có bản tin live (STM-1 #18) nên vẫn có thể đang sạc thật. Phiên orphaned cũ (tới hạn 24 h)
+ * cũng chặn: operator thấy tên phiên trong 409 và dùng `force`.
+ */
+const CHARGING = ['pending', 'active', 'paused', 'stopping', 'orphaned'] as const;
 const REMOTE_STOP_TIMEOUT_MS = 15_000;
 const RESET_CALL_TIMEOUT_MS = 15_000;
 
@@ -153,6 +158,26 @@ export class ConsoleCommands {
     const conn = this.registry.get(fault.serial);
     if (!conn) {
       throw new ConsoleError(409, 'station_offline', `Trụ ${fault.serial} đang offline`);
+    }
+    // Sự cố khác trên cùng trụ đang chờ Reset: trụ đang (hoặc sắp) khởi động lại — Reset thứ hai
+    // giữa lúc reboot chỉ làm rối kết quả của lệnh đầu.
+    const [busy] = await this.db
+      .select({ id: faultEvents.id })
+      .from(faultEvents)
+      .where(
+        and(
+          eq(faultEvents.chargePointId, fault.chargePointId),
+          eq(faultEvents.status, 'resetting'),
+          ne(faultEvents.id, id),
+        ),
+      )
+      .limit(1);
+    if (busy) {
+      throw new ConsoleError(
+        409,
+        'reset_in_progress',
+        `Trụ ${fault.serial} đang chờ kết quả Reset của sự cố #${busy.id}; đợi xong rồi thử lại`,
+      );
     }
     const charging = await this.chargingSessionsBesideFault(id);
     if (charging.length > 0 && !force) {

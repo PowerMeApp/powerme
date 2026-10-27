@@ -9,7 +9,7 @@ CSMS OCPP 1.6J. **Trái tim kỹ thuật của đồ án.**
 | Stack | NestJS 12 + TypeScript 5.9 (strict) · ocpp-rpc 2.2.1 (ADR-0004) · Drizzle ORM + PostgreSQL 16 (ADR-0008) · Redis (chưa dùng ở Iteration 1) |
 | Lộ trình chi tiết | [docs/WP2-LO-TRINH-KY-THUAT.md](../../docs/WP2-LO-TRINH-KY-THUAT.md) |
 | Iteration 1 | [docs/ITERATION-1-WF03.md](../../docs/ITERATION-1-WF03.md) — gateway + state machine phiên + đối soát, test phát lại trace EXP-01 |
-| Iteration 1 WF-04 | [docs/ITERATION-1-WF04.md](../../docs/ITERATION-1-WF04.md) — sự cố trụ STM-6 (FE-04): FaultService, Reset từ xa qua console, 19 test tích hợp |
+| Iteration 1 WF-04 | [docs/ITERATION-1-WF04.md](../../docs/ITERATION-1-WF04.md) — sự cố trụ STM-6 (FE-04): FaultService, Reset từ xa qua console, 26 test tích hợp |
 
 ## Chạy
 

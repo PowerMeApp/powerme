@@ -72,6 +72,8 @@ export type StatusOutcome =
   | { kind: 'raised'; faultId: number }
   | { kind: 'attached'; faultId: number }
   | { kind: 'resolved'; faultId: number; from: FaultStatus }
+  /** Bản phát lại cũ hơn trạng thái hiện tại của sự cố: không đổi gì (xem {@link eventTime}). */
+  | { kind: 'stale'; faultId: number | null }
   | { kind: 'none' };
 
 export interface ConnectorStatusInput {
@@ -146,6 +148,27 @@ function severityRankSql(column: SQLWrapper): SQL {
   return sql`CASE ${column} ${sql.join(whens, sql` `)} ELSE ${sql.raw(String(severityRank(guideFor(null).severity)))} END`;
 }
 
+/**
+ * Bản phát lại cũ hơn mức này coi là đồng hồ trụ sai (pin RTC hết → 1970…), không phải hàng đợi
+ * offline thật. Hàng đợi của trụ không giữ lâu hơn vài ngày; 30 ngày để dư.
+ */
+export const MAX_REPLAY_AGE_MS = 30 * 24 * 3600 * 1000;
+
+/**
+ * Thời điểm ghi cho sự cố: `occurredAt` (giờ trụ của bản phát lại) nhưng KHÔNG muộn hơn lúc CSMS
+ * nhận (đồng hồ trụ chạy nhanh) và không cũ hơn {@link MAX_REPLAY_AGE_MS} (đồng hồ trụ hỏng) —
+ * hai trường hợp đó dùng `receivedAt` (ADR-0009: received_at là đồng hồ tin cậy).
+ */
+export function eventTime(input: Pick<ConnectorStatusInput, 'occurredAt' | 'receivedAt'>): Date {
+  const occurred = input.occurredAt;
+  if (!occurred || Number.isNaN(occurred.getTime())) return input.receivedAt;
+  const rx = input.receivedAt.getTime();
+  if (occurred.getTime() > rx || rx - occurred.getTime() > MAX_REPLAY_AGE_MS) {
+    return input.receivedAt;
+  }
+  return occurred;
+}
+
 /** Trạng thái lệnh `remote_commands` còn chưa có kết quả. */
 const IN_FLIGHT = ['pending', 'sent'] as const;
 
@@ -205,12 +228,17 @@ export class FaultService implements OnApplicationBootstrap, OnApplicationShutdo
    * Gọi SAU khi SessionsService đã phản chiếu StatusNotification (frame của một trụ được tuần tự
    * hoá nên thứ tự an toàn). `Faulted` → t1 hoặc gắn vào sự cố mở; trạng thái hồi phục
    * ({@link RECOVERED_STATUSES}) → kết thúc sự cố mở. `Unavailable` / status lạ: không làm gì.
+   *
+   * Chống bản phát lại cũ (hàng đợi offline trộn với frame live, EXP-01): frame hồi phục có thời
+   * điểm TRƯỚC `raised_at` của sự cố đang mở không đóng sự cố (vd. `Charging` 10:00 phát lại sau
+   * khi `Faulted` live 10:30 đã mở sự cố); `Faulted` có thời điểm trước lúc sự cố gần nhất của súng
+   * đã đóng không mở lại sự cố cũ. Cả hai trả `stale`, frame vẫn nằm trong log.
    */
   async onConnectorStatus(input: ConnectorStatusInput): Promise<StatusOutcome> {
     if (input.status !== 'Faulted' && !RECOVERED_STATUSES.has(input.status)) {
       return { kind: 'none' };
     }
-    const at = input.occurredAt ?? input.receivedAt;
+    const at = eventTime(input);
     const connectorId = await this.resolveConnectorId(input.chargePointId, input.connectorNo);
     if (connectorId === undefined) return { kind: 'none' };
 
@@ -221,6 +249,8 @@ export class FaultService implements OnApplicationBootstrap, OnApplicationShutdo
           this.sm.apply(open.status, 'SIGNAL'); // no-op, ném nếu bảng đổi
           return { kind: 'attached', faultId: open.id } as const;
         }
+        const lastResolved = await this.lastResolvedAt(tx, input.chargePointId, connectorId);
+        if (lastResolved && at < lastResolved) return { kind: 'stale', faultId: null } as const;
         const [row] = await tx
           .insert(faultEvents)
           .values({
@@ -236,6 +266,7 @@ export class FaultService implements OnApplicationBootstrap, OnApplicationShutdo
         return { kind: 'raised', faultId: row.id } as const;
       }
       if (!open) return { kind: 'none' } as const;
+      if (at < open.raisedAt) return { kind: 'stale', faultId: open.id } as const;
       const step = this.sm.apply(open.status, 'CONNECTOR_AVAILABLE');
       await tx
         .update(faultEvents)
@@ -245,6 +276,11 @@ export class FaultService implements OnApplicationBootstrap, OnApplicationShutdo
     });
 
     if (outcome.kind === 'resolved') this.clearTimer(outcome.faultId);
+    if (outcome.kind === 'stale') {
+      this.logger.warn(
+        `trụ ${input.chargePointId} c${input.connectorNo}: bỏ qua ${input.status} phát lại lúc ${at.toISOString()} (cũ hơn trạng thái sự cố hiện tại)`,
+      );
+    }
     if (outcome.kind === 'raised') {
       this.logger.warn(
         `sự cố #${outcome.faultId} raised: trụ ${input.chargePointId} c${input.connectorNo} ${input.errorCode ?? '?'}`,
@@ -313,7 +349,7 @@ export class FaultService implements OnApplicationBootstrap, OnApplicationShutdo
   }
 
   /**
-   * Kết quả CALL Reset. Accepted: chỉ ghi lệnh — sự cố vẫn `resetting` chờ súng Available hoặc
+   * Kết quả CALL Reset. Accepted: chỉ ghi lệnh — sự cố vẫn `resetting` chờ súng hoạt động lại hoặc
    * hết hạn. Rejected / lỗi gửi: ghi lệnh và t6 resetting → acknowledged.
    * Kết quả tới muộn của một lệnh không còn gắn với sự cố đang `resetting` thì chỉ ghi lệnh.
    */
@@ -566,7 +602,7 @@ export class FaultService implements OnApplicationBootstrap, OnApplicationShutdo
     connectorId: number | null,
   ) {
     const [row] = await tx
-      .select({ id: faultEvents.id, status: faultEvents.status })
+      .select({ id: faultEvents.id, status: faultEvents.status, raisedAt: faultEvents.raisedAt })
       .from(faultEvents)
       .where(
         and(
@@ -579,6 +615,29 @@ export class FaultService implements OnApplicationBootstrap, OnApplicationShutdo
       )
       .for('update');
     return row;
+  }
+
+  /** Lúc sự cố gần nhất của súng (connector 0: cả trụ) được đóng; null nếu chưa có. */
+  private async lastResolvedAt(
+    tx: DbExecutor,
+    chargePointId: number,
+    connectorId: number | null,
+  ): Promise<Date | null> {
+    const [row] = await tx
+      .select({ resolvedAt: faultEvents.resolvedAt })
+      .from(faultEvents)
+      .where(
+        and(
+          eq(faultEvents.chargePointId, chargePointId),
+          connectorId === null
+            ? isNull(faultEvents.connectorId)
+            : eq(faultEvents.connectorId, connectorId),
+          eq(faultEvents.status, 'resolved'),
+        ),
+      )
+      .orderBy(desc(faultEvents.resolvedAt))
+      .limit(1);
+    return row?.resolvedAt ?? null;
   }
 
   private async lockFault(tx: DbExecutor, faultId: number) {
