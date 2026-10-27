@@ -139,7 +139,7 @@ Yêu cầu: đã `--seed` (để trụ tồn tại và có credential), `DEMO_PI
 
 ## Biến môi trường
 
-Compose chỉ truyền cho `csms` những biến mà `apps/csms/src/config.ts` đọc: `DATABASE_URL` (ghép từ `POSTGRES_*`), `OCPP_PORT` (9000), `OCPP_PUBLIC_URL` (`wss://$DOMAIN/ocpp`), `CONSOLE_ENABLED`/`CONSOLE_HOST`/`CONSOLE_PORT`, `ALLOW_LEGACY_NO_CREDENTIAL` (**cố định `false`**, không đọc từ `.env`), `OFFLINE_GRACE_S` và các biến timeout/đối soát (có mặc định, xem `.env.example`). `OFFLINE_GRACE_S=30` là giá trị tạm của Trí (ADR-0016 chưa có số chính thức).
+Compose chỉ truyền cho `csms` những biến mà `apps/csms/src/config.ts` đọc: `DATABASE_URL` (ghép từ `POSTGRES_*`), `OCPP_PORT` (9000), `OCPP_PUBLIC_URL` (`wss://$DOMAIN/ocpp`), `CONSOLE_ENABLED`/`CONSOLE_HOST`/`CONSOLE_PORT`, `ALLOW_LEGACY_NO_CREDENTIAL` (**cố định `false`**, không đọc từ `.env`), `OFFLINE_GRACE_S` và các biến timeout/đối soát (có mặc định, xem `.env.example`). `OFFLINE_GRACE_S` mặc định 120 (WP1 chốt ngày 26/10/2026, ADR-0016).
 
 ## Bảo mật: những điều thật
 

@@ -140,7 +140,7 @@ npm run build -w @powerme/csms                # tsc → dist/
 DATABASE_URL=... OCPP_PORT=9000 npm run start -w @powerme/csms
 ```
 
-Biến môi trường (xem `infra/.env.example`): `DATABASE_URL` (bắt buộc), `OCPP_PORT` (9000; dự phòng `CSMS_OCPP_WS_PORT`), `OCPP_HEARTBEAT_INTERVAL_SECONDS` (300), `SESSION_START_TIMEOUT_S` (120), `SESSION_HARD_CAP_H` (24), `REPLAY_SKEW_THRESHOLD_S`, `OFFLINE_GRACE_S` (30; T61 — giây ân hạn trước `orphaned`, `0` = orphan ngay) (5), `METER_VALUE_SAMPLE_INTERVAL_S` (10), `RECONCILE_GAP_FACTOR` (3), `RECONCILE_ENERGY_TOLERANCE_WH` (1).
+Biến môi trường (xem `infra/.env.example`): `DATABASE_URL` (bắt buộc), `OCPP_PORT` (9000; dự phòng `CSMS_OCPP_WS_PORT`), `OCPP_HEARTBEAT_INTERVAL_SECONDS` (300), `SESSION_START_TIMEOUT_S` (120), `SESSION_HARD_CAP_H` (24), `REPLAY_SKEW_THRESHOLD_S`, `OFFLINE_GRACE_S` (120 theo ADR-0016, trước 27/10 là 30 tạm; T61 — giây ân hạn trước `orphaned`, `0` = orphan ngay) (5), `METER_VALUE_SAMPLE_INTERVAL_S` (10), `RECONCILE_GAP_FACTOR` (3), `RECONCILE_ENERGY_TOLERANCE_WH` (1).
 
 Trụ (hoặc SAP simulator với `ws://localhost:9000/ocpp`) nối tới `ws://host:OCPP_PORT/ocpp/{serialNumber}`; serial phải có trong `charge_points` trước.
 
