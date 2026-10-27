@@ -40,7 +40,7 @@ if ( ) then ([payment succeeded,\namount matches])
   :TopUp\n[credited]; <<task>>
   :CreditTransaction\n[top_up]; <<task>>
   if ( ) then ([points were applied])
-    :LoyaltyTransaction\n[redeemed]; <<task>>
+    :LoyaltyTransaction\n[redeem]; <<task>>
   else ([else])
   endif
   :EInvoice\n[requested]; <<task>>

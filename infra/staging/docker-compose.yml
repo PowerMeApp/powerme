@@ -49,6 +49,11 @@ services:
       # PHẢI false trên staging: trụ không có credential bị 401 (Security Profile 2). Cố định ở
       # đây, không đọc từ .env, để không bật nhầm.
       ALLOW_LEGACY_NO_CREDENTIAL: 'false'
+      # PHẢI true: Caddy là proxy duy nhất (cổng 9000 chỉ `expose` trong mạng compose), nên bộ giới
+      # hạn đăng nhập sai của trụ (#40) lấy IP trụ từ X-Forwarded-For. Thiếu dòng này mọi trụ chung
+      # IP của Caddy → 5 lần sai mật khẩu của kẻ lạ khoá luôn trụ thật, 20 lần khoá mọi trụ.
+      # Cố định ở đây, không đọc từ .env.
+      OCPP_TRUST_PROXY: 'true'
       OFFLINE_GRACE_S: ${OFFLINE_GRACE_S:-120}
       OCPP_HEARTBEAT_INTERVAL_SECONDS: ${OCPP_HEARTBEAT_INTERVAL_SECONDS:-300}
       SESSION_START_TIMEOUT_S: ${SESSION_START_TIMEOUT_S:-120}

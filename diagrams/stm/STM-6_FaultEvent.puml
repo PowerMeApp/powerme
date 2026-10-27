@@ -12,5 +12,8 @@ resolved --> [*]
 note right of acknowledged
   One open FaultEvent per connector.
   Maintenance tickets are Should (FR-18).
+  CONNECTOR_AVAILABLE = connector works again:
+  Available or straight to Preparing / Charging /
+  Suspended / Finishing / Reserved (not Unavailable).
 end note
 @enduml

@@ -40,6 +40,16 @@ export async function migrate(client: Queryable, dir = MIGRATIONS_DIR): Promise<
     (await client.query('SELECT name FROM _migrations')).rows.map((r) => String(r['name'])),
   );
   const names = listMigrations(dir);
+  // WP3/T72: keep the test runner's legacy-history refusal identical to the production runner.
+  const legacy = [...done].filter((name) =>
+    /^(0003_wp3_t31_charging|0004_wp3_t72_recovery|0005_wp3_station_search|0006_wp3_stop_attempts)$/.test(
+      name,
+    ),
+  );
+  if (legacy.length)
+    throw new Error(
+      `legacy_wp3_migration_history: ${legacy.join(', ')}; back up this database and reconcile its migration history before upgrading; no migration was applied`,
+    );
 
   // DB dựng bằng 0000 trước khi có _migrations (ví dụ DB demo cũ): ghi nhận 0000 đã áp, KHÔNG
   // chạy lại (CREATE TYPE sẽ lỗi), để các migration sau áp lên dữ liệu hiện có.

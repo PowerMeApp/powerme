@@ -264,6 +264,10 @@ export const faultEventsRelations = relations(faultEvents, ({ one, many }) => ({
     fields: [faultEvents.acknowledgedBy],
     references: [operatorStaff.userId],
   }),
+  resetCommand: one(remoteCommands, {
+    fields: [faultEvents.resetCommandId],
+    references: [remoteCommands.id],
+  }),
   reports: many(faultReports),
   tickets: many(maintenanceTickets),
 }));
