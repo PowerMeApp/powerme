@@ -1,0 +1,68 @@
+@startuml SD-2a_create_topup
+!include ../team/_team.iuml
+title SD-2a (WF-02) Driver creates a top-up and pays at VNPay\n<size:11>STM-4 #1: [*] → pending · UC-PAY-01, UC-PAY-03 (points) · BR-P22, BR-P35 · tests TC-STM4-01, TC-STM4-11, TC-STM4-16 (proposed)</size>
+footer PowerMe · WF-02 owner Lê Bảo Khang (WP5) · v0.1 · 24/10/2026 · class/method names to align with the CSMS repo (apps/csms/billing)
+autonumber
+hide footbox
+actor "Driver" as drv
+participant "Driver App\n(Flutter)" as app
+box "users" #FAFBFD
+participant "RolesGuard" as guard
+end box
+box "billing (WP5)" #FAFBFD
+participant "TopUp\nController" as ctl
+participant "TopUpService" as svc
+participant "Loyalty\nService" as loy
+participant "VnpayAdapter" as vnpA
+end box
+database "PostgreSQL" as db
+database "Redis\n(BullMQ)" as q
+participant "VNPay sandbox" as vnp <<external>>
+
+drv -> app : enter amount, tick "use points"
+app -> ctl : POST /api/v1/billing/top-ups\n{amountVnd, redeemPoints}\nIdempotency-Key: <uuid>
+ctl -> guard : check JWT, role = Driver
+guard --> ctl : DriverContext(driverId)
+ctl -> svc : create(driverId, dto, idempotencyKey)
+svc -> db : SELECT top_ups WHERE idempotency_key = ?
+alt same key already used (app retried the request)
+  svc --> ctl : existing TopUpCreated (same paymentUrl)
+  ctl --> app : 200 {topUpId, paymentUrl}
+else new key
+  svc -> db : SELECT credit_accounts WHERE driver_id = ? FOR UPDATE
+  alt account closed, amount < 50,000 or > 2,000,000,\nor balance + amount > 5,000,000 (BR-P22)
+    svc --> ctl : ValidationError(reason)
+    ctl --> app : 422 limit error, no top_ups row
+  else another top-up of this account is still open\n(pending, or expired inside LATE_WINDOW) — proposed guard
+    svc --> ctl : ConflictError(openTopUpId)
+    ctl --> app : 409 finish or wait for the open top-up
+  else within limits
+    opt redeemPoints
+      svc -> loy : quoteRedemption(driverId, points, amountVnd)
+      loy -> db : SELECT points not expired
+      loy --> svc : PointsQuote(points ≥ 500, discount ≤ 50% of amount,\n100 points = 1,000 VND)
+    end
+    group one database transaction
+      svc -> svc : TopUpStateMachine: [*] → pending\namountPaidVnd = amountVnd − pointsDiscountVnd\ngatewayRef = new vnp_TxnRef, expiresAt = now + 15 min
+      svc -> db : INSERT top_ups (status = pending)
+    end
+    svc -> q : add delayed job topup.timeout {topUpId}\ndelay = 15 min (jobId = topUpId)
+    svc -> vnpA : buildPaymentUrl(topUp, expireAt)
+    vnpA -> vnpA : vnp_Amount = amountPaidVnd × 100,\nvnp_TxnRef, vnp_ExpireDate = expiresAt,\nvnp_ReturnUrl, sign HMAC-SHA512 → vnp_SecureHash
+    vnpA --> svc : paymentUrl
+    svc --> ctl : TopUpCreated(topUpId, paymentUrl, expiresAt)
+    ctl --> app : 201 {topUpId, paymentUrl, amountPaidVnd, expiresAt}
+    app -> vnp : open paymentUrl (in-app browser)
+    drv -> vnp : pay (sandbox card / QR)
+    vnp --> app : redirect to vnp_ReturnUrl\n(display only, never credits)
+    note right of app
+      The return URL is not trusted for money.
+      Credit happens only on the signed IPN (SD-2b).
+    end note
+    loop until status ≠ pending (or Socket.IO topup.status arrives)
+      app -> ctl : GET /api/v1/billing/top-ups/{id}
+      ctl --> app : {status, balanceVnd}
+    end
+  end
+end
+@enduml
