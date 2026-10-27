@@ -154,11 +154,12 @@ describeDb('migration 0003 — billing WF-02 (nâng cấp DB đã có 0002)', ()
       );
     });
 
-    it('(c) migrate() áp 0003 và các migration sau; _migrations khớp thư mục drizzle/; chạy lại không áp gì', async () => {
-      expect(await migrate(db.$client)).toEqual(listMigrations().slice(BEFORE_0003.length));
+    it('(c) migrate() áp 0003 rồi các migration sau; _migrations khớp thư mục drizzle/; chạy lại không áp gì', async () => {
+      const applied = await migrate(db.$client);
+      expect(applied[0]).toBe('0003_billing-wf02');
+      expect(applied).toEqual(listMigrations().slice(BEFORE_0003.length));
       expect(await migrate(db.$client)).toEqual([]);
       const names = (await q('SELECT name FROM _migrations ORDER BY name')).map((r) => r['name']);
-      expect(names.slice(0, BEFORE_0003.length)).toEqual(BEFORE_0003);
       expect(names).toEqual(listMigrations());
     });
 

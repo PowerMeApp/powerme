@@ -4,15 +4,15 @@
  *
  * Vì sao tồn tại: 0002 sửa DỮ LIỆU đang có (UPDATE lifecycle) trên bảng người dùng thật. Test dựng
  * DB "như demo đã có 0001" (0000 + 0001 + bảng _migrations + vài trụ ở đủ các lifecycle), gọi
- * helper `migrate` (cùng logic scripts/migrate.mjs) và kiểm: 0002 cùng migration sau được áp, hàng `offline` →
- * `in_service` + `is_online=false`, hàng khác KHÔNG bị đụng, giá trị enum `offline` vẫn còn.
+ * helper `migrate` (cùng logic scripts/migrate.mjs) và kiểm: 0002 (rồi 0003) được áp, hàng
+ * `offline` → `in_service` + `is_online=false`, hàng khác KHÔNG bị đụng, enum `offline` vẫn còn.
  *
  * Cần DATABASE_URL (DB test riêng — test DROP SCHEMA public); thiếu thì cả describe bị skip.
  */
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { createDb, Db } from '../src/db/db.module.js';
-import { MIGRATIONS_DIR, migrate } from './helpers/apply-migrations.js';
+import { listMigrations, MIGRATIONS_DIR, migrate } from './helpers/apply-migrations.js';
 
 const DATABASE_URL = process.env['DATABASE_URL'];
 const describeDb = DATABASE_URL ? describe : describe.skip;
@@ -49,15 +49,10 @@ describeDb('migration 0002 — tách kết nối khỏi lifecycle (nâng cấp D
     await db?.$client.end();
   });
 
-  it('migrate() áp 0002 rồi 0007 (WP3/T72), giữ 0000 và 0001 đã ghi nhận', async () => {
-    expect(await migrate(db.$client)).toEqual([
-      '0002_tach-ket-noi-khoi-lifecycle',
-      '0003_billing-wf02',
-      '0004_wp3_t31_charging',
-      '0005_wp3_t72_recovery',
-      '0006_wp3_station_search',
-      '0007_wp3_stop_attempts',
-    ]);
+  it('migrate() áp 0002 rồi các migration sau (0000 và 0001 đã ghi trong _migrations)', async () => {
+    const applied = await migrate(db.$client);
+    expect(applied[0]).toBe('0002_tach-ket-noi-khoi-lifecycle');
+    expect(applied).toEqual(listMigrations().slice(2));
     expect(await migrate(db.$client)).toEqual([]); // chạy lại không áp gì
   });
 
