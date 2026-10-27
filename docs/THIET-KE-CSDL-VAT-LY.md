@@ -9,6 +9,8 @@
 **Cập nhật 26/10/2026 (T61, ADR-0016 D-C):** áp migration 0002 — `charge_points` có thêm `is_online boolean not null default false` và `online_changed_at timestamptz null`; `lifecycle` chỉ còn nghĩa hành chính, giá trị enum `offline` thành **legacy** (không còn được ghi; hàng cũ được backfill sang `in_service` + `is_online=false`). `last_message_at` đóng vai `last_seen_at` của ADR-0016 nên **không thêm cột trùng**.
 **Cập nhật 27/10/2026 (T73, LERD-1 v0.4):** áp migration 0003 — thuộc tính billing WF-02: `top_ups` thêm `gateway_transaction_no`, `points_redeemed`, `expires_at` (NOT NULL, hàng cũ backfill `created_at + 15 phút`), `refunded_at`, `refunded_by`, `late_gateway_ref` (UNIQUE), `late_paid_at`, `late_amount_vnd`, `late_refunded_at`; `top_ups.gateway_reference` **đổi nghĩa** thành `vnp_TxnRef` (do CSMS sinh) và thành NOT NULL; `e_invoices` thêm `last_error_kind` (enum mới `e_invoice_error_kind`), `last_error_message`, `last_attempt_at`; `credit_accounts` thêm `closed_at`, `closure_refunded_at`; UNIQUE sổ cái theo top-up đổi thành `(top_up_id, transaction_type)`; `loyalty_transaction_type` thêm `restore`; 12 CHECK mới và UNIQUE partial `gateway_transaction_no` (trong đó 4 ràng buộc Trí duyệt bổ sung 27/10/2026 trên PR #60). Không làm ở DB: cửa sổ trả muộn 1 giờ (service kiểm, tham số cấu hình) và `refund_status` (Planned). Mỗi ràng buộc kèm use case: mục 4 và `docs/NHAT-KY-MIGRATION-0003.md` mục 2.
 
+**Cập nhật 27/10/2026 (WP3 T72):** bổ sung mục 4.3 về trigger quyết toán phiên, thử lại và ranh giới lỗi; giữ nguyên tác giả cùng số liệu lịch sử sau 0003.
+
 > Nguồn sự thật về cấu trúc DB là **migration SQL viết tay** (ADR-0008). Schema Drizzle phải khớp từng cột với SQL — mục 8 ghi cách đối chiếu đã chạy.
 
 ---
@@ -286,6 +288,37 @@ Khoá: CHECK `connector_no IS NULL OR connector_no IN (0,1,2)`; CHECK `sent_at >
 | CHECK percent ≤ 100, `valid_to > valid_from` | promotions | giá trị khuyến mãi hợp lệ |
 | CHECK `connector_no IS NULL OR connector_no IN (0,1,2)` (0001) | remote_commands | lệnh chỉ nhắm cả trụ hoặc connector 0/1/2 |
 | CHECK `sent_at >= requested_at`; CHECK `responded_at` chỉ khi đã gửi và `>= sent_at` (0001) | remote_commands | trình tự thời gian của một lệnh không đảo ngược |
+
+---
+
+### 4.3. WP3 T72 — trigger, function và index quyết toán (27/10/2026)
+
+Phạm vi FR-05, UC-CHG-03/04, BR-P04/34, NFR-OCPP-03: WP3 phối hợp WP2 ghi bằng chứng, WP5 quyết toán. [Migration 0005](../apps/csms/drizzle/0005_wp3_t72_recovery.sql) định nghĩa:
+
+```sql
+CREATE TRIGGER wp3_session_settlement
+AFTER INSERT OR UPDATE OF received_stopped_at,status ON sessions
+FOR EACH ROW EXECUTE FUNCTION wp3_queue_settlement();
+```
+
+Function kiểm `NEW.received_stopped_at IS NOT NULL`, không chỉ chuyển NULL → có giá trị. INSERT phiên đã dừng hoặc UPDATE hai cột trên khi đã có mốc dừng đều được xử lý, kể cả gán lại cùng giá trị:
+
+- Tạo `charge_settlement_jobs` mặc định `pending/stop_observed`; `ON CONFLICT(session_id)` chỉ cập nhật `next_attempt_at=now(), updated_at=now()` khi job còn `pending`; giữ nguyên `posted`/`ineligible`.
+- Đặt `driver_charge_intents.connector_released_at=coalesce(connector_released_at,now())` theo phiên, giữ mốc cũ và `reserved_vnd`. Chỉ bỏ khóa giữ connector của intent; không đổi trạng thái OCPP sang Available hay hoàn credit dự phòng.
+
+**Transaction và lỗi:** [SessionsService.onStopTransaction](../apps/csms/src/sessions/sessions.service.ts) ghi mốc dừng, trigger/job, giải phóng connector và đối soát cùng transaction DB; lỗi trigger hoặc bước ghi sau đó rollback toàn bộ transaction này. [OcppHandlers](../apps/csms/src/ocpp-gateway/ocpp-handlers.ts) gọi `onStopTransaction` ngoài `try`: lỗi lưu vẫn dẫn tới CALLERROR. Chỉ `onStopped` tiếp theo được bắt lỗi riêng; sau khi lưu thành công, lỗi billing không hủy bằng chứng dừng và handler trả Accepted. Không phải mọi lỗi đều được ACK.
+
+**Job và tiền:** PK `charge_settlement_jobs.session_id` giữ một job/phiên; partial index `charge_settlement_jobs_due(next_attempt_at) WHERE state='pending'` hỗ trợ quét đến hạn. Chống thu trùng còn cần partial UNIQUE `session_debit` ([0000](../apps/csms/drizzle/0000_init.sql)), UNIQUE `earn`/phiên, PK `charging_statements.session_id` ([0004](../apps/csms/drizzle/0004_wp3_t31_charging.sql)) và khóa `FOR UPDATE` trên phiên, ví, tài khoản điểm. [ChargeSettlementService](../apps/csms/src/sessions/charge-settlement.service.ts) ghi debit, điểm, số dư, đoạn giá, statement và đặt reserve về 0 trong transaction riêng; lỗi thì rollback phần tiền. Job được cập nhật sau đó; nếu tiến trình dừng giữa hai bước, thử lại nhận `already_posted` từ statement đã tồn tại.
+
+**Điều kiện và thử lại:** cần policy, `origin='app_qr'`, intent khớp phiên/tài xế, `csms_billed`, Driver, `reconciled`, meter/energy hợp lệ và đủ giá/bằng chứng biên giá. Promotion, offline pricing hoặc late-start cần review vẫn chờ. `pending.reason` phân biệt `awaiting_reconciliation`, `policy_unconfigured`, `tariff_coverage_or_boundary_meter_required`, `transient_error`…; `ineligible` là ngoài nhánh đủ điều kiện; `posted` là đã ghi statement. `station_wallet`/`unattributed` không tự debit/earn. Statement thuộc phiên; e-invoice thuộc top-up.
+
+[ChargeRecoveryService](../apps/csms/src/sessions/charge-recovery.service.ts) quét ngay khi bootstrap, rồi mỗi 10 giây; `retryPending()` mặc định lấy tối đa 25 job đến hạn. Lịch thử lại pending/lỗi billing là sau 30 giây nếu cập nhật metadata thành công; trigger có thể đưa job pending về hạn ngay. DB giữ job qua restart; WP3 dùng timer, không dùng BullMQ.
+
+**Backfill và số đếm:** 0005 lấy mọi phiên có mốc dừng: có statement → `posted/already_posted`, chưa có → `pending/recovered_stop`; đồng thời đặt mốc giải phóng connector cho intent liên quan. Đây là trigger riêng ngoài hai trigger append-only lịch sử ở mục 1. Các tổng sau 0003 giữ nguyên, không phải tổng đầy đủ đến 0007; lượt này chưa kiểm catalog DB.
+
+**Kiểm thử có sẵn, chỉ đọc tham chiếu, chưa chạy lại:** [WF01 integration](../apps/csms/test/wf01-driver-charging.integration.test.ts) có `T72 persists retry work and ACKs stop despite a real ledger write failure`, `T72 review exposes pending reason and resumes after reconciliation`, `T72 pending billing frees the stopped connector but preserves its credit liability`; [migration WP3](../apps/csms/test/migration-wp3.integration.test.ts) có `upgrades a populated #60 database, preserves billing, and enforces earn/segment keys`.
+
+**Nói ngắn với hội đồng:** “Trigger lưu việc quyết toán cùng bằng chứng dừng. Worker thử lại khi đủ dữ liệu; khóa và ràng buộc sổ cái chống thu trùng. Lỗi ghi dừng vẫn báo lỗi OCPP; lỗi billing sau đó được xử lý riêng.”
 
 ---
 
