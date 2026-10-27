@@ -281,6 +281,8 @@ svg text { fill: var(--muted); font-size: 13px; }
       case 'orphan_stop':
         return 'StopTransaction tới cho phiên đã dừng — giữ nguyên trạng thái phiên';
       case 'unknown_id_tag':
+        var cardStatus = /card_status=(\S+)/.exec(r.resolution || '');
+        if (cardStatus) return 'Thẻ ' + (tag ? tag[1] : '?') + ' đang ' + cardStatus[1] + ' (không Accepted) nhưng trụ vẫn mở phiên — không thu tiền tài xế';
         return 'idTag lạ (' + (tag ? tag[1] : '?') + ') — không có trong sổ thẻ';
       default:
         return 'Chênh lệch ' + wh(r.energy_difference_wh) + ' trong chuỗi đo' + late;

@@ -41,14 +41,16 @@
 | 9 | stopping → closed | StopTransaction tới | UC-CHG-03 | |
 | 10 | active → closed | StopTransaction tới [đầy pin hoặc dừng tại trụ] | AD-1 A1 | |
 | 11 | paused → closed | StopTransaction tới | AD-1 | |
-| 12 | closed → reconciled | đối soát xong [cross-check **nhất quán**] / tính giá theo band, trừ credit, cộng điểm, gửi statement | UC-PAY-02, UC-INT-03 | |
-| **12a** | **closed → review** | **đối soát phát hiện conflict** [meterStop ≠ chuỗi MeterValues, hoặc lỗ hổng chuỗi không giải thích được] / tạo ReconciliationRecord `conflict`, đưa vào danh sách review | **UC-OPS-05, EXP-01** | **Mới** |
+| 12 | closed → reconciled | đối soát xong [cross-check **nhất quán**, hoặc chỉ có lỗ hổng chuỗi (`gap_detected`) — ghi record `meter_gap`] / tính giá theo band, trừ credit, cộng điểm, gửi statement | UC-PAY-02, UC-INT-03 | Sửa 26/10 (BM02 F39), xem ghi chú dưới bảng |
+| **12a** | **closed → review** | **đối soát phát hiện conflict** [meterStop mâu thuẫn chuỗi MeterValues: chuỗi không đơn điệu, meterStop thấp hơn mẫu cuối quá dung sai, hoặc không có meterStop hợp lệ] / tạo ReconciliationRecord `conflict`, đưa vào danh sách review | **UC-OPS-05, EXP-01** | **Mới.** Sửa 26/10 (BM02 F39): bỏ "lỗ hổng chuỗi không giải thích được" |
 | 13–15 | active / paused / stopping → orphaned | trụ chuyển `offline` (STM-3) khi chưa có StopTransaction | UC-INT-03, AD-2 E4 | Không phải timer riêng — là hệ quả của STM-3 #4 |
 | 16 | orphaned → reconciled | trụ nối lại, StopTransaction phát lại tới, đối soát **nhất quán** | UC-INT-03 | |
 | **16a** | **orphaned → review** | trụ nối lại, StopTransaction phát lại tới, đối soát **conflict**; hoặc không có StopTransaction sau hard cap | UC-INT-03, UC-OPS-05 | **Mới** — thay cho #17 cũ |
 | **17** | **review → reconciled** | operator giải quyết [chọn số Wh cuối, ghi lý do] / record decision | UC-OPS-05 | Sửa: từ `review`, không từ `orphaned` |
 | **18** | **orphaned → active** | bản tin **live** (epoch mới, không phải phát lại) của chính phiên đó tới — MeterValues hoặc StatusNotification Charging | **EXP-01 giai đoạn D** | **Mới (T24 phát hiện).** Trụ nối lại lúc 14:20:22 và gửi MeterValues live cho tx 3 suốt 36 s trước khi StopTransaction phát lại tới. Không có chuyển này, phiên đang sạc thật bị ghi là orphaned |
 | **19** | **reconciled → review** | mẫu phát lại đến muộn làm đổi kết luận đối soát [**chưa có** CreditTransaction trừ tiền] | EXP-01 giai đoạn F | **Mới.** Đã trừ tiền rồi thì **không** đổi trạng thái — chỉ ghi ReconciliationRecord `late_sample` và báo operator; sửa tiền đi đường compensation (AC-B06) |
+
+> **Ghi chú 26/10/2026 (BM02 F39) — lỗ hổng chuỗi đi #12, không đi #12a.** Bản 23/10 của dòng #12a ghi "hoặc lỗ hổng chuỗi không giải thích được" là conflict; WF-03 mục 1 ghi `gap_detected → reconciled`. Hai tài liệu mâu thuẫn; **code là chuẩn** và đã chọn WF-03: `evaluateSeries` (`reconciliation.service.ts`) chỉ kết luận `conflict` khi chuỗi không đơn điệu, meterStop thấp hơn mẫu cuối quá `RECONCILE_ENERGY_TOLERANCE_WH`, hoặc không có meterStop; mọi khoảng trống > `RECONCILE_GAP_FACTOR` × nhịp mẫu (dù có giải thích được bằng khoảng offline hay không) chỉ là `gap_detected`. `SessionsService.onStopTransaction` ánh xạ `gap_detected → RECONCILE_OK` (#12/#16, phiên `reconciled`) và chỉ `conflict → RECONCILE_CONFLICT` (#12a/#16a, `review`). **Lý do:** một lỗ hổng đơn thuần không chứng minh số tiền sai — `meterStop − meterStart` là bộ đếm năng lượng tích luỹ của trụ, thiếu mẫu giữa chừng không làm nó sai; lỗ hổng vẫn được lưu thành record `meter_gap` (có `gap_start`, `gap_end`) để operator thấy. Test: "lỗ hổng thuần (gap_detected) → record_type meter_gap; phiên vẫn reconciled" trong `apps/csms/test/session-history.integration.test.ts`.
 
 **Tổng: 22 chuyển.** Trạng thái cuối: `failed`, `reconciled` (reconciled có thể quay lại `review` theo #19 khi chưa trừ tiền).
 
@@ -132,6 +134,8 @@ Phía WP2, chi phí nhỏ: `disabled` = gửi `ChangeAvailability(connectorId 0,
 **Ai gắn thẻ (câu hỏi của Ân):** Must — **Operator/Admin** gắn thẻ cho driver (thẻ phát vật lý tại site, UC-ADM-04). Driver tự gắn trong app (#5 `active → unlinked` và ngược lại) = **Should**. Lý do: tự gắn cần cơ chế chứng minh sở hữu thẻ (quẹt tại trụ + xác nhận trong app) — thêm một luồng OCPP, không có trong demo.
 
 **Ghi chú WP2 cho ADR-0012:** `card_kind` ∈ {online, wallet, free_vend} quyết `payment_mode` của phiên: `online → csms_billed`, `wallet → station_wallet` (trụ đã trừ tiền, CSMS không thu), `free_vend → free`. Thẻ `wallet` có thể mở phiên **khi trụ offline, không qua Authorize** — CSMS chỉ biết khi StartTransaction phát lại. Authorize cho idTag không có trong `rfid_cards` → `Invalid`.
+
+> **Cập nhật 26/10/2026 (BM02 F22) — đã có trong code (`SessionsService.authorize`, `classifyIdTag`):** Authorize chỉ trả `Accepted` cho thẻ `active`; `blocked` → `Blocked`; `unlinked` → `Invalid` (OCPP 1.6 không có giá trị riêng cho "chưa gắn"; AD-6: thẻ lạ, unlinked hoặc blocked đều bị từ chối). `StartTransaction` đã diễn ra với thẻ `blocked`/`unlinked` (trụ tự cho sạc, thường lúc offline) **vẫn được ghi** (BR-P06: không bỏ phiên) nhưng không phân loại theo `card_kind`: `payment_mode = unattributed`, `driver_id = null`, giữ `rfid_card_id`, kèm một record `unknown_id_tag` có `card_status=` trong `resolution` cho operator. `StartTransaction.conf` vẫn luôn `Accepted` như cũ. Chưa xét số dư Charging Credit (BR-P23) vì chưa có billing. Test: `test/session-history.integration.test.ts`, `src/sessions/authorize-status.spec.ts`.
 
 ---
 

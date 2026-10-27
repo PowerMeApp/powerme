@@ -73,11 +73,11 @@ describe('OfflineGraceService', () => {
     expect(service.pendingCount).toBe(1);
   });
 
-  it('không khai báo offlineGraceS: dùng mặc định 30 s', async () => {
+  it('không khai báo offlineGraceS: dùng mặc định 120 s (ADR-0016)', async () => {
     const { service, scheduler } = build(undefined);
-    expect(service.graceS).toBe(30);
+    expect(service.graceS).toBe(120);
     await service.onSocketClosed(7, 1, AT);
-    expect(scheduler.timers[0]?.delayMs).toBe(30_000);
+    expect(scheduler.timers[0]?.delayMs).toBe(120_000);
   });
 
   it('nối lại trong ân hạn (epoch DB 2 > 1): hết hạn KHÔNG orphan', async () => {

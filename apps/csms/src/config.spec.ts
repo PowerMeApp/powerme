@@ -31,9 +31,9 @@ describe('loadConfig — ALLOW_LEGACY_NO_CREDENTIAL', () => {
 });
 
 describe('loadConfig — OFFLINE_GRACE_S (ADR-0016 D-A)', () => {
-  it('mặc định 30 giây khi không khai báo hoặc rỗng', () => {
-    expect(loadConfig({ ...base }).offlineGraceS).toBe(30);
-    expect(loadConfig({ ...base, OFFLINE_GRACE_S: '' }).offlineGraceS).toBe(30);
+  it('mặc định 120 giây (ADR-0016) khi không khai báo hoặc rỗng', () => {
+    expect(loadConfig({ ...base }).offlineGraceS).toBe(120);
+    expect(loadConfig({ ...base, OFFLINE_GRACE_S: '' }).offlineGraceS).toBe(120);
   });
 
   it('"0" hợp lệ = tắt ân hạn (orphan ngay)', () => {

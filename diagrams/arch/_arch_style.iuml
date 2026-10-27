@@ -28,7 +28,7 @@ skinparam package<<external>> {
 }
 skinparam TitleFontSize 14
 skinparam FooterFontSize 9
-footer PowerMe · WP1 (Trần Đức Ân) · v1.1 · 24/10/2026 · Report 4 §2 System Overview · names to align with the repo at tag review-2 (Trí)
+footer PowerMe · WP1 (Trần Đức Ân) · v1.2 · 26/10/2026 · Report 4 §2 System Overview · console, HMI simulator, demo runner, infra/staging added by Trí (BM02 F32)
 skinparam component<<new>> {
   BackgroundColor #FFF8E1
   BorderColor #B08900

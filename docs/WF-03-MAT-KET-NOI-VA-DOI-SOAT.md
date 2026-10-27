@@ -8,6 +8,8 @@
 **Nguồn:**
 `apps/csms/lab/EXP-01-ngat-ket-noi-81s.md` và `apps/csms/lab/README.md` (nhánh `wp2/be-02-*`, định dạng trace `received_at` / `cp_timestamp` / `epoch` / `epoch_opened_at`) · `docs/adr/` ADR-0005, 0006, 0009, 0010 (nhánh `wp2/be-01-tach-adr-rieng`) · `docs/PACKAGE-DIAGRAM-CSMS.md` (nhánh `wp2/be-01-package-diagram-csms`) · STM-1 phiên sạc (T12, đã được T13 xác nhận) · STM-3 trụ.
 
+> **Superseded một phần (26/10/2026, BM02 F36):** câu "Trên `main` chưa có mã NestJS nào" bên dưới là hiện trạng ngày 23/10. Code đã có từ Iteration 1 (`apps/csms/src`); chỗ code khác sơ đồ được ghi tại chỗ (mục 1, mục 3) và trong `docs/ITERATION-1-WF03.md`.
+
 > Sơ đồ mô tả **thiết kế đích** của `ocpp-gateway`, `sessions`, `reconciliation`, `realtime`. Trên `main` chưa có mã NestJS nào (xem mục 4 của package diagram). Số liệu trong note là số thật của EXP-01 — hành vi của **SAP simulator v4.12.0**, **chưa xác nhận trên firmware Ruihua**.
 
 ---
@@ -21,6 +23,8 @@
 **Diễn biến khi nối lại.** Trụ mở socket mới → gateway cấp `epoch = n + 1`, ghi `epoch_opened_at`; **không chờ `BootNotification`** (EXP-01: SAP nối lại sau 81 s, không gửi Boot). Trụ gửi xen kẽ bản tin thời gian thực (skew `received_at − cp_timestamp` ≈ 0) và bản tin phát lại từ hàng đợi offline (skew ≈ độ dài ngắt, EXP-01: 104–127 s, 6 mẫu phát lại, **2/8 mẫu mất im lặng**). OCPP 1.6 không có cờ phân biệt hai loại này; CSMS suy ra bằng `cp_timestamp < epoch_opened_at` của kết nối hiện tại → `replayed = true`.
 
 **Kết quả.** Khi `StopTransaction` (live hoặc phát lại) tới, `reconciliation` so `meterStop − meterStart` với chuỗi `meter_values` (mẫu cuối vs `meterStop`, đơn điệu tăng, lỗ hổng thời gian), ghi một `reconciliation_records` với `record_type ∈ {consistent, gap_detected, conflict}`. `consistent` / `gap_detected` → phiên `reconciled`, billing tính tiền. `conflict` → phiên `review`, billing **không** tính cho tới khi operator giải quyết (UC-OPS-05). EXP-01 là ca `conflict` điển hình: `meterStop = 242 Wh` trong khi MeterValues live đã lên `1042 Wh`, chênh **4,3 lần** — nhiều khả năng là đặc thù của SAP simulator, chưa biết firmware Ruihua có làm vậy không.
+
+> **Khớp code (26/10/2026, BM02 F39):** đây cũng là quy tắc của code và T13 #12/#12a đã được sửa cho khớp. Kết luận `consistent` / `gap_detected` / `conflict` là kết quả của `evaluateSeries`, còn `record_type` thật trong DB là: `consistent` → không ghi record; `gap_detected` → `meter_gap`; `conflict` → `conflict` (enum từ migration 0001). `gap_detected` đi `RECONCILE_OK` vì lỗ hổng đơn thuần không chứng minh số đo sai — `meterStop − meterStart` là bộ đếm tích luỹ của trụ; lỗ hổng chỉ được ghi lại (`meter_gap`, có `gap_start`/`gap_end`). Code không phân biệt lỗ hổng "giải thích được bằng khoảng offline" hay không: mọi khoảng trống > `RECONCILE_GAP_FACTOR` × nhịp mẫu đều là `gap_detected`.
 
 **Bất biến.** Không có bản tin nào bị mất trong bộ nhớ: log ghi trước handler. Không mắt xích nào trên đường `ocpp-gateway → sessions → reconciliation → billing` đi qua Redis pub/sub (ADR-0006); `realtime` chỉ nghe sự kiện trong tiến trình để đẩy lên dashboard/app và được phép mất sự kiện (client gọi lại REST).
 
@@ -106,8 +110,8 @@ sequenceDiagram
     SES->>SES: apply(tx3, RECONCILE_OK): orphaned → reconciled
     SES-)RT: transaction.reconciled
     RT-)DB: tx3 hết cờ, billing tính tiền
-  else gap_detected — lỗ hổng chuỗi giải thích được bằng khoảng offline, meterStop vẫn khớp
-    REC->>REC: INSERT reconciliation_records (record_type=gap_detected, gap_start, gap_end, resolution=auto)
+  else gap_detected — có lỗ hổng chuỗi (bất kể giải thích được hay không), meterStop vẫn khớp
+    REC->>REC: INSERT reconciliation_records (record_type=meter_gap, gap_start, gap_end, resolution=gap_detected…)
     REC->>SES: resolve(tx3, RECONCILED, actor=system)
     SES->>SES: apply(tx3, RECONCILE_OK): orphaned → reconciled
     SES-)RT: transaction.reconciled
@@ -408,8 +412,8 @@ classDiagram
 
 **Đọc sơ đồ:**
 
-- `ocpp-gateway` không import `sessions` hay `reconciliation`: `SessionsService.onStartTransaction/onMeterValues/onStopTransaction` là handler đăng ký qua giao diện `OcppHandler` (luật 1 của package diagram). `onStationConnection` nghe sự kiện `station.connection` do `stations` phát sau khi chuyển STM-3.
-- `ReplayDetector` thuộc `ocpp-gateway` vì cần `epoch_opened_at` ngay lúc frame tới, trước khi INSERT log. `reconciliation` **đọc lại** cờ `replayed` từ `meter_values` / `ocpp_message_log`, không tính lại.
+- > **Không còn đúng với code (26/10/2026, BM02 F33):** `OcppGatewayModule` import `SessionsModule`, `ReconciliationModule` và `StationsModule`; `OcppHandlers` gọi thẳng `SessionsService`, `OcppServer` gọi `ReplayDetector` và `PillarAuthService`. Luật đã viết lại theo code ở mục 3 `docs/PACKAGE-DIAGRAM-CSMS.md`. Câu gốc 23/10: `ocpp-gateway` không import `sessions` hay `reconciliation`: `SessionsService.onStartTransaction/onMeterValues/onStopTransaction` là handler đăng ký qua giao diện `OcppHandler` (luật 1 của package diagram). `onStationConnection` nghe sự kiện `station.connection` do `stations` phát sau khi chuyển STM-3.
+- > **Vị trí trong code (26/10/2026, BM02 F33):** lớp `ReplayDetector` nằm ở `apps/csms/src/reconciliation/replay-detector.ts`, do `ReconciliationModule` cung cấp; `ocpp-gateway` (`OcppServer`) gọi nó lúc frame tới, nên ý dưới đây (tính trước khi INSERT log) vẫn đúng. Câu gốc 23/10: `ReplayDetector` thuộc `ocpp-gateway` vì cần `epoch_opened_at` ngay lúc frame tới, trước khi INSERT log. `reconciliation` **đọc lại** cờ `replayed` từ `meter_values` / `ocpp_message_log`, không tính lại.
 - `SessionStateMachine.apply` là nơi duy nhất đổi `status`; `SessionsService.resolve` và `flagForReview` chỉ bọc lại các sự kiện `RECONCILE_OK` / `RECONCILE_CONFLICT` / `OPERATOR_RESOLVED` để `reconciliation` không phải biết bảng chuyển trạng thái.
 - `ReconciliationService.enabled` là công tắc ablation (thí nghiệm WP5): tắt đi thì mọi sự kiện bị bỏ qua, phiên `closed` không bao giờ thành `reconciled`.
 - `Resolution` liệt kê ba hành động operator **giả định** cho UC-OPS-05 — chưa có nguồn, xem mục 6.

@@ -96,6 +96,7 @@ flowchart TB
 - Toàn bộ **đường đi giao dịch** `StartTransaction → sessions → reconciliation → billing` nằm trong tiến trình, không chạm Redis pub/sub. Redis chỉ xuất hiện ở hai chỗ: Socket.IO adapter (fan-out giao diện, mất được) và BullMQ (job nền, có lưu bền).
 - Không có module `admin`. Endpoint `/api/admin/*` nằm trong controller của từng module nghiệp vụ và được `RolesGuard` (do `users` cung cấp) bảo vệ.
 - Cổng `3000` / `3001` và đường dẫn `/ocpp` khớp `CSMS_HTTP_PORT`, `CSMS_OCPP_WS_PORT`, `CSMS_OCPP_PATH_PREFIX` trong `infra/.env.example`. Dev không cần Caddy — simulator nối thẳng `ws://localhost:3001/ocpp/{serialNumber}`.
+  > **Không còn đúng (26/10/2026, BM02 F35):** code đọc `OCPP_PORT` (dự phòng `CSMS_OCPP_WS_PORT`), mặc định **9000** như `docs/WP2-KIEN-TRUC-TECHSTACK.md` và `infra/staging`; không đọc `CSMS_HTTP_PORT`, `CSMS_OCPP_PATH_PREFIX` (`apps/csms/src/config.ts`). Cổng `3000` hiện là của **console vận hành** (`CONSOLE_PORT`), chưa có REST. Dev nối `ws://localhost:9000/ocpp/{serialNumber}`. Việc đổi cổng console khỏi 3000 để dành 3000 cho REST: xem phản hồi F35 trong `docs/self-review/BM02-TEAM-RESPONSE.md`.
 
 ---
 
@@ -127,28 +128,42 @@ Bảng → module sở hữu (mỗi bảng đúng một chủ):
 
 ## 3. Luật phụ thuộc
 
+> **Cập nhật 26/10/2026 (BM02 F33) — luật 1, 2, 3, 10 viết lại theo code.** Bản 23/10 giả định gateway nhận handler qua đăng ký (`OcppHandler` + `DiscoveryService`) để không import module nghiệp vụ (mục 5 câu 4). Code Iteration 1 chọn cách đơn giản hơn: gateway import thẳng `SessionsService`, `ReplayDetector`, `PillarAuthService`. Không refactor trước Review 2; các luật dưới đây mô tả **đúng code hiện tại** (đọc từ `apps/csms/src/**/*.module.ts` và constructor của provider), phần còn là thiết kế đích được ghi rõ. Bảng phụ thuộc thật ở mục 3.1.
+
 Luật chung: **mỗi bảng có đúng một module chủ; module khác muốn đọc hay ghi phải qua service của module chủ.** Lý do: WP2 đổi partition `meter_values` hoặc đổi schema `sessions` mà không làm vỡ `billing` (hợp đồng mục 4.4 của tài liệu kiến trúc).
 
-1. `ocpp-gateway` **không import** `stations`, `sessions`, `reconciliation`, `billing`, `tariffs`, `realtime`. Nó không biết `billing` tồn tại. Nó chỉ biết:
-   - giao diện `OcppHandler` — `stations` và `sessions` đăng ký handler cho từng action (decorator + `DiscoveryService` của Nest, hoặc provider token);
-   - `StationCredentialsPort` — interface do `stations` hiện thực để gateway kiểm Basic Auth mà không phụ thuộc ngược;
-   - bảng `ocpp_message_log`.
+1. **(Viết lại 26/10 theo code.)** `ocpp-gateway` import `SessionsModule`, `ReconciliationModule`, `StationsModule` và gọi thẳng: `SessionsService` (`OcppHandlers` chuyển Authorize/Start/Meter/Stop/StatusNotification; `OcppServer`/`OfflineGraceService` gọi `onStationOffline`), `ReplayDetector` (nằm ở `reconciliation/`, gateway gọi `classify` lúc frame tới), `PillarAuthService` của `stations` (kiểm Basic Auth lúc handshake). Chiều ngược lại **không có**: `sessions`, `reconciliation`, `stations` không import `ocpp-gateway`. Gateway vẫn **không** import `billing`, `tariffs`, `realtime` (chưa có trong code). Gateway ghi thẳng các bảng `ocpp_message_log`, `charge_point_connections`, và cột kết nối của `charge_points` (`is_online`, `current_epoch`, `last_message_at`, lifecycle `awaiting_connection → in_service`). Thiết kế đích ban đầu (handler đăng ký qua `OcppHandler`, `StationCredentialsPort`) **chưa làm**; chỉ làm khi cần tách gateway, không phải việc trước Review 2.
 
    Thứ tự bắt buộc với mọi frame: **INSERT `ocpp_message_log` → rồi mới gọi handler.** Handler ném lỗi thì log vẫn còn (ADR-0005).
-2. `stations` → `ocpp-gateway` là chiều duy nhất giữa hai module này ở mức import: `stations` gọi `OcppDispatchService.call(identity, action, params)` để gửi lệnh xuống trụ. Gateway gọi ngược lại `stations` chỉ qua handler đã đăng ký, không qua import.
-3. `sessions` là cửa duy nhất vào `sessions` và `meter_values`. `reconciliation` sửa giao dịch qua `SessionsService.amend(...)`; `billing` đọc chuỗi meter qua `SessionsService.getMeterSeries(...)`. **Cấm** `billing` hay `reconciliation` viết SQL vào hai bảng đó.
+2. **(Viết lại 26/10 theo code.)** Giữa `stations` và `ocpp-gateway` chiều import duy nhất là `ocpp-gateway` → `stations` (`PillarAuthService`). `stations` chưa gửi lệnh xuống trụ (BE-04 chưa làm, không có `OcppDispatchService`). Lệnh xuống trụ duy nhất hiện có là RemoteStop / ngắt socket từ `console`, đi qua `ConnectionRegistry` mà `OcppGatewayModule` export.
+3. `sessions` là cửa **ghi** duy nhất vào `sessions`, `meter_values`, `session_pauses`, `session_status_history`, `connector_status_events` (và `connectors.status`). **(Viết lại 26/10 theo code.)** Chiều gọi giữa `sessions` và `reconciliation` là `sessions` → `reconciliation`: `SessionsModule` import `ReconciliationModule`, `SessionsService` gọi `ReconciliationService.evaluate/record*` rồi tự đổi `sessions.status` qua state machine. `reconciliation` **không** import `sessions` và không sửa giao dịch (không có `SessionsService.amend`). Ngoại lệ đang có với luật "mỗi bảng một chủ": `ReconciliationService.hasSessionDebit` đọc `credit_transactions` (bảng của `billing`, guard T13 #19); `console` đọc thẳng (chỉ SELECT) bảng của các module khác; `OfflineGraceService` (gateway) đọc `sessions` để biết trụ nào có phiên mở. Khi có `billing`, `billing` đọc chuỗi meter qua `SessionsService.getEnergySeries(...)` — **cấm** `billing` viết SQL vào bảng của `sessions`.
 4. Đường đi giao dịch `ocpp-gateway → sessions → reconciliation → billing` là **gọi hàm và sự kiện trong tiến trình** (`@nestjs/event-emitter`). **Không có Redis pub/sub** ở bất kỳ mắt xích nào (ADR-0006). Việc nền cần retry (đối soát định kỳ, sinh hoá đơn, tạo partition tháng kế) dùng BullMQ — có lưu bền.
 5. `realtime` **chỉ nghe** sự kiện trong tiến trình và đẩy ra Socket.IO. Không ghi DB, không gọi `SessionsService`/`StationsService`, không là nguồn sự thật. Mất sự kiện là chấp nhận được; client gọi lại REST.
 6. `billing` và `tariffs` (WP5) được phép phụ thuộc vào `sessions`, `users`, `tariffs`. **Không** module WP2 nào import `billing` hay `tariffs`: `sessions` phát `transaction.stopped`/`amended` chứ không gọi `BillingService`. Nhờ vậy tắt `billing` (ví dụ khi chạy thí nghiệm ablation) thì phần OCPP vẫn chạy.
 7. `users` không phụ thuộc module nghiệp vụ nào. Nó cung cấp `JwtAuthGuard`, `RolesGuard`, `UsersService.resolveIdTag()` cho người khác dùng.
 8. Không có module `admin`. Endpoint `/api/admin/*` đặt trong controller của module sở hữu dữ liệu (ví dụ `POST /api/admin/stations` onboarding nằm trong `stations`), gắn `@Roles('admin')` + `RolesGuard`. Tránh một module "admin" phải import mọi thứ.
 9. Hợp đồng ra ngoài: `openapi.json` sinh từ decorator `@nestjs/swagger` trong controller, là nguồn cho client Dart của app Flutter và cho `packages/shared/src/api/generated/`. Dashboard dùng `packages/shared`. Kiểu dữ liệu đổi ở `packages/shared` cần hai người duyệt (CODEOWNERS).
-10. Thứ tự import cho phép (mũi tên = "được import"):
-    `users` → không ai · `stations` → `ocpp-gateway` (chỉ `OcppDispatchService`), `users` · `sessions` → `stations`, `users` · `reconciliation` → `sessions` · `tariffs` → `users` · `billing` → `sessions`, `tariffs`, `users` · `realtime` → `users` (guard handshake). Vòng phụ thuộc là lỗi build (bật `madge --circular` trong CI).
+10. **(Viết lại 26/10 theo code.)** Import thực tế giữa các Nest module (A → B nghĩa là A import B): `ocpp-gateway` → `sessions`, `reconciliation`, `stations`, `db` · `sessions` → `reconciliation`, `db` · `reconciliation` → `db` · `stations` → `db` · `console` → `ocpp-gateway`, `db` · `app` → tất cả. Không có vòng. Đích khi thêm module mới: `users` → không ai · `tariffs` → `users` · `billing` → `sessions`, `tariffs`, `users` · `realtime` → `users` (guard handshake). Vòng phụ thuộc là lỗi build; `madge --circular` **chưa** có trong CI.
+
+### 3.1 Phụ thuộc thật trong code (26/10/2026, BM02 F33)
+
+Đọc từ `imports:` của các `*.module.ts` và constructor của provider trên `main` sau PR #48.
+
+| Module (thư mục) | Import Nest module | Gọi service/lớp của module khác | Bảng ghi | Bảng chỉ đọc của module khác |
+|---|---|---|---|---|
+| `ocpp-gateway` | `db`, `sessions`, `reconciliation`, `stations` | `SessionsService`, `ReplayDetector`, `PillarAuthService` | `ocpp_message_log`, `charge_point_connections`, `charge_points` (cột kết nối) | `sessions` (`OfflineGraceService`) |
+| `sessions` | `db`, `reconciliation` | `ReconciliationService` | `sessions`, `meter_values`, `session_pauses`, `session_status_history`, `connector_status_events`, `connectors.status` | `rfid_cards`, `charge_points.free_vend_tag` |
+| `reconciliation` | `db` | — | `reconciliation_records` | `credit_transactions` (guard #19) |
+| `stations` | `db` | — | `charge_points`, `connectors` (onboarding) | `users`, `operator_staff`, `sites` |
+| `console` | `db`, `ocpp-gateway` | `ConnectionRegistry` (ngắt socket, RemoteStop), `ReplayDetector` (khởi tạo riêng để hiển thị) | — | `charge_points`, `charge_point_connections`, `connectors`, `sessions`, `meter_values`, `session_pauses`, `reconciliation_records`, `ocpp_message_log` |
+
+`console` (bảng điều khiển vận hành cho Review 2, `src/console/`, HTTP `node:http` trên 127.0.0.1:3000, **chưa có xác thực**) không có trong sơ đồ mục 1 vì sơ đồ đó là thiết kế đích; nó có trong ARCH-1 v1.2 và PKG-1.
 
 ---
 
 ## 4. Trạng thái hiện thực (23/10/2026)
+
+> **Superseded (26/10/2026, BM02 F36).** Bảng dưới là ảnh chụp ngày 23/10, giữ nguyên làm lịch sử. Câu "Không có mã NestJS nào" **không còn đúng**: `apps/csms/src` hiện có `ocpp-gateway`, `stations`, `sessions`, `reconciliation`, `console`, `db`. Phụ thuộc thật giữa các module: mục 3.1. Module chưa có code: `users`, `billing`, `tariffs`, `realtime` (Known Gaps G1, G16, G17 trong `docs/DESIGN-BRIEF-WP2-INPUT.md`).
 
 Trung thực về hiện trạng, để không ai đọc sơ đồ trên rồi tưởng đã có:
 
