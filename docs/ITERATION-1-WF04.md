@@ -252,4 +252,4 @@ The WF-04 §6 questions still apply. New ones from this iteration:
 | A fault only closes on `Available` | should fix | Any working status resolves (`RECOVERED_STATUSES`) | IT-12 |
 | Replay flag ignored for `raised_at` | should fix | Replayed frames use the pillar's `timestamp` | IT-14 |
 | List limited before sorting by severity | should fix | Order in SQL, then `LIMIT` | IT-15 |
-| PR also carried UC-ADM-08 and the dashboard package diagram; empty description | minor | Moved to `wp4/fe-09-billing-exceptions-uc-adm-08`; PR description written | — |
+| PR also carried UC-ADM-08 and the dashboard package diagram; empty description | minor | Kept in this PR at the owner's choice (they are WP4 dashboard design docs for Iteration 1); listed separately in the PR description with Khang tagged for the billing part. A copy is also on `wp4/fe-09-billing-exceptions-uc-adm-08`. PR description written | — |
