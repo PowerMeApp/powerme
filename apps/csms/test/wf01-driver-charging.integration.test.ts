@@ -1637,12 +1637,14 @@ describeDb('WP3/T31 WF-01 service journey with real OCPP + Postgres', () => {
       await until(async () => (await q('SELECT 1 FROM charging_statements')).length === 1);
       expect(stopCount).toBe(2);
       expect(await q('SELECT 1 FROM driver_stop_intents')).toHaveLength(1);
-      expect(
-        await q(
-          "SELECT 1 FROM driver_stop_attempts WHERE kind='operator_recovery' AND operator_user_id=$1 AND note='live confirmation'",
-          [op],
-        ),
-      ).toHaveLength(1);
+      // Hai recoverStop chạy song song: request nào thắng khoá là ngẫu nhiên, nên chỉ chốt có đúng
+      // MỘT lần phục hồi được ghi (bản kia là duplicate), không chốt ghi chú của bên nào.
+      const recoveries = await q(
+        "SELECT note FROM driver_stop_attempts WHERE kind='operator_recovery' AND operator_user_id=$1",
+        [op],
+      );
+      expect(recoveries).toHaveLength(1);
+      expect(['live confirmation', 'duplicate request']).toContain(recoveries[0]!.note);
       expect(
         await q("SELECT 1 FROM session_status_history WHERE event='REMOTE_STOP_REJECTED'"),
       ).toHaveLength(0);
