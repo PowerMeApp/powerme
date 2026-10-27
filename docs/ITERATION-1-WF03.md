@@ -75,7 +75,7 @@ Unit test đặt cạnh mã nguồn (`*.spec.ts`): `session-state-machine.spec.t
 - **OfflineGraceService** (T61, ADR-0016 D-A) — `onSocketClosed(chargePointId, epoch, at)`: `OFFLINE_GRACE_S` = 0 → orphan ngay; > 0 → hẹn giờ qua interface `Scheduler` (mặc định `setTimeout`; đích là job BullMQ trễ, chưa có Redis). Đến hạn: `charge_points.current_epoch` trong DB > epoch của socket vừa đóng → trụ đã nối lại, không làm gì; ngược lại gọi `onStationOffline` (#13–#15). `onApplicationBootstrap` quét DB tìm trụ không có socket mà `is_online = true` hoặc còn phiên active/paused/stopping, đánh dấu offline và orphan ngay (nếu quá hạn tính từ `last_message_at` / `online_changed_at`) hoặc hẹn giờ phần còn lại. `onApplicationShutdown` huỷ hẹn giờ.
 - **OcppMessageLogger** — một INSERT trả id; `raw` là frame đã parse.
 - **InboundSerializer** — `run(key, task)`: nối task vào đuôi chuỗi promise của key, tác vụ lỗi không chặn tác vụ sau.
-- **OcppHandlers** — BootNotification (Accepted, interval), Heartbeat, StatusNotification, Authorize (tra `rfid_cards`: không có → Invalid), StartTransaction (luôn Accepted, transactionId từ SessionsService), MeterValues, StopTransaction (Accepted), DataTransfer (Accepted, chỉ log); khác → NotImplemented.
+- **OcppHandlers** — BootNotification (Accepted, interval), Heartbeat, StatusNotification, Authorize (tra `rfid_cards`: không có → Invalid; từ 26/10 theo `status` — chỉ `active` → Accepted, `blocked` → Blocked, `unlinked` → Invalid, BM02 F22), StartTransaction (luôn Accepted, transactionId từ SessionsService; thẻ `blocked`/`unlinked` vẫn ghi phiên nhưng `payment_mode = unattributed` + record `unknown_id_tag` có `card_status=`), MeterValues, StopTransaction (Accepted), DataTransfer (Accepted, chỉ log); khác → NotImplemented.
 
 ### 3.2 `sessions`
 
@@ -140,7 +140,7 @@ npm run build -w @powerme/csms                # tsc → dist/
 DATABASE_URL=... OCPP_PORT=9000 npm run start -w @powerme/csms
 ```
 
-Biến môi trường (xem `infra/.env.example`): `DATABASE_URL` (bắt buộc), `OCPP_PORT` (9000; dự phòng `CSMS_OCPP_WS_PORT`), `OCPP_HEARTBEAT_INTERVAL_SECONDS` (300), `SESSION_START_TIMEOUT_S` (120), `SESSION_HARD_CAP_H` (24), `REPLAY_SKEW_THRESHOLD_S`, `OFFLINE_GRACE_S` (30; T61 — giây ân hạn trước `orphaned`, `0` = orphan ngay) (5), `METER_VALUE_SAMPLE_INTERVAL_S` (10), `RECONCILE_GAP_FACTOR` (3), `RECONCILE_ENERGY_TOLERANCE_WH` (1).
+Biến môi trường (xem `infra/.env.example`): `DATABASE_URL` (bắt buộc), `OCPP_PORT` (9000; dự phòng `CSMS_OCPP_WS_PORT`), `OCPP_HEARTBEAT_INTERVAL_SECONDS` (300), `SESSION_START_TIMEOUT_S` (120), `SESSION_HARD_CAP_H` (24), `REPLAY_SKEW_THRESHOLD_S`, `OFFLINE_GRACE_S` (120 theo ADR-0016, trước 27/10 là 30 tạm; T61 — giây ân hạn trước `orphaned`, `0` = orphan ngay) (5), `METER_VALUE_SAMPLE_INTERVAL_S` (10), `RECONCILE_GAP_FACTOR` (3), `RECONCILE_ENERGY_TOLERANCE_WH` (1).
 
 Trụ (hoặc SAP simulator với `ws://localhost:9000/ocpp`) nối tới `ws://host:OCPP_PORT/ocpp/{serialNumber}`; serial phải có trong `charge_points` trước.
 

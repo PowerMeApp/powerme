@@ -1,6 +1,6 @@
 @startuml STM-1_ChargingSession
 !include _style.iuml
-title STM-1 ChargingSession lifecycle (System level)\nsessions.status · v0.5 · 25/10/2026 · = SessionStateMachine at tag review-2 (22 transitions, T13)
+title STM-1 ChargingSession lifecycle (System level)\nsessions.status · v0.6 · 26/10/2026 · = SessionStateMachine at tag review-2 (22 transitions, T13); #12/#12a guards as in code (BM02 F39)
 [*] --> pending : (1) REMOTE_START_ACCEPTED\n[connector free, credit ≥ start minimum]
 [*] --> active : (2) START_TRANSACTION\n(started at the pillar, no pending match)\n/ stamp origin, payment_mode
 pending --> active : (3) START_TRANSACTION
@@ -13,8 +13,8 @@ stopping --> active : (9a) REMOTE_STOP_REJECTED\n(OCPP 1.6 RemoteStop Rejected)
 stopping --> closed : (9) STOP_TRANSACTION
 active --> closed : (10) STOP_TRANSACTION\n[stopped at the pillar]
 paused --> closed : (11) STOP_TRANSACTION
-closed --> reconciled : (12) RECONCILE_OK\n/ price, debit, points, statement
-closed --> review : (12a) RECONCILE_CONFLICT\n/ billing held
+closed --> reconciled : (12) RECONCILE_OK\n[consistent, or gap_detected:\na gap alone is kept as a meter_gap record]\n/ price, debit, points, statement
+closed --> review : (12a) RECONCILE_CONFLICT\n[conflict only]\n/ billing held
 active --> orphaned : (13) STATION_OFFLINE
 paused --> orphaned : (14) STATION_OFFLINE
 stopping --> orphaned : (15) STATION_OFFLINE

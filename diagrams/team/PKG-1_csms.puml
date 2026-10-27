@@ -3,8 +3,8 @@
 skinparam linetype polyline
 skinparam nodesep 40
 skinparam ranksep 50
-title PKG-1 Package diagram: CSMS back end (apps/csms)
-footer Content: Ngô Văn Minh Trí (WP2), Package-diagram-CSMS 23/10/2026 · redrawn in the Report 4 diagram style and translated to English, content unchanged
+title PKG-1 Package diagram: CSMS back end (apps/csms)\n<size:11>26/10/2026 (BM02 F33): arrows between gateway, stations, sessions, reconciliation, console = imports in code; users, billing, tariffs, realtime = target design</size>
+footer Content: Ngô Văn Minh Trí (WP2), Package-diagram-CSMS 23/10/2026, dependency rules rewritten from the code 26/10/2026 (docs/PACKAGE-DIAGRAM-CSMS.md §3, §3.1)
 
 package "External to the system" as EXT {
   rectangle "VNPay\nsandbox" as vnp
@@ -23,6 +23,7 @@ package "apps/csms — ONE NestJS process, modular monolith (ADR-0002)" as CSMS 
   rectangle "<b>billing — WP5</b>\npricing, invoices, adjustments\nendpoint VNPay IPN" as bil
   rectangle "<b>tariffs — WP5</b>\ntariff schedules" as tar
   rectangle "<b>realtime</b>\nSocket.IO gateway\nonly listens to events, never writes to the DB" as rt
+  rectangle "<b>console</b> (Review 2)\nnode:http on 127.0.0.1:3000, no auth yet\nGET /api/admin/*, SSE log; POST disconnect, RemoteStop" as con
 }
 
 package "Shared contracts" as SH {
@@ -39,19 +40,19 @@ vnp --> caddy : HTTP IPN
 cp --> caddy : OCPP-J 1.6 / WSS\n/ocpp/{serialNumber} - Basic Auth
 app --> caddy : HTTPS /api/v1\nSocket.IO /realtime
 dash --> caddy : HTTPS /api/v1, /api/admin\nSocket.IO /realtime
-caddy --> CSMS : HTTP :3000 /api/*\ncontrollers of each module
-caddy --> gw : WS :3001 /ocpp/*
+caddy --> CSMS : HTTP /api/* (planned)\ncontrollers of each module
+caddy --> gw : WS :9000 /ocpp/*
 caddy --> bil : HTTP\n/api/v1/billing/vnpay/ipn
-caddy --> rt : Socket.IO :3000 /realtime
+caddy --> rt : Socket.IO /realtime (planned)
 
-st --> gw : sends CALLs to the pillar\nvia the connection registry
-gw ..> st : handler Boot/Status/Heartbeat\n(function call, after logging)
-gw ..> ses : handler Authorize/Start/Meter/Stop\n(function call, after logging)
-ses --> usr : looks up rfid_cards via\nUsersService
+gw --> st : imports StationsModule:\nPillarAuthService (Basic Auth at handshake)
+gw --> ses : imports SessionsModule: Authorize / Start /\nMeter / Stop / StatusNotification,\nonStationOffline (after logging)
+gw --> rec : imports ReconciliationModule:\nReplayDetector.classify on each frame
+con --> gw : ConnectionRegistry:\nclose socket, send RemoteStop
+ses --> usr : target: rfid_cards via UsersService\n(today: reads rfid_cards directly)
 bil --> ses : reads the meter series via\nSessionsService
 ses --> bil : transaction.stopped / amended\n(in-process event)
-rec --> ses : amends transactions via\nSessionsService
-ses --> rec : in-process event\ntransaction.stopped
+ses --> rec : imports ReconciliationModule:\nevaluate / record* (direct call);\nsessions then changes sessions.status
 bil --> tar : TariffsService
 ses ..> rt : transaction.started /\nmeter / stopped
 st ..> rt : station.connection,\nconnector.status,\ncommand.result
@@ -63,7 +64,7 @@ oa --> pkgs : api/generated
 pkgs --> dash : shared types
 
 gw --> pg : SQL INSERT\nocpp_message_log\nbefore the handler (ADR-0005)
-CSMS --> pg : SQL (Drizzle) — each module\nonly touches the tables it owns
+CSMS --> pg : SQL (Drizzle) — writes only to own tables;\nreads across: console (SELECT), reconciliation\n(credit_transactions), gateway (sessions)
 bil --> redis : durable BullMQ jobs with retry
 rec --> redis : durable BullMQ jobs with retry
 rt --> redis : pub/sub via the Socket.IO\nRedis adapter\n(UI fan-out only, ADR-0006)

@@ -55,10 +55,11 @@ export interface CsmsConfig {
 }
 
 /**
- * Mặc định của OFFLINE_GRACE_S. 30 s là GIÁ TRỊ TẠM do Trí chọn: ADR-0016 gốc không nằm trong
- * repo nên chưa có con số chính thức (xem PR T61). Đổi ở đây + infra/.env.example khi có.
+ * Mặc định của OFFLINE_GRACE_S: 120 s, WP1 chốt ngày 26/10/2026 (ADR-0016, mục "Grace value").
+ * 30 s cũ là giá trị tạm của PR T61, quá sát lần thử nối lại đầu tiên của trụ nên rớt mạng
+ * bình thường vẫn có thể bị orphan. Demo đặt ngắn hơn (run-demo.mjs).
  */
-export const DEFAULT_OFFLINE_GRACE_S = 30;
+export const DEFAULT_OFFLINE_GRACE_S = 120;
 
 /** Token DI cho CsmsConfig (dùng `@Inject(CONFIG)`). */
 export const CONFIG = Symbol('CSMS_CONFIG');

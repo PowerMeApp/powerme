@@ -6,8 +6,9 @@
 #   ./rollback.sh --restore-db <file.dump>     khôi phục DB từ bản sao lưu RỒI lùi ảnh
 #   thêm --yes để bỏ bước gõ xác nhận (khi --restore-db)
 #
-# MIGRATION KHÔNG ĐẢO ĐƯỢC BẰNG LÙI ẢNH. Migration 0001/0002 có `ALTER TYPE … ADD VALUE` (Postgres
-# không có DROP VALUE) và đổi tên/kiểu cột (ví dụ cp_timestamp, payment_mode). Ảnh cũ viết cho
+# MIGRATION KHÔNG ĐẢO ĐƯỢC BẰNG LÙI ẢNH. Migration 0001 và 0003 có `ALTER TYPE … ADD VALUE` (Postgres
+# không có DROP VALUE), 0001 đổi tên cột (cp_timestamp), 0003 đặt NOT NULL (top_ups.gateway_reference,
+# expires_at) và đổi UNIQUE của sổ cái. Ảnh cũ viết cho
 # schema cũ sẽ lỗi trên schema mới: `review-2-v0` KHÔNG tương thích schema sau 0001. Vì vậy:
 #   - deploy.sh ghi lại migration của mỗi lần deploy (.deploy/migrated_<tag>);
 #   - nếu lần deploy đang chạy đã áp migration, lùi ảnh bị TỪ CHỐI trừ khi có --force;

@@ -61,11 +61,13 @@ WHERE u.email = 'driver.demo@powerme.test'
 ON CONFLICT ON CONSTRAINT credit_accounts_driver_id_key DO NOTHING;
 
 -- Sổ cái cần một top_up làm gốc (CHECK credit_transactions_top_up_check).
+-- expires_at bắt buộc từ migration 0003 (BR-P13: tạo + 15 phút); created_at mặc định now().
 INSERT INTO top_ups (
   gateway_reference, credit_account_id, amount_vnd, points_discount_vnd, amount_paid_vnd,
-  status, idempotency_key, completed_at
+  status, idempotency_key, expires_at, completed_at
 )
-SELECT 'DEMO-TOPUP-0001', ca.id, 500000, 0, 500000, 'credited', 'demo-seed-topup-0001', now()
+SELECT 'DEMO-TOPUP-0001', ca.id, 500000, 0, 500000, 'credited', 'demo-seed-topup-0001',
+       now() + interval '15 minutes', now()
 FROM credit_accounts ca
 JOIN users u ON u.id = ca.driver_id
 WHERE u.email = 'driver.demo@powerme.test'
