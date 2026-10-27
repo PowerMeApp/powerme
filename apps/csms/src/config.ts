@@ -47,6 +47,11 @@ export interface CsmsConfig {
    */
   allowLegacyNoCredential?: boolean;
   /**
+   * CSMS đứng sau reverse proxy (Caddy trên staging): IP trụ cho bộ giới hạn đăng nhập sai (#40)
+   * lấy từ giá trị cuối của X-Forwarded-For thay vì địa chỉ socket. Không khai báo = false.
+   */
+  ocppTrustProxy?: boolean;
+  /**
    * ADR-0016 D-A (STM-1 v0.5): thời gian ân hạn (giây) kể từ khi socket đóng trước khi các phiên
    * active/paused/stopping bị kéo sang `orphaned` (#13–#15). Nối lại trong ân hạn thì phiên giữ
    * nguyên. `0` = orphan ngay (hành vi cũ). Không khai báo = {@link DEFAULT_OFFLINE_GRACE_S}.
@@ -109,6 +114,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): CsmsConfig {
     consolePort: intEnv(env, 'CONSOLE_PORT', 3000),
     ...(env['OCPP_PUBLIC_URL'] ? { ocppPublicUrl: env['OCPP_PUBLIC_URL'] } : {}),
     allowLegacyNoCredential: boolEnv(env, 'ALLOW_LEGACY_NO_CREDENTIAL', false),
+    ocppTrustProxy: boolEnv(env, 'OCPP_TRUST_PROXY', false),
     offlineGraceS: graceEnv(env, 'OFFLINE_GRACE_S', DEFAULT_OFFLINE_GRACE_S),
   };
 }
