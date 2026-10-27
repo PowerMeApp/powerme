@@ -13,7 +13,12 @@
 --   A. Enum: loyalty_transaction_type += restore · enum mới e_invoice_error_kind.
 --   B. top_ups: gateway_reference đổi nghĩa (vnp_TxnRef, NOT NULL) · gateway_transaction_no ·
 --      points_redeemed · expires_at (backfill created_at + 15 min rồi NOT NULL) · refunded_at /
---      refunded_by · late_gateway_ref (UNIQUE) / late_paid_at / late_amount_vnd / late_refunded_at.
+--      refunded_by · late_gateway_ref (UNIQUE) / late_paid_at / late_amount_vnd / late_refunded_at
+--      · CHECK/UNIQUE (bổ sung theo quyết định của Trí 27/10/2026 trên PR #60: late_* chỉ khi
+--      expired, points_redeemed = 0 ⇔ points_discount_vnd = 0, gateway_transaction_no UNIQUE,
+--      refunded ⇒ refunded_by).
+--      KHÔNG làm ở DB: late_paid_at > expires_at + 1 giờ (LATE_WINDOW là tham số cấu hình — service
+--      kiểm); refund_status (SD-2c "not modelled yet") — Planned.
 --   C. credit_transactions: UNIQUE (top_up_id) → UNIQUE (top_up_id, transaction_type).
 --   D. e_invoices: last_error_kind / last_error_message / last_attempt_at.
 --   E. credit_accounts: closed_at / closure_refunded_at.
@@ -34,7 +39,11 @@ BEGIN;
 -- 0. TIỀN KIỂM — ràng buộc mới cần dữ liệu cũ thoả. Không tự bịa giá trị: nếu có hàng vi phạm,
 --    báo rõ và dừng (cả file là một transaction, không áp gì). Trên main chưa có code billing
 --    nào ghi các bảng này; dữ liệu duy nhất là demo/seed.sql (một top-up credited có
---    gateway_reference, một ví active) nên các điều kiện dưới đều thoả.
+--    gateway_reference, points_discount_vnd = 0, một ví active) nên các điều kiện dưới đều thoả.
+--    Ràng buộc trên cột MỚI (late_* chỉ khi expired, gateway_transaction_no UNIQUE) không cần
+--    kiểm: các cột đó chưa tồn tại trước 0003, hàng cũ nhận NULL nên luôn thoả.
+--    `status = 'refunded'` bị chặn ở đây cho cả hai CHECK refunded ⇔ refunded_at và
+--    refunded ⇒ refunded_by (hàng cũ không có cả hai giá trị).
 -- -----------------------------------------------------------------------------
 
 DO $$
@@ -48,6 +57,12 @@ BEGIN
   SELECT count(*) INTO n FROM top_ups WHERE status = 'refunded';
   IF n > 0 THEN
     RAISE EXCEPTION '0003: % top_ups status = refunded nhưng chưa có refunded_at — CHECK mới bắt buộc. Xử lý tay rồi chạy lại.', n;
+  END IF;
+  -- points_redeemed mới nhận 0 cho hàng cũ → hàng đã có giảm giá điểm sẽ vi phạm
+  -- (points_redeemed = 0) = (points_discount_vnd = 0); số điểm thật không suy ra được.
+  SELECT count(*) INTO n FROM top_ups WHERE points_discount_vnd <> 0;
+  IF n > 0 THEN
+    RAISE EXCEPTION '0003: % top_ups có points_discount_vnd <> 0 nhưng chưa có points_redeemed — CHECK mới bắt buộc. Xử lý tay rồi chạy lại.', n;
   END IF;
   SELECT count(*) INTO n FROM credit_accounts WHERE status = 'closed';
   IF n > 0 THEN
@@ -100,12 +115,20 @@ ALTER TABLE top_ups ALTER COLUMN expires_at SET NOT NULL;
 ALTER TABLE top_ups
   ADD CONSTRAINT top_ups_late_gateway_ref_key UNIQUE (late_gateway_ref),
   ADD CONSTRAINT top_ups_points_redeemed_check CHECK (points_redeemed >= 0),
+  -- Có điểm ⇔ có giảm giá (BR-P35, UC-PAY-03). Không ghi cứng tỉ lệ 100 điểm = 1.000 VND (Admin
+  -- cấu hình). Chặn lỗi "giảm tiền mà không trừ điểm" và để hoàn (STM-4 #7) trả đúng số điểm.
+  ADD CONSTRAINT top_ups_points_check
+    CHECK ((points_redeemed = 0) = (points_discount_vnd = 0)),
   ADD CONSTRAINT top_ups_expires_at_check CHECK (expires_at > created_at),
   -- refunded là trạng thái cuối (STM-4 #7): có refunded_at ⇔ status = refunded.
   ADD CONSTRAINT top_ups_refunded_check
     CHECK ((status = 'refunded') = (refunded_at IS NOT NULL)),
   ADD CONSTRAINT top_ups_refunded_by_check
     CHECK (refunded_by IS NULL OR refunded_at IS NOT NULL),
+  -- Hoàn top-up là thao tác tay của Admin (STM-4 #7, UC-ADM-08): sổ kiểm toán phải biết ai hoàn.
+  -- Hoàn khi đóng ví ghi ở credit_accounts.closure_refunded_at, không ở đây.
+  ADD CONSTRAINT top_ups_refunded_by_required_check
+    CHECK (status <> 'refunded' OR refunded_by IS NOT NULL),
   -- SD-2c D: thanh toán muộn ghi ba cột cùng lúc (late_gateway_ref, late_paid_at, late_amount_vnd).
   ADD CONSTRAINT top_ups_late_payment_check
     CHECK (
@@ -115,10 +138,21 @@ ALTER TABLE top_ups
     ),
   -- Chỉ hoàn được khoản muộn đã ghi nhận, và không hoàn trước lúc nhận.
   ADD CONSTRAINT top_ups_late_refunded_check
-    CHECK (late_refunded_at IS NULL OR (late_paid_at IS NOT NULL AND late_refunded_at >= late_paid_at));
+    CHECK (late_refunded_at IS NULL OR (late_paid_at IS NOT NULL AND late_refunded_at >= late_paid_at)),
+  -- SD-2c D: chỉ top-up expired nhận khoản muộn và nó vẫn expired; IPN cũ cho top-up
+  -- failed/credited trả RspCode 02, không ghi gì. Chặn ghi khoản muộn lên top-up credited
+  -- (tiền nhận hai lần). Cửa sổ 1 giờ (LATE_WINDOW, BR-P13) KHÔNG kiểm ở đây: tham số cấu hình,
+  -- service kiểm.
+  ADD CONSTRAINT top_ups_late_payment_status_check
+    CHECK (late_gateway_ref IS NULL OR status = 'expired');
+
+-- Một giao dịch VNPay chỉ cộng cho đúng một top-up (BR-P13): IPN phát lại / lỗi code gắn cùng
+-- vnp_TransactionNo vào top-up thứ hai bị từ chối. Partial vì cột NULL tới khi cổng báo đã trả.
+CREATE UNIQUE INDEX top_ups_gateway_transaction_no_key
+  ON top_ups (gateway_transaction_no) WHERE gateway_transaction_no IS NOT NULL;
 
 COMMENT ON COLUMN top_ups.gateway_transaction_no IS
-  'vnp_TransactionNo — mã giao dịch phía VNPay, ghi khi IPN/querydr báo đã trả (SD-2b). NULL tới lúc đó.';
+  'vnp_TransactionNo — mã giao dịch phía VNPay, ghi khi IPN/querydr báo đã trả (SD-2b). NULL tới lúc đó; UNIQUE khi có.';
 COMMENT ON COLUMN top_ups.points_redeemed IS
   'Số điểm thưởng dùng cho top-up này (BR-P35); points_discount_vnd là số tiền giảm tương ứng.';
 COMMENT ON COLUMN top_ups.expires_at IS
@@ -126,9 +160,9 @@ COMMENT ON COLUMN top_ups.expires_at IS
 COMMENT ON COLUMN top_ups.refunded_at IS
   'Lúc Admin hoàn top-up (STM-4 #7, UC-ADM-08). Có giá trị ⇔ status = refunded.';
 COMMENT ON COLUMN top_ups.refunded_by IS
-  'users.id của Admin thực hiện hoàn (UC-ADM-08). DB không kiểm role.';
+  'users.id của Admin thực hiện hoàn (UC-ADM-08). Bắt buộc khi status = refunded. DB không kiểm role.';
 COMMENT ON COLUMN top_ups.late_gateway_ref IS
-  'Mã giao dịch của khoản thanh toán tới SAU cửa sổ 1 giờ (BR-P13, SD-2c D): không cộng ví, chờ Admin hoàn. UNIQUE — IPN lặp không ghi lần hai.';
+  'Mã giao dịch của khoản thanh toán tới SAU cửa sổ 1 giờ (BR-P13, SD-2c D): không cộng ví, chờ Admin hoàn. UNIQUE — IPN lặp không ghi lần hai. Chỉ khi status = expired; cửa sổ 1 giờ do service kiểm.';
 COMMENT ON COLUMN top_ups.late_paid_at IS 'Lúc nhận khoản thanh toán muộn (đồng hồ CSMS).';
 COMMENT ON COLUMN top_ups.late_amount_vnd IS 'Số tiền của khoản thanh toán muộn (VND).';
 COMMENT ON COLUMN top_ups.late_refunded_at IS 'Lúc Admin hoàn khoản thanh toán muộn về nguồn.';

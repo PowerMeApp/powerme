@@ -8,8 +8,8 @@
  *
  * Phần 1 dựng DB "như demo đã có 0002" (0000 + 0001 + 0002 + `_migrations` + ví, top-up, ledger,
  * hoá đơn, điểm), gọi helper `migrate` (cùng logic scripts/migrate.mjs) và kiểm dữ liệu còn nguyên,
- * backfill đúng. Phần 2 kiểm ràng buộc trên chính DB đó. Phần 3 kiểm tiền kiểm: DB có top-up
- * `gateway_reference` NULL thì 0003 dừng, không áp gì.
+ * backfill đúng. Phần 2 kiểm ràng buộc trên chính DB đó (mỗi ràng buộc: ca hợp lệ và ca bị từ
+ * chối). Phần 3 kiểm tiền kiểm: dữ liệu cũ vi phạm ràng buộc mới thì 0003 dừng, không áp gì.
  *
  * Cần DATABASE_URL (DB test riêng — test DROP SCHEMA public); thiếu thì cả describe bị skip.
  */
@@ -122,7 +122,7 @@ describeDb('migration 0003 — billing WF-02 (nâng cấp DB đã có 0002)', ()
           await one(
             `INSERT INTO top_ups (gateway_reference, credit_account_id, amount_vnd, points_discount_vnd,
                                   amount_paid_vnd, status, idempotency_key, created_at)
-             VALUES ('M3-REF-2', $1, 100000, 5000, 95000, 'pending', 'm3-idem-2', '2026-10-21T08:00:00Z')
+             VALUES ('M3-REF-2', $1, 100000, 0, 100000, 'pending', 'm3-idem-2', '2026-10-21T08:00:00Z')
              RETURNING id`,
             [accountId],
           )
@@ -173,7 +173,7 @@ describeDb('migration 0003 — billing WF-02 (nâng cấp DB đã có 0002)', ()
         rows.map((r) => [r['gateway_reference'], r['status'], Number(r['amount_paid_vnd'])]),
       ).toEqual([
         ['M3-REF-1', 'credited', 200000],
-        ['M3-REF-2', 'pending', 95000],
+        ['M3-REF-2', 'pending', 100000],
       ]);
       expect(rows.map((r) => (r['expires_at'] as Date).toISOString())).toEqual([
         '2026-10-20T10:15:00.000Z',
@@ -394,27 +394,45 @@ describeDb('migration 0003 — billing WF-02 (nâng cấp DB đã có 0002)', ()
     });
 
     it.each([
-      ['points_redeemed âm', ', points_redeemed', ', -1', 'top_ups_points_redeemed_check'],
       [
         'expires_at không sau created_at',
         ', created_at',
         `, now() + interval '1 hour'`,
         'top_ups_expires_at_check',
       ],
-      ['status refunded thiếu refunded_at', ', status', `, 'refunded'`, 'top_ups_refunded_check'],
-      ['refunded_at khi chưa refunded', ', refunded_at', ', now()', 'top_ups_refunded_check'],
+      // `refunded` thiếu refunded_at luôn vi phạm hai CHECK cùng lúc: thiếu refunded_by thì
+      // refunded_by_required, có refunded_by thì refunded_by_check — cả hai đều chặn.
+      [
+        'status refunded thiếu cả refunded_at lẫn refunded_by',
+        ', status',
+        `, 'refunded'`,
+        'top_ups_refunded_check|top_ups_refunded_by_required_check',
+      ],
       // ADMIN được thay bằng users.id của Admin lúc chạy (adminId chỉ có sau beforeAll).
+      [
+        'status refunded có refunded_by nhưng thiếu refunded_at',
+        ', status, refunded_by',
+        `, 'refunded', ADMIN`,
+        'top_ups_refunded_check|top_ups_refunded_by_check',
+      ],
+      [
+        'status refunded thiếu refunded_by (Admin hoàn, UC-ADM-08)',
+        ', status, refunded_at',
+        `, 'refunded', now()`,
+        'top_ups_refunded_by_required_check',
+      ],
+      ['refunded_at khi chưa refunded', ', refunded_at', ', now()', 'top_ups_refunded_check'],
       ['refunded_by không có refunded_at', ', refunded_by', ', ADMIN', 'top_ups_refunded_by_check'],
       [
         'late_gateway_ref thiếu late_paid_at/amount',
-        ', late_gateway_ref',
-        `, 'LATE-X'`,
+        ', status, late_gateway_ref',
+        `, 'expired', 'LATE-X'`,
         'top_ups_late_payment_check',
       ],
       [
         'late_amount_vnd âm',
-        ', late_gateway_ref, late_paid_at, late_amount_vnd',
-        `, 'LATE-Y', now(), -1`,
+        ', status, late_gateway_ref, late_paid_at, late_amount_vnd',
+        `, 'expired', 'LATE-Y', now(), -1`,
         'top_ups_late_payment_check',
       ],
       [
@@ -425,9 +443,21 @@ describeDb('migration 0003 — billing WF-02 (nâng cấp DB đã có 0002)', ()
       ],
       [
         'late_refunded_at trước late_paid_at',
-        ', late_gateway_ref, late_paid_at, late_amount_vnd, late_refunded_at',
-        `, 'LATE-Z', now(), 1000, now() - interval '1 minute'`,
+        ', status, late_gateway_ref, late_paid_at, late_amount_vnd, late_refunded_at',
+        `, 'expired', 'LATE-Z', now(), 1000, now() - interval '1 minute'`,
         'top_ups_late_refunded_check',
+      ],
+      [
+        'khoản muộn trên top-up credited (tiền nhận hai lần, SD-2c D)',
+        ', status, late_gateway_ref, late_paid_at, late_amount_vnd',
+        `, 'credited', 'LATE-C', now(), 1000`,
+        'top_ups_late_payment_status_check',
+      ],
+      [
+        'khoản muộn trên top-up pending',
+        ', late_gateway_ref, late_paid_at, late_amount_vnd',
+        `, 'LATE-P', now(), 1000`,
+        'top_ups_late_payment_status_check',
       ],
     ])('CHECK top_ups từ chối: %s', async (label, cols, vals, constraint) => {
       const ref = `M3-BAD-${label.replace(/\W+/g, '-')}`;
@@ -440,7 +470,48 @@ describeDb('migration 0003 — billing WF-02 (nâng cấp DB đã có 0002)', ()
         ),
       );
       expect(e.code).toBe('23514');
-      expect(e.constraint).toBe(constraint);
+      expect(constraint.split('|')).toContain(e.constraint);
+    });
+
+    it('điểm ⇔ giảm giá (BR-P35): 500 điểm + 5.000 VND được; lệch một bên hoặc điểm âm bị từ chối', async () => {
+      const ins = (ref: string, points: number, discount: number) =>
+        q(
+          `INSERT INTO top_ups (gateway_reference, credit_account_id, amount_vnd, points_redeemed,
+                                points_discount_vnd, amount_paid_vnd, idempotency_key, expires_at)
+           VALUES ($1, $2, 50000, $3, $4, 50000 - $4::bigint, $1, now() + interval '15 minutes')
+           RETURNING points_redeemed, amount_paid_vnd`,
+          [ref, accountId, points, discount],
+        );
+      const ok = (await ins('M3-PTS-OK', 500, 5000))[0] ?? {};
+      expect([ok['points_redeemed'], Number(ok['amount_paid_vnd'])]).toEqual([500, 45000]);
+      // Tỉ lệ không ghi cứng: 300 điểm cho 5.000 VND vẫn được (chính sách do Admin cấu hình).
+      await ins('M3-PTS-RATIO', 300, 5000);
+      const noPoints = await rejection(ins('M3-PTS-0', 0, 5000));
+      expect([noPoints.code, noPoints.constraint]).toEqual(['23514', 'top_ups_points_check']);
+      const noDiscount = await rejection(ins('M3-PTS-1', 500, 0));
+      expect(noDiscount.constraint).toBe('top_ups_points_check');
+      const negative = await rejection(ins('M3-PTS-NEG', -1, 1000));
+      expect(negative.constraint).toBe('top_ups_points_redeemed_check');
+    });
+
+    it('gateway_transaction_no UNIQUE khi có (BR-P13): nhiều NULL được, cùng vnp_TransactionNo cho top-up thứ hai bị từ chối', async () => {
+      const ins = (ref: string, txnNo: string | null) =>
+        q(
+          `INSERT INTO top_ups (gateway_reference, credit_account_id, amount_vnd, amount_paid_vnd,
+                                idempotency_key, expires_at, status, gateway_transaction_no)
+           VALUES ($1, $2, 50000, 50000, $1, now() + interval '15 minutes', 'credited', $3)`,
+          [ref, accountId, txnNo],
+        );
+      await ins('M3-TXN-NULL-1', null);
+      await ins('M3-TXN-NULL-2', null);
+      await ins('M3-TXN-1', 'VNP-14000001');
+      await ins('M3-TXN-2', 'VNP-14000002');
+      const dup = await rejection(ins('M3-TXN-DUP', 'VNP-14000001'));
+      expect([dup.code, dup.constraint]).toEqual(['23505', 'top_ups_gateway_transaction_no_key']);
+      const def = await one(
+        `SELECT indexdef FROM pg_indexes WHERE indexname = 'top_ups_gateway_transaction_no_key'`,
+      );
+      expect(String(def['indexdef'])).toContain('WHERE (gateway_transaction_no IS NOT NULL)');
     });
 
     it('refunded_by phải là users.id có thật (FK)', async () => {
@@ -505,29 +576,52 @@ describeDb('migration 0003 — billing WF-02 (nâng cấp DB đã có 0002)', ()
     });
   });
 
-  describe('tiền kiểm: DB có top-up gateway_reference NULL → 0003 dừng, không áp gì', () => {
+  describe('tiền kiểm: dữ liệu cũ vi phạm ràng buộc mới → 0003 dừng, không áp gì', () => {
     // Client riêng: lỗi giữa BEGIN … COMMIT để kết nối ở trạng thái aborted cho tới ROLLBACK.
     let client: Client;
+    const BASE = `INSERT INTO users (email, full_name, role) VALUES ('m3.pre@test', 'Pre', 'driver');
+       INSERT INTO drivers (user_id, consent_version, consent_given_at)
+         SELECT id, 'v1', now() FROM users WHERE email = 'm3.pre@test';`;
+    const ACCOUNT = `INSERT INTO credit_accounts (driver_id) SELECT id FROM users WHERE email = 'm3.pre@test';`;
     beforeAll(async () => {
       client = new Client({ connectionString: DATABASE_URL as string });
       await client.connect();
-      await buildAt0002((sql) => client.query(sql));
-      await client.query(
-        `INSERT INTO users (email, full_name, role) VALUES ('m3.pre@test', 'Pre', 'driver');
-         INSERT INTO drivers (user_id, consent_version, consent_given_at)
-           SELECT id, 'v1', now() FROM users WHERE email = 'm3.pre@test';
-         INSERT INTO credit_accounts (driver_id) SELECT id FROM users WHERE email = 'm3.pre@test';
-         INSERT INTO top_ups (credit_account_id, amount_vnd, amount_paid_vnd, idempotency_key)
-           SELECT id, 50000, 50000, 'm3-pre-null' FROM credit_accounts;`,
-      );
     });
     afterAll(async () => {
       await client?.end();
     });
 
-    it('migrate() ném lỗi có tiền tố 0003; _migrations và schema giữ ở 0002', async () => {
+    it.each([
+      [
+        'top-up gateway_reference NULL',
+        `${ACCOUNT} INSERT INTO top_ups (credit_account_id, amount_vnd, amount_paid_vnd, idempotency_key)
+           SELECT id, 50000, 50000, 'm3-pre' FROM credit_accounts;`,
+        /^0003: 1 top_ups có gateway_reference NULL/,
+      ],
+      [
+        'top-up refunded (không có refunded_at / refunded_by)',
+        `${ACCOUNT} INSERT INTO top_ups (gateway_reference, credit_account_id, amount_vnd, amount_paid_vnd,
+                                         status, idempotency_key)
+           SELECT 'PRE-R', id, 50000, 50000, 'refunded', 'm3-pre' FROM credit_accounts;`,
+        /^0003: 1 top_ups status = refunded/,
+      ],
+      [
+        'top-up có giảm giá điểm (points_redeemed không suy ra được)',
+        `${ACCOUNT} INSERT INTO top_ups (gateway_reference, credit_account_id, amount_vnd, points_discount_vnd,
+                                         amount_paid_vnd, idempotency_key)
+           SELECT 'PRE-P', id, 50000, 5000, 45000, 'm3-pre' FROM credit_accounts;`,
+        /^0003: 1 top_ups có points_discount_vnd <> 0/,
+      ],
+      [
+        'ví closed (không có closed_at)',
+        `INSERT INTO credit_accounts (driver_id, status) SELECT id, 'closed' FROM users WHERE email = 'm3.pre@test';`,
+        /^0003: 1 credit_accounts status = closed/,
+      ],
+    ])('%s: migrate() ném lỗi; _migrations và schema giữ ở 0002', async (_label, data, message) => {
+      await buildAt0002((sql) => client.query(sql));
+      await client.query(`${BASE} ${data}`);
       const err = await rejection(migrate(client));
-      expect(err.message).toMatch(/^0003: 1 top_ups có gateway_reference NULL/);
+      expect(err.message).toMatch(message);
       await client.query('ROLLBACK');
       const names = (await client.query('SELECT name FROM _migrations ORDER BY name')).rows.map(
         (r: { name: string }) => r.name,
