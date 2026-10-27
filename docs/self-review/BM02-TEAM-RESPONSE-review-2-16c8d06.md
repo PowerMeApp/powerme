@@ -1,4 +1,6 @@
-# BM02 — Team response, run 2 (tag `review-2` = `16c8d06`)
+# BM02 — Team response, run 2 (self-review run on commit `16c8d06`)
+
+> **Tag note (28/10/2026, Trí):** tag `review-2` was moved from `16c8d06` (26/10) to `1cead5d` (`main` after PR #64) so the council sees the code it reviews. The raw report `BM02-SELF-REVIEW-review-2-16c8d06.md` was run on `16c8d06` and is unchanged; "after the tag" below still means "not in `16c8d06`".
 
 **DRAFT 26/10/2026 (WP1).** Responses to the raw report `BM02-SELF-REVIEW-review-2-16c8d06.md`. The raw report is not edited; all responses are in this file.
 
