@@ -57,6 +57,10 @@ export class ConsoleServer implements OnModuleInit, OnModuleDestroy {
         summary: () => this.queries.summary(),
         disconnect: (serial) => this.commands.disconnect(serial),
         remoteStop: (id) => this.commands.remoteStop(id),
+        faults: (filter, limit) => this.commands.faults(filter, limit),
+        acknowledgeFault: (id) => this.commands.acknowledgeFault(id),
+        resetFault: (id, type) => this.commands.resetFault(id, type),
+        closeFault: (id) => this.commands.closeFault(id),
       }),
     );
     try {

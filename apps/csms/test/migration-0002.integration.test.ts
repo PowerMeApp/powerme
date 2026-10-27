@@ -49,8 +49,11 @@ describeDb('migration 0002 — tách kết nối khỏi lifecycle (nâng cấp D
     await db?.$client.end();
   });
 
-  it('migrate() chỉ áp 0002 (0000 và 0001 đã ghi trong _migrations)', async () => {
-    expect(await migrate(db.$client)).toEqual(['0002_tach-ket-noi-khoi-lifecycle']);
+  it('migrate() áp 0002 (0000 và 0001 đã ghi trong _migrations), rồi các migration sau nó', async () => {
+    expect(await migrate(db.$client)).toEqual([
+      '0002_tach-ket-noi-khoi-lifecycle',
+      '0007_fe04-fault-events-wf04',
+    ]);
     expect(await migrate(db.$client)).toEqual([]); // chạy lại không áp gì
   });
 

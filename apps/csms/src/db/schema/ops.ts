@@ -24,6 +24,7 @@ import {
   reservationHoldModeEnum,
   reservationStatusEnum,
 } from './enums.js';
+import { remoteCommands } from './ocpp-log.js';
 import { chargePoints, connectors } from './stations.js';
 import { drivers, operatorStaff, users } from './users.js';
 
@@ -49,12 +50,20 @@ export const faultEvents = pgTable(
     ),
     acknowledgedAt: timestamp('acknowledged_at', { withTimezone: true }),
     resolvedAt: timestamp('resolved_at', { withTimezone: true }),
+    /** Lệnh Reset đang chờ khi `resetting` (STM-6 t4); giữ lại để truy vết. Migration 0007 (FE-04). */
+    resetCommandId: bigint('reset_command_id', { mode: 'number' }).references(
+      () => remoteCommands.id,
+    ),
   },
   (t) => [
     unique('fault_events_event_no_key').on(t.eventNo),
     index('fault_events_charge_point_id_raised_at_idx').on(t.chargePointId, t.raisedAt),
     index('fault_events_open_idx')
       .on(t.status)
+      .where(sql`${t.status} <> 'resolved'`),
+    // Một sự cố mở cho mỗi connector; connector 0 (cả trụ) có connector_id null → COALESCE 0.
+    uniqueIndex('fault_events_one_open_per_connector_key')
+      .on(t.chargePointId, sql`COALESCE(${t.connectorId}, 0)`)
       .where(sql`${t.status} <> 'resolved'`),
   ],
 );

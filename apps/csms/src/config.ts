@@ -52,6 +52,12 @@ export interface CsmsConfig {
    * nguyên. `0` = orphan ngay (hành vi cũ). Không khai báo = {@link DEFAULT_OFFLINE_GRACE_S}.
    */
   offlineGraceS?: number;
+  /**
+   * WF-04 / STM-6 t6 (FE-04): hạn chờ (giây) sau khi gửi Reset từ xa. Hết hạn mà súng chưa báo
+   * Available thì sự cố `resetting → acknowledged` và lệnh `remote_commands` thành `timeout`.
+   * Không khai báo = {@link DEFAULT_FAULT_RESET_TIMEOUT_S}.
+   */
+  faultResetTimeoutS?: number;
 }
 
 /**
@@ -60,6 +66,12 @@ export interface CsmsConfig {
  * bình thường vẫn có thể bị orphan. Demo đặt ngắn hơn (run-demo.mjs).
  */
 export const DEFAULT_OFFLINE_GRACE_S = 120;
+
+/**
+ * Mặc định của FAULT_RESET_TIMEOUT_S: 120 s = trụ khởi động lại + BootNotification +
+ * StatusNotification (WF-04 câu hỏi mở 3, đề xuất của FE-04; simulator D1 khởi động lại ~3 s).
+ */
+export const DEFAULT_FAULT_RESET_TIMEOUT_S = 120;
 
 /** Token DI cho CsmsConfig (dùng `@Inject(CONFIG)`). */
 export const CONFIG = Symbol('CSMS_CONFIG');
@@ -90,6 +102,14 @@ function graceEnv(env: NodeJS.ProcessEnv, key: string, fallback: number): number
   return n;
 }
 
+/** Số nguyên giây > 0. 0 / âm / thập phân / không phải số → ném lỗi rõ. */
+function positiveSecondsEnv(env: NodeJS.ProcessEnv, key: string, fallback: number): number {
+  const n = intEnv(env, key, fallback);
+  if (!Number.isInteger(n) || n <= 0)
+    throw new Error(`Biến môi trường ${key} phải là số nguyên giây > 0: "${env[key]}"`);
+  return n;
+}
+
 /** Đọc cấu hình; ném lỗi sớm khi thiếu DATABASE_URL thay vì chết lúc query đầu tiên. */
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): CsmsConfig {
   const databaseUrl = env['DATABASE_URL'];
@@ -110,6 +130,11 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): CsmsConfig {
     ...(env['OCPP_PUBLIC_URL'] ? { ocppPublicUrl: env['OCPP_PUBLIC_URL'] } : {}),
     allowLegacyNoCredential: boolEnv(env, 'ALLOW_LEGACY_NO_CREDENTIAL', false),
     offlineGraceS: graceEnv(env, 'OFFLINE_GRACE_S', DEFAULT_OFFLINE_GRACE_S),
+    faultResetTimeoutS: positiveSecondsEnv(
+      env,
+      'FAULT_RESET_TIMEOUT_S',
+      DEFAULT_FAULT_RESET_TIMEOUT_S,
+    ),
   };
 }
 

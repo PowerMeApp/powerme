@@ -26,32 +26,18 @@ import {
   Optional,
 } from '@nestjs/common';
 import { and, eq, exists, inArray, isNull, or } from 'drizzle-orm';
+import { ScheduledTask, Scheduler, TimeoutScheduler } from '../common/scheduler.js';
 import { CONFIG, CsmsConfig, DEFAULT_OFFLINE_GRACE_S } from '../config.js';
 import { DB, Db } from '../db/db.module.js';
 import { chargePointConnections, chargePoints, sessions } from '../db/schema/index.js';
 import { SessionsService } from '../sessions/sessions.service.js';
 import { ConnectionRegistry } from './connection-registry.js';
 
-/** Hẹn giờ một lần. `cancel()` huỷ nếu chưa chạy. */
-export interface ScheduledTask {
-  cancel(): void;
-}
-
-/** Điểm thay thế cho `setTimeout` (sau này: job BullMQ trễ). */
-export interface Scheduler {
-  schedule(delayMs: number, fn: () => void): ScheduledTask;
-}
+// Interface hẹn giờ chuyển sang common/ (FE-04 dùng chung); export lại để code/test T61 không đổi.
+export type { ScheduledTask, Scheduler } from '../common/scheduler.js';
+export { TimeoutScheduler } from '../common/scheduler.js';
 
 export const OFFLINE_GRACE_SCHEDULER = Symbol('OFFLINE_GRACE_SCHEDULER');
-
-/** Scheduler mặc định: `setTimeout`, `unref` để hẹn giờ treo không giữ tiến trình sống. */
-export class TimeoutScheduler implements Scheduler {
-  schedule(delayMs: number, fn: () => void): ScheduledTask {
-    const handle = setTimeout(fn, delayMs);
-    handle.unref();
-    return { cancel: () => clearTimeout(handle) };
-  }
-}
 
 /** Kết quả một lần kiểm tra khi hết ân hạn. */
 export type GraceOutcome = 'orphaned' | 'reconnected';
