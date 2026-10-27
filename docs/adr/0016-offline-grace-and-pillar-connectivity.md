@@ -2,10 +2,10 @@
 
 | | |
 |---|---|
-| Status | Accepted (implemented in PR #44, T61); grace value decided 26/10/2026 |
+| Status | Accepted (implemented in PR #44, T61, with a 30 s placeholder); grace value decided 26/10/2026, 120 s default in PR #59 (34ec95a) |
 | Date | 24/10/2026 (recorded in the repo 26/10/2026) |
 | Decided by | Trần Đức Ân (WP1, PM/BA) after comparing the WP2 code with the WP1 design |
-| Related | STM-1 ChargingSession, STM-3 ChargingPillar; BR-P19, BR-P39; F-10; ADR-0005, ADR-0010; T61; G18, G19 |
+| Related | STM-1 ChargingSession, STM-3 ChargingPillar; BR-P19, BR-P39; NFR-OCPP-07 (F-10 in STM-3); ADR-0005, ADR-0010; T61; G18, G19 |
 
 ## Context
 
@@ -19,11 +19,11 @@ In Iteration 1 the CSMS moved a running session to `orphaned` as soon as the pil
 - **D-D / D-E** Keep WP2's behaviour: a reconnect needs no BootNotification; `orphaned → reconciled` directly.
 - **D-F** Credit ledger, top-ups and loyalty live in `billing` (WP5); `FaultService` stays in `stations` (WP4); a `suggestions` module (WP3); push notifications (FCM) are out of Review 2 scope.
 
-**Grace value (G18).** Default **120 s** (decided by WP1 on 26/10/2026), configurable with `OFFLINE_GRACE_S`; the demo may use a shorter value. Reasons:
+**Grace value (G18).** Default **120 s** (decided by WP1 on 26/10/2026; the code default `DEFAULT_OFFLINE_GRACE_S = 120` landed in PR #59, 34ec95a, not in PR #44), configurable with `OFFLINE_GRACE_S`; the demo may use a shorter value. `OFFLINE_GRACE_S=0` means orphan immediately on socket close (the Iteration 1 behaviour). Reasons:
 
 - A network blip is expected to reconnect within seconds to about a minute, as pillars retry the WebSocket with back-off; 120 s leaves room for a couple of retries. This is an assumption to check on the simulator and, if possible, on a real pillar.
 - 2 × heartbeat (600 s with the 300 s heartbeat) would show a session that has really lost its pillar as `active` for ten minutes.
-- It stays well inside the offline alert bound (F-10, ≤ 900 s); the alert itself is WF-04's (G19).
+- It stays well inside the offline alert bound (NFR-OCPP-07, ≤ 900 s after the last message; F-10 in STM-3); the alert itself is WF-04's (G19).
 
 ## Consequences
 
