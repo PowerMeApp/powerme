@@ -29,6 +29,7 @@ import {
 } from '@nestjs/common';
 import { RPCServer } from 'ocpp-rpc';
 import type RPCServerClient from 'ocpp-rpc/lib/server-client';
+import type { IHandshakeInterface } from 'ocpp-rpc/lib/server-client';
 import { CONFIG, CsmsConfig } from '../config.js';
 import { ReplayDetector } from '../reconciliation/replay-detector.js';
 import { SessionsService } from '../sessions/sessions.service.js';
@@ -83,11 +84,13 @@ export class OcppServer implements OnApplicationBootstrap, OnApplicationShutdown
     const server = new RPCServer({ protocols: ['ocpp1.6'], strictMode: true });
     server.auth(async (accept, reject, handshake) => {
       if (this.pillarAuth) {
-        // WF-05 / SD-5b: unknown → 404, not onboarded or retired → 403, wrong credential → 401.
-        const res = await this.pillarAuth.verify(handshake.identity, handshake.password);
+        // WF-05 / SD-5b: unknown → 404, not onboarded or retired → 403, wrong credential → 401,
+        // too many failures → 429 (issue #40).
+        const clientIp = this.clientIp(handshake);
+        const res = await this.pillarAuth.verify(handshake.identity, handshake.password, clientIp);
         if (!res.ok) {
           this.logger.warn(
-            `từ chối ${handshake.identity} từ ${handshake.remoteAddress ?? '?'}: ${res.status} ${res.reason}`,
+            `từ chối ${handshake.identity} từ ${clientIp}: ${res.status} ${res.reason}`,
           );
           reject(res.status, res.reason);
           return;
@@ -113,6 +116,20 @@ export class OcppServer implements OnApplicationBootstrap, OnApplicationShutdown
     this.logger.log(
       `OCPP-J 1.6 lắng nghe ws://0.0.0.0:${this.config.ocppPort}/ocpp/{serialNumber}`,
     );
+  }
+
+  /**
+   * IP của trụ cho bộ giới hạn đăng nhập sai. Sau Caddy (staging) `remoteAddress` là IP của Caddy,
+   * nên khi OCPP_TRUST_PROXY=true lấy giá trị CUỐI của X-Forwarded-For — giá trị do Caddy thêm,
+   * trụ không giả được. Không bật khi CSMS lộ thẳng ra internet: khi đó header do client tự đặt.
+   */
+  private clientIp(handshake: Pick<IHandshakeInterface, 'remoteAddress' | 'headers'>): string {
+    if (this.config.ocppTrustProxy) {
+      const xff = handshake.headers['x-forwarded-for'];
+      const last = (Array.isArray(xff) ? xff.join(',') : xff)?.split(',').pop()?.trim();
+      if (last) return last;
+    }
+    return handshake.remoteAddress ?? 'unknown';
   }
 
   async stop(): Promise<void> {
