@@ -16,7 +16,14 @@ import * as schema from './schema/index.js';
 
 /** Tạo db từ chuỗi kết nối — dùng chung cho app và test tích hợp. `db.$client` là Pool. */
 export function createDb(connectionString: string) {
-  return drizzle(new Pool({ connectionString }), { schema });
+  const pool = new Pool({ connectionString });
+  // Kết nối rảnh trong pool bị Postgres đóng (restart, ECONNRESET) phát 'error' trên Pool; không
+  // có listener thì Node coi là unhandled và tắt cả CSMS (thấy khi dừng demo 27/10). Chỉ log —
+  // truy vấn kế tiếp tự lấy kết nối mới.
+  pool.on('error', (err) => {
+    console.error(`[db] kết nối rảnh trong pool lỗi: ${err.message}`);
+  });
+  return drizzle(pool, { schema });
 }
 
 export type Db = ReturnType<typeof createDb>;
