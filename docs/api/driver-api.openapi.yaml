@@ -1,0 +1,588 @@
+openapi: 3.1.0
+info:
+  title: PowerMe CSMS — Driver API
+  version: 0.1.0
+  summary: Hợp đồng REST cho app tài xế (T77, phiếu v1.3 §3.2g)
+  description: |
+    Hợp đồng giữa CSMS (WP2) và app tài xế Flutter (WP3) cho trạng thái súng sạc, thời gian còn lại,
+    bắt đầu / dừng phiên và theo dõi phiên. Mỗi đường dẫn ánh xạ một hàm đã có trong
+    `DriverChargingService` (apps/csms/src/sessions/driver-charging.service.ts) hoặc một hàm sẽ
+    thêm ở Tuần 9 (ghi rõ `x-status`). Luật nghiệp vụ dẫn ở từng chỗ: BR-P32, BR-P38, BR-P39,
+    BR-P40 (trạng thái và thời gian còn lại), BR-P18, BR-P19 (tín dụng), BR-P45 (làm tròn).
+
+    Quy ước chung:
+    - Tiền là số nguyên VND, điện năng là số nguyên Wh, thời gian là ISO 8601 UTC.
+    - Số định danh (`*_id`) là số nguyên dương; DB dùng bigint nên trả về dạng **chuỗi số** để
+      không mất độ chính xác ở JSON (`"id": "12"`), đúng như hàng `pg` trả hiện nay.
+    - Lỗi luôn là `{error, detail}`; `error` là mã ổn định để app rẽ nhánh, `detail` để hiển thị.
+    - App **có thể thấy phiên mà nó không tạo ra** (quẹt thẻ RFID online, mật khẩu HMI): các
+      đường `sessions/*` trả cả phiên đó nếu `driver_id` khớp; `charges/*` chỉ có với phiên bắt đầu
+      từ app.
+  x-owner: Trí (WP2) — hợp đồng; Sơn (WP3) — route và client Dart
+  x-status: contract-only — chưa có route HTTP nào trên `main` tính đến 30/10/2026 (G1)
+servers:
+  - url: http://localhost:3000/api/driver/v1
+    description: CSMS cục bộ (cùng tiến trình với console /api/admin)
+tags:
+  - name: stations
+    description: UC-CHG-01 tìm trạm, trạng thái từng súng (BR-P38, BR-P39)
+  - name: time-left
+    description: UC-CHG-04 / FR-03 thời gian còn lại (BR-P32, BR-P40)
+  - name: charges
+    description: UC-CHG-02 bắt đầu phiên từ app (D4 start intent có idempotency key)
+  - name: sessions
+    description: UC-CHG-03 dừng, UC-CHG-04 theo dõi, bảng kê sau phiên
+
+security:
+  - bearerAuth: []
+
+paths:
+  /stations:
+    get:
+      tags: [stations]
+      operationId: searchStations
+      summary: Tìm trạm theo tên hoặc vị trí, kèm trạng thái từng súng
+      description: |
+        Ánh xạ `DriverChargingService.findStations` → `searchStations` (station-search.ts).
+        Chỉ trả súng cùng chuẩn đầu cắm với xe `vehicle_id`. Trạm chỉ dành VinFast bị ẩn khi
+        xe không phải VinFast, trừ khi `include_vinfast_only=true` (BR-P03).
+        `driver_status` theo BR-P38; `status_quality` theo BR-P39 (quá 2 chu kỳ heartbeat là
+        `stale`, mặc định 600 s; quá ngưỡng offline 900 s là `offline`).
+      parameters:
+        - $ref: '#/components/parameters/vehicleId'
+        - name: q
+          in: query
+          description: Chuỗi tìm theo tên trạm hoặc địa chỉ, tối đa 120 ký tự
+          schema: { type: string, maxLength: 120 }
+        - name: latitude
+          in: query
+          schema: { type: number, minimum: -90, maximum: 90 }
+        - name: longitude
+          in: query
+          schema: { type: number, minimum: -180, maximum: 180 }
+        - name: radius_km
+          in: query
+          description: Chỉ dùng khi có toạ độ
+          schema: { type: number, exclusiveMinimum: 0, maximum: 20040 }
+        - name: availability
+          in: query
+          schema:
+            type: string
+            enum: [all, available, in_use, freeing_soon, unavailable, offline]
+            default: all
+        - name: sort
+          in: query
+          description: Mặc định `distance` khi có toạ độ, `name` khi không
+          schema: { type: string, enum: [name, distance] }
+        - name: page
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100000, default: 1 }
+        - name: page_size
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+        - name: include_vinfast_only
+          in: query
+          schema: { type: boolean, default: false }
+      responses:
+        '200':
+          description: Trang kết quả
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StationSearchResult' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404':
+          description: Xe không thuộc tài xế (`not_found`)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /connectors/by-code/{displayCode}/{connectorNo}:
+    get:
+      tags: [stations]
+      operationId: resolveConnectorByCode
+      summary: Đổi mã in trên trụ (QR) thành súng cụ thể
+      description: |
+        Ánh xạ `DriverChargingService.resolveConnector`. Mã QR trên màn hình trụ chứa
+        `display_code` của trụ và số súng 1 hoặc 2 (BR-P10). Chỉ trả súng cùng chuẩn với xe và
+        trụ đang `in_service` của operator `active`.
+      parameters:
+        - name: displayCode
+          in: path
+          required: true
+          schema: { type: string, minLength: 1, maxLength: 100 }
+        - name: connectorNo
+          in: path
+          required: true
+          schema: { type: integer, enum: [1, 2] }
+        - $ref: '#/components/parameters/vehicleId'
+      responses:
+        '200':
+          description: Súng tìm thấy
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ResolvedConnector' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /connectors/{connectorId}/time-left:
+    get:
+      tags: [time-left]
+      operationId: getConnectorTimeLeft
+      summary: Thời gian còn lại ước tính của súng đang bận
+      description: |
+        FR-03, BR-P32, BR-P40. Luôn là **khoảng** `[min_minutes, max_minutes]` hoặc `unknown`,
+        không bao giờ là một mốc hứa. Mức ước tính lấy theo thứ tự có dữ liệu: hạn mức của phiên
+        (`limit`), SoC với đường cong sạc DC (`soc_curve`), lịch sử trụ (`history`), còn lại
+        `unknown`. Súng đang `available` trả `kind: unknown` với `reason: not_in_use`.
+      x-status: Tuần 9 — hàm ước tính chưa có trên `main`; hình dạng trả về chốt ở đây để WP3 làm UI trước
+      parameters:
+        - name: connectorId
+          in: path
+          required: true
+          schema: { $ref: '#/components/schemas/Id' }
+      responses:
+        '200':
+          description: Ước tính hiện tại
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TimeLeftEstimate' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /charges:
+    post:
+      tags: [charges]
+      operationId: startCharge
+      summary: Yêu cầu bắt đầu phiên từ app
+      description: |
+        Ánh xạ `DriverChargingService.start(driverId, key, input)`. Tạo **start intent** bền
+        trước khi gửi RemoteStartTransaction (quyết định D4). Gọi lại cùng `Idempotency-Key` và
+        cùng body trả về cùng snapshot; cùng key khác body → 409 `idempotency_conflict`.
+        Kiểm tra tín dụng theo BR-P18 (đủ mức khởi đầu) và giữ trước `reserved_vnd`; CSMS tự dừng
+        khi chạm mức dự trữ cắt (BR-P19). Chỉ có chế độ `energy_kwh` (hạn mức kWh); các chế độ
+        khác là hướng phát triển (README WP3).
+      parameters:
+        - $ref: '#/components/parameters/idempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/StartChargeRequest' }
+      responses:
+        '202':
+          description: Intent đã ghi; lệnh có thể đang gửi hoặc đã có kết quả — xem `outcome`
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ChargeSnapshot' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: |
+            `idempotency_conflict` (cùng key khác body), `credit_unavailable` (BR-P18),
+            `connector_unavailable`, `connector_busy_or_unknown` (BR-P12), `tariff_unavailable`
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '503': { $ref: '#/components/responses/PolicyUnconfigured' }
+
+  /charges/{idempotencyKey}:
+    get:
+      tags: [charges]
+      operationId: getChargeStart
+      summary: Xem lại kết quả một yêu cầu bắt đầu
+      description: |
+        Ánh xạ `DriverChargingService.getStart`. App gọi khi mất mạng giữa chừng hoặc mở lại
+        màn hình. Khi `session_id` khác null, chuyển sang `GET /sessions/{sessionId}/progress`.
+      parameters:
+        - name: idempotencyKey
+          in: path
+          required: true
+          schema: { $ref: '#/components/schemas/IdempotencyKey' }
+      responses:
+        '200':
+          description: Snapshot hiện tại
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ChargeSnapshot' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /sessions/{sessionId}/progress:
+    get:
+      tags: [sessions]
+      operationId: getSessionProgress
+      summary: Tiến trình phiên đang chạy hoặc vừa dừng
+      description: |
+        Ánh xạ `DriverChargingService.progress`. Trả cho mọi phiên có `driver_id` là tài xế gọi,
+        kể cả phiên bắt đầu bằng thẻ RFID online. `consumed_wh` lấy từ `energy_wh` khi phiên đã
+        dừng, hoặc từ mẫu đo mới nhất trừ `meter_start_wh` khi đang chạy; `telemetry_quality`
+        là `unknown` khi chưa có mẫu hoặc mẫu không hợp lệ.
+        Ngưỡng M3 của WP3: SoC và kWh lên app trong vài giây sau MeterValues → app **poll mỗi 5 s**
+        cho đến khi có kênh realtime (Tuần 10, ngoài hợp đồng này).
+      parameters:
+        - $ref: '#/components/parameters/sessionId'
+      responses:
+        '200':
+          description: Tiến trình
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SessionProgress' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /sessions/{sessionId}/stop:
+    post:
+      tags: [sessions]
+      operationId: stopCharge
+      summary: Yêu cầu dừng phiên từ app
+      description: |
+        Ánh xạ `DriverChargingService.stop(driverId, key, sessionId)`. Ghi **stop intent** rồi
+        gửi RemoteStopTransaction; phiên kết thúc thật bằng StopTransaction của trụ (BR-P01).
+        Key bắt đầu bằng `limit:` là dành riêng cho CSMS tự cắt (BR-P19) → 400
+        `reserved_idempotency_key`.
+      parameters:
+        - $ref: '#/components/parameters/sessionId'
+        - $ref: '#/components/parameters/idempotencyKey'
+      responses:
+        '202':
+          description: Yêu cầu dừng đã ghi; theo dõi bằng `GET .../progress`
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StopSnapshot' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: '`session_not_stoppable` (phiên không ở active/paused), `idempotency_conflict`'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '503': { $ref: '#/components/responses/PolicyUnconfigured' }
+
+  /sessions/{sessionId}/statement:
+    get:
+      tags: [sessions]
+      operationId: getChargingStatement
+      summary: Bảng kê sau phiên (một lần trừ tiền, BR-P45)
+      description: |
+        Ánh xạ `DriverChargingService.statement`. Chỉ có sau khi quyết toán xong; trước đó 404
+        `not_found` và app hiển thị theo `settlement_state` trong progress. Phiên đang `review`
+        (đối soát mâu thuẫn, WF-03) chưa có bảng kê cho đến khi operator quyết.
+      parameters:
+        - $ref: '#/components/parameters/sessionId'
+      responses:
+        '200':
+          description: Bảng kê
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ChargingStatement' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: |
+        Token của tài xế sau đăng nhập OTP (WP3 MB-02). CSMS chỉ cần lấy được `driver_id`
+        (= `users.id` với role `driver`) từ token. Cơ chế phát hành token không thuộc hợp đồng này.
+        Khi chạy demo cục bộ, cho phép header `X-Driver-Id` thay token nếu bật
+        `DRIVER_API_DEV_AUTH=true` (mặc định tắt; cấm trên staging).
+
+  parameters:
+    vehicleId:
+      name: vehicle_id
+      in: query
+      required: true
+      description: Xe tài xế chọn (UC-ACC-03); quyết định chuẩn đầu cắm và bộ lọc VinFast
+      schema: { $ref: '#/components/schemas/Id' }
+    sessionId:
+      name: sessionId
+      in: path
+      required: true
+      schema: { $ref: '#/components/schemas/Id' }
+    idempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      description: Do app sinh (UUID v4 khuyến nghị), giữ nguyên khi gửi lại sau lỗi mạng
+      schema: { $ref: '#/components/schemas/IdempotencyKey' }
+
+  responses:
+    BadRequest:
+      description: |
+        `invalid_input`, `invalid_search`, `invalid_connector_reference`, `invalid_idempotency_key`,
+        `reserved_idempotency_key`, `unsupported_mode`, `vehicle_not_owned_or_incompatible`
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Unauthorized:
+      description: Thiếu hoặc sai token (`unauthorized`); `forbidden` khi token hợp lệ nhưng không phải tài xế
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    NotFound:
+      description: '`not_found` — không có, hoặc không thuộc tài xế này (không phân biệt để tránh dò)'
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    PolicyUnconfigured:
+      description: '`policy_unconfigured` — CSMS chưa nạp chính sách sạc (biến môi trường CHARGE_*)'
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+
+  schemas:
+    Id:
+      type: string
+      pattern: '^[1-9][0-9]{0,18}$'
+      description: bigint dạng chuỗi số
+      examples: ['12']
+    IdempotencyKey:
+      type: string
+      minLength: 8
+      maxLength: 128
+      pattern: '^[A-Za-z0-9._:-]+$'
+    Timestamp:
+      type: string
+      format: date-time
+      examples: ['2026-10-28T14:20:27.000Z']
+
+    Error:
+      type: object
+      required: [error, detail]
+      properties:
+        error: { type: string, description: 'Mã ổn định, snake_case' }
+        detail: { type: string, description: Lời giải thích để hiển thị }
+      examples:
+        - { error: credit_unavailable, detail: 'Số dư 15.000 ₫ thấp hơn mức khởi đầu 50.000 ₫' }
+
+    DriverConnectorStatus:
+      type: string
+      description: |
+        Trạng thái hướng tài xế (BR-P38): `available` = Available; `in_use` = Preparing, Charging,
+        SuspendedEV, SuspendedEVSE; `freeing_soon` = Finishing; `unavailable` = Reserved,
+        Unavailable, Faulted; `offline` = không có bản tin quá ngưỡng offline; `unknown` = chưa
+        từng có StatusNotification.
+      enum: [available, in_use, freeing_soon, unavailable, offline, unknown]
+    StatusQuality:
+      type: string
+      description: BR-P39 — `stale` khi không có bản tin quá 2 chu kỳ heartbeat; app hiện "có thể đã cũ"
+      enum: [fresh, stale, unknown]
+    OcppConnectorStatus:
+      type: string
+      enum: [Available, Preparing, Charging, SuspendedEVSE, SuspendedEV, Finishing, Reserved, Unavailable, Faulted]
+    ConnectorType:
+      type: string
+      enum: [ccs2, chademo, gbt, type2]
+
+    Connector:
+      type: object
+      required: [connector_id, connector_no, charge_point_id, connector_type, driver_status, status_quality, is_online, available_now]
+      properties:
+        connector_id: { $ref: '#/components/schemas/Id' }
+        connector_no: { type: integer, enum: [1, 2], description: '1 = súng A, 2 = súng B (BR-P10)' }
+        charge_point_id: { $ref: '#/components/schemas/Id' }
+        display_code: { type: [string, 'null'], description: 'Mã in trên trụ, dùng trong QR' }
+        connector_type: { $ref: '#/components/schemas/ConnectorType' }
+        max_power_kw: { type: [number, 'null'] }
+        status: { $ref: '#/components/schemas/OcppConnectorStatus' }
+        driver_status: { $ref: '#/components/schemas/DriverConnectorStatus' }
+        status_quality: { $ref: '#/components/schemas/StatusQuality' }
+        status_updated_at: { oneOf: [{ $ref: '#/components/schemas/Timestamp' }, { type: 'null' }] }
+        last_message_at: { oneOf: [{ $ref: '#/components/schemas/Timestamp' }, { type: 'null' }] }
+        is_online: { type: boolean }
+        online_changed_at: { oneOf: [{ $ref: '#/components/schemas/Timestamp' }, { type: 'null' }] }
+        lifecycle:
+          type: string
+          enum: [registered, awaiting_connection, in_service, disabled, decommissioned]
+        available_now:
+          type: boolean
+          description: '`driver_status = available` và trụ online và `in_service`'
+        time_left:
+          description: Có khi `driver_status` là `in_use` hoặc `freeing_soon`; Tuần 9
+          oneOf: [{ $ref: '#/components/schemas/TimeLeftEstimate' }, { type: 'null' }]
+
+    Station:
+      type: object
+      required: [site_id, site_code, site_name, operator_id, operator_name, vinfast_only, connectors]
+      properties:
+        site_id: { $ref: '#/components/schemas/Id' }
+        site_code: { type: string }
+        site_name: { type: string }
+        address: { type: [string, 'null'] }
+        operator_id: { $ref: '#/components/schemas/Id' }
+        operator_name: { type: string, description: Nhà vận hành sở hữu trạm (BR-P11) }
+        vinfast_only: { type: boolean }
+        latitude: { type: [number, 'null'] }
+        longitude: { type: [number, 'null'] }
+        distance_m: { type: [integer, 'null'], description: 'Đường chim bay, chỉ khi có toạ độ' }
+        connectors:
+          type: array
+          items: { $ref: '#/components/schemas/Connector' }
+
+    StationSearchResult:
+      type: object
+      required: [items, total, page, pageSize]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/Station' }
+        total: { type: integer, minimum: 0 }
+        page: { type: integer, minimum: 1 }
+        pageSize: { type: integer, minimum: 1 }
+
+    ResolvedConnector:
+      type: object
+      required: [connector_id, connector_no, status, serial_number, lifecycle, is_online, site_name, vinfast_only]
+      properties:
+        connector_id: { $ref: '#/components/schemas/Id' }
+        connector_no: { type: integer, enum: [1, 2] }
+        status: { $ref: '#/components/schemas/OcppConnectorStatus' }
+        display_code: { type: [string, 'null'] }
+        serial_number: { type: string }
+        lifecycle: { type: string }
+        is_online: { type: boolean }
+        online_changed_at: { oneOf: [{ $ref: '#/components/schemas/Timestamp' }, { type: 'null' }] }
+        last_message_at: { oneOf: [{ $ref: '#/components/schemas/Timestamp' }, { type: 'null' }] }
+        site_name: { type: string }
+        vinfast_only: { type: boolean }
+
+    TimeLeftEstimate:
+      type: object
+      description: |
+        BR-P32: luôn là khoảng hoặc `unknown`, không bao giờ là một mốc. BR-P40: `kind` cho biết
+        ước tính dựa vào gì, app hiển thị kèm.
+      required: [kind, computed_at]
+      properties:
+        kind:
+          type: string
+          enum: [limit, soc_curve, history, unknown]
+        min_minutes: { type: [integer, 'null'], minimum: 0 }
+        max_minutes: { type: [integer, 'null'], minimum: 0 }
+        computed_at: { $ref: '#/components/schemas/Timestamp' }
+        reason:
+          type: [string, 'null']
+          description: Khi `unknown` — `not_in_use`, `no_soc`, `no_history`, `pillar_offline`
+        basis:
+          type: [string, 'null']
+          description: Dữ liệu dùng để tính, ví dụ "SoC 42 % → 80 %, đường cong 60 kW"
+      examples:
+        - { kind: soc_curve, min_minutes: 18, max_minutes: 26, computed_at: '2026-10-28T14:20:27Z', reason: null, basis: 'SoC 42 % → 80 %, 60 kW' }
+        - { kind: unknown, min_minutes: null, max_minutes: null, computed_at: '2026-10-28T14:20:27Z', reason: no_soc, basis: null }
+
+    StartChargeRequest:
+      type: object
+      required: [connector_id, vehicle_id, mode, energy_limit_wh]
+      properties:
+        connector_id: { $ref: '#/components/schemas/Id' }
+        vehicle_id: { $ref: '#/components/schemas/Id' }
+        mode: { type: string, enum: [energy_kwh], description: Chỉ hạn mức kWh ở Iteration 2 }
+        energy_limit_wh:
+          type: integer
+          minimum: 1
+          description: Hạn mức tài xế chọn; CSMS cắt thấp hơn nếu tín dụng không đủ (BR-P18)
+
+    ChargeSnapshot:
+      type: object
+      description: Trạng thái của một start intent (D4). Trả cùng hình dạng ở POST /charges và GET /charges/{key}.
+      required: [intent_id, command_id, session_id, outcome, effect_confirmed, version, max_energy_wh]
+      properties:
+        intent_id: { $ref: '#/components/schemas/Id' }
+        command_id:
+          oneOf: [{ $ref: '#/components/schemas/Id' }, { type: 'null' }]
+          description: RemoteStartTransaction đã ghi vào `remote_commands`; null khi bị từ chối trước khi gửi
+        session_id:
+          oneOf: [{ $ref: '#/components/schemas/Id' }, { type: 'null' }]
+          description: Có khi trụ đã gửi StartTransaction khớp intent
+        outcome:
+          type: string
+          description: |
+            Một trong: trạng thái intent `pending`, `sent`, `accepted`, `unknown`, `effect`,
+            `released`; lý do từ chối `credit_unavailable`, `connector_unavailable`,
+            `requiresconfirmation`, `outcome_unknown`; hoặc trạng thái phiên khi đã có phiên
+            (`active`, `paused`, `stopping`, `closed`, `reconciled`, `review`, `orphaned`).
+        effect_confirmed:
+          type: boolean
+          description: true khi `session_id` khác null, tức trụ đã gửi StartTransaction khớp intent
+        version: { type: integer, minimum: 1 }
+        max_energy_wh:
+          type: [integer, 'null']
+          description: Hạn mức sau khi cắt theo tín dụng; khác `energy_limit_wh` gửi lên là đã bị cắt
+
+    StopSnapshot:
+      type: object
+      description: Hình dạng của `DriverChargingService.commandSnapshot` — lệnh dừng mới nhất của phiên
+      required: [command_id, command_status, session_status, effect_confirmed]
+      properties:
+        command_id: { $ref: '#/components/schemas/Id' }
+        command_status:
+          type: string
+          enum: [pending, sent, accepted, rejected, timeout, failed]
+          description: '`remote_commands.status`; `timeout` → app poll progress, operator có thể khôi phục (T72)'
+        session_status:
+          type: string
+          enum: [pending, active, paused, stopping, closed, review, reconciled, orphaned, failed]
+        effect_confirmed:
+          type: boolean
+          description: true khi phiên đã có `meter_stop_wh`, tức trụ đã gửi StopTransaction
+
+    SessionProgress:
+      type: object
+      required: [session_id, status, updated_at, meter_start_wh, consumed_wh, telemetry_quality, pillar]
+      properties:
+        session_id: { $ref: '#/components/schemas/Id' }
+        status:
+          type: string
+          enum: [pending, active, paused, stopping, closed, review, reconciled, orphaned, failed]
+          description: STM-1. `orphaned` = trụ mất liên lạc quá ân hạn (WF-03), app hiện "đang chờ trụ báo cáo"
+        updated_at: { $ref: '#/components/schemas/Timestamp' }
+        meter_start_wh: { type: integer }
+        meter_stop_wh: { type: [integer, 'null'] }
+        energy_wh: { type: [integer, 'null'], description: Điện năng chốt sau StopTransaction }
+        consumed_wh:
+          type: [integer, 'null']
+          description: Điện năng đã sạc tới hiện tại (mẫu mới nhất − meter_start) hoặc `energy_wh` khi đã dừng
+        telemetry_quality:
+          type: string
+          enum: [observed, unknown]
+        limit_value: { type: [integer, 'null'], description: Hạn mức Wh đã áp (BR-P18) }
+        reserved_vnd: { type: [integer, 'null'], description: Số tiền đang giữ trước cho phiên }
+        estimated_cost_vnd:
+          type: [integer, 'null']
+          description: Ước tính theo biểu giá hiện hành (UC-CHG-04); Tuần 9, null cho đến khi có
+        billing_review_required: { type: boolean }
+        settlement_state:
+          type: [string, 'null']
+          description: Trạng thái job quyết toán (`charge_settlement_jobs.state`); null khi chưa dừng
+        settlement_reason: { type: [string, 'null'] }
+        settlement_retry_at: { oneOf: [{ $ref: '#/components/schemas/Timestamp' }, { type: 'null' }] }
+        time_left:
+          oneOf: [{ $ref: '#/components/schemas/TimeLeftEstimate' }, { type: 'null' }]
+        pillar:
+          type: object
+          required: [lifecycle, is_online]
+          properties:
+            lifecycle: { type: string }
+            is_online: { type: boolean }
+            online_changed_at: { oneOf: [{ $ref: '#/components/schemas/Timestamp' }, { type: 'null' }] }
+            last_message_at: { oneOf: [{ $ref: '#/components/schemas/Timestamp' }, { type: 'null' }] }
+
+    ChargingStatement:
+      type: object
+      description: Một dòng `charging_statements`; một phiên một bảng kê, một lần trừ (BR-P45)
+      required: [session_id, driver_id, energy_wh, amount_vnd, earned_points, debit_id, loyalty_entry_id, created_at]
+      properties:
+        session_id: { $ref: '#/components/schemas/Id' }
+        driver_id: { $ref: '#/components/schemas/Id' }
+        energy_wh: { type: integer, minimum: 0 }
+        amount_vnd: { type: integer, minimum: 0, description: 'Đã làm tròn một lần, nửa lên' }
+        earned_points: { type: integer, minimum: 0, description: 'BR-P34, 1 điểm / 1.000 ₫' }
+        debit_id: { $ref: '#/components/schemas/Id' }
+        loyalty_entry_id: { $ref: '#/components/schemas/Id' }
+        created_at: { $ref: '#/components/schemas/Timestamp' }
