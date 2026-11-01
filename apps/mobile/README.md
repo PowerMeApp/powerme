@@ -1,6 +1,49 @@
-# PowerMe — Flutter Driver App (WP3)
+# @powerme/mobile — App tài xế PowerMe (WP3)
 
-Read [screen/function reference](docs/screens.md) and [architecture reference](docs/architecture.md) before coding. These are the two canonical mobile references; [AGENTS.md](AGENTS.md) makes them mandatory. Current SRS/registration and diagrams linked there supersede older MB summaries and charging-mode restrictions.
+| | |
+|---|---|
+| Chủ sở hữu | WP3 — Mobile Developer (Sơn) |
+| Cột mốc | **M3 — 18/10/2026** (giao diện + mock local, PR #70) |
+| Stack | Flutter 3.44.2 / Dart 3.12.2, flutter_riverpod 3.4.3, go_router 16.3.0, vietmap_flutter_gl 4.1.1, geolocator 14.0.2, mobile_scanner 7.4.2; ngoài npm workspaces (ADR-0001, phụ lục 10/2026) |
+| Hợp đồng API | [`docs/api/driver-api.openapi.yaml`](../../docs/api/driver-api.openapi.yaml) + [`docs/api/DRIVER-API-HOP-DONG.md`](../../docs/api/DRIVER-API-HOP-DONG.md) (#69, base `/api/driver/v1`); app hiện **chưa gọi HTTP**, toàn bộ dữ liệu là mock trong bộ nhớ |
+
+Đọc [screen/function reference](docs/screens.md) và [architecture reference](docs/architecture.md) trước khi code. Đây là hai tài liệu chuẩn của mobile; [AGENTS.md](AGENTS.md) bắt buộc đọc chúng. SRS/registration và sơ đồ hiện hành dẫn từ đó thay thế các bản tóm tắt MB cũ.
+
+## Phạm vi
+
+- **MB-01** Khởi tạo app, hệ thống thiết kế, đa ngôn ngữ Việt và Anh
+- **MB-02** Đăng ký và đăng nhập OTP, hồ sơ người dùng, quản lý xe
+- **MB-03** Bản đồ tìm trụ, bộ lọc, trạng thái realtime tới từng súng
+- **MB-04** Quét QR trên màn hình trụ để ghép phiên, remote start và stop
+- **MB-05** Màn hình sạc realtime: SoC, kWh, điện áp, dòng, thời gian, chi phí
+- **MB-06** Lịch sử phiên, xem hoá đơn, báo lỗi trụ
+
+## Ràng buộc
+
+- Backend hiện chỉ nhận **một chế độ bắt đầu phiên: hạn mức kWh** (`mode: energy_kwh`, hợp đồng #69, D4). Mock trong app có thêm `autoFull`, `timed`, `cost`; ba chế độ này chưa có backend và phải được xem là hướng phát triển cho tới khi hợp đồng đổi.
+- Có hai đường bắt đầu phiên **không đi qua app** (quẹt thẻ RFID, thao tác trên trụ). App phải xử lý được việc thấy một phiên mà nó không tạo ra; hợp đồng mô tả ở `DRIVER-API-HOP-DONG.md` §5.
+- Ngưỡng M3: SoC và kWh cập nhật **trong vòng vài giây** kể từ khi simulator gửi `MeterValues`. Giai đoạn mock: polling 5 s theo hợp đồng; SSE dự kiến tuần 10.
+- Giao diện tài xế không hiển thị nhãn demo/mock; ranh giới mock chỉ ghi ở README và `docs/mock-scenarios.md`.
+
+## Chạy trên clone mới
+
+```bash
+cd apps/mobile
+cp config/vietmap.example.json config/vietmap.local.json   # điền apiKey nếu muốn xem bản đồ thật; để rỗng vẫn chạy được
+flutter pub get
+dart format --output=none --set-exit-if-changed .
+flutter analyze
+flutter test
+flutter run -d chrome        # hoặc thiết bị Android API 24+
+```
+
+CI (`.github/workflows/ci.yml`, job `Flutter · Format · Analyze · Test`) chạy đúng bốn lệnh kiểm tra trên với Flutter 3.44.2 cho mọi PR chạm `apps/mobile`. Kết quả 01/11 trên mã PR #70: analyze sạch, **85/85 test**, format sạch sau commit `dart format`.
+
+Ảnh render trong `build/previews/` được tạo bởi `tool/capture_preview_test.dart`; thư mục `build/` không commit, nên các link ảnh trong nhật ký dưới đây chỉ mở được trên máy đã chạy lệnh chụp.
+
+---
+
+## Nhật ký review UI và kiểm chứng local (28/10 → 30/10, mới nhất ở trên)
 
 ## Google Maps SDK removed — 30/10
 
