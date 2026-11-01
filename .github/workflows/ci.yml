@@ -102,11 +102,15 @@ jobs:
       - name: Cài phụ thuộc
         run: flutter pub get
 
+      # Ba bước dưới độc lập: format đỏ vẫn cho analyze và test chạy
+      # để PR nhận đủ ba kết quả trong một lượt.
       - name: Kiểm tra định dạng
         run: dart format --output=none --set-exit-if-changed .
 
       - name: Analyze
+        if: ${{ !cancelled() }}
         run: flutter analyze
 
       - name: Test
+        if: ${{ !cancelled() }}
         run: flutter test
