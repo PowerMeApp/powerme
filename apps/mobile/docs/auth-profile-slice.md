@@ -1,0 +1,20 @@
+# Auth / onboarding / vehicles — 28 October 2026
+
+Resumed 29 October: re-fetched origin with approved access; HEAD still equals origin/main `50a2010` (0/0), local main remains `91d8ec0`. All existing WIP preserved. No commit/push/dependency/diagram/backend edits. Running worker on resume is Astra; no Sol delegation claimed.
+
+Local evidence: formatter 38 files, analyzer no issues, full suite 18 passed, preview capture one passed / nine images. All new auth/profile CTA flows, rejection/consent, account and request generation, mutation races/ownership, selected vehicle compatibility and 320px/200% checked. Reviewed login, onboarding (three steps), account and vehicle edit captures; coordinator reviewed login and onboarding vehicle. Browser/device/backend/gateway/NFR evidence remains pending; final web build result recorded in README.
+
+Visual reference read only: `E:/Project/PowerMe/apps/mobile/lib/features/auth/presentation/auth_screen.dart`; adapted compact functional forms, retained brand, removed no technical labels from new UI because none are rendered. No marketing hero. Original scaffold, assets and diagrams retained.
+
+Before implementation: fetched origin successfully with approved network escalation. HEAD and origin/main are `50a2010dfb217c2f3f6b40e2879a1661dff48f85` (0/0 divergence); local main remains `91d8ec0`. Existing untracked mobile scaffold and rendered diagrams are preserved. Writes are restricted to apps/mobile.
+
+Scope: views 1/2/10 plus navigation and selected-vehicle discovery; FR-01/02/03, UC-ACC-01/02/03, BR-P03/05/16/17, NFR-US-02/SEC-01. Auth/Profile are PKG-3 extensions, not invented WF01 classes. Mock repositories only; WP2 auth/OpenAPI, production consent text, retention and account closure remain pending. No payment or command work.
+
+Acceptance: explicit consent before atomic registration, three onboarding steps, validation and rejected credentials, owned vehicle CRUD/select, empty vehicle recovery, compatibility refetch after edits/selection, route restore gate and allowlisted station references, logout clears private providers and old responses cannot restore an earlier generation. Check 320px/200% text, existing discovery/detail regression, analyzer/tests/web build. No new dependencies.
+
+## Official source research read before implementation
+
+- Flutter packages / go_router 16.3.0 at `9ec29b6d23e79e8cb83a29ad29311c903d7cd07d`: [redirect implementation](https://github.com/flutter/packages/blob/9ec29b6d23e79e8cb83a29ad29311c903d7cd07d/packages/go_router/example/lib/redirection.dart) and [redirect tests](https://github.com/flutter/packages/blob/9ec29b6d23e79e8cb83a29ad29311c903d7cd07d/packages/go_router/example/test/redirection_test.dart). BSD-3-Clause, notices retained. Fits existing router dependency: stable router plus refresh listenable and pre-navigation redirect. The example's username-only login is insufficient; PowerMe uses a mock repository, credential rejection, consent and auth generations. Route guards remain UI controls, not server authorization. No provider dependency from the example is added.
+- Riverpod 3.4.3 at `128a8cacce6ddb73e04675e5204af452c9aec369`: [ProviderScope tests, lines 1–190](https://github.com/rrousselGit/riverpod/blob/128a8cacce6ddb73e04675e5204af452c9aec369/packages/flutter_riverpod/test/provider_scope_test.dart). MIT, existing notices retained. Read invalidation, overrides and asynchronous rebuild regression cases. Fits existing manual providers and adapter injection without code generation. Explicit generation checks are still required; provider disposal alone does not undo a completed repository mutation.
+
+These complementary sources support the existing architecture rather than introducing another auth/navigation framework. PowerMe implementation/tests are project-specific; no source copied verbatim, downloaded code executed or dependencies changed. Maintenance remains bounded manual providers, typed domain errors and contract tests. API ownership, secure credential storage and real restore require WP2 integration evidence.
