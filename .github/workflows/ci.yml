@@ -76,3 +76,37 @@ jobs:
 
       - name: Build
         run: npm run build
+
+  # App tài xế (Flutter) nằm ngoài npm workspaces nên job trên không chạm tới.
+  # Ghim đúng phiên bản trong apps/mobile/.metadata (3.44.2 = c9a6c484).
+  flutter:
+    name: Flutter · Format · Analyze · Test
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: apps/mobile
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2.23.0
+        with:
+          flutter-version: '3.44.2'
+          channel: stable
+          cache: true
+
+      - name: Phiên bản Flutter
+        run: flutter --version
+
+      - name: Cài phụ thuộc
+        run: flutter pub get
+
+      - name: Kiểm tra định dạng
+        run: dart format --output=none --set-exit-if-changed .
+
+      - name: Analyze
+        run: flutter analyze
+
+      - name: Test
+        run: flutter test
