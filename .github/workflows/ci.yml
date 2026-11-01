@@ -99,6 +99,11 @@ jobs:
       - name: Phiên bản Flutter
         run: flutter --version
 
+      # pubspec khai báo asset config/vietmap.local.json nhưng file bị ignore
+      # (chứa key). Làm đúng bước README của app: copy từ bản mẫu, key rỗng.
+      - name: Tạo cấu hình Vietmap rỗng
+        run: cp config/vietmap.example.json config/vietmap.local.json
+
       - name: Cài phụ thuộc
         run: flutter pub get
 
