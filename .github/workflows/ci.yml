@@ -76,3 +76,46 @@ jobs:
 
       - name: Build
         run: npm run build
+
+  # App tài xế (Flutter) nằm ngoài npm workspaces nên job trên không chạm tới.
+  # Ghim đúng phiên bản trong apps/mobile/.metadata (3.44.2 = c9a6c484).
+  flutter:
+    name: Flutter · Format · Analyze · Test
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: apps/mobile
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2.23.0
+        with:
+          flutter-version: '3.44.2'
+          channel: stable
+          cache: true
+
+      - name: Phiên bản Flutter
+        run: flutter --version
+
+      # pubspec khai báo asset config/vietmap.local.json nhưng file bị ignore
+      # (chứa key). Làm đúng bước README của app: copy từ bản mẫu, key rỗng.
+      - name: Tạo cấu hình Vietmap rỗng
+        run: cp config/vietmap.example.json config/vietmap.local.json
+
+      - name: Cài phụ thuộc
+        run: flutter pub get
+
+      # Ba bước dưới độc lập: format đỏ vẫn cho analyze và test chạy
+      # để PR nhận đủ ba kết quả trong một lượt.
+      - name: Kiểm tra định dạng
+        run: dart format --output=none --set-exit-if-changed .
+
+      - name: Analyze
+        if: ${{ !cancelled() }}
+        run: flutter analyze
+
+      - name: Test
+        if: ${{ !cancelled() }}
+        run: flutter test
