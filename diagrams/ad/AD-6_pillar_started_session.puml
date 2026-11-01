@@ -35,14 +35,16 @@ case ([online card of a driver])
 case ([wallet card])
   :Classify station_wallet;
 case ([free-vend tag or unknown tag])
-  :Classify free / unattributed;
+  :Classify unattributed
+  (unknown tag also gets a
+  reconciliation record);
 endswitch
 :ChargingSession\n[active]; <<task>>
 :Monitor until the pillar\nreports the session end (AD-1);
 :ChargingSession\n[closed]; <<task>>
 if ( ) then ([csms_billed])
   :Price, debit Charging Credit,\naward points, send statement;
-else ([station_wallet or free])
+else ([station_wallet or unattributed])
   :Price for reconciliation only;\nno debit, no invoice (ADR-0012);
 endif
 :ChargingSession\n[reconciled]; <<task>>

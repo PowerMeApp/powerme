@@ -306,7 +306,7 @@ describeDb(
       expect(await chain(tx)).toContain('closed -RECONCILE_OK-> reconciled');
     });
 
-    it('payment_mode theo idTag: online → csms_billed, wallet → station_wallet, free vend → free, thẻ lạ → unattributed (+ unknown_id_tag)', async () => {
+    it('payment_mode theo idTag: online → csms_billed, wallet → station_wallet, free vend → unattributed KHÔNG unknown_id_tag, thẻ lạ → unattributed + unknown_id_tag', async () => {
       const online = await start(1, 'CARD-ONLINE', 1000, T('07:00'));
       const wallet = await start(1, 'CARD-WALLET', 1000, T('07:01'));
       const free = await start(1, FREE_VEND_TAG, 1000, T('07:02'));
@@ -317,7 +317,10 @@ describeDb(
         paymentMode: 'station_wallet',
         origin: 'rfid',
       });
-      expect(await session(free)).toMatchObject({ paymentMode: 'free', origin: 'free_vend' });
+      expect(await session(free)).toMatchObject({
+        paymentMode: 'unattributed',
+        origin: 'free_vend',
+      });
       expect(await session(unknown)).toMatchObject({ paymentMode: 'unattributed', origin: 'rfid' });
       expect((await records(unknown)).map((r) => r.recordType)).toEqual(['unknown_id_tag']);
       for (const tx of [online, wallet, free]) {
@@ -364,9 +367,12 @@ describeDb(
       expect(await chain(blocked)).toEqual(['● -START_TRANSACTION-> active']);
     });
 
-    it('thẻ card_kind = free_vend trong sổ (không phải free_vend_tag của trụ) → origin free_vend, payment_mode free', async () => {
+    it('thẻ card_kind = free_vend trong sổ (không phải free_vend_tag của trụ) → origin free_vend, payment_mode unattributed, không bản ghi đối soát', async () => {
       const tx = await start(1, 'CARD-FREEVEND', 3000, T('09:10'));
-      expect(await session(tx)).toMatchObject({ origin: 'free_vend', paymentMode: 'free' });
+      expect(await session(tx)).toMatchObject({
+        origin: 'free_vend',
+        paymentMode: 'unattributed',
+      });
       expect(await records(tx)).toHaveLength(0);
     });
 

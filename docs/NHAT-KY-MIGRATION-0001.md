@@ -64,4 +64,4 @@ Bảng dưới liệt kê từng thay đổi, lý do và cách kiểm. "Test" l�
 - **Backfill** `meter_values.replayed/epoch`, `ocpp_message_log.replayed` và chuyển bản ghi đối soát cũ sang `conflict`/`late_sample`: không (bảng append-only; không sửa bản ghi đối soát đã có người xem).
 - **Code gửi lệnh `remote_commands`:** BE-04.
 - **F41 / Known Gap G9** (dung sai `before_epoch`) và **G10:** vẫn mở, không đụng.
-- **Free vend:** ADR-0012 quyết định 3 viết `unattributed`, schema/code dùng `free`; giữ `free`, ghi ở ADR-0012 mục "Cập nhật 25/10/2026".
+- **Free vend:** ADR-0012 quyết định 3 viết `unattributed`, schema/code dùng `free`; giữ `free`, ghi ở ADR-0012 mục "Cập nhật 25/10/2026". *Đã đóng 01/11/2026: migration 0009 bỏ `free`, free vend → `unattributed`.*

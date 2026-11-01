@@ -64,10 +64,10 @@ export const sessionOriginEnum = pgEnum('session_origin', [
   'hmi_password',
   'free_vend',
 ]);
+// `free` bỏ ở migration 0009 (01/11/2026): free vend → unattributed, phân biệt qua origin.
 export const paymentModeEnum = pgEnum('payment_mode', [
   'csms_billed',
   'station_wallet',
-  'free',
   'unattributed',
 ]);
 export const billingModeEnum = pgEnum('billing_mode', [
