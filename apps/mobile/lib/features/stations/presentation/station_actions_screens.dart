@@ -165,23 +165,20 @@ class _SuggestionsScreenState extends ConsumerState<SuggestionsScreen> {
                   ),
               ],
             ),
-            Text(
-              switch (mode) {
-                SuggestionMode.nearest => copy.text(
-                  'Ưu tiên quãng đường bộ ngắn, trong tầm pin.',
-                  'Prioritizes short road distance within battery range.',
-                ),
-                SuggestionMode.fastest => copy.text(
-                  'Xét tổng thời gian di chuyển + chờ + sạc đến mục tiêu.',
-                  'Considers total drive + wait + charge time to target.',
-                ),
-                SuggestionMode.cheapest => copy.text(
-                  'Ưu tiên chi phí sạc đến mục tiêu, sau đó là thời gian.',
-                  'Prioritizes charging cost to target, then total time.',
-                ),
-              },
-              style: text.bodyMedium?.copyWith(color: PowerMeColors.muted),
-            ),
+            Text(switch (mode) {
+              SuggestionMode.nearest => copy.text(
+                'Ưu tiên quãng đường bộ ngắn, trong tầm pin.',
+                'Prioritizes short road distance within battery range.',
+              ),
+              SuggestionMode.fastest => copy.text(
+                'Xét tổng thời gian di chuyển + chờ + sạc đến mục tiêu.',
+                'Considers total drive + wait + charge time to target.',
+              ),
+              SuggestionMode.cheapest => copy.text(
+                'Ưu tiên chi phí sạc đến mục tiêu, sau đó là thời gian.',
+                'Prioritizes charging cost to target, then total time.',
+              ),
+            }, style: text.bodyMedium?.copyWith(color: PowerMeColors.muted)),
             Text(
               copy.text(
                 'Thời gian và chi phí là khoảng ước tính.',
@@ -233,7 +230,10 @@ class _SuggestionsScreenState extends ConsumerState<SuggestionsScreen> {
               if (o.roadRoute case final route?) ...[
                 RouteSummary(route: route, compact: true, copy: copy),
                 ValueLine(
-                  copy.text('Chờ · Sạc đến mục tiêu', 'Wait · Charge to target'),
+                  copy.text(
+                    'Chờ · Sạc đến mục tiêu',
+                    'Wait · Charge to target',
+                  ),
                   '${minutes(o.waitingSeconds)} · ${minutes(o.chargingSeconds)}',
                 ),
                 ValueLine(
@@ -243,7 +243,10 @@ class _SuggestionsScreenState extends ConsumerState<SuggestionsScreen> {
                 ),
               ] else ...[
                 ValueLine(
-                  copy.text('Di chuyển ước tính · chờ', 'Estimated drive · wait'),
+                  copy.text(
+                    'Di chuyển ước tính · chờ',
+                    'Estimated drive · wait',
+                  ),
                   '${minutes(o.etaSeconds)} · ${minutes(o.waitingSeconds)}',
                 ),
                 ValueLine(

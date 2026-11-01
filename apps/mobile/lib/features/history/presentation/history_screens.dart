@@ -36,7 +36,10 @@ class HistoryScreen extends ConsumerWidget {
         if (h != null) ...[
           const SizedBox(height: 24),
           Text(
-            copy.text('Phiên sạc và bảng kê', 'Charging sessions and statements'),
+            copy.text(
+              'Phiên sạc và bảng kê',
+              'Charging sessions and statements',
+            ),
             style: text.titleLarge,
           ),
           const SizedBox(height: 12),

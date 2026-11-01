@@ -234,16 +234,11 @@ class MenuRow extends StatelessWidget {
       decoration: BoxDecoration(
         color: PowerMeColors.black,
         borderRadius: BorderRadius.circular(10),
-        border: Border.all(
-          color: PowerMeColors.gold.withValues(alpha: .32),
-        ),
+        border: Border.all(color: PowerMeColors.gold.withValues(alpha: .32)),
       ),
       child: Icon(icon, size: 19, color: PowerMeColors.gold),
     ),
-    title: Text(
-      label,
-      style: Theme.of(context).textTheme.titleMedium,
-    ),
+    title: Text(label, style: Theme.of(context).textTheme.titleMedium),
     trailing: const Icon(
       Icons.chevron_right_rounded,
       color: PowerMeColors.muted,

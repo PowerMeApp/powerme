@@ -280,15 +280,9 @@ class VietmapSurfaceState extends ConsumerState<VietmapSurface> {
                                 'Could not load the map. Check your connection or map access.',
                               )
                             : location.busy
-                            ? copy.text(
-                                'Đang lấy vị trí…',
-                                'Locating…',
-                              )
+                            ? copy.text('Đang lấy vị trí…', 'Locating…')
                             : issue ??
-                                  copy.text(
-                                    'Đang tải bản đồ…',
-                                    'Loading map…',
-                                  ),
+                                  copy.text('Đang tải bản đồ…', 'Loading map…'),
                       ),
                       if (_failed)
                         TextButton(

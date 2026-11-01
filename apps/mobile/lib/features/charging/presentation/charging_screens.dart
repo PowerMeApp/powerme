@@ -69,10 +69,7 @@ String settlementLabel(
     'Đang chờ đối soát',
     'Awaiting reconciliation',
   ),
-  SettlementState.posted => copy.text(
-    'Đã ghi sổ tín dụng',
-    'Credit posted',
-  ),
+  SettlementState.posted => copy.text('Đã ghi sổ tín dụng', 'Credit posted'),
   SettlementState.review => copy.text('Cần kiểm tra', 'Under review'),
   SettlementState.notApplicable => copy.text(
     'Không trừ tín dụng PowerMe',
@@ -288,7 +285,9 @@ class _StartScreenState extends ConsumerState<StartScreen> {
         if (s.session != null && !s.session!.ended && !waiting)
           TextButton(
             onPressed: () => context.go('/charging'),
-            child: Text(copy.text('Xem phiên hiện tại', 'View current session')),
+            child: Text(
+              copy.text('Xem phiên hiện tại', 'View current session'),
+            ),
           ),
       ],
     );
@@ -340,9 +339,7 @@ class ActiveSessionScreen extends ConsumerWidget {
                 ),
                 FilledButton(
                   onPressed: () => context.push('/start'),
-                  child: Text(
-                    copy.text('Chọn cổng sạc', 'Choose connector'),
-                  ),
+                  child: Text(copy.text('Chọn cổng sạc', 'Choose connector')),
                 ),
               ],
             )
@@ -678,9 +675,7 @@ class StatementScreen extends ConsumerWidget {
         const SizedBox(height: 8),
         TextButton(
           onPressed: () => context.go('/history'),
-          child: Text(
-            copy.text('Lịch sử và hóa đơn', 'History and invoices'),
-          ),
+          child: Text(copy.text('Lịch sử và hóa đơn', 'History and invoices')),
         ),
       ],
     );

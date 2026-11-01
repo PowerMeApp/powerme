@@ -207,9 +207,7 @@ class _CreditScreenState extends ConsumerState<CreditScreen> {
             FilledButton(
               key: const Key('create-topup'),
               onPressed: s.busy ? null : create,
-              child: Text(
-                copy.text('Tiếp tục đến VNPay', 'Continue to VNPay'),
-              ),
+              child: Text(copy.text('Tiếp tục đến VNPay', 'Continue to VNPay')),
             ),
           ],
         ),
@@ -408,7 +406,9 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
           key: const Key('close-checkout'),
           onPressed: () =>
               context.canPop() ? context.pop() : context.go('/credit'),
-          child: Text(copy.text('Đóng và kiểm tra sau', 'Close and check later')),
+          child: Text(
+            copy.text('Đóng và kiểm tra sau', 'Close and check later'),
+          ),
         ),
       ],
     );
