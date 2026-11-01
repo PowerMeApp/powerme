@@ -86,7 +86,7 @@ class ManualScheduler implements Scheduler {
 }
 
 /** Trụ giả: câu trả lời cho Reset do test đặt trước. */
-class ScriptedPillar implements OcppClientLike {
+class ScriptedChargePoint implements OcppClientLike {
   readonly calls: { method: string; params: unknown }[] = [];
   resetReply: { status: string } | Error = { status: 'Accepted' };
   constructor(readonly identity: string) {}
@@ -118,7 +118,7 @@ describeDb('WF-04 — sự cố trụ, cảnh báo và Reset từ xa (STM-6, FE-
   let faults: FaultService;
   let scheduler: ManualScheduler;
   let consoleServer: ConsoleServer;
-  let pillar: ScriptedPillar;
+  let chargePoint: ScriptedChargePoint;
   let conn: Connection;
   let cpId: number;
   let base: string;
@@ -216,8 +216,8 @@ describeDb('WF-04 — sự cố trụ, cảnh báo và Reset từ xa (STM-6, FE-
       new OcppHandlers(sessionsService, CONFIG, undefined, faults),
       sessionsService,
     );
-    pillar = new ScriptedPillar(CP);
-    conn = await registry.open(CP, pillar, { openedAt: new Date(clock) });
+    chargePoint = new ScriptedChargePoint(CP);
+    conn = await registry.open(CP, chargePoint, { openedAt: new Date(clock) });
 
     consoleServer = new ConsoleServer(
       CONFIG,
@@ -242,8 +242,8 @@ describeDb('WF-04 — sự cố trụ, cảnh báo và Reset từ xa (STM-6, FE-
     // Mỗi test bắt đầu khi không còn sự cố nào và hai súng Available (qua đường thật của trụ).
     faults.cancelAll();
     scheduler.timers.length = 0;
-    pillar.resetReply = { status: 'Accepted' };
-    pillar.calls.length = 0;
+    chargePoint.resetReply = { status: 'Accepted' };
+    chargePoint.calls.length = 0;
     await db.delete(faultEvents);
     await db.delete(remoteCommands);
     for (const c of [1, 2])
@@ -392,7 +392,7 @@ describeDb('WF-04 — sự cố trụ, cảnh báo và Reset từ xa (STM-6, FE-
     );
     expect(r.status).toBe(200);
     expect(r.body).toMatchObject({ reset_status: 'Accepted', fault_status: 'resetting' });
-    expect(pillar.calls).toEqual([{ method: 'Reset', params: { type: 'Hard' } }]);
+    expect(chargePoint.calls).toEqual([{ method: 'Reset', params: { type: 'Hard' } }]);
     const [cmd] = await db
       .select()
       .from(remoteCommands)
@@ -420,7 +420,7 @@ describeDb('WF-04 — sự cố trụ, cảnh báo và Reset từ xa (STM-6, FE-
     await status(1, 'Faulted', 'ConnectorLockFailure');
     const id = (await onlyFault()).id;
     await post(`/api/admin/faults/${id}/acknowledge`);
-    pillar.resetReply = { status: 'Rejected' };
+    chargePoint.resetReply = { status: 'Rejected' };
     const r = await post<{ reset_status: string; fault_status: string; command_id: number }>(
       `/api/admin/faults/${id}/reset`,
     );
@@ -432,7 +432,7 @@ describeDb('WF-04 — sự cố trụ, cảnh báo và Reset từ xa (STM-6, FE-
     expect(cmd?.status).toBe('rejected');
     expect(scheduler.live).toHaveLength(0);
 
-    pillar.resetReply = { status: 'Accepted' };
+    chargePoint.resetReply = { status: 'Accepted' };
     const again = await post<{ fault_status: string }>(`/api/admin/faults/${id}/reset`);
     expect(again.body.fault_status).toBe('resetting');
   });
@@ -441,7 +441,7 @@ describeDb('WF-04 — sự cố trụ, cảnh báo và Reset từ xa (STM-6, FE-
     await status(1, 'Faulted', 'InternalError');
     const id = (await onlyFault()).id;
     await post(`/api/admin/faults/${id}/acknowledge`);
-    pillar.resetReply = new Error('timeout');
+    chargePoint.resetReply = new Error('timeout');
     const r = await post<{ error: string }>(`/api/admin/faults/${id}/reset`);
     expect(r).toMatchObject({ status: 502, body: { error: 'station_error' } });
     const [cmd] = await db.select().from(remoteCommands);
@@ -546,7 +546,7 @@ describeDb('WF-04 — sự cố trụ, cảnh báo và Reset từ xa (STM-6, FE-
     const r = await post<{ error: string }>(`/api/admin/faults/${offFault!.id}/reset`);
     expect(r).toMatchObject({ status: 409, body: { error: 'station_offline' } });
     expect(await db.select().from(remoteCommands)).toHaveLength(0);
-    expect(pillar.calls).toHaveLength(0);
+    expect(chargePoint.calls).toHaveLength(0);
   });
 
   it('console: danh sách mặc định chỉ sự cố mở, nặng trước; ?status=all có cả resolved', async () => {
@@ -608,7 +608,7 @@ describeDb('WF-04 — sự cố trụ, cảnh báo và Reset từ xa (STM-6, FE-
     expect(refused).toMatchObject({ status: 409, body: { error: 'sessions_active' } });
     expect(refused.body.detail).toContain('súng 2');
     expect(await db.select().from(remoteCommands)).toHaveLength(0);
-    expect(pillar.calls).toHaveLength(0);
+    expect(chargePoint.calls).toHaveLength(0);
     expect((await onlyFault()).status).toBe('acknowledged');
 
     const forced = await post<{ forced: boolean; fault_status: string; command_id: number }>(
@@ -675,7 +675,7 @@ describeDb('WF-04 — sự cố trụ, cảnh báo và Reset từ xa (STM-6, FE-
 
   it('IT-15: danh sách sắp theo mức nặng TRƯỚC khi cắt limit — 25 lỗi nhẹ mới hơn không đẩy lỗi nghiêm trọng cũ ra khỏi ?limit=20', async () => {
     // 13 trụ × 2 súng = 26 súng, mỗi súng một sự cố mở (bất biến một sự cố mở mỗi súng).
-    const pillars = await db
+    const chargePointRows = await db
       .insert(chargePoints)
       .values(
         Array.from({ length: 13 }, (_, i) => ({
@@ -688,7 +688,9 @@ describeDb('WF-04 — sự cố trụ, cảnh báo và Reset từ xa (STM-6, FE-
     const conns = await db
       .insert(connectors)
       .values(
-        pillars.flatMap((p) => [1, 2].map((connectorNo) => ({ chargePointId: p.id, connectorNo }))),
+        chargePointRows.flatMap((p) =>
+          [1, 2].map((connectorNo) => ({ chargePointId: p.id, connectorNo })),
+        ),
       )
       .returning({ id: connectors.id, chargePointId: connectors.chargePointId });
     const t0 = Date.parse('2026-10-27T06:00:00Z');
@@ -709,7 +711,7 @@ describeDb('WF-04 — sự cố trụ, cảnh báo và Reset từ xa (STM-6, FE-
     expect(list.slice(1).every((f) => f.severity === 'minor')).toBe(true);
 
     await db.delete(faultEvents);
-    const ids = pillars.map((p) => p.id);
+    const ids = chargePointRows.map((p) => p.id);
     await db.delete(connectors).where(inArray(connectors.chargePointId, ids));
     await db.delete(chargePoints).where(inArray(chargePoints.id, ids));
   });
@@ -805,7 +807,7 @@ describeDb('WF-04 — sự cố trụ, cảnh báo và Reset từ xa (STM-6, FE-
     expect((await post(`/api/admin/faults/${id}/reset`)).status).toBe(200); // c1 → resetting
     const r = await post<{ error: string }>(`/api/admin/faults/${second}/reset`);
     expect(r).toMatchObject({ status: 409, body: { error: 'reset_in_progress' } });
-    expect(pillar.calls.filter((c) => c.method === 'Reset')).toHaveLength(1);
+    expect(chargePoint.calls.filter((c) => c.method === 'Reset')).toHaveLength(1);
   });
 
   it('khởi động lại CSMS: sự cố resetting quá hạn → acknowledged; còn trong hạn → hẹn giờ phần còn lại', async () => {

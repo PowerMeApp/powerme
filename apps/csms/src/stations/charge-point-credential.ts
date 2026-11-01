@@ -1,9 +1,9 @@
 /**
- * Pillar credential for OCPP Security Profile 2 (HTTP Basic auth over TLS, ADR-0011).
+ * Charge point credential for OCPP Security Profile 2 (HTTP Basic auth over TLS, ADR-0011).
  * Today the CSMS listens on plain ws:// (TLS comes with Caddy on staging, T04), so until then the
  * password crosses the network in clear text: Profile 2 is the target, not the current state.
  *
- * Why it exists: SD-5a issues one password per pillar at onboarding and shows it ONCE; only a
+ * Why it exists: SD-5a issues one password per charge point at onboarding and shows it ONCE; only a
  * salted hash is stored in `charge_points.basic_auth_password_hash`. SD-5b verifies it at the
  * WebSocket upgrade.
  *
@@ -32,18 +32,18 @@ function scryptAsync(password: Buffer, salt: Buffer, n: number, r: number, p: nu
 }
 
 /** New random credential (plain text) — returned to the operator once, never stored. */
-export function generatePillarPassword(): string {
+export function generateChargePointPassword(): string {
   return randomBytes(18).toString('base64url');
 }
 
-export async function hashPillarPassword(password: string): Promise<string> {
+export async function hashChargePointPassword(password: string): Promise<string> {
   const salt = randomBytes(16);
   const key = await scryptAsync(Buffer.from(password, 'utf8'), salt, N, R, P);
   return [PREFIX, N, R, P, salt.toString('base64url'), key.toString('base64url')].join('$');
 }
 
 /** Constant-time check. A malformed stored hash never matches. */
-export async function verifyPillarPassword(
+export async function verifyChargePointPassword(
   password: Buffer | string | undefined | null,
   stored: string,
 ): Promise<boolean> {

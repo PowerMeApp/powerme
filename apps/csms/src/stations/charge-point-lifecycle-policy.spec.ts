@@ -1,23 +1,23 @@
 /**
- * STM-3 ChargingPillar lifecycle — one test per transition (TC-STM3-01..06, Brief A3) plus the
+ * STM-3 ChargePoint lifecycle — one test per transition (TC-STM3-01..06, Brief A3) plus the
  * invalid moves CD-5 says the policy must refuse.
  */
 import {
-  InvalidPillarTransitionError,
-  PillarLifecycle,
-  PillarLifecycleEvent,
-  PillarLifecyclePolicy,
+  InvalidChargePointTransitionError,
+  ChargePointLifecycle,
+  ChargePointLifecycleEvent,
+  ChargePointLifecyclePolicy,
   STM3_TRANSITIONS,
-} from './pillar-lifecycle-policy';
+} from './charge-point-lifecycle-policy';
 
-describe('PillarLifecyclePolicy (STM-3 v0.3, ADR-0016)', () => {
-  const policy = new PillarLifecyclePolicy();
+describe('ChargePointLifecyclePolicy (STM-3 v0.3, ADR-0016)', () => {
+  const policy = new ChargePointLifecyclePolicy();
 
   it('has exactly the 6 decided transitions', () => {
     expect(STM3_TRANSITIONS.map((t) => t.no)).toEqual([1, 2, 3, 4, 5, 6]);
   });
 
-  it.each<[string, PillarLifecycle | null, PillarLifecycleEvent, PillarLifecycle]>([
+  it.each<[string, ChargePointLifecycle | null, ChargePointLifecycleEvent, ChargePointLifecycle]>([
     ['TC-STM3-01 [*] → registered (Admin registers serial)', null, 'REGISTER', 'registered'],
     [
       'TC-STM3-02 registered → awaiting_connection (onboard)',
@@ -39,7 +39,7 @@ describe('PillarLifecyclePolicy (STM-3 v0.3, ADR-0016)', () => {
     expect(policy.transition(from, event)).toBe(to);
   });
 
-  it.each<[PillarLifecycle | null, PillarLifecycleEvent]>([
+  it.each<[ChargePointLifecycle | null, ChargePointLifecycleEvent]>([
     ['awaiting_connection', 'ONBOARD'], // onboarding twice
     ['in_service', 'ONBOARD'],
     ['registered', 'FIRST_CONNECT'], // connecting before onboarding
@@ -48,7 +48,7 @@ describe('PillarLifecyclePolicy (STM-3 v0.3, ADR-0016)', () => {
     ['registered', 'REGISTER'],
   ])('refuses %s + %s', (from, event) => {
     expect(policy.canApply(from, event)).toBe(false);
-    expect(() => policy.transition(from, event)).toThrow(InvalidPillarTransitionError);
+    expect(() => policy.transition(from, event)).toThrow(InvalidChargePointTransitionError);
   });
 
   it('treats the legacy lifecycle value "offline" as in_service (legacy, no longer written since T61)', () => {
@@ -56,7 +56,7 @@ describe('PillarLifecyclePolicy (STM-3 v0.3, ADR-0016)', () => {
     expect(policy.canApply('offline', 'ONBOARD')).toBe(false);
   });
 
-  it('only onboarded, not retired pillars may open an OCPP connection', () => {
+  it('only onboarded, not retired charge points may open an OCPP connection', () => {
     expect(policy.mayConnect('registered')).toBe(false);
     expect(policy.mayConnect('decommissioned')).toBe(false);
     expect(policy.mayConnect('awaiting_connection')).toBe(true);

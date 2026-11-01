@@ -24,7 +24,7 @@ NFR đã đăng ký "OCPP-J over TLS". `ocpp-rpc` (ADR-0004) đã hỗ trợ s�
 
 Security Profile 2 là **mục tiêu**, chưa phải trạng thái hiện tại:
 
-- Basic Auth đã chạy: `PillarAuthService` kiểm mật khẩu lúc nâng cấp WebSocket (404 / 403 / 401), trụ chưa có credential bị từ chối trừ khi bật `ALLOW_LEGACY_NO_CREDENTIAL` (PR #33, #35).
+- Basic Auth đã chạy: `ChargePointAuthService` kiểm mật khẩu lúc nâng cấp WebSocket (404 / 403 / 401), trụ chưa có credential bị từ chối trừ khi bật `ALLOW_LEGACY_NO_CREDENTIAL` (PR #33, #35).
 - **Chưa có TLS:** CSMS lắng nghe `ws://`, nên mật khẩu đi dạng rõ trên mạng. Thực tế hiện nay gần với Security Profile 1. TLS có khi dựng Caddy trên staging (T04).
 - Cho tới lúc đó: chỉ nối trụ hoặc simulator trong mạng dev/LAN, không đưa cổng OCPP ra Internet.
 

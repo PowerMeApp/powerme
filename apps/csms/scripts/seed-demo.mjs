@@ -4,7 +4,7 @@
  *
  * Vì sao tồn tại: staging chạy với ALLOW_LEGACY_NO_CREDENTIAL=false (mặc định) nên trụ không có
  * `basic_auth_password_hash` bị 401. seed.sql không tạo credential (nó có trước WF-05), nên script
- * này băm DEMO_PILLAR_PASSWORD bằng đúng hàm của CSMS (scrypt, src/stations/pillar-credential.ts —
+ * này băm DEMO_PILLAR_PASSWORD bằng đúng hàm của CSMS (scrypt, src/stations/charge-point-credential.ts —
  * bản đã build trong dist/) và ghi vào charge_points. Simulator dùng cùng mật khẩu (CP_PASSWORD).
  *
  * Idempotent: chạy lại không nhân đôi dòng; hash luôn được ghi lại, nên đổi DEMO_PILLAR_PASSWORD
@@ -36,9 +36,9 @@ export function checkPassword(password) {
 
 /** Băm bằng hàm của CSMS đã build; không sao chép thuật toán sang đây. */
 async function loadHasher() {
-  const file = path.resolve(here, '..', 'dist', 'stations', 'pillar-credential.js');
+  const file = path.resolve(here, '..', 'dist', 'stations', 'charge-point-credential.js');
   try {
-    return (await import(pathToFileURL(file).href)).hashPillarPassword;
+    return (await import(pathToFileURL(file).href)).hashChargePointPassword;
   } catch (err) {
     throw new Error(
       `không nạp được ${file} (đã chạy "npm run build -w @powerme/csms" chưa?): ${err.message}`,
@@ -50,8 +50,8 @@ async function loadHasher() {
 export async function seedDemo(client, password, log = () => {}) {
   const bad = checkPassword(password);
   if (bad) throw new Error(bad);
-  const hashPillarPassword = await loadHasher();
-  const hash = await hashPillarPassword(password);
+  const hashChargePointPassword = await loadHasher();
+  const hash = await hashChargePointPassword(password);
 
   await client.query(readFileSync(SEED_SQL, 'utf8'));
   const upd = await client.query(

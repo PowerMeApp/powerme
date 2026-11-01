@@ -128,11 +128,11 @@ Lệnh chung: unit test `npm test -w @powerme/csms -- <tên>` (không cần DB);
 ### Ân (WP1)
 | Câu | File | Ý trả lời |
 |---|---|---|
-| "Kẻ xấu biết serial trụ, thử mật khẩu sai 5 lần — trụ thật có bị khoá không?" | `stations/pillar-login-limiter.ts:33` | Khoá theo (serial, IP) nên chỉ kẻ xấu bị khoá; trụ thật ở IP khác vẫn vào. Cần `OCPP_TRUST_PROXY=true` sau Caddy (#63) |
-| "Trụ chưa onboard mà nối vào?" | `pillar-auth.service.ts` | Không có credential → 401 (trừ `ALLOW_LEGACY_NO_CREDENTIAL`, chỉ demo local); serial chưa đăng ký → 404 |
-| "STM-3 có 6 chuyển, `disabled` ai đặt?" | `pillar-lifecycle-policy.ts:46` | Chưa có endpoint gọi DISABLE/ENABLE/DECOMMISSION (G11, 14/11) |
+| "Kẻ xấu biết serial trụ, thử mật khẩu sai 5 lần — trụ thật có bị khoá không?" | `stations/charge-point-login-limiter.ts:33` | Khoá theo (serial, IP) nên chỉ kẻ xấu bị khoá; trụ thật ở IP khác vẫn vào. Cần `OCPP_TRUST_PROXY=true` sau Caddy (#63) |
+| "Trụ chưa onboard mà nối vào?" | `charge-point-auth.service.ts` | Không có credential → 401 (trừ `ALLOW_LEGACY_NO_CREDENTIAL`, chỉ demo local); serial chưa đăng ký → 404 |
+| "STM-3 có 6 chuyển, `disabled` ai đặt?" | `charge-point-lifecycle-policy.ts:46` | Chưa có endpoint gọi DISABLE/ENABLE/DECOMMISSION (G11, 14/11) |
 
-**Sửa tại chỗ:** đổi `perSerial.maxFailures` 5 → 3, chạy `-- pillar-login-limiter`; thêm chuyển `in_service --DECOMMISSION--> decommissioned` và test `-- pillar-lifecycle-policy`.
+**Sửa tại chỗ:** đổi `perSerial.maxFailures` 5 → 3, chạy `-- charge-point-login-limiter`; thêm chuyển `in_service --DECOMMISSION--> decommissioned` và test `-- charge-point-lifecycle-policy`.
 
 ---
 

@@ -1,5 +1,5 @@
 /**
- * PillarLoginLimiter — caps failed Basic-auth upgrades before PillarAuthService spends a scrypt
+ * ChargePointLoginLimiter — caps failed Basic-auth upgrades before ChargePointAuthService spends a scrypt
  * hash on them (issue #40, ADR-0011 "Consequences — costs").
  *
  * Two counters, each a sliding window of failure times:
@@ -11,7 +11,7 @@
  * flight, so a burst of parallel upgrades cannot get past the counters before they are written.
  *
  * The serial counter is keyed with the IP so that a stranger who knows a serial (printed on the
- * pillar) locks out only themselves, not the real pillar on its own connection.
+ * charge point) locks out only themselves, not the real charge point on its own connection.
  *
  * Known limit: the state is in memory, so it resets on restart and is not shared between
  * processes. That is enough for the single-process CSMS (ADR-0002); move it to Redis when there
@@ -24,12 +24,12 @@ export interface LoginLimitRule {
   lockMs: number;
 }
 
-export interface PillarLoginLimits {
+export interface ChargePointLoginLimits {
   perSerial: LoginLimitRule;
   perIp: LoginLimitRule;
 }
 
-export const DEFAULT_PILLAR_LOGIN_LIMITS: PillarLoginLimits = {
+export const DEFAULT_CHARGE_POINT_LOGIN_LIMITS: ChargePointLoginLimits = {
   perSerial: { maxFailures: 5, windowMs: 60_000, lockMs: 15 * 60_000 },
   perIp: { maxFailures: 20, windowMs: 60_000, lockMs: 15 * 60_000 },
 };
@@ -51,13 +51,13 @@ export interface FailureResult {
   ipFailures: number;
 }
 
-export class PillarLoginLimiter {
+export class ChargePointLoginLimiter {
   private readonly bySerial = new Map<string, Entry>();
   private readonly byIp = new Map<string, Entry>();
   private readonly inFlight = new Map<string, number>();
 
   constructor(
-    private readonly limits: PillarLoginLimits = DEFAULT_PILLAR_LOGIN_LIMITS,
+    private readonly limits: ChargePointLoginLimits = DEFAULT_CHARGE_POINT_LOGIN_LIMITS,
     private readonly now: () => number = Date.now,
   ) {}
 

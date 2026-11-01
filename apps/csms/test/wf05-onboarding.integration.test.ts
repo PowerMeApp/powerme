@@ -1,11 +1,11 @@
 /**
- * Integration test WF-05 "Onboard a pillar and bring it into service" (owner Trần Đức Ân, WP1).
+ * Integration test WF-05 "Onboard a charge point and bring it into service" (owner Trần Đức Ân, WP1).
  *
  * Runs the whole workflow against a real Postgres and a REAL OCPP-J WebSocket:
  *   SD-5a  Admin registers the serial (STM-3 #1) → operator staff onboards it onto their own site
  *          (STM-3 #2): 403 for another operator's site, 409 for an unknown or already onboarded
  *          serial, 400 for bad connectors; success returns the credential once.
- *   SD-5b  The pillar connects with Basic auth: wrong password → 401, not onboarded → 403;
+ *   SD-5b  The charge point connects with Basic auth: wrong password → 401, not onboarded → 403;
  *          right password → BootNotification Accepted, lifecycle in_service (STM-3 #3),
  *          StatusNotification Available on both connectors (STM-2 Unavailable → Available).
  *
@@ -33,13 +33,13 @@ import { ReconciliationService } from '../src/reconciliation/reconciliation.serv
 import { ReplayDetector } from '../src/reconciliation/replay-detector.js';
 import { SessionStateMachine } from '../src/sessions/session-state-machine.js';
 import { SessionsService } from '../src/sessions/sessions.service.js';
-import { PillarAuthService } from '../src/stations/pillar-auth.service.js';
-import { PillarLoginLimiter } from '../src/stations/pillar-login-limiter.js';
+import { ChargePointAuthService } from '../src/stations/charge-point-auth.service.js';
+import { ChargePointLoginLimiter } from '../src/stations/charge-point-login-limiter.js';
 import { resetAndMigrate } from './helpers/apply-migrations.js';
 import {
   OnboardingError,
-  PillarOnboardingService,
-} from '../src/stations/pillar-onboarding.service.js';
+  ChargePointOnboardingService,
+} from '../src/stations/charge-point-onboarding.service.js';
 
 const DATABASE_URL = process.env['DATABASE_URL'];
 const describeDb = DATABASE_URL ? describe : describe.skip;
@@ -75,7 +75,7 @@ async function expectOnboardingError(p: Promise<unknown>, code: string, status: 
 /** ocpp-rpc's typings mark every option as required; the runtime fills the defaults. */
 type ClientOptions = ConstructorParameters<typeof RPCClient>[0];
 
-function pillarClient(identity: string, password: string | null) {
+function chargePointClient(identity: string, password: string | null) {
   const options = {
     endpoint: `ws://127.0.0.1:${OCPP_PORT}/ocpp`,
     identity,
@@ -87,9 +87,9 @@ function pillarClient(identity: string, password: string | null) {
   return new RPCClient(options);
 }
 
-describeDb('WF-05 — onboard a pillar and bring it into service (SD-5a, SD-5b)', () => {
+describeDb('WF-05 — onboard a charge point and bring it into service (SD-5a, SD-5b)', () => {
   let db: Db;
-  let onboarding: PillarOnboardingService;
+  let onboarding: ChargePointOnboardingService;
   let server: OcppServer;
   let adminId: number;
   let staffAId: number;
@@ -136,7 +136,7 @@ describeDb('WF-05 — onboard a pillar and bring it into service (SD-5a, SD-5b)'
       .insert(operatorStaff)
       .values({ userId: staffAId, operatorId: opA!.id, staffRole: 'manager' });
 
-    onboarding = new PillarOnboardingService(db, CONFIG);
+    onboarding = new ChargePointOnboardingService(db, CONFIG);
     const sessions = new SessionsService(
       db,
       new SessionStateMachine(),
@@ -151,7 +151,7 @@ describeDb('WF-05 — onboard a pillar and bring it into service (SD-5a, SD-5b)'
       new ReplayDetector(CONFIG.replaySkewThresholdS),
       new OcppHandlers(sessions, CONFIG),
       sessions,
-      new PillarAuthService(db, CONFIG),
+      new ChargePointAuthService(db, CONFIG),
     );
     await server.start();
   });
@@ -179,8 +179,8 @@ describeDb('WF-05 — onboard a pillar and bring it into service (SD-5a, SD-5b)'
     );
   });
 
-  it('a registered but not onboarded pillar cannot connect (403)', async () => {
-    const c = pillarClient(SERIAL, 'anything-anything-1');
+  it('a registered but not onboarded charge point cannot connect (403)', async () => {
+    const c = chargePointClient(SERIAL, 'anything-anything-1');
     clients.push(c);
     await expect(c.connect()).rejects.toThrow(/Forbidden/); // HTTP 403;
   });
@@ -254,7 +254,7 @@ describeDb('WF-05 — onboard a pillar and bring it into service (SD-5a, SD-5b)'
     ]);
   });
 
-  it('cannot onboard the same pillar twice (409)', async () => {
+  it('cannot onboard the same charge point twice (409)', async () => {
     await expectOnboardingError(
       onboarding.onboard(staffAId, {
         serialNumber: SERIAL,
@@ -266,7 +266,7 @@ describeDb('WF-05 — onboard a pillar and bring it into service (SD-5a, SD-5b)'
     );
   });
 
-  it('pillars onboarded at the same time in one province get distinct display codes', async () => {
+  it('charge points onboarded at the same time in one province get distinct display codes', async () => {
     const serials = [78, 79, 80, 81, 82, 83].map((n) => `RH24D1-000${n}`);
     for (const s of serials) {
       await onboarding.registerDevice(adminId, { serialNumber: s, model: 'D1-120' });
@@ -285,23 +285,26 @@ describeDb('WF-05 — onboard a pillar and bring it into service (SD-5a, SD-5b)'
     );
   });
 
-  // ---- Review of PR #33, decision 2: pillar with no credential on file ----------------------
+  // ---- Review of PR #33, decision 2: charge point with no credential on file ----------------------
 
-  it('a pillar with no credential on file: 401 by default, accepted only with ALLOW_LEGACY_NO_CREDENTIAL', async () => {
+  it('a charge point with no credential on file: 401 by default, accepted only with ALLOW_LEGACY_NO_CREDENTIAL', async () => {
     await db
       .insert(chargePoints)
       .values({ serialNumber: 'LEGACY-SEED-0001', lifecycle: 'in_service' });
 
-    const strict = await new PillarAuthService(db, {
+    const strict = await new ChargePointAuthService(db, {
       ...CONFIG,
       allowLegacyNoCredential: false,
     }).verify('LEGACY-SEED-0001', undefined);
     expect(strict).toMatchObject({ ok: false, status: 401 });
 
-    const defaulted = await new PillarAuthService(db, CONFIG).verify('LEGACY-SEED-0001', undefined);
+    const defaulted = await new ChargePointAuthService(db, CONFIG).verify(
+      'LEGACY-SEED-0001',
+      undefined,
+    );
     expect(defaulted).toMatchObject({ ok: false, status: 401 }); // the test CONFIG leaves it off
 
-    const legacy = await new PillarAuthService(db, {
+    const legacy = await new ChargePointAuthService(db, {
       ...CONFIG,
       allowLegacyNoCredential: true,
     }).verify('LEGACY-SEED-0001', undefined);
@@ -310,9 +313,9 @@ describeDb('WF-05 — onboard a pillar and bring it into service (SD-5a, SD-5b)'
 
   // ---- SD-5b: first connection -----------------------------------------------------------
 
-  it('wrong or missing credential → 401, pillar stays awaiting_connection', async () => {
-    const wrong = pillarClient(SERIAL, 'wrong-password-123456');
-    const none = pillarClient(SERIAL, null);
+  it('wrong or missing credential → 401, charge point stays awaiting_connection', async () => {
+    const wrong = chargePointClient(SERIAL, 'wrong-password-123456');
+    const none = chargePointClient(SERIAL, null);
     clients.push(wrong, none);
     await expect(wrong.connect()).rejects.toThrow(/Unauthorized/); // HTTP 401;
     await expect(none.connect()).rejects.toThrow(/Unauthorized/); // HTTP 401;
@@ -324,7 +327,7 @@ describeDb('WF-05 — onboard a pillar and bring it into service (SD-5a, SD-5b)'
   });
 
   it('right credential → Boot Accepted, in_service (STM-3 #3), connectors Available (STM-2)', async () => {
-    const c = pillarClient(SERIAL, password);
+    const c = chargePointClient(SERIAL, password);
     clients.push(c);
     c.handle('TriggerMessage', async () => ({ status: 'Accepted' }));
     await c.connect();
@@ -372,13 +375,17 @@ describeDb('WF-05 — onboard a pillar and bring it into service (SD-5a, SD-5b)'
 
   it('5 wrong passwords → the 6th attempt gets 429 even with the right password; accepted again after 15 min', async () => {
     let now = Date.now();
-    const auth = new PillarAuthService(db, CONFIG, new PillarLoginLimiter(undefined, () => now));
+    const auth = new ChargePointAuthService(
+      db,
+      CONFIG,
+      new ChargePointLoginLimiter(undefined, () => now),
+    );
     const ip = '203.0.113.7';
     for (let i = 0; i < 5; i++) {
       expect(await auth.verify(SERIAL, 'wrong-password-123456', ip)).toMatchObject({ status: 401 });
     }
     expect(await auth.verify(SERIAL, password, ip)).toMatchObject({ ok: false, status: 429 });
-    // The real pillar on its own connection is not locked out by a stranger who knows the serial.
+    // The real charge point on its own connection is not locked out by a stranger who knows the serial.
     expect(await auth.verify(SERIAL, password, '198.51.100.1')).toMatchObject({ ok: true });
 
     now += 15 * 60_000;

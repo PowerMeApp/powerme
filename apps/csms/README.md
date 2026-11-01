@@ -85,7 +85,7 @@ Callers must obtain principal IDs from authenticated server context before invok
   with compatible connectors and string resource IDs. Input supports literal accent-insensitive Vietnamese
   name/code/address search, availability, optional coordinates/radius, name/distance sort, page/pageSize
   (maximum 100), and explicit VinFast-only override. Distance is straight-line metres, not route/ETA.
-  Disabled pillars/inactive operators are excluded; connectivity, raw status and freshness remain separate.
+  Disabled charge points/inactive operators are excluded; connectivity, raw status and freshness remain separate.
   Stale/future status cannot promise Available. `resolveConnector` uses exact code/gun lookup independently
   of pagination. Ranking, travel/wait/charging estimates and recommendations remain WP4 dependencies.
 
@@ -112,7 +112,7 @@ reset only its schema. Run `npm test -w @powerme/csms -- --runInBand` with that 
   **same business intent and physical transaction** after an unknown/sent or Accepted-without-effect stop.
   There is no new client business key. Persisted linkage to the previous command makes duplicate requests
   return the same attempt, including historical requests after a newer recovery. Recovery requires the
-  current registry/DB epoch, online pillar, current Charging/Suspended status and non-replayed aggregate
+  current registry/DB epoch, online charge point, current Charging/Suspended status and non-replayed aggregate
   meter evidence in that epoch. Evidence must be newer than the previous command's timeout window and
   response, non-future and within the configured freshness window; a new connection requires new evidence.
   Conflicting open sessions, stopped sessions and absent evidence are refused. Dispatch checks the epoch
@@ -125,10 +125,10 @@ reset only its schema. Run `npm test -w @powerme/csms -- --runInBand` with that 
 - Start now requires current-epoch Available evidence linked to the recorded StatusNotification, an
   online matching registry epoch, and non-future/fresh last-message times. A Heartbeat after reconnect
   cannot reuse Available from the prior connection. Replayed/future-dated status is refused; a new valid
-  StatusNotification permits start. Dispatch checks the selected epoch again. Missing optional pillar
+  StatusNotification permits start. Dispatch checks the selected epoch again. Missing optional charge point
   status timestamps are accepted as a known OCPP limitation when the receipt/epoch evidence is valid.
-  Provided pillar timestamps are checked conservatively against the connection and CSMS receipt times;
-  a legitimately skewed pillar clock can therefore require resynchronization. No real-pillar compatibility
+  Provided charge point timestamps are checked conservatively against the connection and CSMS receipt times;
+  a legitimately skewed charge point clock can therefore require resynchronization. No real-charge-point compatibility
   or hardware safety certification is claimed.
 
 Migration 0006 backfills existing stop intents into immutable attempt history. These are still backend

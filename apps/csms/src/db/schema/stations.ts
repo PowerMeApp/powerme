@@ -59,7 +59,7 @@ export const sites = pgTable(
 );
 
 /**
- * Trụ sạc (ChargingPillar trong ERD). Định danh kỹ thuật = serial_number (ADR-0009),
+ * Trụ sạc (ChargePoint trong ERD). Định danh kỹ thuật = serial_number (ADR-0009),
  * xuất hiện ở cuối URL `/ocpp/{serialNumber}`. `display_code` là mã người vận hành đọc.
  */
 export const chargePoints = pgTable(
