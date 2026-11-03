@@ -10,11 +10,13 @@
 - The dashboard package diagram (`package-diagram-dashboard.drawio` / `.svg`) now has a `billing` feature package.
 
 **Sources:**
-- WP5 billing designs, v0.1, 24/10 (repo root):
+- WP5 billing designs, v2.0, 01/11 (`diagrams/wf02/`; this page was first written against v0.1 of 24/10, references below are updated to v2.0):
   - `CD-2_topup_classes.puml`
   - `SD-2a_create_topup.puml`
-  - `SD-2b_ipn_credit_invoice.puml`, phase B
-  - `SD-2c_expiry_late_refund.puml`, phases D and E
+  - `SD-2c_einvoice_issue.puml` (was v0.1 SD-2b phase B)
+  - `SD-2d_timeout_late_payment.puml` (was v0.1 SD-2c phase D)
+  - `SD-2e_admin_refund.puml` (was v0.1 SD-2c phase E)
+  - `SD-2f_close_account.puml` (closure refunds, new in v2.0)
 - State machines: STM-4 TopUp, STM-5 CreditAccount, STM-7 EInvoice (T12 v0.2).
 - Code: `apps/csms/src/db/schema/billing.ts`, `enums.ts`.
 - Dashboard: `docs/PACKAGE-DIAGRAM-DASHBOARD.md`, and FE scope in `apps/dashboard/README.md`.
@@ -34,9 +36,9 @@ There is one route, `/billing/exceptions`, Admin only. It has three tabs. Each t
 
 | Tab | Rows shown | Admin action | State change (backend) | Backend design |
 |---|---|---|---|---|
-| **1. Top-ups to refund** | `top_ups.status = credited` | **Refund** (whole amount, to the original payment source) | STM-4 #7 `credited → refunded`, ledger `refund` row, points restored, `invoice_adjustments` row, VNPay refund after commit | SD-2c E |
-| **2. Late payments to refund** | `top_ups.status = expired` **and** `late_gateway_ref IS NOT NULL` **and** `late_refunded_at IS NULL` | **Refund late payment** (`late_amount_vnd` back to the card) | no STM-4 transition (stays `expired`); sets `late_refunded_at`. No ledger row, points or invoice, because the money never became credit | SD-2c D, after `LATE_WINDOW` (1 h) |
-| **3. Invoices to retry** | `e_invoices.status = needs_review` (3 failed attempts) | **Retry** (one attempt, `attempt_count` not reset) | STM-7 #6 `needs_review → requested`, then #2 `issued`, or #3 `failed` → #5 back to `needs_review` | SD-2b B |
+| **1. Top-ups to refund** | `top_ups.status = credited` | **Refund** (whole amount, to the original payment source) | STM-4 #7 `credited → refunded`, ledger `refund` row, points restored, `invoice_adjustments` row, VNPay refund after commit | SD-2e |
+| **2. Late payments to refund** | `top_ups.status = expired` **and** `late_gateway_ref IS NOT NULL` **and** `late_refunded_at IS NULL` | **Refund late payment** (`late_amount_vnd` back to the card) | no STM-4 transition (stays `expired`); sets `late_refunded_at`. No ledger row, points or invoice, because the money never became credit | SD-2d, after `LATE_WINDOW` (1 h) |
+| **3. Invoices to retry** | `e_invoices.status = needs_review` (3 failed attempts) | **Retry** (one attempt, `attempt_count` not reset) | STM-7 #6 `needs_review → requested`, then #2 `issued`, or #3 `failed` → #5 back to `needs_review` | SD-2c |
 
 **Rules the screen must respect:**
 - **No partial refund.** Refund is allowed only when `balanceVnd ≥ amountVnd` (STM-4 #7 guard, TC-STM4-12/13). The UI disables the button and shows why, but the server is the authority: a 422 can still arrive if the driver spends credit while the dialog is open.
@@ -107,11 +109,11 @@ Editable source: [`diagrams/uc-adm-08-class.drawio`](diagrams/uc-adm-08-class.dr
 | # | Method + path | In CD-2 / SD-2? | Response | Errors the UI handles |
 |---|---|---|---|---|
 | A1 | `GET /api/admin/billing/top-ups?status=credited&from&to&q&page` | **no** — proposed `AdminTopUpController.listRefundable` | `Page<RefundableTopUpDto>` with `balanceVnd` and `refundable` computed server-side | 401, 403 |
-| A2 | `POST /api/admin/billing/top-ups/{id}/refund` | **yes** — SD-2c E | `200 { status: "refunded" }` | 404 · 409 `InvalidTransition` · 422 `RefundNotAllowed` · 502 if the gateway call is made synchronously (Q2) |
+| A2 | `POST /api/admin/billing/top-ups/{id}/refund` | **yes** — SD-2e | `200 { status: "refunded" }` | 404 · 409 `InvalidTransition` · 422 `RefundNotAllowed` · 502 if the gateway call is made synchronously (Q2) |
 | A3 | `GET /api/admin/billing/top-ups/late-payments?from&to&q&page` | **no** — proposed `listLatePayments` | `Page<LatePaymentDto>` | 401, 403 |
 | A4 | `POST /api/admin/billing/top-ups/{id}/late-refund` | **no** — proposed `AdminTopUpController.lateRefund` + `TopUpService.lateRefund` | `200 { lateRefundedAt }` | 404 · 409 `LateRefundNotAllowed` · 502 `GatewayError` |
 | A5 | `GET /api/admin/billing/e-invoices?status=needs_review&page` | **no** — proposed `AdminEInvoiceController.listNeedsReview` | `Page<NeedsReviewInvoiceDto>` | 401, 403 |
-| A6 | `POST /api/admin/billing/e-invoices/{id}/retry` | **no** — SD-2b only says "UC-ADM-08 retry, STM-7 #6" | `200 { status: "issued", invoiceNo }` or `200 { status: "needs_review", lastErrorKind, lastErrorMessage }` | 404 · 409 `InvalidTransition` |
+| A6 | `POST /api/admin/billing/e-invoices/{id}/retry` | **no** — SD-2c only says "UC-ADM-08 retry, STM-7 #6" | `200 { status: "issued", invoiceNo }` or `200 { status: "needs_review", lastErrorKind, lastErrorMessage }` | 404 · 409 `InvalidTransition` |
 
 **Error → UI message mapping** (in `billingApi`, one place):
 
@@ -219,10 +221,10 @@ Test files sit next to the code (`*.test.tsx`), as in `apps/csms`.
 | # | Question | This draft assumes |
 |---|---|---|
 | 1 | **Endpoints A1, A3, A4, A5, A6 are not in CD-2.** Can you add `listRefundable`, `listLatePayments`, `lateRefund` (AdminTopUpController + TopUpService), and a new `AdminEInvoiceController` with `listNeedsReview` and `retry` (EInvoiceService `retryOnce`)? | Names as in the class diagram, marked «proposed» |
-| 2 | **Gateway refund failing after commit** (open note in SD-2c E, `refund_status` not modelled). Does A2 return 200 as soon as the DB commits, or wait for VNPay? Same for A4, where the order is "call VNPay, then write `late_refunded_at`". If the write fails after VNPay accepted, a retry must not refund twice | A2: 200 after commit, plus a `refundStatus` field later. A4: gateway first, with an idempotent `requestId` |
+| 2 | **Gateway refund failing after commit** (open note in v0.1 SD-2c E, `refund_status` not modelled; v2.0 SD-2e models it as a `refunds` row). Does A2 return 200 as soon as the DB commits, or wait for VNPay? Same for A4, where the order is "call VNPay, then write `late_refunded_at`". If the write fails after VNPay accepted, a retry must not refund twice | A2: 200 after commit, plus a `refundStatus` field later. A4: gateway first, with an idempotent `requestId` |
 | 3 | **Tab 1 content.** All `credited` top-ups, or only ones a driver asked to refund? There is no refund-request entity | All `credited` top-ups, newest first, searchable |
-| 4 | **Retry synchronous or through the job?** SD-2b issues invoices through BullMQ. For an Admin button, a synchronous single attempt (timeout 15 s) gives a clear result | Synchronous (sequence 3) |
+| 4 | **Retry synchronous or through the job?** SD-2c issues invoices in the background (v0.1 said BullMQ; see WF-02 decisions D7). For an Admin button, a synchronous single attempt (timeout 15 s) gives a clear result | Synchronous (sequence 3) |
 | 5 | **Report 3 figure 11.** It is not in the repo. Please send it so the columns and wording match | Layout in §2 until then |
 | 6 | **Schema.** `late_*`, `expires_at`, `points_redeemed`, `gateway_ref` (`vnp_TxnRef`) on `top_ups`, and `last_error_kind` / `last_error_message` on `e_invoices`, are in CD-2 / SD-2b but not in `billing.ts`. Which migration adds them? | Migration `0001` or `0002` (WP5) |
 | 7 | **Audit.** Should Admin refunds and retries be logged with the admin id (who refunded what)? | Yes — `adminId` is passed to every service call; storage to be decided |
-| 8 | **Alert to Admin on `needs_review`** (SD-2b "alert to Admin"). Which realtime event name? | `billing.exception` → refresh badges |
+| 8 | **Alert to Admin on `needs_review`** (SD-2c "notify Admin"). Which realtime event name? | `billing.exception` → refresh badges |
