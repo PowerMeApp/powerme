@@ -1,0 +1,30 @@
+' Shared style, copied from the lecturer guide (Appendix B.1), sequence part
+skinparam style strictuml
+skinparam shadowing false
+skinparam dpi 150
+skinparam defaultFontName Arial
+skinparam defaultFontSize 12
+skinparam backgroundColor white
+skinparam ArrowColor black
+skinparam ArrowThickness 1
+skinparam maxMessageSize 260
+skinparam sequence {
+  LifeLineBorderColor black
+  LifeLineBackgroundColor white
+  ParticipantBackgroundColor white
+  ParticipantBorderColor black
+  ActorBackgroundColor white
+  ActorBorderColor black
+  GroupBorderColor black
+  GroupBackgroundColor white
+  BoxBorderColor black
+  DividerBackgroundColor white
+  DividerBorderColor black
+  ReferenceBackgroundColor white
+  ReferenceBorderColor black
+}
+skinparam note {
+  BackgroundColor white
+  BorderColor black
+}
+hide footbox

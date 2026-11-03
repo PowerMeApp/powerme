@@ -1,0 +1,55 @@
+@startuml SD-2e_admin_refund
+!include _seq.iuml
+title SD-2e (Software level, CSMS billing) — Admin refunds a top-up\nPrecondition: Admin logged in, top-up credited · System view: AD-9 · State: STM-4, STM-10, STM-7
+footer Owner: Lê Bảo Khang (WP5) · v2.0 · 01/11/2026 · Refund entity = ERD v1.1 · RefundService is new (add to CD-2) · left gate = Admin console, right gate = Payment Gateway
+
+participant "«component»\n<u>:AdminBillingController</u>" as AB
+participant "«component»\n<u>:TopUpService</u>" as TS
+participant "«component»\n<u>:CreditLedgerService</u>" as CL
+participant "«component»\n<u>:LoyaltyService</u>" as LS
+participant "«component»\n<u>:RefundService</u>" as RS
+participant "«port»\n<u>:VnpayAdapter</u>" as VA
+participant "«component»\n<u>:EInvoiceService</u>" as EI
+
+== Admin records the refund ==
+[-> AB ++ : POST /admin/billing/top-ups/{id}/refund [HTTPS, JWT admin]
+AB -> TS ++ : refund(topUpId, adminId)
+TS -> TS : check top-up credited and balance ≥ amount
+break not credited, or balance < amount
+  TS --> AB : RefundNotAllowed(reason)
+  [<-- AB : 409 / 422 {reason}
+end
+TS -> TS : credited → refunded
+TS -> CL ++ : post(accountId, refund, −amountVnd, topUpId)
+CL --> TS --
+opt points were redeemed
+  TS -> LS ++ : restoreForTopUp(topUp)
+  LS --> TS --
+end
+TS -> RS ++ : create(topUpId, kind = top_up, amountPaidVnd, adminId) : refundId
+hnote over RS : {refund.status = requested}
+RS --> TS -- : refundId
+TS --> AB -- : refundId
+[<-- AB -- : 202 {refundId, status = requested}
+
+== Refund is sent to the original payment source ==
+[o-> RS ++ : send(refundId)  (job, attempt n)
+RS -> VA ++ : refund(ref, amountVnd) : result
+VA ->] : refund [HTTPS]
+note right : {d ≤ 10 s}; unknown result →\nquery before resending
+VA <--] : refund result
+VA --> RS -- : result
+alt confirmed
+  RS -> RS : requested → done
+  RS ->> EI : adjustForRefund(refund)
+  note right : InvoiceAdjustment\nrequested → issued (STM-7)
+  RS ->>] : notify Driver (MSG25)
+else transient error and attempts < 4
+  RS -> RS : record error, retry after 5 min / 30 min / 2 h
+else rejected, or 4th attempt failed
+  RS -> RS : requested → failed
+  RS ->>] : list on Billing Exceptions, notify Admin
+end
+deactivate RS
+note over AB, EI : Same pattern for a late-payment refund (kind = late_payment, no ledger entry) and for an Admin retry of a failed refund (one attempt, counter not reset).
+@enduml
