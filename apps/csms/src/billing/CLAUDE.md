@@ -16,11 +16,11 @@
 
 ## Đọc trước khi làm bất cứ task nào
 
-1. `docs/spec/WF-02_decisions.md` – các quyết định sau review 2. **Ưu tiên hơn diagram** nếu khác nhau.
-2. `docs/tasks/WF-02_plan.md` – thứ tự các phần và tiêu chí xong.
-3. Diagram của luồng đang làm (bảng tra bên dưới).
+1. Diagram của luồng đang làm trong `diagrams/wf02/` (bảng tra bên dưới) – **nguồn chính**, bản đã chia sẻ vào tài liệu chung của nhóm.
+2. `docs/spec/WF-02_decisions.md` – tóm tắt diagram, cách khớp với repo, và các bổ sung ⊕ chưa có trong diagram.
+3. `docs/tasks/WF-02_plan.md` – thứ tự các phần và tiêu chí xong.
 
-Nếu spec, decisions và code mâu thuẫn nhau: **dừng lại, nêu chỗ mâu thuẫn và hỏi**. Không tự chọn một bên.
+Decisions khác diagram thì theo diagram và sửa decisions. Diagram mâu thuẫn với code, SRS hoặc ADR: **dừng lại, nêu chỗ mâu thuẫn và hỏi**. Không tự chọn một bên.
 
 ## Ba nguyên tắc
 
@@ -33,8 +33,8 @@ Nếu spec, decisions và code mâu thuẫn nhau: **dừng lại, nêu chỗ mâ
 - `credit_accounts.balance_vnd` = Σ `credit_transactions.amount_vnd`. Snapshot được cập nhật cùng transaction với dòng sổ cái.
 - `credit_transactions` là append-only. Trong billing, **chỉ `CreditLedgerService.post`** được INSERT; không UPDATE, không DELETE. (Ngoại lệ hiện tại: `charge-settlement.service.ts` của WP3 ghi `session_debit` trực tiếp, chờ nhóm chốt.) Mọi nơi ghi sổ phải khoá `credit_accounts ... FOR UPDATE` trước khi tính `entry_no` và `balance_after_vnd`.
 - Mọi chuyển trạng thái top-up đi qua `TopUpStateMachine`. Chuyển không hợp lệ → ném `InvalidTransition`.
-- **VNPay refund chỉ được gọi từ `RefundService.execute`** (trong `RefundJobProcessor`), không gọi trong DB transaction.
-- Job (`einvoice.*`, `refund.execute`, realtime emit) chỉ được đẩy **sau khi commit**. Việc nền chạy bằng **quét DB** (`status` + `next_attempt_at`, `FOR UPDATE SKIP LOCKED`), `Scheduler` chỉ để chạy sớm; không thêm BullMQ (decisions D4).
+- **VNPay refund chỉ được gọi từ `RefundService.send`** (do worker refund gọi), không gọi trong DB transaction.
+- Việc nền (e-invoice, gửi refund, realtime emit) chỉ chạy **sau khi commit**. Việc nền chạy bằng **quét DB** (`status` + `next_attempt_at`, `FOR UPDATE SKIP LOCKED`), `Scheduler` chỉ để chạy sớm; không thêm BullMQ (decisions D7).
 - Thứ tự khoá dòng khi cần nhiều bảng: **`top_ups` trước, `credit_accounts` sau** (tránh deadlock).
 - Tiền là `bigint` VND, không dùng số thực.
 
@@ -43,8 +43,8 @@ Nếu spec, decisions và code mâu thuẫn nhau: **dừng lại, nêu chỗ mâ
 | Service | Bảng / cột |
 |---|---|
 | `TopUpService` | `top_ups` |
-| `CreditLedgerService` | `credit_transactions` (INSERT), `credit_accounts.balance_vnd`, `active ↔ in_shortfall` |
-| `AccountClosureService` | `credit_accounts.account_status → closed`, `closed_at`, `closure_refunded_at` |
+| `CreditLedgerService` | `credit_transactions` (INSERT), `credit_accounts.balance_vnd`, `credit_accounts.status`: `active ↔ in_shortfall` |
+| `AccountClosureService` | `credit_accounts.status`: `active → closed`, `closed_at`, `closure_refunded_at` |
 | `LoyaltyService` | `loyalty_accounts`, `loyalty_transactions` |
 | `EInvoiceService` | `e_invoices`, `invoice_adjustments` |
 | `RefundService` | `refunds` |
@@ -57,17 +57,17 @@ Nếu spec, decisions và code mâu thuẫn nhau: **dừng lại, nêu chỗ mâ
 
 ## Bảng tra
 
-| Luồng | Diagram | State machine | Test |
-|---|---|---|---|
-| Tạo top-up | SD-2a | STM-4 #1 | TC-STM4-01/11/16/18 |
-| IPN cộng tiền | SD-2b phần A | STM-4 #2 #3, STM-5 | TC-STM4-02/03/08/09/10, TC-STM5-* |
-| Xuất hoá đơn | SD-2b phần B | STM-7 | TC-STM7-* |
-| Timeout, thanh toán trễ | SD-2c | STM-4 #4–#6 | TC-STM4-04/05/06/07/15 |
-| Admin hoàn / retry | SD-2d | STM-4 #7, STM-8 | TC-STM4-12/13/14, TC-STM8-* |
-| Đóng tài khoản | SD-2e | STM-5 | (theo test case của nhóm) |
-| Job hoàn tiền, quét outbox | SD-2f (chưa vẽ) – xem decisions | STM-8 | TC-STM8-* |
+| Luồng | Diagram | Decisions | State machine | Test |
+|---|---|---|---|---|
+| Tạo top-up | SD-2a | D2 | STM-4 #1 | TC-STM4-01/11/16/18 |
+| IPN cộng tiền | SD-2b | D3 | STM-4 #2 #3, STM-5 | TC-STM4-02/03/08/09/10, TC-STM5-* |
+| Xuất hoá đơn, retry | SD-2c | D5 | STM-7 | TC-STM7-* |
+| Timeout, thanh toán trễ | SD-2d | D4 | STM-4 #4–#6 | TC-STM4-04/05/06/07/15 |
+| Admin hoàn, gửi refund, retry | SD-2e | D1 | STM-4 #7, STM-10 | TC-STM4-12/13/14, TC-STM10-* |
+| Đóng tài khoản | SD-2f | D6 | STM-5, STM-10 | (theo test case của nhóm) |
+| Worker quét DB | (không vẽ) | D7 | | |
 
-Diagram: `diagrams/wf02/` (SD-2a/2b/2c, CD-2) và `diagrams/erd/LERD-1_Charging-Billing.puml`. Lưu ý: bản trên repo là bản cũ (SD v0.1, CD-2 v0.2), chưa có SD-2d/2e; decisions được ưu tiên. Nguồn sự thật cho tên cột là `src/db/schema/billing.ts` (vd. cột là `status`, không phải `topUpStatus`).
+Diagram: `diagrams/wf02/` (CD-2, SD-2a…2f v2.0, 01/11/2026) và `diagrams/erd/LERD-1_Charging-Billing.puml`. STM-10 Refund chưa có file trong `diagrams/stm/` (STM-8 là RfidCard); tạm dùng D1. Tên class/method theo CD-2; nguồn sự thật cho tên cột là `src/db/schema/billing.ts` (vd. cột là `status`, không phải `topUpStatus`).
 
 ## Cách làm việc
 
