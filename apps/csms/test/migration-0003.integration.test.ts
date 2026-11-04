@@ -166,7 +166,7 @@ describeDb('migration 0003 — billing WF-02 (nâng cấp DB đã có 0002)', ()
     it('(a) dữ liệu cũ còn nguyên; expires_at backfill = created_at + 15 phút; cột mới rỗng', async () => {
       const rows = await q(
         `SELECT id, gateway_reference, status::text, amount_paid_vnd, points_redeemed, expires_at,
-                gateway_transaction_no, refunded_at, refunded_by, late_gateway_ref, late_paid_at,
+                gateway_transaction_no, refunded_at, late_gateway_ref, late_paid_at,
                 late_amount_vnd, late_refunded_at
            FROM top_ups ORDER BY id`,
       );
@@ -182,10 +182,10 @@ describeDb('migration 0003 — billing WF-02 (nâng cấp DB đã có 0002)', ()
       ]);
       for (const r of rows) {
         expect(r['points_redeemed']).toBe(0);
+        // refunded_by của 0003 bỏ ở 0015 (B5, T32) — test này áp mọi migration nên không còn cột.
         for (const c of [
           'gateway_transaction_no',
           'refunded_at',
-          'refunded_by',
           'late_gateway_ref',
           'late_paid_at',
           'late_amount_vnd',
@@ -227,7 +227,7 @@ describeDb('migration 0003 — billing WF-02 (nâng cấp DB đã có 0002)', ()
         `SELECT table_name, column_name, data_type, udt_name, is_nullable, column_default
            FROM information_schema.columns
           WHERE (table_name = 'top_ups' AND column_name IN ('gateway_reference', 'gateway_transaction_no',
-                   'points_redeemed', 'expires_at', 'refunded_at', 'refunded_by', 'late_gateway_ref',
+                   'points_redeemed', 'expires_at', 'refunded_at', 'late_gateway_ref',
                    'late_paid_at', 'late_amount_vnd', 'late_refunded_at'))
              OR (table_name = 'e_invoices' AND column_name IN ('last_error_kind', 'last_error_message', 'last_attempt_at'))
              OR (table_name = 'credit_accounts' AND column_name IN ('closed_at', 'closure_refunded_at'))
@@ -253,7 +253,7 @@ describeDb('migration 0003 — billing WF-02 (nâng cấp DB đã có 0002)', ()
         'top_ups.late_refunded_at timestamptz YES -',
         'top_ups.points_redeemed int4 NO 0',
         'top_ups.refunded_at timestamptz YES -',
-        'top_ups.refunded_by int8 YES -',
+        // top_ups.refunded_by (0003) bỏ ở 0015 (B5): Admin hoàn nằm ở refunds.requested_by.
       ]);
       const comment = await one(
         `SELECT col_description('top_ups'::regclass, a.attnum) AS c FROM pg_attribute a
@@ -336,13 +336,15 @@ describeDb('migration 0003 — billing WF-02 (nâng cấp DB đã có 0002)', ()
       expect(dupRefund.constraint).toBe('credit_transactions_one_per_top_up_and_type');
     });
 
-    it('hoàn top-up hợp lệ: status refunded + refunded_at + refunded_by (Admin)', async () => {
+    // Từ 0015 (B5) Admin hoàn ghi ở refunds.requested_by, không còn top_ups.refunded_by
+    // (test migration-0015 kiểm phần đó).
+    it('hoàn top-up hợp lệ: status refunded + refunded_at', async () => {
       const r = await one(
-        `UPDATE top_ups SET status = 'refunded', refunded_at = '2026-10-22T09:00:00Z', refunded_by = $2
-          WHERE id = $1 RETURNING status::text, refunded_by`,
-        [creditedId, adminId],
+        `UPDATE top_ups SET status = 'refunded', refunded_at = '2026-10-22T09:00:00Z'
+          WHERE id = $1 RETURNING status::text`,
+        [creditedId],
       );
-      expect([r['status'], Number(r['refunded_by'])]).toEqual(['refunded', adminId]);
+      expect(r['status']).toBe('refunded');
     });
 
     it("loyalty_transactions dùng được 'restore' (BR-P37) gắn với top-up", async () => {
@@ -401,29 +403,10 @@ describeDb('migration 0003 — billing WF-02 (nâng cấp DB đã có 0002)', ()
         `, now() + interval '1 hour'`,
         'top_ups_expires_at_check',
       ],
-      // `refunded` thiếu refunded_at luôn vi phạm hai CHECK cùng lúc: thiếu refunded_by thì
-      // refunded_by_required, có refunded_by thì refunded_by_check — cả hai đều chặn.
-      [
-        'status refunded thiếu cả refunded_at lẫn refunded_by',
-        ', status',
-        `, 'refunded'`,
-        'top_ups_refunded_check|top_ups_refunded_by_required_check',
-      ],
-      // ADMIN được thay bằng users.id của Admin lúc chạy (adminId chỉ có sau beforeAll).
-      [
-        'status refunded có refunded_by nhưng thiếu refunded_at',
-        ', status, refunded_by',
-        `, 'refunded', ADMIN`,
-        'top_ups_refunded_check|top_ups_refunded_by_check',
-      ],
-      [
-        'status refunded thiếu refunded_by (Admin hoàn, UC-ADM-08)',
-        ', status, refunded_at',
-        `, 'refunded', now()`,
-        'top_ups_refunded_by_required_check',
-      ],
+      // top_ups_refunded_by_check / top_ups_refunded_by_required_check của 0003 bỏ ở 0015 cùng cột
+      // refunded_by (B5); còn lại top_ups_refunded_check.
+      ['status refunded thiếu refunded_at', ', status', `, 'refunded'`, 'top_ups_refunded_check'],
       ['refunded_at khi chưa refunded', ', refunded_at', ', now()', 'top_ups_refunded_check'],
-      ['refunded_by không có refunded_at', ', refunded_by', ', ADMIN', 'top_ups_refunded_by_check'],
       [
         'late_gateway_ref thiếu late_paid_at/amount',
         ', status, late_gateway_ref',
@@ -514,18 +497,6 @@ describeDb('migration 0003 — billing WF-02 (nâng cấp DB đã có 0002)', ()
         `SELECT indexdef FROM pg_indexes WHERE indexname = 'top_ups_gateway_transaction_no_key'`,
       );
       expect(String(def['indexdef'])).toContain('WHERE (gateway_transaction_no IS NOT NULL)');
-    });
-
-    it('refunded_by phải là users.id có thật (FK)', async () => {
-      const e = await rejection(
-        q(
-          `INSERT INTO top_ups (gateway_reference, credit_account_id, amount_vnd, amount_paid_vnd,
-                                idempotency_key, expires_at, status, refunded_at, refunded_by)
-           VALUES ('M3-FK', $1, 50000, 50000, 'm3-fk', now() + interval '15 minutes', 'refunded', now(), 999999)`,
-          [accountId],
-        ),
-      );
-      expect(e.code).toBe('23503');
     });
 
     it('e_invoices: last_error_kind cần last_attempt_at; giá trị ngoài enum bị từ chối; lỗi hợp lệ ghi được', async () => {

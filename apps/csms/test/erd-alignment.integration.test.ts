@@ -702,7 +702,8 @@ describeDb('migration 0010–0012 — ERD alignment (Physical ERD v1.0)', () => 
 
     /**
      * Ngoại lệ tường minh — mỗi dòng có lý do; thêm dòng mới phải được người duyệt chấp nhận.
-     * Truy vấn của Ân đòi index có CHÍNH bộ cột FK ở đầu; ba FK dưới đây không đạt mà có lý do.
+     * Truy vấn của Ân đòi index có CHÍNH bộ cột FK ở đầu; các FK dưới đây không đạt mà có lý do.
+     * (`top_ups_refunded_by_fkey` hết là ngoại lệ ở 0015: B5 bỏ cột refunded_by — T32.)
      */
     const EXCEPTIONS: Record<string, string> = {
       // FK tổng hợp 3 cột; index sessions(connector_id, received_started_at) bắt đầu bằng connector_id
@@ -712,8 +713,6 @@ describeDb('migration 0010–0012 — ERD alignment (Physical ERD v1.0)', () => 
       // Bảng dẫn xuất, đề xuất thay bằng view (chưa duyệt) — không thêm index cho bảng có thể bị bỏ.
       'charging_statements.charging_statements_driver_id_fkey':
         'charging_statements có thể bị thay bằng view (đề xuất C của Ân, chưa duyệt)',
-      // Cột refunded_by sẽ bị bỏ ở B5 (Khang, cùng bảng refunds) — không đánh index cho cột sắp bỏ.
-      'top_ups.top_ups_refunded_by_fkey': 'cột refunded_by sẽ bị bỏ ở B5 (Khang)',
     };
 
     it('không FK nào thiếu index, ngoài ngoại lệ có lý do', async () => {
