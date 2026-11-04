@@ -11,6 +11,7 @@ import {
   invoiceAdjustments,
   loyaltyAccounts,
   loyaltyTransactions,
+  refunds,
   topUps,
 } from './billing.js';
 import { ocppMessageLog, remoteCommands } from './ocpp-log.js';
@@ -241,9 +242,20 @@ export const topUpsRelations = relations(topUps, ({ one, many }) => ({
   }),
   // Từ migration 0003: tối đa một dòng `top_up` và một dòng `refund` cho mỗi top-up.
   creditTransactions: many(creditTransactions),
-  refunder: one(users, { fields: [topUps.refundedBy], references: [users.id] }),
   eInvoice: one(eInvoices, { fields: [topUps.id], references: [eInvoices.topUpId] }),
   loyaltyTransactions: many(loyaltyTransactions),
+  // Từ migration 0015 (STM-10): TopUp 1 – 0..* Refund; Admin quyết định hoàn ở refunds.requestedBy (B5).
+  refunds: many(refunds),
+}));
+
+export const refundsRelations = relations(refunds, ({ one }) => ({
+  topUp: one(topUps, { fields: [refunds.topUpId], references: [topUps.id] }),
+  requester: one(admins, { fields: [refunds.requestedBy], references: [admins.userId] }),
+  // Refund 1 – 0..1 InvoiceAdjustment (UNIQUE invoice_adjustments.refund_id).
+  adjustment: one(invoiceAdjustments, {
+    fields: [refunds.id],
+    references: [invoiceAdjustments.refundId],
+  }),
 }));
 
 export const eInvoicesRelations = relations(eInvoices, ({ one, many }) => ({
@@ -253,6 +265,7 @@ export const eInvoicesRelations = relations(eInvoices, ({ one, many }) => ({
 
 export const invoiceAdjustmentsRelations = relations(invoiceAdjustments, ({ one }) => ({
   eInvoice: one(eInvoices, { fields: [invoiceAdjustments.eInvoiceId], references: [eInvoices.id] }),
+  refund: one(refunds, { fields: [invoiceAdjustments.refundId], references: [refunds.id] }),
 }));
 
 export const loyaltyAccountsRelations = relations(loyaltyAccounts, ({ one, many }) => ({

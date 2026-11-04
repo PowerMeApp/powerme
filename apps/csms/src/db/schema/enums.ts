@@ -135,6 +135,12 @@ export const loyaltyTransactionTypeEnum = pgEnum('loyalty_transaction_type', [
 ]);
 /** Loại lỗi lần gọi nhà cung cấp HĐĐT gần nhất (BR-P44, migration 0003). */
 export const eInvoiceErrorKindEnum = pgEnum('e_invoice_error_kind', ['transient', 'data']);
+/**
+ * Hoàn tiền về nguồn thanh toán (STM-10, migration 0012). `account_closure` do hệ thống tạo khi
+ * đóng tài khoản (SD-2f); hai loại còn lại do Admin quyết (SD-2e).
+ */
+export const refundKindEnum = pgEnum('refund_kind', ['top_up', 'late_payment', 'account_closure']);
+export const refundStatusEnum = pgEnum('refund_status', ['requested', 'done', 'failed']);
 
 // ---- ops ----
 export const faultSourceEnum = pgEnum('fault_source', ['ocpp', 'driver_report', 'operator']);
