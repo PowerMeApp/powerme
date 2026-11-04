@@ -5,7 +5,7 @@
  * `drivers`, `operator_staff`. T11 ban đầu KHÔNG có `admins`; Ân duyệt 31/10/2026 ("ERD Alignment
  * Decisions", Physical ERD v1.0) thêm `admins` (migration 0011) cho đủ ba subtype.
  */
-import { bigint, index, pgTable, text, timestamp, unique } from 'drizzle-orm/pg-core';
+import { bigint, index, pgTable, text, timestamp, unique, varchar } from 'drizzle-orm/pg-core';
 import { staffRoleEnum, userAccountStatusEnum, userRoleEnum } from './enums.js';
 import { operators } from './stations.js';
 
@@ -13,9 +13,9 @@ export const users = pgTable(
   'users',
   {
     id: bigint('id', { mode: 'number' }).primaryKey().generatedAlwaysAsIdentity(),
-    email: text('email').notNull(),
+    email: varchar('email', { length: 254 }).notNull(),
     fullName: text('full_name').notNull(),
-    phoneNumber: text('phone_number'),
+    phoneNumber: varchar('phone_number', { length: 16 }),
     role: userRoleEnum('role').notNull(),
     accountStatus: userAccountStatusEnum('account_status').notNull().default('active'),
     /** Băm argon2; null với tài khoản chưa đặt mật khẩu (đăng nhập OTP / social). */
@@ -31,7 +31,7 @@ export const drivers = pgTable('drivers', {
   userId: bigint('user_id', { mode: 'number' })
     .primaryKey()
     .references(() => users.id, { onDelete: 'cascade' }),
-  consentVersion: text('consent_version').notNull(),
+  consentVersion: varchar('consent_version', { length: 20 }).notNull(),
   consentGivenAt: timestamp('consent_given_at', { withTimezone: true }).notNull(),
 });
 

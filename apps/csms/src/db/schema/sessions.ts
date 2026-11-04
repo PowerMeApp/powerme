@@ -22,6 +22,7 @@ import {
   timestamp,
   unique,
   uniqueIndex,
+  varchar,
 } from 'drizzle-orm/pg-core';
 import {
   billingModeEnum,
@@ -44,16 +45,19 @@ export const rfidCards = pgTable(
   {
     id: bigint('id', { mode: 'number' }).primaryKey().generatedAlwaysAsIdentity(),
     /** Giá trị idTag trên dây (OCPP 1.6: tối đa 20 ký tự). */
-    cardIdentifier: text('card_identifier').notNull(),
+    cardIdentifier: varchar('card_identifier', { length: 20 }).notNull(),
     cardKind: rfidCardKindEnum('card_kind').notNull(),
     driverId: bigint('driver_id', { mode: 'number' }).references(() => drivers.userId),
     status: rfidCardStatusEnum('status').notNull().default('unlinked'),
     issuedAt: timestamp('issued_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .notNull()
+      .defaultNow()
+      .$onUpdate(() => new Date()),
   },
   (t) => [
     unique('rfid_cards_card_identifier_key').on(t.cardIdentifier),
     index('rfid_cards_driver_id_idx').on(t.driverId),
-    check('rfid_cards_card_identifier_check', sql`char_length(${t.cardIdentifier}) <= 20`),
   ],
 );
 
@@ -68,6 +72,11 @@ export const vehicleModels = pgTable(
     ratedRangeKm: integer('rated_range_km'),
     maxDcKw: numeric('max_dc_kw', { precision: 6, scale: 2 }),
     isVinfast: boolean('is_vinfast').notNull().default(false),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .notNull()
+      .defaultNow()
+      .$onUpdate(() => new Date()),
   },
   (t) => [unique('vehicle_models_brand_model_name_key').on(t.brand, t.modelName)],
 );
@@ -76,7 +85,7 @@ export const vehicles = pgTable(
   'vehicles',
   {
     id: bigint('id', { mode: 'number' }).primaryKey().generatedAlwaysAsIdentity(),
-    plateNumber: text('plate_number').notNull(),
+    plateNumber: varchar('plate_number', { length: 12 }).notNull(),
     driverId: bigint('driver_id', { mode: 'number' })
       .notNull()
       .references(() => drivers.userId),
@@ -85,6 +94,10 @@ export const vehicles = pgTable(
       .references(() => vehicleModels.id),
     isDefault: boolean('is_default').notNull().default(false),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .notNull()
+      .defaultNow()
+      .$onUpdate(() => new Date()),
   },
   (t) => [
     unique('vehicles_plate_number_key').on(t.plateNumber),
@@ -121,7 +134,7 @@ export const sessions = pgTable(
     chargePointId: bigint('charge_point_id', { mode: 'number' }).notNull(),
     connectorNo: smallint('connector_no').notNull(),
     /** idTag nguyên văn trong StartTransaction — kể cả khi không tra được thẻ. */
-    idTag: text('id_tag').notNull(),
+    idTag: varchar('id_tag', { length: 20 }).notNull(),
     driverId: bigint('driver_id', { mode: 'number' }).references(() => drivers.userId),
     vehicleId: bigint('vehicle_id', { mode: 'number' }).references(() => vehicles.id),
     rfidCardId: bigint('rfid_card_id', { mode: 'number' }).references(() => rfidCards.id),
@@ -150,7 +163,7 @@ export const sessions = pgTable(
     meterStartWh: bigint('meter_start_wh', { mode: 'number' }).notNull(),
     meterStopWh: bigint('meter_stop_wh', { mode: 'number' }),
     /** Reason của StopTransaction, giữ nguyên văn (trụ báo gì cũng ghi được). */
-    stopReason: text('stop_reason'),
+    stopReason: varchar('stop_reason', { length: 20 }),
     /** Do engine đối soát gán — phiên được trụ gửi bù sau khi nối lại (ADR-0009). */
     deliveredOffline: boolean('delivered_offline').notNull().default(false),
     /** Dẫn xuất = meter_stop_wh - meter_start_wh; cập nhật cùng transaction với lúc đóng phiên. */
@@ -201,6 +214,10 @@ export const sessionPauses = pgTable(
     pausedAt: timestamp('paused_at', { withTimezone: true }).notNull(),
     resumedAt: timestamp('resumed_at', { withTimezone: true }),
     pauseCause: pauseCauseEnum('pause_cause').notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .notNull()
+      .defaultNow()
+      .$onUpdate(() => new Date()),
   },
   (t) => [
     unique('session_pauses_session_id_paused_at_key').on(t.sessionId, t.pausedAt),
@@ -227,9 +244,9 @@ export const sessionStatusHistory = pgTable(
     fromStatus: sessionStatusEnum('from_status'),
     toStatus: sessionStatusEnum('to_status').notNull(),
     /** Tên event của state machine: START_TRANSACTION, STATION_OFFLINE, RECONCILE_OK… */
-    event: text('event').notNull(),
+    event: varchar('event', { length: 50 }).notNull(),
     /** station = frame của trụ · system = CSMS tự quyết · hoặc users.id (operator). */
-    actor: text('actor').notNull().default('system'),
+    actor: varchar('actor', { length: 50 }).notNull().default('system'),
     note: text('note'),
     occurredAt: timestamp('occurred_at', { withTimezone: true }).notNull().defaultNow(),
   },
@@ -254,11 +271,11 @@ export const meterValues = pgTable(
     /** Đồng hồ CSMS — tin cậy; đồng thời là khoá partition. */
     receivedAt: timestamp('received_at', { withTimezone: true }).notNull().defaultNow(),
     /** Measurand OCPP nguyên văn: Energy.Active.Import.Register, Power.Active.Import, SoC, Voltage, Current.Import... */
-    measurand: text('measurand').notNull(),
+    measurand: varchar('measurand', { length: 40 }).notNull(),
     value: numeric('value', { precision: 14, scale: 3 }).notNull(),
-    unit: text('unit'),
-    context: text('context'),
-    phase: text('phase'),
+    unit: varchar('unit', { length: 20 }),
+    context: varchar('context', { length: 20 }),
+    phase: varchar('phase', { length: 10 }),
     /** ReplayDetector phán frame chứa mẫu này là phát lại. Dòng trước migration 0001 = false (chưa phân loại). */
     replayed: boolean('replayed').notNull().default(false),
     /** charge_point_connections.epoch lúc frame tới; null với dòng trước migration 0001. */

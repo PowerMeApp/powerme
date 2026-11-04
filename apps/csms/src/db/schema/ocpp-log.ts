@@ -23,6 +23,7 @@ import {
   text,
   timestamp,
   uniqueIndex,
+  varchar,
 } from 'drizzle-orm/pg-core';
 import { ocppDirectionEnum, remoteCommandStatusEnum } from './enums.js';
 import { chargePoints } from './stations.js';
@@ -44,9 +45,9 @@ export const ocppMessageLog = pgTable(
      */
     messageType: smallint('message_type'),
     /** MessageId của frame OCPP-J; dùng ghép CALL với CALLRESULT/CALLERROR. */
-    uniqueId: text('unique_id').notNull(),
+    uniqueId: varchar('unique_id', { length: 36 }).notNull(),
     /** Chỉ có ở CALL (type 2). */
-    action: text('action'),
+    action: varchar('action', { length: 40 }),
     /** Trường timestamp trong payload nếu có — đồng hồ trụ, không tin cậy. */
     cpTimestamp: timestamp('cp_timestamp', { withTimezone: true }),
     /** Đồng hồ CSMS; khoá partition. */
@@ -95,19 +96,23 @@ export const remoteCommands = pgTable(
     /** Null = lệnh cho cả trụ; 0 = connector 0 của OCPP. */
     connectorNo: smallint('connector_no'),
     /** Tên action OCPP nguyên văn (RemoteStartTransaction, Reset, TriggerMessage, DataTransfer…). */
-    action: text('action').notNull(),
+    action: varchar('action', { length: 40 }).notNull(),
     payload: jsonb('payload'),
     status: remoteCommandStatusEnum('status').notNull().default('pending'),
     /** users.id người/hệ thống yêu cầu; null = CSMS tự phát sinh. */
     requestedBy: bigint('requested_by', { mode: 'number' }).references(() => users.id),
     /** Chống tạo trùng khi client retry. */
-    idempotencyKey: text('idempotency_key'),
+    idempotencyKey: varchar('idempotency_key', { length: 64 }),
     requestedAt: timestamp('requested_at', { withTimezone: true }).notNull().defaultNow(),
     sentAt: timestamp('sent_at', { withTimezone: true }),
     respondedAt: timestamp('responded_at', { withTimezone: true }),
     /** Payload CALLRESULT của trụ. */
     response: jsonb('response'),
     error: text('error'),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .notNull()
+      .defaultNow()
+      .$onUpdate(() => new Date()),
   },
   (t) => [
     // DESC mặc định của Postgres là NULLS FIRST; Drizzle sinh NULLS LAST nếu không nói rõ → nói rõ.

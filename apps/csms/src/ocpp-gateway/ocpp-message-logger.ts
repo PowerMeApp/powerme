@@ -37,6 +37,17 @@ export interface MessageLogEntry {
   validationError?: string | null;
 }
 
+/**
+ * Độ dài cột `ocpp_message_log.unique_id` / `action` (varchar(36) / varchar(40), migration 0014).
+ * Frame hỏng hay sai schema (G12) có thể mang UniqueId/action dài tuỳ ý; INSERT sẽ bị 22001 và dòng
+ * kiểm toán mất đúng lúc cần nhất. Cắt hai trường định danh này cho vừa cột — frame nguyên văn vẫn
+ * nằm đủ trong `raw`.
+ */
+const UNIQUE_ID_MAX = 36;
+const ACTION_MAX = 40;
+const clamp = <T extends string | null>(value: T, max: number): T =>
+  (typeof value === 'string' && value.length > max ? value.slice(0, max) : value) as T;
+
 @Injectable()
 export class OcppMessageLogger {
   constructor(@Inject(DB) private readonly db: Db) {}
@@ -50,8 +61,8 @@ export class OcppMessageLogger {
         epoch: entry.epoch,
         direction: entry.direction,
         messageType: entry.messageType,
-        uniqueId: entry.uniqueId,
-        action: entry.messageType === 2 ? entry.action : null,
+        uniqueId: clamp(entry.uniqueId, UNIQUE_ID_MAX),
+        action: entry.messageType === 2 ? clamp(entry.action, ACTION_MAX) : null,
         cpTimestamp: entry.cpTimestamp,
         receivedAt: entry.receivedAt,
         raw: entry.raw,

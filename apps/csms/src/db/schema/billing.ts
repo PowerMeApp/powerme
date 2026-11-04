@@ -19,6 +19,7 @@ import {
   timestamp,
   unique,
   uniqueIndex,
+  varchar,
 } from 'drizzle-orm/pg-core';
 import {
   creditAccountStatusEnum,
@@ -72,7 +73,7 @@ export const topUps = pgTable(
      * vnp_TxnRef — mã do CSMS sinh lúc tạo top-up (SD-2a); BK, UNIQUE, NOT NULL từ migration 0003.
      * (Trước 0003 cột này mô tả là vnp_TransactionNo; nay mã đó nằm ở `gatewayTransactionNo`.)
      */
-    gatewayReference: text('gateway_reference').notNull(),
+    gatewayReference: varchar('gateway_reference', { length: 100 }).notNull(),
     creditAccountId: bigint('credit_account_id', { mode: 'number' })
       .notNull()
       .references(() => creditAccounts.id),
@@ -84,9 +85,9 @@ export const topUps = pgTable(
     amountPaidVnd: bigint('amount_paid_vnd', { mode: 'number' }).notNull(),
     status: topUpStatusEnum('status').notNull().default('pending'),
     /** Khoá chống tạo trùng từ app khi retry (UNIQUE). */
-    idempotencyKey: text('idempotency_key').notNull(),
+    idempotencyKey: varchar('idempotency_key', { length: 64 }).notNull(),
     /** vnp_TransactionNo — mã phía VNPay, ghi khi IPN/querydr báo đã trả (SD-2b). UNIQUE khi có. */
-    gatewayTransactionNo: text('gateway_transaction_no'),
+    gatewayTransactionNo: varchar('gateway_transaction_no', { length: 20 }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     /** Hết hạn thanh toán (BR-P13: tạo + 15 phút). Không có DEFAULT — TopUpService đặt. */
     expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
@@ -96,10 +97,14 @@ export const topUps = pgTable(
     /** users.id của Admin hoàn (UC-ADM-08); bắt buộc khi status = refunded; DB không kiểm role. */
     refundedBy: bigint('refunded_by', { mode: 'number' }).references(() => users.id),
     /** Thanh toán sau cửa sổ 1 giờ (BR-P13, SD-2c D): ba cột late_* ghi cùng lúc, chỉ khi expired. */
-    lateGatewayRef: text('late_gateway_ref'),
+    lateGatewayRef: varchar('late_gateway_ref', { length: 100 }),
     latePaidAt: timestamp('late_paid_at', { withTimezone: true }),
     lateAmountVnd: bigint('late_amount_vnd', { mode: 'number' }),
     lateRefundedAt: timestamp('late_refunded_at', { withTimezone: true }),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .notNull()
+      .defaultNow()
+      .$onUpdate(() => new Date()),
   },
   (t) => [
     unique('top_ups_gateway_reference_key').on(t.gatewayReference),
@@ -200,7 +205,7 @@ export const eInvoices = pgTable(
   {
     id: bigint('id', { mode: 'number' }).primaryKey().generatedAlwaysAsIdentity(),
     /** Số hoá đơn do nhà cung cấp HĐĐT cấp; null khi còn `requested`/`failed`. */
-    invoiceNo: text('invoice_no'),
+    invoiceNo: varchar('invoice_no', { length: 20 }),
     topUpId: bigint('top_up_id', { mode: 'number' })
       .notNull()
       .references(() => topUps.id),
@@ -214,6 +219,10 @@ export const eInvoices = pgTable(
     lastErrorKind: eInvoiceErrorKindEnum('last_error_kind'),
     lastErrorMessage: text('last_error_message'),
     lastAttemptAt: timestamp('last_attempt_at', { withTimezone: true }),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .notNull()
+      .defaultNow()
+      .$onUpdate(() => new Date()),
   },
   (t) => [
     unique('e_invoices_invoice_no_key').on(t.invoiceNo),

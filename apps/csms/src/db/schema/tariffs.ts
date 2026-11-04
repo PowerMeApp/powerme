@@ -15,6 +15,7 @@ import {
   time,
   timestamp,
   unique,
+  varchar,
 } from 'drizzle-orm/pg-core';
 import { discountTypeEnum, tariffBandEnum } from './enums.js';
 import { sessions } from './sessions.js';
@@ -35,6 +36,11 @@ export const tariffPeriods = pgTable(
     pricePerKwhVnd: bigint('price_per_kwh_vnd', { mode: 'number' }).notNull(),
     effectiveFrom: date('effective_from').notNull(),
     effectiveTo: date('effective_to'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .notNull()
+      .defaultNow()
+      .$onUpdate(() => new Date()),
   },
   (t) => [
     unique('tariff_periods_operator_band_range_key').on(
@@ -56,7 +62,7 @@ export const promotions = pgTable(
   'promotions',
   {
     id: bigint('id', { mode: 'number' }).primaryKey().generatedAlwaysAsIdentity(),
-    promotionCode: text('promotion_code').notNull(),
+    promotionCode: varchar('promotion_code', { length: 20 }).notNull(),
     operatorId: bigint('operator_id', { mode: 'number' })
       .notNull()
       .references(() => operators.id),
@@ -65,6 +71,11 @@ export const promotions = pgTable(
     discountValue: bigint('discount_value', { mode: 'number' }).notNull(),
     validFrom: timestamp('valid_from', { withTimezone: true }).notNull(),
     validTo: timestamp('valid_to', { withTimezone: true }).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .notNull()
+      .defaultNow()
+      .$onUpdate(() => new Date()),
   },
   (t) => [
     unique('promotions_promotion_code_key').on(t.promotionCode),
@@ -92,6 +103,7 @@ export const sessionTariffSegments = pgTable(
     energyWh: bigint('energy_wh', { mode: 'number' }).notNull(),
     amountVnd: bigint('amount_vnd', { mode: 'number' }).notNull(),
     exactAmountMilliVnd: numeric('exact_amount_milli_vnd', { precision: 40, scale: 0 }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
     primaryKey({
