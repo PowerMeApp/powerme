@@ -1,0 +1,23 @@
+@startuml STM-10
+!include _style.iuml
+title STM-10 (System level) — Lifecycle of a Refund\nrefunds.status · v1.0 · 01/11/2026
+
+[*] --> requested : / send refund to\noriginal source
+note left of requested
+  created by the Admin (kind top_up,
+  late_payment) or by the system when a
+  Driver closes the account (account_closure);
+  one per top-up and kind
+end note
+requested : attempt fails [transient and attempts < 4]\n/ record error
+requested : after(retry delay) [last attempt failed]\n/ query gateway, send again if not received
+requested --> done : gateway confirms\n/ request adjustment invoice\n(STM-7), notify Driver
+requested --> failed : attempt fails [rejected\nor attempts ≥ 4]\n/ list on Billing Exceptions,\nnotify Admin
+failed --> requested : Admin retries\n/ one attempt,\ncounter not reset
+done --> [*]
+note right of failed
+  A failed refund is only retried,
+  never put back on the balance.
+  Retry delays: 5 min, 30 min, 2 h.
+end note
+@enduml
