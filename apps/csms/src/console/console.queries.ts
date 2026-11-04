@@ -217,6 +217,7 @@ export class ConsoleQueries {
         messageType: ocppMessageLog.messageType,
         action: ocppMessageLog.action,
         uniqueId: ocppMessageLog.uniqueId,
+        validationError: ocppMessageLog.validationError,
         epochOpenedAt: chargePointConnections.openedAt,
       })
       .from(ocppMessageLog)

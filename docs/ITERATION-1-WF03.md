@@ -224,3 +224,12 @@ Ngoại lệ duy nhất: `meterStop < meterStart` (không lưu được, `energy
 **Tình huống EXP-01.** tx3 nhận StopTransaction phát lại mang `meterStop = 242 Wh` trong khi chuỗi MeterValues live đã tới 1042,64 Wh. Với đối soát **tắt**, tx3 được ghi `reconciled` 242 Wh — hoá đơn sai 4,3 lần (1043 / 242). Với đối soát **bật**, tx3 vào `review` (conflict, lệch 801 Wh) cho operator quyết (UC-OPS-05). Test: `test/wf03-ablation.integration.test.ts` phát lại trace thật ở cả hai chế độ (kết quả thật: xem mô tả PR).
 
 Cách bật cho thí nghiệm: `RECONCILIATION_ENABLED=false` trong môi trường của CSMS. Không bật trên staging/production.
+
+## 10. Frame sai schema (G12 / BM02 F42)
+
+ocpp-rpc 2.2.1 ở strict mode loại CALL chiều vào sai schema **trước** handler, nên trước đây `ocpp_message_log` không có chúng. Nay `OcppServer` móc hai sự kiện của thư viện (đọc từ `node_modules/ocpp-rpc/lib/client.js`):
+
+- `strictValidationFailure` `{messageId, method, params, error, outbound, isCall}` — phát đồng bộ trong `_onCall`, sau `message` và trước handler; chỉ ghi khi `outbound=false && isCall=true`. Thư viện tự trả CALLERROR.
+- `badMessage` `{buffer, error, response}` — frame không phải JSON / không phải mảng / MessageTypeId lạ / method không phải chuỗi. CALLRESULT/CALLERROR parse được đã có dòng thô từ sự kiện `message` nên không ghi lại.
+
+Mỗi frame bị loại → một dòng `direction='in'` với `raw` nguyên văn, `action` nếu có, cột mới `validation_error` ("mã-trên-dây: thông điệp"; migration `0010_log-frame-sai-schema.sql`, `message_type` được NULL khi frame không xác định được loại). Lưu ý: thư viện đổi mã `OccurenceConstraintViolation`/`FormatViolation` (chính tả spec) thành `OccurrenceConstraintViolation`/`FormationViolation` khi gửi; log ghi mã đã đổi cho khớp CALLERROR trụ nhận. Lỗi ghi log chỉ được log, không đóng kết nối. Giới hạn: CALLRESULT chiều vào sai schema không được gắn cờ (bảng append-only); frame bị tầng WebSocket loại trước ocpp-rpc vẫn không có trong log. Test: `test/frame-sai-schema.integration.test.ts`.

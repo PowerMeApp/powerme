@@ -316,9 +316,12 @@ export interface MessageInput {
   cpTimestamp: Date | null;
   epoch: number;
   direction: string;
-  messageType: number;
+  /** Null chỉ với frame hỏng không xác định được loại (validation_error có giá trị). */
+  messageType: number | null;
   action: string | null;
   uniqueId: string;
+  /** Lý do ocpp-rpc từ chối frame (G12); null = frame hợp lệ. */
+  validationError?: string | null;
   /** opened_at của (trụ, epoch) trong charge_point_connections; null nếu không có dòng. */
   epochOpenedAt: Date | null;
 }
@@ -334,6 +337,7 @@ export function mapMessage(row: MessageInput, detector: ReplayDetector) {
     message_type: row.messageType,
     action: row.action,
     unique_id: row.uniqueId,
+    validation_error: row.validationError ?? null,
     replayed: replayedFlag(detector, row.cpTimestamp, row.receivedAt, row.epochOpenedAt),
   };
 }
