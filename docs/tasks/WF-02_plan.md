@@ -12,7 +12,7 @@ Kết quả đã ghi vào mục "Bối cảnh repo" của `apps/csms/src/billing
 
 | # | Phần | Nội dung | Xong khi | Trạng thái |
 |---|---|---|---|---|
-| 1 | Schema bổ sung | Các bảng billing đã có (0003). Viết migration `0012` (D8): enum `refund_kind`, `refund_status` + bảng `refunds` (D1), cột mới cho `invoice_adjustments` (D5), `next_attempt_at` + index quét cho `e_invoices`, `invoice_adjustments`, `refunds`, index `top_ups (status, expires_at)` (D7). Cập nhật `billing.ts`, `enums.ts`, `relations.ts`; thêm `NHAT-KY-MIGRATION-0012.md`, cập nhật `THIET-KE-CSDL-VAT-LY.md` | `migrate.mjs` áp được trên DB sạch và trên DB đã có các migration trước; `test/migration-0012.integration.test.ts` kiểm từng ràng buộc mới (cả nhánh vi phạm) | ☐ |
+| 1 | Schema bổ sung | Các bảng billing đã có (0003). Viết migration `0015` (D8; 0010–0012 và 0014 đã dùng cho BE-16, 0013 cho BE-07): enum `refund_kind`, `refund_status` + bảng `refunds` (D1), cột mới cho `invoice_adjustments` (D5), `next_attempt_at` + index quét cho `e_invoices`, `invoice_adjustments`, `refunds`, index `top_ups (status, expires_at)` (D7). Cập nhật `billing.ts`, `enums.ts`, `relations.ts`; thêm `NHAT-KY-MIGRATION-0015.md`, cập nhật `THIET-KE-CSDL-VAT-LY.md` | `migrate.mjs` áp được trên DB sạch và trên DB đã có các migration trước; `test/migration-0015.integration.test.ts` kiểm từng ràng buộc mới (cả nhánh vi phạm) | ☑ 04/11 (nhánh `wp5/t32-migration-refunds-0013`, PR #85; thay PR #83) |
 | 2 | State machine | `TopUpStateMachine` + `TopUpEvent` (STM-4), `RefundStateMachine` (STM-10). Thuần logic | Unit test mọi chuyển hợp lệ và không hợp lệ | ☐ |
 | 3 | Sổ cái | `CreditLedgerService.post` / `getBalance`: entryNo, `balanceAfterVnd`, snapshot, `active ↔ in_shortfall`; `ensureAccounts(driverId)`; `LoyaltyService.earnForSession` để WP3 thay SQL thô (D9). Báo Sơn khi merge | Test bất biến số dư = Σ sổ cái; test unique `(top_up_id, transaction_type)` | ☐ |
 | 4 | Loyalty (phần nạp) | `quoteRedemption` (≥ 500 điểm, ≤ 50% số tiền, 100 điểm = 1.000 VND), `redeemForTopUp` (lúc cộng tiền), `restoreForTopUp` (giữ hạn cũ) | Unit test các giới hạn | ☐ |
@@ -65,10 +65,13 @@ Việc nền viết theo D7 (quét DB). API admin bám D10. Đường dẫn theo
 ## Yêu cầu cho nhóm
 
 - Sơn (WP3): đồng ý D9 (sau Phần 3, `charge-settlement` gọi `CreditLedgerService.post` / `earnForSession`); không mở rộng thêm SQL ghi bảng billing trong lúc chờ.
-- Nhóm: báo đã giữ số migration `0012` cho billing.
+- ~~Nhóm: báo đã giữ số migration `0012` cho billing.~~ 0012 đã dùng cho BE-16; billing dùng `0015`.
 - Người làm đăng ký tài xế: gọi `ensureAccounts(driverId)`.
 - WP4: thống nhất bảng D10 (dạng trả về 202 của refund, đóng tài khoản không cần Admin hoàn), thêm mục refund `failed` + retry.
 - Người lo Caddy staging / app Flutter: đường dẫn `/billing/vnpay/ipn`, `/billing/vnpay/return`, `/api/driver/v1/billing/top-ups`, `/api/driver/v1/me/account/close`.
+- Trí (chủ DB): review migration 0015 — dùng lại `e_invoice_status` / `e_invoice_error_kind`, `invoice_adjustments.issued_at` thành nullable, B5 (bỏ `top_ups.refunded_by`), `refunds.requested_by` → `admins`, và hai chỗ sửa trong `erd-alignment.integration.test.ts` (`docs/NHAT-KY-MIGRATION-0015.md` mục 4). Cập nhật B5 "đã làm" ở `NHAT-KY-ERD-ALIGNMENT.md` mục 4 và `DESIGN-BRIEF-WP2-INPUT.md` G19.
+- Nhóm: nơi nào tạo user Admin phải chèn thêm dòng `admins` (0011), nếu không thì Admin đó không ghi được `refunds.requested_by`.
+- Nhóm: 0015 không chặn ai, nhưng code mới INSERT `e_invoices` / `invoice_adjustments` phải để `next_attempt_at` theo DEFAULT (hoặc ghi giá trị) khi `status` là `requested`/`failed`; ghi NULL sẽ bị CHECK từ chối.
 - (Claude Code ghi thêm vào đây khi phát hiện cần gì từ module khác.)
 
 ## Ghi chú
@@ -77,3 +80,9 @@ Việc nền viết theo D7 (quét DB). API admin bám D10. Đường dẫn theo
 
 - 03/11: decisions viết lại theo diagram v2.0. Chỗ diagram lệch code / ADR (theo code, chờ sửa diagram): `reservation_fee` trong CD-2, kiểu tiền `number`, "monthly cap" ở SD-2a, đường dẫn không có tiền tố `/api/...` (D8).
 - Class / method thêm ngoài CD-2 (CD-2 chỉ vẽ thành viên chính): `TopUpStateMachine`, `RefundStateMachine`, worker D7, `BillingExceptionsQuery`, `getBalance`, `ensureAccounts`, `quoteRedemption`, `earnForSession`.
+- 04/11 (Phần 0, xác nhận lại trên `main` `f9f0975`): khác ghi chép ở hai chỗ, đều không chạm billing: `main` đã có `0009_bo-payment-mode-free.sql` (BE-11, đổi enum `payment_mode`) và refactor đổi tên pillar → charge point (T90). Số `0012` vẫn trống.
+- 04/11 (Phần 1): `refunds.last_error_kind` và `invoice_adjustments.last_error_kind` dùng lại enum `e_invoice_error_kind`; `invoice_adjustments.status` dùng lại `e_invoice_status` (lý do: D8 đã cập nhật, nhật ký 0015 mục 2). `next_attempt_at` có DEFAULT `now()` trên cả ba bảng, kèm CHECK chặn NULL khi dòng còn chờ. `invoice_adjustments.refund_id` để nullable. Tiền kiểm: 0015 dừng nếu `invoice_adjustments` đã có hàng hoặc đã có top-up `refunded`.
+- 04/11 (Phần 1): đối chiếu máy SQL ↔ Drizzle phát hiện index `loyalty_transactions_one_earn_per_session` (từ `0004` của WP3) chưa có trong `billing.ts`. **Phần 3** thêm vào schema TS khi viết `earnForSession`.
+- 04/11 (Phần 1, sau BE-16): Trí merge `0010`–`0012` (ERD alignment, PR #84) trước. Billing làm lại trên nhánh mới `wp5/t32-migration-refunds-0013` (PR #85, đóng PR #83); sau đó BE-07 (#82) lấy `0013`, nên rebase và đổi thành `0015` trên cùng nhánh. Theo quyết định cùng Khang: `refunds.requested_by` → `admins (user_id)` (ISA 0011); làm luôn **B5** (bỏ `top_ups.refunded_by` + hai CHECK) trong 0015; thêm `refunds_requested_by_idx` theo quy ước A5; FK của `refunds` giữ NO ACTION theo C3. `reservation_fee` đã có trong enum (0010), nên D8 hết lệch CD-2 ở điểm này.
+- 04/11 (Phần 1): sửa test của người khác vì B5 và vì danh sách migration ghi cứng: `migration-0003` (bỏ các ca `refunded_by`), `erd-alignment` (xoá ngoại lệ A5 `top_ups_refunded_by_fkey`; phần danh sách migration ghi cứng đã được #82 sửa). Lý do từng chỗ: nhật ký 0015 mục 4.
+- 04/11 (Phần 1, sau BE-16 đợt 2 #86): `0014` bị chiếm lần nữa → đổi thành `0015`, rebase trên cùng nhánh. Theo C1/C2 của đợt 2: `gateway_refund_no`, `provider_adjustment_no` là `varchar(20)`; `refunds` thêm `updated_at`, `invoice_adjustments` thêm `created_at` + `updated_at` (`$onUpdate` ở schema TS). **Code billing sau này:** mọi `UPDATE` thô lên `refunds`, `invoice_adjustments`, `top_ups`, `e_invoices` phải ghi `updated_at = now()` (test quét mã nguồn của 0014 sẽ bắt).
