@@ -58,6 +58,10 @@ export const faultEvents = pgTable(
   (t) => [
     unique('fault_events_event_no_key').on(t.eventNo),
     index('fault_events_charge_point_id_raised_at_idx').on(t.chargePointId, t.raisedAt),
+    // Migration 0011 (A5): mọi FK có index.
+    index('fault_events_connector_id_idx').on(t.connectorId),
+    index('fault_events_acknowledged_by_idx').on(t.acknowledgedBy),
+    index('fault_events_reset_command_id_idx').on(t.resetCommandId),
     index('fault_events_open_idx')
       .on(t.status)
       .where(sql`${t.status} <> 'resolved'`),
@@ -91,6 +95,8 @@ export const faultReports = pgTable(
   (t) => [
     unique('fault_reports_report_no_key').on(t.reportNo),
     index('fault_reports_connector_id_idx').on(t.connectorId),
+    index('fault_reports_driver_id_idx').on(t.driverId),
+    index('fault_reports_cleared_by_idx').on(t.clearedBy),
     index('fault_reports_fault_event_id_idx').on(t.faultEventId),
   ],
 );
@@ -115,6 +121,7 @@ export const maintenanceTickets = pgTable(
   (t) => [
     unique('maintenance_tickets_ticket_no_key').on(t.ticketNo),
     index('maintenance_tickets_fault_event_id_idx').on(t.faultEventId),
+    index('maintenance_tickets_assigned_to_idx').on(t.assignedTo),
     check(
       'maintenance_tickets_closed_check',
       sql`(${t.status} = 'closed') = (${t.closedAt} IS NOT NULL)`,
@@ -137,7 +144,10 @@ export const policyTemplates = pgTable(
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [unique('policy_templates_template_code_key').on(t.templateCode)],
+  (t) => [
+    unique('policy_templates_template_code_key').on(t.templateCode),
+    index('policy_templates_created_by_idx').on(t.createdBy),
+  ],
 );
 
 /**

@@ -113,7 +113,7 @@ export const connectors = pgTable(
     id: bigint('id', { mode: 'number' }).primaryKey().generatedAlwaysAsIdentity(),
     chargePointId: bigint('charge_point_id', { mode: 'number' })
       .notNull()
-      .references(() => chargePoints.id),
+      .references(() => chargePoints.id, { onDelete: 'cascade' }),
     connectorNo: smallint('connector_no').notNull(),
     connectorType: connectorTypeEnum('connector_type').notNull().default('ccs2'),
     maxPowerKw: numeric('max_power_kw', { precision: 7, scale: 2 }),
@@ -144,7 +144,7 @@ export const connectorStatusEvents = pgTable(
     id: bigint('id', { mode: 'number' }).primaryKey().generatedAlwaysAsIdentity(),
     chargePointId: bigint('charge_point_id', { mode: 'number' })
       .notNull()
-      .references(() => chargePoints.id),
+      .references(() => chargePoints.id, { onDelete: 'cascade' }),
     connectorNo: smallint('connector_no').notNull(),
     connectorId: bigint('connector_id', { mode: 'number' }).references(() => connectors.id),
     status: connectorStatusEnum('status').notNull(),

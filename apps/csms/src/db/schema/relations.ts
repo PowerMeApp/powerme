@@ -40,14 +40,18 @@ import {
   sites,
 } from './stations.js';
 import { promotions, sessionTariffSegments, tariffPeriods } from './tariffs.js';
-import { drivers, operatorStaff, users } from './users.js';
+import { admins, drivers, operatorStaff, users } from './users.js';
 
 // ---- users ----
 export const usersRelations = relations(users, ({ one, many }) => ({
   driver: one(drivers, { fields: [users.id], references: [drivers.userId] }),
   operatorStaff: one(operatorStaff, { fields: [users.id], references: [operatorStaff.userId] }),
+  admin: one(admins, { fields: [users.id], references: [admins.userId] }),
   policyTemplates: many(policyTemplates),
-  reviewedReconciliations: many(reconciliationRecords),
+}));
+
+export const adminsRelations = relations(admins, ({ one }) => ({
+  user: one(users, { fields: [admins.userId], references: [users.id] }),
 }));
 
 export const driversRelations = relations(drivers, ({ one, many }) => ({
@@ -72,6 +76,7 @@ export const operatorStaffRelations = relations(operatorStaff, ({ one, many }) =
   operator: one(operators, { fields: [operatorStaff.operatorId], references: [operators.id] }),
   acknowledgedFaults: many(faultEvents),
   assignedTickets: many(maintenanceTickets),
+  reviewedReconciliations: many(reconciliationRecords),
 }));
 
 // ---- stations ----
@@ -153,6 +158,10 @@ export const sessionsRelations = relations(sessions, ({ one, many }) => ({
   vehicle: one(vehicles, { fields: [sessions.vehicleId], references: [vehicles.id] }),
   rfidCard: one(rfidCards, { fields: [sessions.rfidCardId], references: [rfidCards.id] }),
   promotion: one(promotions, { fields: [sessions.promotionId], references: [promotions.id] }),
+  reservation: one(reservations, {
+    fields: [sessions.reservationId],
+    references: [reservations.id],
+  }),
   pauses: many(sessionPauses),
   statusHistory: many(sessionStatusHistory),
   meterValues: many(meterValues),
@@ -199,7 +208,10 @@ export const sessionTariffSegmentsRelations = relations(sessionTariffSegments, (
 // ---- reconciliation ----
 export const reconciliationRecordsRelations = relations(reconciliationRecords, ({ one }) => ({
   session: one(sessions, { fields: [reconciliationRecords.sessionId], references: [sessions.id] }),
-  reviewer: one(users, { fields: [reconciliationRecords.reviewedBy], references: [users.id] }),
+  reviewer: one(operatorStaff, {
+    fields: [reconciliationRecords.reviewedBy],
+    references: [operatorStaff.userId],
+  }),
 }));
 
 // ---- billing ----
@@ -216,6 +228,10 @@ export const creditTransactionsRelations = relations(creditTransactions, ({ one 
   }),
   session: one(sessions, { fields: [creditTransactions.sessionId], references: [sessions.id] }),
   topUp: one(topUps, { fields: [creditTransactions.topUpId], references: [topUps.id] }),
+  reservation: one(reservations, {
+    fields: [creditTransactions.reservationId],
+    references: [reservations.id],
+  }),
 }));
 
 export const topUpsRelations = relations(topUps, ({ one, many }) => ({

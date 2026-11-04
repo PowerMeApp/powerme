@@ -97,6 +97,7 @@ export const remoteCommands = pgTable(
   },
   (t) => [
     // DESC mặc định của Postgres là NULLS FIRST; Drizzle sinh NULLS LAST nếu không nói rõ → nói rõ.
+    index('remote_commands_requested_by_idx').on(t.requestedBy),
     index('remote_commands_cp_requested_at_idx').on(
       t.chargePointId,
       t.requestedAt.desc().nullsFirst(),
