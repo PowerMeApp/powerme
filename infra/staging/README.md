@@ -4,6 +4,8 @@ Hạ tầng staging theo kiến trúc ARCH-2 (Report 4, Figure 2): **một VPS U
 
 > **Trạng thái trung thực: đây là bộ cấu hình, CHƯA được chạy thử trên Docker hay VPS thật.** Máy của Trí không có Docker, nên Dockerfile chưa được `docker build`, Caddyfile chưa được Caddy đọc, `deploy.sh` chưa chạy trên Ubuntu 24.04, workflow chưa chạy trên GitHub. Phần đã kiểm (bằng mô phỏng trên máy Windows) và phần chưa kiểm nằm ở mục [Đã kiểm và chưa kiểm](#đã-kiểm-và-chưa-kiểm). Đừng coi `deploy.sh` đã được chứng minh cho tới khi có lần deploy thật đầu tiên — lần đó sẽ có lỗi vặt.
 
+> **Đường nhanh để dựng staging trên Azure (Azure for Students, tên miền miễn phí): xem [`AZURE.md`](AZURE.md).** Có `cloud-init.yaml` (dán vào "Custom data" khi tạo VM: tự cài Docker, tạo user `deploy`, clone repo) và `init-env.sh` (sinh `.env` với mật khẩu ngẫu nhiên). Cả hai chưa chạy trên Azure thật.
+
 ## Những gì có trong thư mục này
 
 | File | Việc |

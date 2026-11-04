@@ -1,0 +1,36 @@
+#cloud-config
+# Dán NGUYÊN FILE này vào ô "Custom data" (tab Advanced) khi tạo VM Ubuntu 24.04 trên Azure.
+# Việc nó làm lúc VM khởi động lần đầu (khoảng 3-5 phút):
+#   1. tạo user 'deploy' (khoá mật khẩu; chỉ đăng nhập bằng khoá SSH bên dưới),
+#   2. cài Docker Engine + Compose plugin từ kho chính thức của Docker,
+#   3. cho 'deploy' dùng docker, rồi clone repo public vào /home/deploy/powerme.
+# KHÔNG chứa secret: dòng ssh-ed25519 là khoá CÔNG KHAI (khoá riêng nằm ở máy Trí và ở GitHub secret
+# STAGING_SSH_KEY). Muốn dùng khoá khác thì thay dòng đó trước khi dán.
+# Kiểm xong khi có file /var/lib/powerme-cloud-init.done (cloud-init status --wait).
+package_update: true
+packages:
+  - ca-certificates
+  - curl
+  - git
+  - openssl
+users:
+  - default
+  - name: deploy
+    shell: /bin/bash
+    lock_passwd: true
+    ssh_authorized_keys:
+      - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOA5OhD1I728Ht2slR3F+A4ZYzyGS7uwT7xfcyXLgoZ5 tri-powerme-staging
+runcmd:
+  - |
+    set -e
+    install -m 0755 -d /etc/apt/keyrings
+    curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+    chmod a+r /etc/apt/keyrings/docker.asc
+    . /etc/os-release
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu $VERSION_CODENAME stable" > /etc/apt/sources.list.d/docker.list
+    apt-get update
+    apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+    systemctl enable --now docker
+    usermod -aG docker deploy
+    runuser -u deploy -- git clone https://github.com/PowerMeApp/powerme.git /home/deploy/powerme
+    touch /var/lib/powerme-cloud-init.done
