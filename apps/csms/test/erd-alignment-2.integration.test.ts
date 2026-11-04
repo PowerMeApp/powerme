@@ -1,11 +1,11 @@
 /**
- * Test tích hợp migration 0013 (BE-16, đợt 2): C1 độ dài VARCHAR(n) và C2 cột created_at/updated_at.
+ * Test tích hợp migration 0014 (BE-16, đợt 2): C1 độ dài VARCHAR(n) và C2 cột created_at/updated_at.
  *
  * Vì sao tồn tại: đổi kiểu text → varchar(n) ghi lại cả bảng và có thể làm hỏng dữ liệu cũ dài hơn;
  * thêm updated_at chỉ có ích nếu mọi nơi UPDATE đều cập nhật nó — Drizzle `$onUpdate` chỉ phủ
  * `db.update()`, còn SQL thô phải tự đặt `updated_at = now()`. Test chạy trên Postgres thật:
  *
- *   1. Đường nâng cấp: DB ở 0012 có dữ liệu → 0013; dữ liệu quá dài làm migration DỪNG (không đổi gì).
+ *   1. Đường nâng cấp: DB ở 0012 có dữ liệu → 0014; dữ liệu quá dài làm migration DỪNG (không đổi gì).
  *   2. C1: 48 cột đúng độ dài; vượt độ dài bị Postgres từ chối (22001); hai CHECK ≤ 20 đã được thay.
  *   3. C2: cột có mặt, NOT NULL DEFAULT now(); `$onUpdate` hoạt động; quét mã nguồn: không UPDATE
  *      thô nào lên bảng có updated_at mà quên cột này.
@@ -16,7 +16,8 @@ import { readdirSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { eq } from 'drizzle-orm';
 import { createDb, Db } from '../src/db/db.module.js';
-import { connectors } from '../src/db/schema/index.js';
+import { connectors, ocppMessageLog } from '../src/db/schema/index.js';
+import { OcppMessageLogger } from '../src/ocpp-gateway/ocpp-message-logger.js';
 import {
   listMigrations,
   MIGRATIONS_DIR,
@@ -78,7 +79,7 @@ const VARCHAR_TABLE: [string, string, number][] = [
   ['charge_settlement_jobs', 'last_error_code', 50],
 ];
 
-/** [bảng, created_at thêm ở 0013?, updated_at thêm ở 0013?] */
+/** [bảng, created_at thêm ở 0014?, updated_at thêm ở 0014?] */
 const AUDIT_ADDED: [string, boolean, boolean][] = [
   ['operators', false, true],
   ['sites', false, true],
@@ -127,13 +128,13 @@ function sourceFiles(dir: string): string[] {
   });
 }
 
-describeDb('migration 0013 — C1 VARCHAR(n) và C2 created_at/updated_at', () => {
+describeDb('migration 0014 — C1 VARCHAR(n) và C2 created_at/updated_at', () => {
   let db: Db;
   const q = async (sql: string, params: unknown[] = []) =>
     (await db.$client.query(sql, params)).rows as Record<string, unknown>[];
   const one = async (sql: string, params: unknown[] = []) => (await q(sql, params))[0] ?? {};
   const id = async (sql: string, params: unknown[] = []) => Number((await one(sql, params))['id']);
-  const MIG = '0013_erd-alignment-varchar-audit';
+  const MIG = '0014_erd-alignment-varchar-audit';
 
   beforeAll(async () => {
     db = createDb(DATABASE_URL as string);
@@ -170,7 +171,7 @@ describeDb('migration 0013 — C1 VARCHAR(n) và C2 created_at/updated_at', () =
         const err = await rejection(
           client.query(readFileSync(path.join(MIGRATIONS_DIR, `${MIG}.sql`), 'utf8')),
         );
-        expect(err.message).toContain('0013/C1');
+        expect(err.message).toContain('0014/C1');
         expect(err.message).toContain('charge_points.free_vend_tag: dài nhất 25 > varchar(20)');
         await client.query('ROLLBACK'); // BEGIN tường minh trong file
       } finally {
@@ -187,7 +188,7 @@ describeDb('migration 0013 — C1 VARCHAR(n) và C2 created_at/updated_at', () =
       expect(upd).toEqual([]);
     });
 
-    it('sau khi xử lý tay dữ liệu, migrate áp 0013; dữ liệu cũ còn nguyên; dòng cũ có created/updated', async () => {
+    it('sau khi xử lý tay dữ liệu, migrate áp 0014; dữ liệu cũ còn nguyên; dòng cũ có created/updated', async () => {
       await q(`UPDATE charge_points SET free_vend_tag = 'FREE-VEND' WHERE id = $1`, [cp]);
       expect(await migrate(db.$client)).toEqual([MIG]);
       expect(
@@ -203,7 +204,7 @@ describeDb('migration 0013 — C1 VARCHAR(n) và C2 created_at/updated_at', () =
     });
   });
 
-  describe('trên DB sạch (0000 → 0013)', () => {
+  describe('trên DB sạch (0000 → 0014)', () => {
     beforeAll(async () => {
       await resetAndMigrate(db.$client);
     });
@@ -303,6 +304,31 @@ describeDb('migration 0013 — C1 VARCHAR(n) và C2 created_at/updated_at', () =
       await log('u'.repeat(36));
     });
 
+    it('OcppMessageLogger cắt UniqueId > 36 và action > 40 ký tự (frame hỏng vẫn được ghi, raw giữ nguyên)', async () => {
+      const cp = await id(
+        `INSERT INTO charge_points (serial_number) VALUES ('C1-CLAMP') RETURNING id`,
+      );
+      const logger = new OcppMessageLogger(db);
+      const longId = 'u'.repeat(100);
+      const longAction = 'A'.repeat(80);
+      const rowId = await logger.log({
+        chargePointId: cp,
+        epoch: 1,
+        direction: 'in',
+        messageType: 2,
+        uniqueId: longId,
+        action: longAction,
+        cpTimestamp: null,
+        receivedAt: new Date(),
+        raw: [2, longId, longAction, {}],
+        validationError: 'schema sai',
+      });
+      const row = (await db.select().from(ocppMessageLog).where(eq(ocppMessageLog.id, rowId)))[0];
+      expect(row?.uniqueId).toBe(longId.slice(0, 36));
+      expect(row?.action).toBe(longAction.slice(0, 40));
+      expect(JSON.stringify(row?.raw)).toContain(longId); // frame nguyên văn không bị cắt
+    });
+
     it('C1: meter_values (partition) — measurand ≤ 40, partition con cũng đổi kiểu', async () => {
       const rows = await q(
         `SELECT table_name t, character_maximum_length l FROM information_schema.columns
@@ -313,7 +339,7 @@ describeDb('migration 0013 — C1 VARCHAR(n) và C2 created_at/updated_at', () =
     });
 
     it.each(AUDIT_ADDED)(
-      'C2: %s — cột kiểm toán thêm ở 0013 (created=%s, updated=%s)',
+      'C2: %s — cột kiểm toán thêm ở 0014 (created=%s, updated=%s)',
       async (t, c, u) => {
         const rows = await q(
           `SELECT column_name c, data_type d, is_nullable n, column_default df FROM information_schema.columns

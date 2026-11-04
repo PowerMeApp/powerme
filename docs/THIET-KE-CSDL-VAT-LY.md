@@ -5,8 +5,8 @@
 **Người chịu trách nhiệm:** Ngô Văn Minh Trí (WP2)
 **Nguồn:** mô hình logic T10 (Ân, 20/10/2026) · state machine T12/T13 · ADR-0005, 0007, 0008, 0009, 0010, 0011, 0012 · `docs/PACKAGE-DIAGRAM-CSMS.md` (bảng → module chủ) · `apps/csms/lab/README.md` (định dạng trace)
 **Sản phẩm:** `apps/csms/src/db/schema/*.ts` (Drizzle) · `apps/csms/drizzle/0000_init.sql` + `apps/csms/drizzle/0001_quyet-dinh-be-11.sql` + `apps/csms/drizzle/0002_tach-ket-noi-khoi-lifecycle.sql` + `apps/csms/drizzle/0003_billing-wf02.sql` (migration viết tay) · tài liệu này
-**Cập nhật 04/11/2026 (đợt 2, 0013, BE-16):** C1 — 48 cột mã/định danh chuẩn đổi `text` → `varchar(n)` theo độ dài thật (nguồn từng độ dài: OCPP, RFC 5321, E.164, mã số thuế, VNPay, code, hoặc giả định [A] của Ân); văn bản tự do (tên, địa chỉ, mô tả, ghi chú, lý do, băm) giữ `text`; hai CHECK `char_length ≤ 20` (`rfid_cards.card_identifier`, `driver_charge_intents.id_tag`) được thay bằng chính kiểu `varchar(20)`. C2 — thêm 7 cột `created_at` và 19 cột `updated_at` (`NOT NULL DEFAULT now()`) cho 21 bảng còn thiếu; quy ước: mọi UPDATE thô phải đặt `updated_at = now()` (test quét mã nguồn), `db.update()` của Drizzle tự đặt qua `$onUpdate`. Chi tiết: `docs/NHAT-KY-ERD-ALIGNMENT.md` mục 6.
-**Cập nhật 04/11/2026 (0010–0012, BE-16 — đồng bộ Physical ERD v1.0):** thêm bảng `admins`; `sessions.reservation_id` và `credit_transactions.reservation_id` (UNIQUE; enum `reservation_fee`); 20 index cho FK chưa có index; bỏ FK dư `sessions_charge_point_id_fkey`; quy tắc `ON DELETE` theo loại quan hệ (mục 4.4); `reconciliation_records.reviewed_by` trỏ `operator_staff`. Nhật ký + cách kiểm: `docs/NHAT-KY-ERD-ALIGNMENT.md`. Chưa làm ở đợt này: B1, B3, B4, B5 (C1, C2 làm ở đợt 2 — 0013).
+**Cập nhật 04/11/2026 (đợt 2, 0014, BE-16):** C1 — 48 cột mã/định danh chuẩn đổi `text` → `varchar(n)` theo độ dài thật (nguồn từng độ dài: OCPP, RFC 5321, E.164, mã số thuế, VNPay, code, hoặc giả định [A] của Ân); văn bản tự do (tên, địa chỉ, mô tả, ghi chú, lý do, băm) giữ `text`; hai CHECK `char_length ≤ 20` (`rfid_cards.card_identifier`, `driver_charge_intents.id_tag`) được thay bằng chính kiểu `varchar(20)`. C2 — thêm 7 cột `created_at` và 19 cột `updated_at` (`NOT NULL DEFAULT now()`) cho 21 bảng còn thiếu; quy ước: mọi UPDATE thô phải đặt `updated_at = now()` (test quét mã nguồn), `db.update()` của Drizzle tự đặt qua `$onUpdate`. Chi tiết: `docs/NHAT-KY-ERD-ALIGNMENT.md` mục 6.
+**Cập nhật 04/11/2026 (0010–0012, BE-16 — đồng bộ Physical ERD v1.0):** thêm bảng `admins`; `sessions.reservation_id` và `credit_transactions.reservation_id` (UNIQUE; enum `reservation_fee`); 20 index cho FK chưa có index; bỏ FK dư `sessions_charge_point_id_fkey`; quy tắc `ON DELETE` theo loại quan hệ (mục 4.4); `reconciliation_records.reviewed_by` trỏ `operator_staff`. Nhật ký + cách kiểm: `docs/NHAT-KY-ERD-ALIGNMENT.md`. Chưa làm ở đợt này: B1, B3, B4, B5 (C1, C2 làm ở đợt 2 — 0014).
 **Cập nhật 01/11/2026 (0009):** bỏ giá trị `free` của `payment_mode` theo quyết định của Trí; free vend → `unattributed`, phân biệt với thẻ lạ qua `origin = free_vend` và không có `unknown_id_tag`. Enum được tạo lại còn ba giá trị.
 
 **Cập nhật 25/10/2026 (BE-11):** áp migration 0001 — `payment_mode` có `unattributed`, đổi `pillar_timestamp` → `cp_timestamp`, thêm bảng `remote_commands` và `session_status_history`, cột `orphaned_at` / `replayed` / `epoch`, `reconciliation_record_type` có `conflict` + `late_sample`. Nhật ký từng thay đổi và cách kiểm: `docs/NHAT-KY-MIGRATION-0001.md`.
@@ -27,8 +27,8 @@
 | Business key của ERD | `UNIQUE` riêng, không làm PK | T11 |
 | Tên bảng / cột | `snake_case`, số nhiều cho bảng | T11 |
 | Thời gian | `timestamptz`, lưu UTC | ADR-0009 |
-| Mã / định danh chuẩn | `varchar(n)` theo độ dài thật (0013); văn bản tự do là `text` | hướng dẫn ERD §9.1, Ân |
-| Kiểm toán | `created_at` (hoặc thời điểm sự kiện) và `updated_at` cho bảng có dòng đổi sau khi tạo; UPDATE thô phải tự đặt `updated_at = now()` | hướng dẫn ERD §9.1, Ân; 0013 |
+| Mã / định danh chuẩn | `varchar(n)` theo độ dài thật (0014); văn bản tự do là `text` | hướng dẫn ERD §9.1, Ân |
+| Kiểm toán | `created_at` (hoặc thời điểm sự kiện) và `updated_at` cho bảng có dòng đổi sau khi tạo; UPDATE thô phải tự đặt `updated_at = now()` | hướng dẫn ERD §9.1, Ân; 0014 |
 | Hai đồng hồ | bảng nhận dữ liệu từ trụ có cả `cp_timestamp` (đồng hồ trụ, **không tin**; trước 0001 `connector_status_events` gọi là `pillar_timestamp`) lẫn `received_at` (đồng hồ CSMS, **tin**) | ADR-0009 |
 | Điện năng | Wh, `bigint` | ADR-0009 |
 | Tiền | VND, `bigint` | ADR-0009 |
@@ -36,7 +36,7 @@
 | Cột dẫn xuất (`/x` trong ERD) | cột thường, **cập nhật cùng transaction với dòng ledger** | T10 §5.6 |
 | Partition | `meter_values`, `ocpp_message_log` — `PARTITION BY RANGE (received_at)` theo tháng, tạo sẵn 2026-10 → 2027-01 + `DEFAULT` | ADR-0007 |
 
-**Số liệu sau migration 0013 (đợt 2):** cột 390 → **416** (+26 cột kiểm toán), ràng buộc 231 → **229** và CHECK 58 → **56** (bỏ 2 CHECK `char_length ≤ 20`); bảng 43, FK 82, index 152, enum 30 không đổi.
+**Số liệu sau migration 0014 (đợt 2):** cột 391 → **417** (+26 cột kiểm toán; 391 gồm `ocpp_message_log.validation_error` của BE-07 #82), ràng buộc 231 → **229** và CHECK 58 → **56** (bỏ 2 CHECK `char_length ≤ 20`); bảng 43, FK 82, index 152, enum 30 không đổi.
 
 **Số liệu sau migration 0012 (04/11/2026)** — đếm bằng truy vấn trên Postgres 17 beta nhúng đã áp 0000 → 0012, cùng cách đếm ở đoạn dưới, so với trạng thái 0009 (trước BE-16): **43 bảng** (42 → 43, thêm `admins`; +10 partition con), **390 cột** (387 → 390: `admins.user_id`, `sessions.reservation_id`, `credit_transactions.reservation_id`), **231 ràng buộc PK/UNIQUE/FK/CHECK** (225 → 231), trong đó **82 FK** (80 → 82: +`admins`, +2 `reservation_id`, −`sessions_charge_point_id_fkey`) và **58 CHECK** (57 → 58: `credit_transactions_reservation_fee_check`), **152 index** (129 → 152: 20 index A5, 2 UNIQUE `reservation_id`, PK `admins`), **15 index partial** (không đổi), **30 enum / 120 giá trị** (119 → 120: `reservation_fee`). Quy tắc xoá của 82 FK: 7 `CASCADE`, 7 `RESTRICT`, 68 thường (`NO ACTION`) — trước đó 2 / 1 / 77.
 
@@ -149,7 +149,7 @@ Khoá: UNIQUE `(charge_point_id, epoch)`.
 ### 3.3. Module `sessions`
 
 **`rfid_cards`** — sổ đăng ký thẻ (ADR-0012 gọi `id_tags`). Người vận hành phát hành thẻ nên biết thẻ nào là thẻ ví.
-Cột: `card_identifier` (BK — giá trị idTag trên dây, `varchar(20)` theo OCPP 1.6 IdToken — thay CHECK cũ ở 0013), `card_kind` (`online` · `wallet` · `free_vend`), `driver_id` (FK → `drivers`, null khi chưa gán), `status` (`unlinked` · `active` · `blocked`), `issued_at`.
+Cột: `card_identifier` (BK — giá trị idTag trên dây, `varchar(20)` theo OCPP 1.6 IdToken — thay CHECK cũ ở 0014), `card_kind` (`online` · `wallet` · `free_vend`), `driver_id` (FK → `drivers`, null khi chưa gán), `status` (`unlinked` · `active` · `blocked`), `issued_at`.
 
 **`vehicle_models`** — danh mục mẫu xe. UNIQUE `(brand, model_name)`; `connector_type`, `battery_capacity_kwh`, `rated_range_km`, `max_dc_kw`, `is_vinfast`.
 
@@ -276,7 +276,7 @@ Khoá: CHECK `connector_no IS NULL OR connector_no IN (0,1,2)`; CHECK `sent_at >
 | CHECK `(connector_no = 0) = (connector_id IS NULL)` | connector_status_events | sự kiện toàn trụ không gắn súng; sự kiện súng phải gắn súng |
 | UNIQUE `(charge_point_id, connector_no, received_at)` | connector_status_events | BK của ERD (Connector + ReceivedAt), mở rộng cho `connector_no = 0` |
 | UNIQUE `(charge_point_id, epoch)` | charge_point_connections | epoch không trùng trong một trụ |
-| `card_identifier varchar(20)` (trước 0013: CHECK `char_length <= 20`) | rfid_cards | giới hạn idTag của OCPP 1.6 |
+| `card_identifier varchar(20)` (trước 0014: CHECK `char_length <= 20`) | rfid_cards | giới hạn idTag của OCPP 1.6 |
 | partial UNIQUE `vehicles (driver_id) WHERE is_default` | vehicles | một xe mặc định mỗi tài xế |
 | CHECK `amount_paid_vnd = amount_vnd - points_discount_vnd` | top_ups | cột dẫn xuất không lệch nguồn |
 | CHECK loại `session_debit` phải có `session_id`; loại `top_up` phải có `top_up_id` | credit_transactions | ledger không có dòng "trừ tiền phiên" mà không biết phiên nào |

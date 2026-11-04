@@ -1,5 +1,5 @@
 -- =============================================================================
--- PowerMe CSMS — migration 0013_erd-alignment-varchar-audit (BE-16, WP2) — đợt 2
+-- PowerMe CSMS — migration 0014_erd-alignment-varchar-audit (BE-16, WP2) — đợt 2
 --
 -- Migration VIẾT TAY (ADR-0008), áp LÊN DB đã có 0000 … 0012. Schema Drizzle phải khớp file này.
 -- Tham chiếu: mục C1 và C2 của `0011_physical-guide-alignment.sql` (Ân, WP1; hướng dẫn ERD §9.1).
@@ -90,7 +90,7 @@ BEGIN
     END IF;
   END LOOP;
   IF bad <> '' THEN
-    RAISE EXCEPTION '0013/C1: có giá trị dài hơn độ dài mới, không đổi gì:%', bad;
+    RAISE EXCEPTION '0014/C1: có giá trị dài hơn độ dài mới, không đổi gì:%', bad;
   END IF;
 END $$;
 

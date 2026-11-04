@@ -461,7 +461,7 @@ describeDb('migration 0003 — billing WF-02 (nâng cấp DB đã có 0002)', ()
         'top_ups_late_payment_status_check',
       ],
     ])('CHECK top_ups từ chối: %s', async (label, cols, vals, constraint) => {
-      // idempotency_key = ref và là varchar(64) từ 0013 (C1): giữ ref ngắn hơn giới hạn.
+      // idempotency_key = ref và là varchar(64) từ 0014 (C1): giữ ref ngắn hơn giới hạn.
       const ref = `M3-BAD-${label.replace(/\W+/g, '-')}`.slice(0, 60);
       const e = await rejection(
         q(
