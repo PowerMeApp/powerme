@@ -11,7 +11,12 @@
 - **Chưa có HTTP qua Nest:** `main.ts` dùng `createApplicationContext`. Route HTTP viết kiểu thuần trong `src/console/` (`console.http.ts`, `console.router.ts`, cổng 3000): tài xế `/api/driver/v1/*`, admin `/api/admin/*`. Theo `docs/api/DRIVER-API-HOP-DONG.md`: chưa thêm Nest controller cho đến khi có RolesGuard; xác thực dev bằng header `X-Driver-Id` khi `DRIVER_API_DEV_AUTH=true`.
 - **Chưa có** module `users`, `realtime`, BullMQ. Redis có trong `infra/docker-compose.yml` nhưng chưa dùng. Hẹn giờ hiện dùng `Scheduler` (`src/common/scheduler.ts`, `setTimeout`, mỗi service tự quét DB lúc khởi động để dựng lại).
 - **WP3 đã ghi vào bảng billing:** `src/sessions/charge-settlement.service.ts` tự INSERT `credit_transactions` (`session_debit`), UPDATE `credit_accounts.balance_vnd`/`status = in_shortfall`, tạo `loyalty_accounts` và ghi điểm `earn` bằng SQL thô. `driver-charging.service.ts` và `reconciliation.service.ts` đọc `credit_accounts`/`credit_transactions`. **Không sửa các file này**; xem mục Còn mở trong decisions.
-- **Lệnh:** `npm run infra:up` (Postgres + Redis) · `DATABASE_URL=postgresql://powerme:powerme@localhost:5432/powerme node apps/csms/scripts/migrate.mjs` · `npm run test -w @powerme/csms` (unit `src/**/*.spec.ts` không cần DB; integration `test/**/*.test.ts` tự skip khi thiếu `DATABASE_URL`, chạy tuần tự vì DROP SCHEMA) · `npm run typecheck`, `npm run lint`.
+- **Lệnh:**
+  - `npm run infra:up` (Postgres + Redis).
+  - Hai database, **không dùng lẫn**: `powerme` cho demo/dev, `powerme_test` cho test (giống CI). Test integration DROP SCHEMA, nên không trỏ test vào `powerme`; vài test (vd. `migration-wp3`) còn từ chối chạy nếu không phải `powerme_test`.
+  - Migrate DB dev: `DATABASE_URL=postgresql://powerme:powerme@localhost:5432/powerme node apps/csms/scripts/migrate.mjs`.
+  - Test: `DATABASE_URL=postgresql://powerme:powerme@localhost:5432/powerme_test npm run test -w @powerme/csms`. Unit `src/**/*.spec.ts` không cần DB; integration `test/**/*.test.ts` tự skip khi thiếu `DATABASE_URL`, chạy tuần tự vì DROP SCHEMA.
+  - `npm run typecheck`, `npm run format:check` (Prettier toàn repo, như CI). `npm run lint` hiện chưa kiểm gì vì chưa workspace nào có script `lint`.
 - **Quy ước nhóm (`CONTRIBUTING.md`):** mỗi task có mã, đi theo nhánh → commit → PR; Conventional Commits kèm mã task; squash merge; PR ≤ 400 dòng; test cả nhánh lỗi; biến môi trường mới thêm vào `infra/.env.example` với giá trị giả; không commit credential VNPay.
 
 ## Đọc trước khi làm bất cứ task nào
@@ -67,7 +72,7 @@ Decisions khác diagram thì theo diagram và sửa decisions. Diagram mâu thu�
 | Đóng tài khoản | SD-2f | D6 | STM-5, STM-10 | (theo test case của nhóm) |
 | Worker quét DB | (không vẽ) | D7 | | |
 
-Diagram: `diagrams/wf02/` (CD-2, SD-2a…2f v2.0, 01/11/2026) và `diagrams/erd/LERD-1_Charging-Billing.puml`. STM-10 Refund chưa có file trong `diagrams/stm/` (STM-8 là RfidCard); tạm dùng D1. Tên class/method theo CD-2; nguồn sự thật cho tên cột là `src/db/schema/billing.ts` (vd. cột là `status`, không phải `topUpStatus`).
+Diagram: `diagrams/wf02/` (CD-2, SD-2a…2f v2.0, 01/11/2026) và `diagrams/erd/LERD-1_Charging-Billing.puml`. STM-10 Refund: `diagrams/stm/STM-10_Refund.puml` (STM-8 là RfidCard). State machine trong code: `top-up-state-machine.ts`, `refund-state-machine.ts`, lỗi chung `invalid-transition.ts`. Tên class/method theo CD-2; nguồn sự thật cho tên cột là `src/db/schema/billing.ts` (vd. cột là `status`, không phải `topUpStatus`).
 
 ## Cách làm việc
 

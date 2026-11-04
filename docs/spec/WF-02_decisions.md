@@ -19,7 +19,7 @@
 | SD-2e `SD-2e_admin_refund.puml` | Admin hoàn top-up; gửi refund về nguồn thanh toán | STM-4, STM-10, STM-7 |
 | SD-2f `SD-2f_close_account.puml` | Tài xế đóng tài khoản, hoàn số dư | STM-5, STM-10 |
 
-STM-4 TopUp, STM-5 CreditAccount, STM-7 EInvoice (cũng dùng cho InvoiceAdjustment), **STM-10 Refund** (STM-8 đã là RfidCard). File STM-10 chưa có trong `diagrams/stm/`; tạm lấy chuyển trạng thái ở D1.
+STM-4 TopUp, STM-5 CreditAccount, STM-7 EInvoice (cũng dùng cho InvoiceAdjustment), **STM-10 Refund** (STM-8 đã là RfidCard; file `diagrams/stm/STM-10_Refund.puml` v1.0, 01/11). Code: `TopUpStateMachine`, `RefundStateMachine` trong `apps/csms/src/billing/` (T32 Phần 2).
 
 ## D1. Hoàn tiền: ghi quyết định trước, chuyển tiền sau (SD-2e, STM-10)
 
@@ -96,6 +96,11 @@ Nghĩa của cột đã có:
 | Đã trả | `pending → credited`, `CreditLedgerService.post(+amountVnd)` (`in_shortfall → active` nếu số dư ≥ 0), `LoyaltyService.redeemForTopUp` nếu có dùng điểm, `EInvoiceService.requestForTopUp` chạy sau commit | 00 |
 
 Cộng tiền, dòng sổ cái và điểm nằm trong **một** DB transaction, nên IPN lặp không cộng hai lần.
+⊕ Kết quả thanh toán tới khi top-up đã có kết quả không đổi trạng thái (BR-P13), không ném lỗi (chốt 04/11, T32 Phần 2):
+- `already_applied` → RspCode 02: thành công trên `credited` / `refunded` với `transactionNo` = `gateway_transaction_no` đã ghi; lỗi trên `failed` / `expired`.
+- `conflicting_result` → không ghi gì, service log warn: thành công trên `credited` / `refunded` với `transactionNo` **khác** (có thể là lần trả thứ hai cho cùng top-up); lỗi trên `credited` / `refunded`.
+- Timeout (`TIMEOUT_NOT_PAID`) tới khi đã rời `pending` → `stale`, bỏ qua (đua với IPN qua Scheduler).
+- Chỉ Admin hoàn sai trạng thái mới ném `InvalidTransition`.
 ⊕ Realtime emit số dư mới sau commit.
 
 ## D4. Timeout và thanh toán trễ (SD-2d)
@@ -108,6 +113,17 @@ Cộng tiền, dòng sổ cái và điểm nằm trong **một** DB transaction,
 - ⊕ Mọi đường cộng tiền ở đây (querydr, IPN trễ) làm giống nhánh "đã trả" của SD-2b: trừ điểm đã dùng và yêu cầu e-invoice.
 - ⊕ Trước khi cộng tiền trễ, **kiểm tra lại** tài khoản chưa đóng và số dư sau nạp ≤ 5.000.000. Vi phạm → không cộng, ghi thành khoản trễ để Admin hoàn.
 - ⊕ querydr lỗi hoặc timeout → giữ `pending`, hẹn quét lại; không chuyển `expired` khi chưa biết kết quả.
+- ⊕ **Thành công tới khi top-up đã `failed`** (VNPay báo lỗi/huỷ trước, rồi báo đã trả): giữ `failed`, ghi khoản trễ như IPN sau cửa sổ (không cộng, không hoá đơn, Admin hoàn `late_payment`). Không xét cửa sổ trễ hay hạn mức. Chốt 04/11.
+- ⊕ **Khoản trễ đã ghi rồi** (`late_gateway_ref` khác NULL, trên `expired` hoặc `failed`), có kết quả thành công mới:
+  - cùng `transactionNo` → no-op `already_applied`, trả 02 (TC-STM4-15);
+  - khác `transactionNo` → `conflicting_result`: không ghi gì, service log warn.
+  - Kiểm **trước** guard cửa sổ, vì khoản trễ có thể đã ghi ngay trong cửa sổ khi vượt hạn mức.
+- ⊕ **Cần migration mới** cho ý thứ nhất (số kế tiếp lúc làm Phần 6; 0015 đã merge): CHECK `top_ups_late_payment_status_check` của 0003 đang là `late_gateway_ref IS NULL OR status = 'expired'`, sẽ chặn khoản trễ trên `failed`.
+  - Nới thành `status IN ('expired','failed')`.
+  - Sửa COMMENT của `late_gateway_ref`.
+  - Test cả ca hợp lệ (khoản trễ trên `failed`) lẫn ca bị chặn (trên `pending` / `credited` / `refunded`).
+  - Trí review.
+- ⊕ Khoản trễ chờ hoàn = `late_gateway_ref IS NOT NULL AND late_refunded_at IS NULL`, **không** lọc `status = 'expired'` (dashboard tab 2, `BillingExceptionsQuery`).
 
 ## D5. E-invoice (SD-2c, STM-7) và InvoiceAdjustment
 
@@ -184,8 +200,10 @@ Diagram chỉ ghi "job" / "queue" / "after commit". Repo chưa có BullMQ (Redis
 
 ## Còn mở (hỏi trước khi code phần liên quan)
 
-- Vẽ lại diagram: đưa các mục ⊕ vào; sửa "monthly cap" ở SD-2a; ~~bỏ `reservation_fee` ở CD-2~~ (không cần nữa, 0010 đã thêm vào enum); ghi số migration 0015 thay 0012 ở CD-2; thêm file STM-10 Refund vào `diagrams/stm/`.
+- Vẽ lại diagram: đưa các mục ⊕ vào; sửa "monthly cap" ở SD-2a; ~~bỏ `reservation_fee` ở CD-2~~ (không cần nữa, 0010 đã thêm vào enum); ghi số migration 0015 thay 0012 ở CD-2; ~~thêm file STM-10 Refund vào `diagrams/stm/`~~ (đã có, v1.0).
+- STM-4: thêm ghi chú ở `failed` giống ghi chú ở `expired` (thành công sau đó ghi thành khoản trễ, không cộng, Admin hoàn); ghi rõ kết quả lặp / khoản trễ trùng `transactionNo` là no-op (D3, D4 ⊕).
 - Thống nhất D10 với WP4.
+- **Lần trả thứ hai cho cùng top-up** (D3 ⊕: thành công với `transactionNo` khác trên `credited` / `refunded` → `conflicting_result`): tiền đã vào VNPay nhưng không có cột để ghi (`late_*` chỉ dành cho top-up chưa cộng, `gateway_transaction_no` đã có giá trị). Cần chốt cách ghi và cách Admin hoàn (cột mới? bảng riêng? `refunds.kind` mới?) trước Phần 6.
 - Đổi tên `lateGatewayRef` → `lateGatewayTransactionNo`?
 - VNPay sandbox: refund có chống trùng không, có API tra trạng thái hoàn không (`VnpayAdapter.queryRefund`), thời hạn được hoàn, danh sách mã IPN.
 - Cách tạo `CreditAccount` + `LoyaltyAccount` khi tài xế đăng ký (WF-05 gọi billing hay billing nghe event).
