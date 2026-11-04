@@ -1,0 +1,38 @@
+@startuml SD-2b_ipn_credit
+!include _seq.iuml
+title SD-2b (Software level, CSMS billing) — Payment notification credits the top-up once\nPrecondition: top-up is pending · System view: AD-2 · State: STM-4, STM-5, STM-7
+footer Owner: Lê Bảo Khang (WP5) · v2.0 · 01/11/2026 · names = CD-2 class diagram · left gate = Payment Gateway (VNPay IPN)
+
+participant "«component»\n<u>:VnpayIpnController</u>" as IPN
+participant "«component»\n<u>:TopUpService</u>" as TS
+participant "«component»\n<u>:CreditLedgerService</u>" as CL
+participant "«component»\n<u>:LoyaltyService</u>" as LS
+participant "«component»\n<u>:EInvoiceService</u>" as EI
+
+[-> IPN ++ : GET /billing/vnpay/ipn?vnp_TxnRef&vnp_Amount&vnp_ResponseCode&vnp_SecureHash\n[HTTPS, signed]
+IPN -> TS ++ : applyPaymentResult(ipn)
+TS -> TS : verify signature, find top-up, compare amount
+alt signature invalid, unknown top-up or amount differs
+  TS --> IPN : 97 / 01 / 04, nothing credited
+else already applied
+  TS --> IPN : 02 (already confirmed)
+else payment failed or cancelled
+  TS -> TS : pending → failed
+  TS --> IPN : 00
+else paid
+  TS -> TS : pending → credited
+  TS -> CL ++ : post(accountId, top_up, +amountVnd, topUpId)
+  CL -> CL : add to balance;\n[balance ≥ 0] in_shortfall → active
+  CL --> TS -- : creditTransactionId
+  opt points were redeemed
+    TS -> LS ++ : redeemForTopUp(topUp)
+    LS --> TS --
+  end
+  TS ->> EI : requestForTopUp(topUp)
+  note right : runs after commit (queue);\ninvoice requested → SD-2c
+  TS --> IPN : 00
+end
+deactivate TS
+[<-- IPN -- : 200 {RspCode, Message}
+note over IPN, EI : Credit, ledger entry and points are written in one database transaction, so a repeated notification can never credit twice.
+@enduml
