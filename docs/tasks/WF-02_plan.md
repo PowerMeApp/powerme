@@ -12,7 +12,7 @@ Kết quả đã ghi vào mục "Bối cảnh repo" của `apps/csms/src/billing
 
 | # | Phần | Nội dung | Xong khi | Trạng thái |
 |---|---|---|---|---|
-| 1 | Schema bổ sung | Các bảng billing đã có (0003). Viết migration `0012` (D8): enum `refund_kind`, `refund_status` + bảng `refunds` (D1), cột mới cho `invoice_adjustments` (D5), `next_attempt_at` + index quét cho `e_invoices`, `invoice_adjustments`, `refunds`, index `top_ups (status, expires_at)` (D7). Cập nhật `billing.ts`, `enums.ts`, `relations.ts`; thêm `NHAT-KY-MIGRATION-0012.md`, cập nhật `THIET-KE-CSDL-VAT-LY.md` | `migrate.mjs` áp được trên DB sạch và trên DB đã có các migration trước; `test/migration-0012.integration.test.ts` kiểm từng ràng buộc mới (cả nhánh vi phạm) | ☐ |
+| 1 | Schema bổ sung | Các bảng billing đã có (0003). Viết migration `0012` (D8): enum `refund_kind`, `refund_status` + bảng `refunds` (D1), cột mới cho `invoice_adjustments` (D5), `next_attempt_at` + index quét cho `e_invoices`, `invoice_adjustments`, `refunds`, index `top_ups (status, expires_at)` (D7). Cập nhật `billing.ts`, `enums.ts`, `relations.ts`; thêm `NHAT-KY-MIGRATION-0012.md`, cập nhật `THIET-KE-CSDL-VAT-LY.md` | `migrate.mjs` áp được trên DB sạch và trên DB đã có các migration trước; `test/migration-0012.integration.test.ts` kiểm từng ràng buộc mới (cả nhánh vi phạm) | ☑ 04/11 (nhánh `wp5/t32-migration-refunds`, chờ PR) |
 | 2 | State machine | `TopUpStateMachine` + `TopUpEvent` (STM-4), `RefundStateMachine` (STM-10). Thuần logic | Unit test mọi chuyển hợp lệ và không hợp lệ | ☐ |
 | 3 | Sổ cái | `CreditLedgerService.post` / `getBalance`: entryNo, `balanceAfterVnd`, snapshot, `active ↔ in_shortfall`; `ensureAccounts(driverId)`; `LoyaltyService.earnForSession` để WP3 thay SQL thô (D9). Báo Sơn khi merge | Test bất biến số dư = Σ sổ cái; test unique `(top_up_id, transaction_type)` | ☐ |
 | 4 | Loyalty (phần nạp) | `quoteRedemption` (≥ 500 điểm, ≤ 50% số tiền, 100 điểm = 1.000 VND), `redeemForTopUp` (lúc cộng tiền), `restoreForTopUp` (giữ hạn cũ) | Unit test các giới hạn | ☐ |
@@ -69,6 +69,8 @@ Việc nền viết theo D7 (quét DB). API admin bám D10. Đường dẫn theo
 - Người làm đăng ký tài xế: gọi `ensureAccounts(driverId)`.
 - WP4: thống nhất bảng D10 (dạng trả về 202 của refund, đóng tài khoản không cần Admin hoàn), thêm mục refund `failed` + retry.
 - Người lo Caddy staging / app Flutter: đường dẫn `/billing/vnpay/ipn`, `/billing/vnpay/return`, `/api/driver/v1/billing/top-ups`, `/api/driver/v1/me/account/close`.
+- Trí (chủ DB, đã làm 0003): review migration 0012, nhất là việc dùng lại `e_invoice_status` / `e_invoice_error_kind` và đổi `invoice_adjustments.issued_at` thành nullable (`docs/NHAT-KY-MIGRATION-0012.md` mục 2).
+- Nhóm: 0012 không chặn ai, nhưng code mới INSERT `e_invoices` / `invoice_adjustments` phải để `next_attempt_at` theo DEFAULT (hoặc ghi giá trị) khi `status` là `requested`/`failed`; ghi NULL sẽ bị CHECK từ chối.
 - (Claude Code ghi thêm vào đây khi phát hiện cần gì từ module khác.)
 
 ## Ghi chú
@@ -77,3 +79,6 @@ Việc nền viết theo D7 (quét DB). API admin bám D10. Đường dẫn theo
 
 - 03/11: decisions viết lại theo diagram v2.0. Chỗ diagram lệch code / ADR (theo code, chờ sửa diagram): `reservation_fee` trong CD-2, kiểu tiền `number`, "monthly cap" ở SD-2a, đường dẫn không có tiền tố `/api/...` (D8).
 - Class / method thêm ngoài CD-2 (CD-2 chỉ vẽ thành viên chính): `TopUpStateMachine`, `RefundStateMachine`, worker D7, `BillingExceptionsQuery`, `getBalance`, `ensureAccounts`, `quoteRedemption`, `earnForSession`.
+- 04/11 (Phần 0, xác nhận lại trên `main` `f9f0975`): khác ghi chép ở hai chỗ, đều không chạm billing: `main` đã có `0009_bo-payment-mode-free.sql` (BE-11, đổi enum `payment_mode`) và refactor đổi tên pillar → charge point (T90). Số `0012` vẫn trống.
+- 04/11 (Phần 1): `refunds.last_error_kind` và `invoice_adjustments.last_error_kind` dùng lại enum `e_invoice_error_kind`; `invoice_adjustments.status` dùng lại `e_invoice_status` (lý do: D8 đã cập nhật, nhật ký 0012 mục 2). `next_attempt_at` có DEFAULT `now()` trên cả ba bảng, kèm CHECK chặn NULL khi dòng còn chờ. `invoice_adjustments.refund_id` để nullable. Tiền kiểm: 0012 dừng nếu `invoice_adjustments` đã có hàng.
+- 04/11 (Phần 1): đối chiếu máy SQL ↔ Drizzle phát hiện index `loyalty_transactions_one_earn_per_session` (từ `0004` của WP3) chưa có trong `billing.ts`. **Phần 3** thêm vào schema TS khi viết `earnForSession`.

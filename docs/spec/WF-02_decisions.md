@@ -147,7 +147,7 @@ Diagram chỉ ghi "job" / "queue" / "after commit". Repo chưa có BullMQ (Redis
 ## D8. Khớp với repo
 
 - **Migration `0012`** (theo CD-2), tên kiểu `0012_billing-refunds-wf02.sql`. `migrate.mjs` áp theo thứ tự tên file, nên chưa có `0010`/`0011` vẫn chạy được. Nội dung: enum `refund_kind`, `refund_status`, bảng `refunds`, cột mới cho `invoice_adjustments` và `e_invoices.next_attempt_at`, index của D7. Kèm `docs/NHAT-KY-MIGRATION-0012.md` và `test/migration-0012.integration.test.ts`. Báo nhóm đã giữ số này. Nếu trùng số: người merge sau đổi sang số kế tiếp, đổi cả test và nhật ký (tiền lệ `docs/ITERATION-1-WF04.md`).
-- `refunds.last_error_kind`: dùng lại enum `e_invoice_error_kind` (`transient`, `data`) hoặc tạo enum chung; chọn khi viết migration và ghi lý do.
+- `refunds.last_error_kind` (và `invoice_adjustments.last_error_kind`): **dùng lại enum `e_invoice_error_kind`** (`transient`, `data`), chốt 04/11 khi viết 0012. Lý do: cùng nghĩa, một helper retry dùng chung (D7); không đổi tên enum của 0003 đã merge. `invoice_adjustments.status` dùng lại `e_invoice_status` (D5). Chi tiết: `docs/NHAT-KY-MIGRATION-0012.md` mục 2.
 - Mã task **T32**; nhánh `wp5/t32-<mo-ta>`; commit kèm `[T32]`.
 - **Đường dẫn:** giữ phần tài nguyên của diagram, ghép tiền tố theo `docs/api/DRIVER-API-HOP-DONG.md`:
 
