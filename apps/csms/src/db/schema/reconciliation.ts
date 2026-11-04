@@ -16,7 +16,7 @@ import {
 } from 'drizzle-orm/pg-core';
 import { reconciliationRecordTypeEnum } from './enums.js';
 import { sessions } from './sessions.js';
-import { users } from './users.js';
+import { operatorStaff } from './users.js';
 
 export const reconciliationRecords = pgTable(
   'reconciliation_records',
@@ -24,7 +24,7 @@ export const reconciliationRecords = pgTable(
     id: bigint('id', { mode: 'number' }).primaryKey().generatedAlwaysAsIdentity(),
     sessionId: bigint('session_id', { mode: 'number' })
       .notNull()
-      .references(() => sessions.id),
+      .references(() => sessions.id, { onDelete: 'restrict' }),
     /** Số thứ tự trong phiên, bắt đầu từ 1. */
     recordNo: smallint('record_no').notNull(),
     recordType: reconciliationRecordTypeEnum('record_type').notNull(),
@@ -32,14 +32,18 @@ export const reconciliationRecords = pgTable(
     gapEnd: timestamp('gap_end', { withTimezone: true }),
     /** Chênh lệch Wh giữa chuỗi meter và meter_stop - meter_start; integer Wh (ADR-0009). */
     energyDifferenceWh: bigint('energy_difference_wh', { mode: 'number' }),
-    /** Người vận hành xử lý (users.id với role operator_staff/admin). Null = chưa xử lý. */
-    reviewedBy: bigint('reviewed_by', { mode: 'number' }).references(() => users.id),
+    /**
+     * Nhân viên vận hành xử lý (operator_staff.user_id). Null = chưa xử lý. D14 / migration 0012:
+     * chỉ operator_staff duyệt — trước đây trỏ users và chỉ dựa vào role.
+     */
+    reviewedBy: bigint('reviewed_by', { mode: 'number' }).references(() => operatorStaff.userId),
     reviewedAt: timestamp('reviewed_at', { withTimezone: true }),
     resolution: text('resolution'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
     unique('reconciliation_records_session_id_record_no_key').on(t.sessionId, t.recordNo),
+    index('reconciliation_records_reviewed_by_idx').on(t.reviewedBy),
     index('reconciliation_records_unreviewed_idx')
       .on(t.recordType, t.createdAt)
       .where(sql`${t.reviewedAt} IS NULL`),

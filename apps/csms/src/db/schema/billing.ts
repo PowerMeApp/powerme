@@ -28,6 +28,7 @@ import {
   loyaltyTransactionTypeEnum,
   topUpStatusEnum,
 } from './enums.js';
+import { reservations } from './ops.js';
 import { sessions } from './sessions.js';
 import { drivers, users } from './users.js';
 
@@ -150,7 +151,7 @@ export const creditTransactions = pgTable(
     id: bigint('id', { mode: 'number' }).primaryKey().generatedAlwaysAsIdentity(),
     creditAccountId: bigint('credit_account_id', { mode: 'number' })
       .notNull()
-      .references(() => creditAccounts.id),
+      .references(() => creditAccounts.id, { onDelete: 'restrict' }),
     entryNo: bigint('entry_no', { mode: 'number' }).notNull(),
     transactionType: creditTransactionTypeEnum('transaction_type').notNull(),
     /** Dương = cộng ví, âm = trừ ví. */
@@ -159,6 +160,11 @@ export const creditTransactions = pgTable(
     balanceAfterVnd: bigint('balance_after_vnd', { mode: 'number' }).notNull(),
     sessionId: bigint('session_id', { mode: 'number' }).references(() => sessions.id),
     topUpId: bigint('top_up_id', { mode: 'number' }).references(() => topUps.id),
+    /**
+     * Đặt chỗ mà dòng phí no-show này thu (migration 0011, BR-P27/P29). Có giá trị ⇔
+     * transaction_type = 'reservation_fee'; UNIQUE ⇒ mỗi reservation tối đa một khoản phí.
+     */
+    reservationId: bigint('reservation_id', { mode: 'number' }).references(() => reservations.id),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
@@ -178,6 +184,12 @@ export const creditTransactions = pgTable(
     check(
       'credit_transactions_top_up_check',
       sql`${t.transactionType} <> 'top_up' OR ${t.topUpId} IS NOT NULL`,
+    ),
+    // BR-P27/P29: phí no-show ⇔ có reservation_id; một khoản phí cho mỗi reservation.
+    unique('credit_transactions_reservation_id_key').on(t.reservationId),
+    check(
+      'credit_transactions_reservation_fee_check',
+      sql`(${t.transactionType} = 'reservation_fee') = (${t.reservationId} IS NOT NULL)`,
     ),
   ],
 );
@@ -223,7 +235,7 @@ export const invoiceAdjustments = pgTable(
     id: bigint('id', { mode: 'number' }).primaryKey().generatedAlwaysAsIdentity(),
     eInvoiceId: bigint('e_invoice_id', { mode: 'number' })
       .notNull()
-      .references(() => eInvoices.id),
+      .references(() => eInvoices.id, { onDelete: 'restrict' }),
     adjustmentNo: smallint('adjustment_no').notNull(),
     reason: text('reason').notNull(),
     /** Dương = điều chỉnh tăng, âm = giảm. */
@@ -258,7 +270,7 @@ export const loyaltyTransactions = pgTable(
     id: bigint('id', { mode: 'number' }).primaryKey().generatedAlwaysAsIdentity(),
     loyaltyAccountId: bigint('loyalty_account_id', { mode: 'number' })
       .notNull()
-      .references(() => loyaltyAccounts.id),
+      .references(() => loyaltyAccounts.id, { onDelete: 'restrict' }),
     entryNo: bigint('entry_no', { mode: 'number' }).notNull(),
     transactionType: loyaltyTransactionTypeEnum('transaction_type').notNull(),
     /** Dương = cộng điểm, âm = trừ điểm. */

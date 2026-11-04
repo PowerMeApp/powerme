@@ -27,7 +27,7 @@ export const tariffPeriods = pgTable(
     id: bigint('id', { mode: 'number' }).primaryKey().generatedAlwaysAsIdentity(),
     operatorId: bigint('operator_id', { mode: 'number' })
       .notNull()
-      .references(() => operators.id),
+      .references(() => operators.id, { onDelete: 'cascade' }),
     band: tariffBandEnum('band').notNull(),
     /** Giờ địa phương Asia/Ho_Chi_Minh; khung qua nửa đêm thì tách thành hai dòng. */
     timeStart: time('time_start').notNull(),
@@ -83,7 +83,7 @@ export const sessionTariffSegments = pgTable(
   {
     sessionId: bigint('session_id', { mode: 'number' })
       .notNull()
-      .references(() => sessions.id),
+      .references(() => sessions.id, { onDelete: 'restrict' }),
     tariffPeriodId: bigint('tariff_period_id', { mode: 'number' })
       .notNull()
       .references(() => tariffPeriods.id),
@@ -98,6 +98,7 @@ export const sessionTariffSegments = pgTable(
       name: 'session_tariff_segments_pkey',
       columns: [t.sessionId, t.tariffPeriodId, t.segmentStart],
     }),
+    index('session_tariff_segments_tariff_period_id_idx').on(t.tariffPeriodId),
     check('session_tariff_segments_range_check', sql`${t.segmentEnd} >= ${t.segmentStart}`),
     check('session_tariff_segments_nonneg_check', sql`${t.energyWh} >= 0 AND ${t.amountVnd} >= 0`),
   ],

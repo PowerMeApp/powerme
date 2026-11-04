@@ -106,6 +106,8 @@ export const creditTransactionTypeEnum = pgEnum('credit_transaction_type', [
   'session_debit',
   'refund',
   'adjustment',
+  // Migration 0010 (ERD alignment, BR-P27): phí no-show của đặt chỗ là một dòng sổ cái.
+  'reservation_fee',
 ]);
 export const topUpStatusEnum = pgEnum('top_up_status', [
   'pending',

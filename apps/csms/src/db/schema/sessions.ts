@@ -33,7 +33,8 @@ import {
   sessionOriginEnum,
   sessionStatusEnum,
 } from './enums.js';
-import { chargePoints, connectors } from './stations.js';
+import { reservations } from './ops.js';
+import { connectors } from './stations.js';
 import { promotions } from './tariffs.js';
 import { drivers } from './users.js';
 
@@ -88,6 +89,7 @@ export const vehicles = pgTable(
   (t) => [
     unique('vehicles_plate_number_key').on(t.plateNumber),
     index('vehicles_driver_id_idx').on(t.driverId),
+    index('vehicles_vehicle_model_id_idx').on(t.vehicleModelId),
     // Mỗi tài xế chỉ một xe mặc định.
     uniqueIndex('vehicles_one_default_per_driver')
       .on(t.driverId)
@@ -111,9 +113,12 @@ export const sessions = pgTable(
       .notNull()
       .default(sql`nextval('sessions_transaction_no_seq')`),
     connectorId: bigint('connector_id', { mode: 'number' }).notNull(),
-    chargePointId: bigint('charge_point_id', { mode: 'number' })
-      .notNull()
-      .references(() => chargePoints.id),
+    /**
+     * KHÔNG khai .references() — FK trực tiếp tới charge_points bị bỏ ở migration 0011 (A6):
+     * FK tổng hợp sessions_connector_fk (connector_id, charge_point_id, connector_no) → connectors
+     * đã phủ charge_point_id, và connectors.charge_point_id lại là FK tới charge_points.
+     */
+    chargePointId: bigint('charge_point_id', { mode: 'number' }).notNull(),
     connectorNo: smallint('connector_no').notNull(),
     /** idTag nguyên văn trong StartTransaction — kể cả khi không tra được thẻ. */
     idTag: text('id_tag').notNull(),
@@ -121,6 +126,11 @@ export const sessions = pgTable(
     vehicleId: bigint('vehicle_id', { mode: 'number' }).references(() => vehicles.id),
     rfidCardId: bigint('rfid_card_id', { mode: 'number' }).references(() => rfidCards.id),
     promotionId: bigint('promotion_id', { mode: 'number' }).references(() => promotions.id),
+    /**
+     * Đặt chỗ mà phiên này hoàn tất (migration 0011, BR-P29: một reservation tối đa một phiên —
+     * UNIQUE). Chỉ có cột + ràng buộc; code gán lúc bắt đầu phiên thuộc tính năng đặt chỗ (Should).
+     */
+    reservationId: bigint('reservation_id', { mode: 'number' }).references(() => reservations.id),
     origin: sessionOriginEnum('origin').notNull(),
     paymentMode: paymentModeEnum('payment_mode').notNull(),
     billingMode: billingModeEnum('billing_mode').notNull().default('full'),
@@ -152,6 +162,7 @@ export const sessions = pgTable(
   },
   (t) => [
     unique('sessions_transaction_no_key').on(t.transactionNo),
+    unique('sessions_reservation_id_key').on(t.reservationId),
     // ADR-0010 — khoá tự nhiên chống StartTransaction phát lại.
     unique('sessions_start_tx_natural_key').on(
       t.chargePointId,
@@ -167,6 +178,9 @@ export const sessions = pgTable(
     }),
     index('sessions_connector_id_received_started_at_idx').on(t.connectorId, t.receivedStartedAt),
     index('sessions_driver_id_idx').on(t.driverId),
+    index('sessions_vehicle_id_idx').on(t.vehicleId),
+    index('sessions_promotion_id_idx').on(t.promotionId),
+    index('sessions_rfid_card_id_idx').on(t.rfidCardId),
     index('sessions_status_idx').on(t.status),
     check(
       'sessions_meter_check',
@@ -183,7 +197,7 @@ export const sessionPauses = pgTable(
     id: bigint('id', { mode: 'number' }).primaryKey().generatedAlwaysAsIdentity(),
     sessionId: bigint('session_id', { mode: 'number' })
       .notNull()
-      .references(() => sessions.id),
+      .references(() => sessions.id, { onDelete: 'cascade' }),
     pausedAt: timestamp('paused_at', { withTimezone: true }).notNull(),
     resumedAt: timestamp('resumed_at', { withTimezone: true }),
     pauseCause: pauseCauseEnum('pause_cause').notNull(),
@@ -234,7 +248,7 @@ export const meterValues = pgTable(
     id: bigint('id', { mode: 'number' }).notNull().generatedAlwaysAsIdentity(),
     sessionId: bigint('session_id', { mode: 'number' })
       .notNull()
-      .references(() => sessions.id),
+      .references(() => sessions.id, { onDelete: 'restrict' }),
     /** Đồng hồ trụ (`timestamp` của MeterValue) — không tin cậy. */
     cpTimestamp: timestamp('cp_timestamp', { withTimezone: true }).notNull(),
     /** Đồng hồ CSMS — tin cậy; đồng thời là khoá partition. */

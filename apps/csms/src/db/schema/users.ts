@@ -1,9 +1,9 @@
 /**
  * Module chủ: `users`.
  *
- * Quyết định T11: MỘT bảng `users` có cột `role`, cộng hai bảng mở rộng chỉ khi subtype
- * có thuộc tính riêng — `drivers`, `operator_staff`. KHÔNG có bảng `admins`
- * (Admin không có thuộc tính riêng; `role = 'admin'` là đủ).
+ * Quyết định T11: MỘT bảng `users` có cột `role`, cộng các bảng mở rộng theo subtype —
+ * `drivers`, `operator_staff`. T11 ban đầu KHÔNG có `admins`; Ân duyệt 31/10/2026 ("ERD Alignment
+ * Decisions", Physical ERD v1.0) thêm `admins` (migration 0011) cho đủ ba subtype.
  */
 import { bigint, index, pgTable, text, timestamp, unique } from 'drizzle-orm/pg-core';
 import { staffRoleEnum, userAccountStatusEnum, userRoleEnum } from './enums.js';
@@ -33,6 +33,17 @@ export const drivers = pgTable('drivers', {
     .references(() => users.id, { onDelete: 'cascade' }),
   consentVersion: text('consent_version').notNull(),
   consentGivenAt: timestamp('consent_given_at', { withTimezone: true }).notNull(),
+});
+
+/**
+ * Bảng mở rộng của User với role = admin. PK = FK tới users (migration 0011, ERD alignment).
+ * Không có thuộc tính riêng: bảng tồn tại để các FK "chỉ Admin" (vd policy_templates.created_by,
+ * B1 — Nghĩa) có đích thật thay vì trỏ users và dựa vào role.
+ */
+export const admins = pgTable('admins', {
+  userId: bigint('user_id', { mode: 'number' })
+    .primaryKey()
+    .references(() => users.id, { onDelete: 'cascade' }),
 });
 
 /** Bảng mở rộng của User với role = operator_staff. PK = FK tới users. */

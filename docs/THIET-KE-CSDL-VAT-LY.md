@@ -5,6 +5,7 @@
 **Người chịu trách nhiệm:** Ngô Văn Minh Trí (WP2)
 **Nguồn:** mô hình logic T10 (Ân, 20/10/2026) · state machine T12/T13 · ADR-0005, 0007, 0008, 0009, 0010, 0011, 0012 · `docs/PACKAGE-DIAGRAM-CSMS.md` (bảng → module chủ) · `apps/csms/lab/README.md` (định dạng trace)
 **Sản phẩm:** `apps/csms/src/db/schema/*.ts` (Drizzle) · `apps/csms/drizzle/0000_init.sql` + `apps/csms/drizzle/0001_quyet-dinh-be-11.sql` + `apps/csms/drizzle/0002_tach-ket-noi-khoi-lifecycle.sql` + `apps/csms/drizzle/0003_billing-wf02.sql` (migration viết tay) · tài liệu này
+**Cập nhật 04/11/2026 (0010–0012, BE-16 — đồng bộ Physical ERD v1.0):** thêm bảng `admins`; `sessions.reservation_id` và `credit_transactions.reservation_id` (UNIQUE; enum `reservation_fee`); 20 index cho FK chưa có index; bỏ FK dư `sessions_charge_point_id_fkey`; quy tắc `ON DELETE` theo loại quan hệ (mục 4.4); `reconciliation_records.reviewed_by` trỏ `operator_staff`. Nhật ký + cách kiểm: `docs/NHAT-KY-ERD-ALIGNMENT.md`. Chưa làm ở đợt này: C1 (độ dài `varchar`), C2 (cột `created_at`/`updated_at`), B1, B3, B4, B5.
 **Cập nhật 01/11/2026 (0009):** bỏ giá trị `free` của `payment_mode` theo quyết định của Trí; free vend → `unattributed`, phân biệt với thẻ lạ qua `origin = free_vend` và không có `unknown_id_tag`. Enum được tạo lại còn ba giá trị.
 
 **Cập nhật 25/10/2026 (BE-11):** áp migration 0001 — `payment_mode` có `unattributed`, đổi `pillar_timestamp` → `cp_timestamp`, thêm bảng `remote_commands` và `session_status_history`, cột `orphaned_at` / `replayed` / `epoch`, `reconciliation_record_type` có `conflict` + `late_sample`. Nhật ký từng thay đổi và cách kiểm: `docs/NHAT-KY-MIGRATION-0001.md`.
@@ -31,6 +32,8 @@
 | Enum | `CREATE TYPE ... AS ENUM` qua `pgEnum` của Drizzle; giá trị khớp T12/T13 | T11 |
 | Cột dẫn xuất (`/x` trong ERD) | cột thường, **cập nhật cùng transaction với dòng ledger** | T10 §5.6 |
 | Partition | `meter_values`, `ocpp_message_log` — `PARTITION BY RANGE (received_at)` theo tháng, tạo sẵn 2026-10 → 2027-01 + `DEFAULT` | ADR-0007 |
+
+**Số liệu sau migration 0012 (04/11/2026)** — đếm bằng truy vấn trên Postgres 17 beta nhúng đã áp 0000 → 0012, cùng cách đếm ở đoạn dưới, so với trạng thái 0009 (trước BE-16): **43 bảng** (42 → 43, thêm `admins`; +10 partition con), **390 cột** (387 → 390: `admins.user_id`, `sessions.reservation_id`, `credit_transactions.reservation_id`), **231 ràng buộc PK/UNIQUE/FK/CHECK** (225 → 231), trong đó **82 FK** (80 → 82: +`admins`, +2 `reservation_id`, −`sessions_charge_point_id_fkey`) và **58 CHECK** (57 → 58: `credit_transactions_reservation_fee_check`), **152 index** (129 → 152: 20 index A5, 2 UNIQUE `reservation_id`, PK `admins`), **15 index partial** (không đổi), **30 enum / 120 giá trị** (119 → 120: `reservation_fee`). Quy tắc xoá của 82 FK: 7 `CASCADE`, 7 `RESTRICT`, 68 thường (`NO ACTION`) — trước đó 2 / 1 / 77.
 
 Số liệu sau migration 0003 (**đếm bằng truy vấn trên Postgres thật đã áp 0000 → 0003**, không đếm trên văn bản): **34 bảng** (+10 partition con của `meter_values`, `ocpp_message_log`), **30 enum** (120 giá trị), **102 index** (kể cả index do PK/UNIQUE tạo, trong đó 10 partial), **39 CHECK**, **54 FK**, **311 cột**, 5 sequence cho số nghiệp vụ, 2 trigger append-only (`ocpp_message_log`, `session_status_history`).
 
@@ -72,7 +75,7 @@ Trả lời T10 §2: tên bảng thật, module chủ theo `PACKAGE-DIAGRAM-CSMS
 | Conceptual | Logical (Ân) | Physical (bảng thật) | Module chủ | Ghi chú |
 |---|---|---|---|---|
 | Nhân viên vận hành | OperatorStaff | `operator_staff` | users | mở rộng, PK = `user_id` |
-| Quản trị viên | Admin | — | users | **không tạo bảng**; `users.role = 'admin'` |
+| Quản trị viên | Admin | `admins` | users | bảng mở rộng của `users` (ISA, một bảng mỗi subtype) từ 0011 — trước đó **không tạo bảng**, chỉ `users.role = 'admin'` |
 | Đơn vị vận hành | Operator | `operators` | stations | |
 | Trạm | Site | `sites` | stations | |
 | Trụ sạc | ChargingPillar | `charge_points` | stations | |
@@ -107,6 +110,9 @@ Khoá: PK `id`; UNIQUE `email`; index `phone_number`.
 **`drivers`** — mở rộng của `users` khi `role = driver`. Chỉ tồn tại vì Driver có thuộc tính riêng.
 Cột: `user_id` (PK, FK → `users`, `ON DELETE CASCADE`), `consent_version`, `consent_given_at`.
 Mọi FK "tới tài xế" trong schema trỏ vào `drivers.user_id`, không trỏ `users.id` — DB tự chặn việc gán phiên/xe/ví cho một tài khoản không phải tài xế.
+
+**`admins`** (0011) — mở rộng của `users` khi `role = admin`; hoàn tất ISA (mỗi subtype một bảng). Không có thuộc tính riêng.
+Cột: `user_id` (PK, FK → `users`, `ON DELETE CASCADE`). Migration backfill từ `users.role = 'admin'`. **Quy ước:** mọi nơi tạo user admin phải chèn thêm một dòng `admins` cùng transaction (hiện chỉ test và công cụ seed ngoài repo; `demo/seed.sql` không tạo admin). Lý do tồn tại: FK "chỉ Admin" (vd `policy_templates.created_by`, B1 — Nghĩa, chưa làm) có đích thật thay vì dựa vào `role`. `policy_templates.created_by` vẫn → `users` cho tới khi B1 xong.
 
 **`operator_staff`** — mở rộng của `users` khi `role = operator_staff`.
 Cột: `user_id` (PK, FK → `users`), `operator_id` (FK → `operators`), `staff_role` (`manager` · `technician`).
@@ -146,7 +152,7 @@ Cột: `card_identifier` (BK — giá trị idTag trên dây, CHECK ≤ 20 ký t
 
 **`sessions`** — phiên sạc = một giao dịch OCPP. Bảng trung tâm của hệ thống.
 Cột định danh: `transaction_no integer` (BK; `transactionId` CSMS cấp cho trụ qua sequence `sessions_transaction_no_seq`, kiểu int32 vì OCPP 1.6), `connector_id`, `charge_point_id`, `connector_no`, `id_tag` (idTag nguyên văn trong `StartTransaction`, kể cả khi không tra được thẻ).
-Cột liên kết tuỳ chọn: `driver_id`, `vehicle_id`, `rfid_card_id`, `promotion_id`.
+Cột liên kết tuỳ chọn: `driver_id`, `vehicle_id`, `rfid_card_id`, `promotion_id`, `reservation_id` (0011, FK → `reservations`, **UNIQUE** — một đặt chỗ được hoàn tất bởi tối đa một phiên, BR-P29; mới có cột + ràng buộc, chưa có code gán lúc bắt đầu phiên — thuộc tính năng đặt chỗ, mức Should). `charge_point_id` không còn FK trực tiếp tới `charge_points` (0011/A6): FK tổng hợp `sessions_connector_fk (connector_id, charge_point_id, connector_no)` → `connectors` đã phủ, và `connectors.charge_point_id` → `charge_points`; cột và khoá chống trùng ADR-0010 giữ nguyên.
 Cột phân loại (ADR-0012): `origin` (`app_qr` · `rfid` · `hmi_password` · `free_vend`), `payment_mode` (`csms_billed` · `station_wallet` · `unattributed` — giá trị cuối thêm ở 0001 cho idTag lạ, chưa biết ai thu tiền; `free` dành cho free vend tồn tại từ 0000 tới 0008 và bị bỏ ở 0009, free vend nay là `unattributed` với `origin = free_vend`), `billing_mode` (`full` · `timed` · `energy_kwh` · `amount_vnd`) + `limit_value` (phút / Wh / VND tuỳ `billing_mode`).
 Cột trạng thái: `status` — 9 giá trị theo T12/T13: `pending` → `active` ⇄ `paused` → `stopping` → `closed` → (`review` →) `reconciled`; nhánh lỗi `orphaned`, `failed`. `closed → review` khi đối soát phát hiện conflict; `review → reconciled` khi operator giải quyết.
 Cột thời gian (ADR-0009, hai đồng hồ): `cp_started_at` / `received_started_at`, `cp_stopped_at` / `received_stopped_at`. `StartedAt`/`EndedAt` của ERD ánh xạ sang cặp này.
@@ -186,7 +192,7 @@ Partition: `meter_values_2026_10` … `_2027_01` + `meter_values_default`. Job B
 ### 3.5. Module `reconciliation`
 
 **`reconciliation_records`** — kết quả engine đối soát (BE-07).
-Cột: `session_id` (FK), `record_no` (từ 1, BK cùng `session_id`), `record_type` (`replay` · `duplicate` · `meter_gap` · `orphan_stop` · `unknown_id_tag` — theo package diagram và ADR-0012 — cộng `conflict` · `late_sample` thêm ở 0001, BM02 F10), `gap_start`/`gap_end`, `energy_difference_wh`, `reviewed_by` (FK → `users`, operator hoặc admin), `reviewed_at`, `resolution`.
+Cột: `session_id` (FK), `record_no` (từ 1, BK cùng `session_id`), `record_type` (`replay` · `duplicate` · `meter_gap` · `orphan_stop` · `unknown_id_tag` — theo package diagram và ADR-0012 — cộng `conflict` · `late_sample` thêm ở 0001, BM02 F10), `gap_start`/`gap_end`, `energy_difference_wh`, `reviewed_by` (FK → `operator_staff`, từ 0012/B2 — D14: chỉ nhân viên vận hành duyệt; trước đó → `users`), `reviewed_at`, `resolution`.
 Khoá: UNIQUE `(session_id, record_no)`; CHECK `(reviewed_by IS NULL) = (reviewed_at IS NULL)`; partial index `(record_type, created_at) WHERE reviewed_at IS NULL` cho màn hình "cần xử lý".
 Quy ước ghi từ 0001 (`ReconciliationService.recordVerdict`): đối soát do **StopTransaction** kết luận `conflict` → `record_type = conflict`; đối soát lại do **mẫu muộn** → `late_sample` (kết luận vẫn ở tiền tố `resolution`: `conflict (late_sample): …` hoặc `gap_detected (late_sample): …`); `meter_gap` chỉ còn cho `gap_detected` thuần. Trước 0001 conflict và mẫu muộn lưu là `meter_gap` + tiền tố `resolution`; bản ghi cũ **không bị sửa** và console vẫn đọc được (nhánh tương thích trong `console.mappers.reconciliationKind` và `console.queries.IS_CONFLICT`, có test).
 
@@ -196,7 +202,7 @@ Quy ước ghi từ 0001 (`ReconciliationService.recordVerdict`): đối soát d
 
 **`top_ups`** — nạp ví qua cổng. `gateway_reference` (BK, UNIQUE; **từ 0003 là `vnp_TxnRef` do CSMS sinh lúc tạo top-up, NOT NULL** — trước 0003 mô tả là `vnp_TransactionNo`, nullable), `credit_account_id`, `amount_vnd`, `points_redeemed` (0003, `integer ≥ 0`, mặc định 0), `points_discount_vnd` (CHECK 0003: `points_redeemed = 0` ⇔ `points_discount_vnd = 0`, tỉ lệ không ghi cứng), `amount_paid_vnd` (dẫn xuất, CHECK `= amount_vnd - points_discount_vnd`), `status` (`pending` · `credited` · `failed` · `expired` · `refunded`), `idempotency_key` (UNIQUE — app retry không tạo trùng), `gateway_transaction_no` (0003, `vnp_TransactionNo`, null tới khi cổng báo đã trả; UNIQUE partial khi có), `expires_at` (0003, NOT NULL không DEFAULT — TopUpService đặt tạo + 15 phút theo BR-P13; CHECK `> created_at`), `completed_at`, `refunded_at` / `refunded_by` (0003, FK → `users`, Admin — DB không kiểm role; CHECK: `refunded_at` có ⇔ `status = 'refunded'`, `refunded_by` chỉ khi có `refunded_at`, `refunded` bắt buộc có `refunded_by`), `late_gateway_ref` (0003, UNIQUE) / `late_paid_at` / `late_amount_vnd` (CHECK: ba cột cùng null hoặc cùng có, `late_amount_vnd ≥ 0`, chỉ khi `status = 'expired'`) / `late_refunded_at` (CHECK: chỉ khi có `late_paid_at` và không trước nó) — thanh toán tới sau cửa sổ 1 giờ, không cộng ví, chờ Admin hoàn (SD-2c D). Cửa sổ 1 giờ **không** là CHECK: LATE_WINDOW là tham số cấu hình, TopUpService kiểm. `refund_status` (thử lại khi gọi hoàn tiền với cổng thất bại, SD-2c) là **Planned**, chưa có cột.
 
-**`credit_transactions`** — sổ cái ví, append-only. `entry_no` tăng dần trong từng ví (BK cùng `credit_account_id`), `transaction_type` (`top_up` · `session_debit` · `refund` · `adjustment`), `amount_vnd` (âm = trừ), `balance_after_vnd` (dẫn xuất), `session_id`, `top_up_id`.
+**`credit_transactions`** — sổ cái ví, append-only. `entry_no` tăng dần trong từng ví (BK cùng `credit_account_id`), `transaction_type` (`top_up` · `session_debit` · `refund` · `adjustment` · `reservation_fee` — giá trị cuối thêm ở 0010, BR-P27), `reservation_id` (0011, FK → `reservations`, UNIQUE — một khoản phí cho mỗi đặt chỗ; CHECK `(transaction_type = 'reservation_fee') = (reservation_id IS NOT NULL)`), `amount_vnd` (âm = trừ), `balance_after_vnd` (dẫn xuất), `session_id`, `top_up_id`.
 Khoá: partial UNIQUE `(session_id) WHERE transaction_type = 'session_debit'` — một phiên chỉ bị trừ một lần; partial UNIQUE `(top_up_id, transaction_type) WHERE top_up_id IS NOT NULL` (`credit_transactions_one_per_top_up_and_type`, từ 0003; trước là `(top_up_id)`) — một top-up có tối đa một dòng `top_up` (cộng một lần) và một dòng `refund`; CHECK loại `session_debit` phải có `session_id`, loại `top_up` phải có `top_up_id`.
 
 **`e_invoices`** — hoá đơn VAT cho top-up credited. `invoice_no` (BK, null khi còn `requested`/`failed`), `top_up_id` (**UNIQUE** — một hoá đơn mỗi top-up), `status` (`requested` · `issued` · `failed` · `needs_review`), `amount_vnd`, `vat_amount_vnd`, `issued_at`, `attempt_count`, (0003) `last_error_kind` (enum `e_invoice_error_kind`: `transient` · `data`), `last_error_message`, `last_attempt_at`. CHECK: `issued` phải có `invoice_no` và `issued_at`; `last_error_kind` chỉ khi có `last_attempt_at`.
@@ -324,9 +330,29 @@ Function kiểm `NEW.received_stopped_at IS NOT NULL`, không chỉ chuyển NUL
 
 ---
 
+### 4.4. Quy tắc xoá theo loại quan hệ (0012/C3, 04/11/2026)
+
+Nguồn: hướng dẫn ERD 8.1 quy tắc 5–6 và 9.1 (Ân, file `0011_physical-guide-alignment.sql` mục C3): thành phần cấu thành → `ON DELETE CASCADE`; kết hợp/tập hợp → FK thường (`NO ACTION`); **ngoại lệ** — cấu thành mà giữ tiền, pháp lý hay kiểm toán → `ON DELETE RESTRICT`, vì phải lưu theo quy định lưu chứng từ kế toán và dòng cha được **đóng bằng trạng thái, không bao giờ xoá**. Đếm sau 0012 trên 82 FK: 7 CASCADE (4 mới + `drivers`/`operator_staff`/`admins` → `users`), 7 RESTRICT (6 mới + `session_status_history` từ 0001), 68 thường.
+
+| FK | Quy tắc | Tình huống thực tế |
+|---|---|---|
+| `connectors.charge_point_id` → `charge_points` | CASCADE | gỡ một trụ khỏi hệ thống (đăng ký nhầm, chưa có phiên) kéo theo hai súng |
+| `connector_status_events.charge_point_id` → `charge_points` | CASCADE | nhật ký trạng thái súng chỉ có nghĩa cùng trụ của nó |
+| `tariff_periods.operator_id` → `operators` | CASCADE | bảng giá thuộc về operator; xoá operator thử nghiệm xoá luôn bảng giá |
+| `session_pauses.session_id` → `sessions` | CASCADE | khoảng tạm dừng là một phần của phiên |
+| `credit_transactions.credit_account_id` → `credit_accounts` | RESTRICT | sổ cái ví: ví đóng bằng `status = closed`, không xoá |
+| `loyalty_transactions.loyalty_account_id` → `loyalty_accounts` | RESTRICT | sổ cái điểm |
+| `invoice_adjustments.e_invoice_id` → `e_invoices` | RESTRICT | điều chỉnh hoá đơn điện tử là chứng từ thuế |
+| `meter_values.session_id` → `sessions` | RESTRICT | bằng chứng điện năng (bảng partition: FK ở bảng cha lan xuống mọi partition) |
+| `reconciliation_records.session_id` → `sessions` | RESTRICT | kết quả đối soát là hồ sơ kiểm toán |
+| `session_tariff_segments.session_id` → `sessions` | RESTRICT | dòng tính tiền của phiên |
+| `session_status_history.session_id` → `sessions` | RESTRICT (từ 0001) | trigger append-only chặn DELETE — CASCADE sẽ đụng trigger |
+
+FK **không** nằm trong bảng giữ nguyên thường — kể cả `credit_transactions.session_id/top_up_id`, `loyalty_transactions.session_id/top_up_id` và `session_tariff_segments.tariff_period_id` (theo đúng danh sách C3 của Ân: chỉ FK tới cha cấu thành). Hệ quả khi dọn dữ liệu (test, seed): xoá **con trước** rồi mới xoá cha, hoặc `TRUNCATE … CASCADE`; xoá một `sessions` còn dòng đối soát/meter/đoạn giá sẽ báo lỗi FK (SQLSTATE 23503, `update or delete on table … violates foreign key constraint`).
+
 ## 5. Trả lời bốn câu của Ân (T10) — theo quyết định T11 của Trí
 
-1. **User / Driver / OperatorStaff / Admin là một bảng hay nhiều bảng?** Một bảng `users` có cột `role`, cộng hai bảng mở rộng **chỉ khi subtype có thuộc tính riêng**: `drivers` (`user_id` PK/FK, `consent_version`, `consent_given_at`) và `operator_staff` (`user_id` PK/FK, `operator_id`, `staff_role`). **Không tạo `admins`** — Admin không có thuộc tính riêng, `role = 'admin'` là đủ; `policy_templates.created_by` trỏ `users.id`.
+1. **User / Driver / OperatorStaff / Admin là một bảng hay nhiều bảng?** Một bảng `users` có cột `role`, cộng hai bảng mở rộng **chỉ khi subtype có thuộc tính riêng**: `drivers` (`user_id` PK/FK, `consent_version`, `consent_given_at`) và `operator_staff` (`user_id` PK/FK, `operator_id`, `staff_role`). **Không tạo `admins`** — Admin không có thuộc tính riêng, `role = 'admin'` là đủ; `policy_templates.created_by` trỏ `users.id`. *(Đã thay đổi 04/11/2026: Ân duyệt "ERD Alignment Decisions" 31/10 — có bảng `admins` (0011) cho đủ ba subtype; `policy_templates.created_by` → `admins` là B1, Nghĩa, chưa làm.)*
 2. **Bảng thẻ tên gì?** `rfid_cards`, không phải `id_tags`. Cột `card_identifier` chứa giá trị idTag trên dây. ADR-0012 vẫn gọi khái niệm là "sổ đăng ký thẻ `id_tags`" — cần cập nhật ADR (mục 7).
 3. **SessionPause có cần bảng riêng không?** Có — `session_pauses` là bảng thật với `paused_at`, `resumed_at`, `pause_cause`, không lưu JSON trong `sessions`. Lý do: cần truy vấn "tổng thời gian tạm dừng" cho `billing_mode = timed` và cần UNIQUE `(session_id, paused_at)`.
 4. **Tên bảng thật là gì?** Bảng ở mục 2. Tóm tắt khác tên so với ERD: ChargingPillar → `charge_points`; ChargingSession → `sessions`; MeterReading → `meter_values`; RfidCard → `rfid_cards`.
@@ -378,7 +404,7 @@ Những chỗ tôi phải chọn một giá trị để schema biên dịch đư
 **Cho Nghĩa (WP1 — ERD/SDD):**
 
 14. Cập nhật ERD T10 theo mục 6: thêm `received_at` cho MeterReading, cặp `cp_*/received_*` cho ChargingSession, `id_tag` cho ChargingSession, ba cột mới của ChargingPillar, và ghi hai bảng kỹ thuật ở phụ lục.
-15. `Admin` không có bảng — ERD nên vẽ là role, không vẽ entity, để tránh finding "ERD có mà DB không có".
+15. ~~`Admin` không có bảng — ERD nên vẽ là role, không vẽ entity.~~ **Thay đổi 04/11/2026:** Ân duyệt ISA đủ ba subtype; DB có bảng `admins` (0011), Logical/Physical ERD vẽ `Admin` là entity. Mục này không còn hiệu lực.
 
 ---
 

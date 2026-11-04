@@ -136,6 +136,7 @@ describeDb('WP3/T31 WF-01 service journey with real OCPP + Postgres', () => {
       );
       if (name === 'admin') {
         admin = id;
+        await q('INSERT INTO admins(user_id) VALUES($1)', [id]);
         continue;
       }
       await q(

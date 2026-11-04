@@ -17,6 +17,7 @@ import { RPCClient } from 'ocpp-rpc';
 import type { CsmsConfig } from '../src/config.js';
 import { createDb, Db } from '../src/db/db.module.js';
 import {
+  admins,
   chargePoints,
   connectors,
   operators,
@@ -132,6 +133,7 @@ describeDb('WF-05 — onboard a charge point and bring it into service (SD-5a, S
     adminId = admin!.id;
     staffAId = staffA!.id;
     driverId = driver!.id;
+    await db.insert(admins).values({ userId: adminId });
     await db
       .insert(operatorStaff)
       .values({ userId: staffAId, operatorId: opA!.id, staffRole: 'manager' });
