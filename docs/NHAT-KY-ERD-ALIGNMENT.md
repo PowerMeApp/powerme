@@ -57,7 +57,7 @@ Số liệu toàn DB (đếm bằng truy vấn, 0009 → 0012): bảng 42 → **
 
 ## 5. Chưa làm sau đợt 2
 
-B1 (Nghĩa), B3 và B4 (Sơn), B5 (Khang, cùng bảng `refunds`); thay `charging_statements` bằng view (đề xuất chưa duyệt); ba "flag" chờ Trí quyết (`charge_points.lifecycle = offline`, `review` của STM-1, `seq_no` của `session_status_history`) — không đổi gì.
+B1 (Nghĩa), B3 và B4 (Sơn), B5 (Khang, cùng bảng `refunds` — **đã làm ở `0015_billing-refunds-wf02.sql`**, T32, xem `docs/NHAT-KY-MIGRATION-0015.md`); thay `charging_statements` bằng view (đề xuất chưa duyệt); ba "flag" chờ Trí quyết (`charge_points.lifecycle = offline`, `review` của STM-1, `seq_no` của `session_status_history`) — không đổi gì.
 
 ## 6. Đợt 2 — migration `0014_erd-alignment-varchar-audit.sql` (C1 + C2)
 

@@ -190,7 +190,8 @@ describeDb('migration 0014 — C1 VARCHAR(n) và C2 created_at/updated_at', () =
 
     it('sau khi xử lý tay dữ liệu, migrate áp 0014; dữ liệu cũ còn nguyên; dòng cũ có created/updated', async () => {
       await q(`UPDATE charge_points SET free_vend_tag = 'FREE-VEND' WHERE id = $1`, [cp]);
-      expect(await migrate(db.$client)).toEqual([MIG]);
+      // Chỉ chốt phần của đợt 2: migration thêm sau 0014 không được làm test này đỏ (như #82 ở đợt 1).
+      expect((await migrate(db.$client)).slice(0, 1)).toEqual([MIG]);
       expect(
         (await one('SELECT free_vend_tag FROM charge_points WHERE id=$1', [cp]))['free_vend_tag'],
       ).toBe('FREE-VEND');

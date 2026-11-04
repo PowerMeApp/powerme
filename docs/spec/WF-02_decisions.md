@@ -58,7 +58,7 @@ Không có `failed → done`.
 | `amountVnd` | bigint > 0 |
 | `status` | enum `requested` · `done` · `failed` |
 | `attemptCount` | int, mặc định 0 |
-| `requestedBy` [0..1] | FK → users (Admin); **null = hệ thống tạo** (đóng tài khoản, SD-2f) |
+| `requestedBy` [0..1] | FK → `admins (user_id)` (ISA của BE-16/0011; chốt 04/11); **null = hệ thống tạo** (đóng tài khoản, SD-2f). Thay `top_ups.refunded_by` (bỏ ở 0015, ERD Alignment B5) |
 | `lastErrorKind`, `lastErrorMessage`, `lastAttemptAt` [0..1] | theo mẫu `e_invoices` |
 | `gatewayRefundNo` [0..1] | mã hoàn VNPay trả về |
 | `nextAttemptAt` [0..1] | lịch chạy nền (D4) |
@@ -146,8 +146,8 @@ Diagram chỉ ghi "job" / "queue" / "after commit". Repo chưa có BullMQ (Redis
 
 ## D8. Khớp với repo
 
-- **Migration `0012`** (theo CD-2), tên kiểu `0012_billing-refunds-wf02.sql`. `migrate.mjs` áp theo thứ tự tên file, nên chưa có `0010`/`0011` vẫn chạy được. Nội dung: enum `refund_kind`, `refund_status`, bảng `refunds`, cột mới cho `invoice_adjustments` và `e_invoices.next_attempt_at`, index của D7. Kèm `docs/NHAT-KY-MIGRATION-0012.md` và `test/migration-0012.integration.test.ts`. Báo nhóm đã giữ số này. Nếu trùng số: người merge sau đổi sang số kế tiếp, đổi cả test và nhật ký (tiền lệ `docs/ITERATION-1-WF04.md`).
-- `refunds.last_error_kind`: dùng lại enum `e_invoice_error_kind` (`transient`, `data`) hoặc tạo enum chung; chọn khi viết migration và ghi lý do.
+- **Migration `0015_billing-refunds-wf02.sql`.** CD-2 ghi 0012, nhưng `0010`–`0012` đã dùng cho BE-16 (Trí, PR #84, merge trước theo thoả thuận 04/11), `0013` cho BE-07 (PR #82), `0014` cho BE-16 đợt 2 (PR #86), nên người merge sau đổi sang số kế tiếp (tiền lệ `docs/ITERATION-1-WF04.md`). Nội dung: enum `refund_kind`, `refund_status`, bảng `refunds`, cột mới cho `invoice_adjustments` và `e_invoices.next_attempt_at`, index của D7, và **B5** (bỏ `top_ups.refunded_by`). Kèm `docs/NHAT-KY-MIGRATION-0015.md` và `test/migration-0015.integration.test.ts`.
+- `refunds.last_error_kind` (và `invoice_adjustments.last_error_kind`): **dùng lại enum `e_invoice_error_kind`** (`transient`, `data`), chốt 04/11 khi viết 0015. Lý do: cùng nghĩa, một helper retry dùng chung (D7); không đổi tên enum của 0003 đã merge. `invoice_adjustments.status` dùng lại `e_invoice_status` (D5). Chi tiết: `docs/NHAT-KY-MIGRATION-0015.md` mục 2. Theo quy ước BE-16: mọi FK có index (A5), FK của `refunds` giữ NO ACTION (C3).
 - Mã task **T32**; nhánh `wp5/t32-<mo-ta>`; commit kèm `[T32]`.
 - **Đường dẫn:** giữ phần tài nguyên của diagram, ghép tiền tố theo `docs/api/DRIVER-API-HOP-DONG.md`:
 
@@ -160,7 +160,7 @@ Diagram chỉ ghi "job" / "queue" / "after commit". Repo chưa có BullMQ (Redis
 
   Sửa `infra/.env.example` trong cùng PR; báo người lo Caddy staging và app Flutter.
 - **Chỗ CD-2 lệch code** (theo code, ghi vào `diagrams/README.md` mục "Known differences"):
-  - `CreditTransaction.transactionType` có `reservation_fee`; enum `credit_transaction_type` không có.
+  - ~~`CreditTransaction.transactionType` có `reservation_fee`; enum `credit_transaction_type` không có.~~ Hết lệch từ 0010 (BE-16): enum đã có `reservation_fee`, CD-2 đúng.
   - Tiền ghi `number`; code dùng `bigint` VND (Drizzle `mode: 'number'` ở tầng TS, không dùng số thực).
   - CD-2 chỉ có thành viên chính. Code thêm các class / method sau, không mâu thuẫn diagram: `TopUpStateMachine`, `RefundStateMachine`, worker của D7, `BillingExceptionsQuery`, `CreditLedgerService.getBalance`, `ensureAccounts`, `LoyaltyService.quoteRedemption` / `earnForSession`.
 - SD-2a ghi "monthly cap": theo ADR-0013 thì BR-P22 không có hạn mức tháng. Code theo ADR-0013; cần sửa diagram.
@@ -184,7 +184,7 @@ Diagram chỉ ghi "job" / "queue" / "after commit". Repo chưa có BullMQ (Redis
 
 ## Còn mở (hỏi trước khi code phần liên quan)
 
-- Vẽ lại diagram: đưa các mục ⊕ vào; sửa "monthly cap" ở SD-2a; bỏ `reservation_fee` ở CD-2; thêm file STM-10 Refund vào `diagrams/stm/`.
+- Vẽ lại diagram: đưa các mục ⊕ vào; sửa "monthly cap" ở SD-2a; ~~bỏ `reservation_fee` ở CD-2~~ (không cần nữa, 0010 đã thêm vào enum); ghi số migration 0015 thay 0012 ở CD-2; thêm file STM-10 Refund vào `diagrams/stm/`.
 - Thống nhất D10 với WP4.
 - Đổi tên `lateGatewayRef` → `lateGatewayTransactionNo`?
 - VNPay sandbox: refund có chống trùng không, có API tra trạng thái hoàn không (`VnpayAdapter.queryRefund`), thời hạn được hoàn, danh sách mã IPN.
