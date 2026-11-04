@@ -755,6 +755,9 @@ export class SessionsService {
   /**
    * ADR-0012 / T13 mục 4: card_kind quyết payment_mode. Thẻ lạ → vẫn mở phiên với
    * payment_mode = unattributed (chưa biết ai thu tiền; migration 0001), ghi unknown_id_tag.
+   * Free vend (thẻ card_kind = free_vend, hoặc idTag trùng charge_points.free_vend_tag) cũng là
+   * unattributed (ADR-0012 quyết định 3; giá trị `free` bỏ ở 0009) nhưng KHÔNG ghi unknown_id_tag:
+   * operator phân biệt với thẻ lạ qua origin = free_vend.
    *
    * BM02 F22: thẻ có trong sổ nhưng `status` ≠ `active` (blocked / unlinked — STM-8) thì
    * StartTransaction đã diễn ra vẫn được ghi (BR-P06: không bỏ phiên), nhưng KHÔNG phân loại
@@ -794,7 +797,7 @@ export class SessionsService {
           ? 'csms_billed'
           : card.cardKind === 'wallet'
             ? 'station_wallet'
-            : 'free';
+            : 'unattributed';
       return {
         origin: card.cardKind === 'free_vend' ? 'free_vend' : 'rfid',
         paymentMode,
@@ -812,7 +815,7 @@ export class SessionsService {
     if (cp?.freeVendTag && cp.freeVendTag === idTag) {
       return {
         origin: 'free_vend',
-        paymentMode: 'free',
+        paymentMode: 'unattributed',
         rfidCardId: null,
         driverId: null,
         unknown: false,

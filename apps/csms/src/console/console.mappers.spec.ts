@@ -198,7 +198,7 @@ describe('mapSession', () => {
     connectorNo: 2,
     idTag: 'BB2TBR09',
     origin: 'rfid',
-    paymentMode: 'free',
+    paymentMode: 'unattributed',
     status: 'review',
     receivedStartedAt: T('14:18:00'),
     receivedStoppedAt: null,

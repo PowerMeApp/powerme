@@ -98,6 +98,13 @@ describeDb('migration 0001 — nâng cấp DB đã có 0000 và ràng buộc m�
           )
         )[0]?.['id'],
       );
+      // Phiên free vend theo 0000 mang payment_mode = 'free' — 0009 phải chuyển sang unattributed.
+      await q(
+        `INSERT INTO sessions (connector_id, charge_point_id, connector_no, id_tag, origin, payment_mode,
+                               status, cp_started_at, meter_start_wh)
+         VALUES ($1, $2, 1, 'FREE-TAG', 'free_vend', 'free', 'orphaned', '2026-10-20T11:00:00Z', 0)`,
+        [connectorId, cpId],
+      );
       await q(
         `INSERT INTO connector_status_events (charge_point_id, connector_no, connector_id, status, pillar_timestamp)
          VALUES ($1, 1, $2, 'Available', '2026-10-20T09:59:00Z')`,
@@ -148,6 +155,18 @@ describeDb('migration 0001 — nâng cấp DB đã có 0000 và ràng buộc m�
       expect(s?.['orphaned_at']).toBeNull();
     });
 
+    it("0009: phiên free vend cũ mang 'free' → unattributed, origin giữ free_vend; 'free' hết hợp lệ", async () => {
+      expect(
+        await q(
+          `SELECT 1 FROM sessions WHERE id_tag = 'FREE-TAG' AND origin = 'free_vend'
+           AND payment_mode = 'unattributed'`,
+        ),
+      ).toHaveLength(1);
+      await expect(q(`SELECT 'free'::payment_mode`)).rejects.toThrow(
+        /invalid input value for enum/,
+      );
+    });
+
     it('dòng cũ nhận giá trị mặc định đúng nghĩa: meter_values.replayed=false/epoch null, log.replayed null', async () => {
       const mv = (await q('SELECT replayed, epoch FROM meter_values'))[0];
       expect(mv).toEqual({ replayed: false, epoch: null });
@@ -194,7 +213,7 @@ describeDb('migration 0001 — nâng cấp DB đã có 0000 và ràng buộc m�
       expect(epochCols).toHaveLength(5);
     });
 
-    it('ba giá trị enum mới nằm CUỐI danh sách (ADD VALUE), 11 enum tự đặt của 0000 không đổi', async () => {
+    it('giá trị enum 0001 nằm CUỐI danh sách (ADD VALUE); payment_mode sau 0009 còn ba giá trị', async () => {
       const vals = async (t: string) =>
         (
           await q(
@@ -203,12 +222,7 @@ describeDb('migration 0001 — nâng cấp DB đã có 0000 và ràng buộc m�
             [t],
           )
         ).map((r) => r['enumlabel']);
-      expect(await vals('payment_mode')).toEqual([
-        'csms_billed',
-        'station_wallet',
-        'free',
-        'unattributed',
-      ]);
+      expect(await vals('payment_mode')).toEqual(['csms_billed', 'station_wallet', 'unattributed']);
       expect(await vals('reconciliation_record_type')).toEqual([
         'replay',
         'duplicate',
