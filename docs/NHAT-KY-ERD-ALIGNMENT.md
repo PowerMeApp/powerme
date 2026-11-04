@@ -1,4 +1,4 @@
-# Nhật ký đồng bộ CSDL với Physical ERD v1.0 — đợt 1 (BE-16)
+# Nhật ký đồng bộ CSDL với Physical ERD v1.0 — đợt 1 và 2 (BE-16)
 
 **Ngày:** 04/11/2026 · **Người làm:** Trí (WP2) theo bản tóm tắt của Ân (WP1) · **Migration:** `0010`, `0011`, `0012` · **Nguồn:** "ERD Alignment Decisions" (Ân duyệt 31/10/2026), các file tham chiếu của Ân `0009_erd-alignment-additive.sql`, `0010_erd-alignment-after-code.sql`, `0011_physical-guide-alignment.sql`, `powerme_physical.dbml`.
 
@@ -55,6 +55,25 @@ Số liệu toàn DB (đếm bằng truy vấn, 0009 → 0012): bảng 42 → **
 - **Seed/demo:** `demo/seed.sql` và `scripts/seed-demo.mjs` không tạo user admin nên không có gì phải thêm; chỉ hai test (`wf01`, `wf05`) tạo admin và đã chèn `admins`.
 - **Tên FK:** theo Postgres mặc định `*_fkey` (như file của Ân).
 
-## 5. Chưa làm trong đợt này
+## 5. Chưa làm sau đợt 2
 
-C1 (độ dài `varchar(n)`), C2 (cột `created_at`/`updated_at`) — PR 2 xếp tầng; B1 (Nghĩa), B3 và B4 (Sơn), B5 (Khang, cùng bảng `refunds`); thay `charging_statements` bằng view (đề xuất chưa duyệt); ba "flag" chờ Trí quyết (`charge_points.lifecycle = offline`, `review` của STM-1, `seq_no` của `session_status_history`) — không đổi gì.
+B1 (Nghĩa), B3 và B4 (Sơn), B5 (Khang, cùng bảng `refunds`); thay `charging_statements` bằng view (đề xuất chưa duyệt); ba "flag" chờ Trí quyết (`charge_points.lifecycle = offline`, `review` của STM-1, `seq_no` của `session_status_history`) — không đổi gì.
+
+## 6. Đợt 2 — migration `0013_erd-alignment-varchar-audit.sql` (C1 + C2)
+
+Xếp tầng lên đợt 1. Nguồn: mục C1 và C2 của `0011_physical-guide-alignment.sql` (Ân), danh sách cột lấy đúng từ file đó (không suy diễn).
+
+| Thay đổi | Quyết định | Cách kiểm |
+|---|---|---|
+| C1: 48 cột `text` → `varchar(n)` (24 bảng; 37 cột ở 14 bảng có trong schema Drizzle, 11 cột ở 5 bảng kỹ thuật WP3 chỉ có SQL) | hướng dẫn ERD §9.1 "Mã VARCHAR(n) theo độ dài thật"; văn bản tự do giữ `text` | migration đo `max(char_length)` từng cột và **dừng** (không đổi gì) nếu có giá trị dài hơn; test: DB ở 0012 có `free_vend_tag` 25 ký tự → thất bại có thông báo `0013/C1 … dài nhất 25 > varchar(20)`, trạng thái cũ nguyên vẹn; sau khi sửa tay thì áp được; 48 cột đúng `character_maximum_length`; vượt độ dài → 22001 (email, serial, thẻ RFID, `vnp_TxnRef`, `unique_id` của bảng partition) |
+| C1: bỏ CHECK `rfid_cards_card_identifier_check`, `driver_charge_intents_id_tag_check` | thay bằng `varchar(20)` (Ân) | test: hai ràng buộc không còn, 21 ký tự bị 22001, 20 ký tự được |
+| C2: 7 cột `created_at` + 19 cột `updated_at` (`NOT NULL DEFAULT now()`) cho 21 bảng | hướng dẫn ERD §9.1; ISA dùng cột của `users` | test: từng bảng có đủ cột thêm, kiểu `timestamptz`, `NOT NULL`, default `now()`; dòng cũ nhận thời điểm chạy migration (không có dữ liệu thật hơn để backfill) |
+| `updated_at` luôn được cập nhật | Ân: dùng `$onUpdate`, rà mọi UPDATE thô | schema TS: `.$onUpdate(() => new Date())`; 15 câu `UPDATE` thô trong `charge-settlement.service.ts`, `driver-charging.service.ts`, `sessions.service.ts` được thêm `updated_at = now()` (các bảng `driver_charge_intents`, `driver_stop_intents`, `remote_commands`, `charge_settlement_jobs`); test quét mã nguồn `src/` để mọi `UPDATE <bảng có updated_at> SET` mới đều phải có `updated_at`; test `$onUpdate` (`db.update(connectors)`) |
+
+**Đối chiếu máy schema TS ↔ SQL sau 0013** (35 bảng trong schema TS): cột **339/339**, ràng buộc **166/166** (167 − 1: CHECK của `rfid_cards`; CHECK của `driver_charge_intents` nằm ngoài schema TS), enum **30/30**, index **120/121** (khác biệt có sẵn `loyalty_transactions_one_earn_per_session`). Số liệu toàn DB 0012 → 0013: cột 390 → 416, ràng buộc 231 → 229, CHECK 58 → 56; bảng 43, FK 82, index 152, enum 30 không đổi.
+
+**Đối chiếu `powerme_physical.dbml`** (đích cuối của Ân; so tập bảng, 414 cột — tên, kiểu/độ dài, NOT NULL — và 80 `Ref` — tên, `ON DELETE`): 43/43 bảng trùng; cột/kiểu **khớp hết** trừ hai cột chờ B4/B5 và `charge_settlement_jobs.reason` (`varchar(50)` thay vì 30, xem trên) (`connector_status_events.connector_id`, `top_ups.refunded_by` còn ở DB, DBML đã bỏ) — 9 dòng "NULL" còn lại là khoá chính ghép mà DBML không gắn `pk` từng cột (giới hạn bộ so, không phải lệch); FK: quy tắc `ON DELETE` của cả 80 `Ref` **khớp**; khác: `connector_status_events_connector_id_fkey` (B4) và `top_ups_refunded_by_fkey` (B5) còn ở DB; đích FK của `policy_templates.created_by` (DBML → `admins`, B1) và `remote_commands.requested_by` (DBML → `operator_staff`, B3) còn là `users` ở DB — đúng danh sách chưa làm.
+
+**Lệch file của Ân (1 cột):** `charge_settlement_jobs.reason` là `varchar(50)`, không phải 30 ([A] trong file của Ân): mã chạy thật ghi `tariff_coverage_or_boundary_meter_required` (42 ký tự); với 30 hai test WF-01 T72 ("tariff gap/overlap stays observable pending") rơi vào `transient_error`. Cần Ân xác nhận.
+
+**Rủi ro hành vi (đã chấp nhận theo quyết định của Ân, đáng biết):** `ocpp_message_log.unique_id varchar(36)` và `action varchar(40)`: ocpp-rpc không giới hạn độ dài hai trường này ở tầng khung, nên một trụ gửi `UniqueId` > 36 ký tự (OCPP-J cấm) sẽ làm INSERT nhật ký thất bại (22001) trước khi xử lý — trước 0013 dòng ấy vẫn được ghi. Các trường còn lại (`id_tag`, `measurand`, `stop_reason`, `error_code`…) đã được `strictMode` kiểm theo schema OCA trước khi tới DB. `ALTER … TYPE` ghi lại cả bảng (kể cả `ocpp_message_log`, `meter_values`) — chạy ngoài giờ tải.

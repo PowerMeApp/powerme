@@ -34,7 +34,7 @@ export class ChargeSettlementService {
       const result = await this.post(sessionId);
       await this.db.$client.query(
         `UPDATE charge_settlement_jobs SET state=$2,
-        reason=CASE WHEN $2='pending' THEN reason ELSE $3 END,
+        reason=CASE WHEN $2::varchar='pending' THEN reason ELSE $3 END,
         attempts=attempts+1,last_error_code=NULL,next_attempt_at=now()+interval '30 seconds',updated_at=now()
         WHERE session_id=$1 AND state<>'posted'`,
         [sessionId, result === 'already_posted' ? 'posted' : result, result],
@@ -137,7 +137,7 @@ export class ChargeSettlementService {
         [sessionId, boundaryAt, meterWh, operatorId, note.trim()],
       );
       await c.query(
-        "UPDATE charge_settlement_jobs SET next_attempt_at=now() WHERE session_id=$1 AND state='pending'",
+        "UPDATE charge_settlement_jobs SET next_attempt_at=now(),updated_at=now() WHERE session_id=$1 AND state='pending'",
         [sessionId],
       );
     });
@@ -156,7 +156,7 @@ export class ChargeSettlementService {
   ): Promise<'posted' | 'already_posted' | 'pending' | 'ineligible'> {
     if (!this.policy) {
       await this.db.$client.query(
-        "UPDATE charge_settlement_jobs SET reason='policy_unconfigured' WHERE session_id=$1 AND state='pending'",
+        "UPDATE charge_settlement_jobs SET reason='policy_unconfigured',updated_at=now() WHERE session_id=$1 AND state='pending'",
         [sessionId],
       );
       return 'pending';
@@ -165,7 +165,7 @@ export class ChargeSettlementService {
     return chargeTransaction(this.db, async (c) => {
       const pending = async (reason: string): Promise<'pending'> => {
         await c.query(
-          "UPDATE charge_settlement_jobs SET reason=$2 WHERE session_id=$1 AND state='pending'",
+          "UPDATE charge_settlement_jobs SET reason=$2,updated_at=now() WHERE session_id=$1 AND state='pending'",
           [sessionId, reason],
         );
         return 'pending';
@@ -314,7 +314,7 @@ export class ChargeSettlementService {
         ],
       );
       await c.query(
-        "UPDATE driver_charge_intents SET state='settled',reserved_vnd=0,version=version+1 WHERE session_id=$1 AND state<>'settled'",
+        "UPDATE driver_charge_intents SET state='settled',reserved_vnd=0,version=version+1,updated_at=now() WHERE session_id=$1 AND state<>'settled'",
         [sessionId],
       );
       return 'posted';

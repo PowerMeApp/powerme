@@ -16,6 +16,7 @@ import {
   timestamp,
   unique,
   uniqueIndex,
+  varchar,
 } from 'drizzle-orm/pg-core';
 import {
   faultEventStatusEnum,
@@ -42,7 +43,7 @@ export const faultEvents = pgTable(
     connectorId: bigint('connector_id', { mode: 'number' }).references(() => connectors.id),
     source: faultSourceEnum('source').notNull(),
     /** ChargePointErrorCode của OCPP 1.6 hoặc mã do nguồn khác cung cấp; giữ nguyên văn. */
-    errorCode: text('error_code'),
+    errorCode: varchar('error_code', { length: 50 }),
     status: faultEventStatusEnum('status').notNull().default('raised'),
     raisedAt: timestamp('raised_at', { withTimezone: true }).notNull().defaultNow(),
     acknowledgedBy: bigint('acknowledged_by', { mode: 'number' }).references(
@@ -54,6 +55,10 @@ export const faultEvents = pgTable(
     resetCommandId: bigint('reset_command_id', { mode: 'number' }).references(
       () => remoteCommands.id,
     ),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .notNull()
+      .defaultNow()
+      .$onUpdate(() => new Date()),
   },
   (t) => [
     unique('fault_events_event_no_key').on(t.eventNo),
@@ -91,6 +96,10 @@ export const faultReports = pgTable(
     faultEventId: bigint('fault_event_id', { mode: 'number' }).references(() => faultEvents.id),
     clearedAt: timestamp('cleared_at', { withTimezone: true }),
     clearedBy: bigint('cleared_by', { mode: 'number' }).references(() => operatorStaff.userId),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .notNull()
+      .defaultNow()
+      .$onUpdate(() => new Date()),
   },
   (t) => [
     unique('fault_reports_report_no_key').on(t.reportNo),
@@ -117,6 +126,10 @@ export const maintenanceTickets = pgTable(
     status: maintenanceTicketStatusEnum('status').notNull().default('open'),
     openedAt: timestamp('opened_at', { withTimezone: true }).notNull().defaultNow(),
     closedAt: timestamp('closed_at', { withTimezone: true }),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .notNull()
+      .defaultNow()
+      .$onUpdate(() => new Date()),
   },
   (t) => [
     unique('maintenance_tickets_ticket_no_key').on(t.ticketNo),
@@ -134,12 +147,12 @@ export const policyTemplates = pgTable(
   'policy_templates',
   {
     id: bigint('id', { mode: 'number' }).primaryKey().generatedAlwaysAsIdentity(),
-    templateCode: text('template_code').notNull(),
+    templateCode: varchar('template_code', { length: 30 }).notNull(),
     /** users.id với role = admin (không có bảng admins — T11). */
     createdBy: bigint('created_by', { mode: 'number' })
       .notNull()
       .references(() => users.id),
-    templateType: text('template_type').notNull(),
+    templateType: varchar('template_type', { length: 30 }).notNull(),
     content: text('content').notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
@@ -173,6 +186,10 @@ export const reservations = pgTable(
     holdMode: reservationHoldModeEnum('hold_mode').notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .notNull()
+      .defaultNow()
+      .$onUpdate(() => new Date()),
   },
   (t) => [
     unique('reservations_reservation_no_key').on(t.reservationNo),

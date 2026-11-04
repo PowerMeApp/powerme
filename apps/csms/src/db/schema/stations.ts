@@ -16,6 +16,7 @@ import {
   text,
   timestamp,
   unique,
+  varchar,
 } from 'drizzle-orm/pg-core';
 import {
   chargePointLifecycleEnum,
@@ -28,11 +29,15 @@ export const operators = pgTable(
   'operators',
   {
     id: bigint('id', { mode: 'number' }).primaryKey().generatedAlwaysAsIdentity(),
-    taxCode: text('tax_code').notNull(),
+    taxCode: varchar('tax_code', { length: 14 }).notNull(),
     legalName: text('legal_name').notNull(),
     address: text('address'),
     status: operatorStatusEnum('status').notNull().default('active'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .notNull()
+      .defaultNow()
+      .$onUpdate(() => new Date()),
   },
   (t) => [unique('operators_tax_code_key').on(t.taxCode)],
 );
@@ -41,7 +46,7 @@ export const sites = pgTable(
   'sites',
   {
     id: bigint('id', { mode: 'number' }).primaryKey().generatedAlwaysAsIdentity(),
-    siteCode: text('site_code').notNull(),
+    siteCode: varchar('site_code', { length: 20 }).notNull(),
     operatorId: bigint('operator_id', { mode: 'number' })
       .notNull()
       .references(() => operators.id),
@@ -51,6 +56,10 @@ export const sites = pgTable(
     latitude: numeric('latitude', { precision: 9, scale: 6 }),
     longitude: numeric('longitude', { precision: 9, scale: 6 }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .notNull()
+      .defaultNow()
+      .$onUpdate(() => new Date()),
   },
   (t) => [
     unique('sites_site_code_key').on(t.siteCode),
@@ -66,18 +75,18 @@ export const chargePoints = pgTable(
   'charge_points',
   {
     id: bigint('id', { mode: 'number' }).primaryKey().generatedAlwaysAsIdentity(),
-    serialNumber: text('serial_number').notNull(),
+    serialNumber: varchar('serial_number', { length: 25 }).notNull(),
     /** `PM-{model}-{tỉnh}-{số thứ tự}`, ví dụ PM-D1-HCM-0001 (ADR-0009). Null tới khi onboard xong. */
-    displayCode: text('display_code'),
+    displayCode: varchar('display_code', { length: 100 }),
     /** Null cho tới khi trụ được gắn vào site (onboarding). */
     siteId: bigint('site_id', { mode: 'number' }).references(() => sites.id),
-    model: text('model'),
-    firmwareVersion: text('firmware_version'),
+    model: varchar('model', { length: 20 }),
+    firmwareVersion: varchar('firmware_version', { length: 50 }),
     ratedPowerKw: numeric('rated_power_kw', { precision: 7, scale: 2 }),
     warrantyUntil: date('warranty_until'),
     lifecycle: chargePointLifecycleEnum('lifecycle').notNull().default('registered'),
     /** idTag mà trụ gửi khi ở chế độ free vend (ADR-0012). Null = trụ không bật free vend. */
-    freeVendTag: text('free_vend_tag'),
+    freeVendTag: varchar('free_vend_tag', { length: 20 }),
     reportsSoc: boolean('reports_soc').notNull().default(false),
     supportsReservation: boolean('supports_reservation').notNull().default(false),
     /** Lần kết nối hiện tại; tăng 1 mỗi lần trụ nối lại. Khớp charge_point_connections.epoch. */
@@ -119,6 +128,11 @@ export const connectors = pgTable(
     maxPowerKw: numeric('max_power_kw', { precision: 7, scale: 2 }),
     status: connectorStatusEnum('status').notNull().default('Unavailable'),
     statusChangedAt: timestamp('status_changed_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .notNull()
+      .defaultNow()
+      .$onUpdate(() => new Date()),
   },
   (t) => [
     unique('connectors_charge_point_id_connector_no_key').on(t.chargePointId, t.connectorNo),
@@ -148,9 +162,9 @@ export const connectorStatusEvents = pgTable(
     connectorNo: smallint('connector_no').notNull(),
     connectorId: bigint('connector_id', { mode: 'number' }).references(() => connectors.id),
     status: connectorStatusEnum('status').notNull(),
-    errorCode: text('error_code').notNull().default('NoError'),
-    vendorErrorCode: text('vendor_error_code'),
-    info: text('info'),
+    errorCode: varchar('error_code', { length: 30 }).notNull().default('NoError'),
+    vendorErrorCode: varchar('vendor_error_code', { length: 50 }),
+    info: varchar('info', { length: 50 }),
     /** Đồng hồ trụ (`timestamp` trong payload) — KHÔNG tin cậy (ADR-0009). */
     cpTimestamp: timestamp('cp_timestamp', { withTimezone: true }),
     /** Đồng hồ CSMS — tin cậy (ADR-0009). */
@@ -188,7 +202,7 @@ export const chargePointConnections = pgTable(
     closedAt: timestamp('closed_at', { withTimezone: true }),
     /** Mã đóng WebSocket hoặc lý do CSMS tự đóng (ví dụ `1012 superseded`). */
     closeReason: text('close_reason'),
-    remoteAddress: text('remote_address'),
+    remoteAddress: varchar('remote_address', { length: 64 }),
   },
   (t) => [
     unique('charge_point_connections_charge_point_id_epoch_key').on(t.chargePointId, t.epoch),

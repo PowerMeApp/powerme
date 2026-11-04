@@ -40,6 +40,10 @@ export const reconciliationRecords = pgTable(
     reviewedAt: timestamp('reviewed_at', { withTimezone: true }),
     resolution: text('resolution'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .notNull()
+      .defaultNow()
+      .$onUpdate(() => new Date()),
   },
   (t) => [
     unique('reconciliation_records_session_id_record_no_key').on(t.sessionId, t.recordNo),

@@ -245,10 +245,10 @@ describeDb('migration 0003 — billing WF-02 (nâng cấp DB đã có 0002)', ()
         'e_invoices.last_error_kind e_invoice_error_kind YES -',
         'e_invoices.last_error_message text YES -',
         'top_ups.expires_at timestamptz NO -',
-        'top_ups.gateway_reference text NO -',
-        'top_ups.gateway_transaction_no text YES -',
+        'top_ups.gateway_reference varchar NO -',
+        'top_ups.gateway_transaction_no varchar YES -',
         'top_ups.late_amount_vnd int8 YES -',
-        'top_ups.late_gateway_ref text YES -',
+        'top_ups.late_gateway_ref varchar YES -',
         'top_ups.late_paid_at timestamptz YES -',
         'top_ups.late_refunded_at timestamptz YES -',
         'top_ups.points_redeemed int4 NO 0',
@@ -461,7 +461,8 @@ describeDb('migration 0003 — billing WF-02 (nâng cấp DB đã có 0002)', ()
         'top_ups_late_payment_status_check',
       ],
     ])('CHECK top_ups từ chối: %s', async (label, cols, vals, constraint) => {
-      const ref = `M3-BAD-${label.replace(/\W+/g, '-')}`;
+      // idempotency_key = ref và là varchar(64) từ 0013 (C1): giữ ref ngắn hơn giới hạn.
+      const ref = `M3-BAD-${label.replace(/\W+/g, '-')}`.slice(0, 60);
       const e = await rejection(
         q(
           `INSERT INTO top_ups (gateway_reference, credit_account_id, amount_vnd, amount_paid_vnd,

@@ -243,7 +243,7 @@ export class SessionsService {
         // WP3/T31: pending belongs to the command intent; STM-1 #2 records observed session start.
         await tx.execute(sql`UPDATE driver_charge_intents SET session_id=${created.id},state='effect',rejection_reason=NULL,
           billing_review_required=(connector_released_at IS NOT NULL OR state='rejected'),
-          reserved_vnd=greatest(reserved_vnd,coalesce((SELECT released_vnd FROM driver_start_recoveries WHERE intent_id=${appStart.id}),0)),version=version+1
+          reserved_vnd=greatest(reserved_vnd,coalesce((SELECT released_vnd FROM driver_start_recoveries WHERE intent_id=${appStart.id}),0)),version=version+1,updated_at=now()
           WHERE id=${appStart.id}`);
         await tx.execute(sql`INSERT INTO driver_charge_intent_events(intent_id,event)
           SELECT id,'late_start_after_release' FROM driver_charge_intents

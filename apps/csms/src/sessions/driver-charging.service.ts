@@ -399,7 +399,7 @@ export class DriverChargingService {
         throw new ChargingError('recovery_evidence_incomplete');
       await c.query(
         `UPDATE driver_charge_intents SET state='released',reserved_vnd=0,
-        connector_released_at=now(),version=version+1 WHERE id=$1`,
+        connector_released_at=now(),version=version+1,updated_at=now() WHERE id=$1`,
         [intentId],
       );
       await c.query('UPDATE driver_start_recoveries SET released_at=now() WHERE intent_id=$1', [
@@ -536,7 +536,7 @@ export class DriverChargingService {
       const i = await this.recoveryIntent(c, operatorId, intentId);
       if (!i.billing_review_required) return;
       await c.query(
-        'UPDATE driver_charge_intents SET billing_review_required=false,version=version+1 WHERE id=$1',
+        'UPDATE driver_charge_intents SET billing_review_required=false,version=version+1,updated_at=now() WHERE id=$1',
         [intentId],
       );
       await c.query(
@@ -545,7 +545,7 @@ export class DriverChargingService {
         [intentId, operatorId, note.trim()],
       );
       await c.query(
-        "UPDATE charge_settlement_jobs SET next_attempt_at=now() WHERE session_id=$1 AND state='pending'",
+        "UPDATE charge_settlement_jobs SET next_attempt_at=now(),updated_at=now() WHERE session_id=$1 AND state='pending'",
         [i.session_id],
       );
     });
@@ -594,7 +594,7 @@ export class DriverChargingService {
     }
     await this.db.$client.query(
       `UPDATE remote_commands SET status=$2::remote_command_status,response=$3,
-      responded_at=now(),error=$4 WHERE id=$1 AND status='sent'`,
+      responded_at=now(),error=$4,updated_at=now() WHERE id=$1 AND status='sent'`,
       [
         commandId,
         status === 'scheduled' ? 'accepted' : status,
@@ -702,10 +702,10 @@ export class DriverChargingService {
           )
         ).rows[0]!;
       if (prior)
-        await c.query("UPDATE driver_stop_intents SET command_id=$2,state='sent' WHERE id=$1", [
-          prior.id,
-          command.id,
-        ]);
+        await c.query(
+          "UPDATE driver_stop_intents SET command_id=$2,state='sent',updated_at=now() WHERE id=$1",
+          [prior.id, command.id],
+        );
       await c.query(
         `INSERT INTO driver_stop_attempts(command_id,intent_id,attempt_no,kind,previous_command_id)
         SELECT $1,$2,coalesce(max(attempt_no),0)+1,$3,$4 FROM driver_stop_attempts WHERE intent_id=$2`,
@@ -871,10 +871,10 @@ export class DriverChargingService {
           note.trim(),
         ],
       );
-      await c.query("UPDATE driver_stop_intents SET command_id=$2,state='sent' WHERE id=$1", [
-        original.id,
-        command.id,
-      ]);
+      await c.query(
+        "UPDATE driver_stop_intents SET command_id=$2,state='sent',updated_at=now() WHERE id=$1",
+        [original.id, command.id],
+      );
       if (['active', 'paused'].includes(session.status)) {
         const next = new SessionStateMachine().apply(
           session.status as SessionStatus,
@@ -1020,7 +1020,7 @@ export class DriverChargingService {
       ).rows[0];
       if (!row) return;
       await c.query(
-        "UPDATE driver_stop_intents SET state='effect' WHERE session_id=$1 AND state NOT IN ('effect','rejected')",
+        "UPDATE driver_stop_intents SET state='effect',updated_at=now() WHERE session_id=$1 AND state NOT IN ('effect','rejected')",
         [row.id],
       );
     });
@@ -1208,7 +1208,7 @@ export class DriverChargingService {
           );
         }
         await c.query(
-          `UPDATE driver_stop_intents SET state=$2 WHERE command_id=$1 AND state='sent'`,
+          `UPDATE driver_stop_intents SET state=$2,updated_at=now() WHERE command_id=$1 AND state='sent'`,
           [
             commandId,
             status === 'timeout' || (status === 'rejected' && stop.kind === 'operator_recovery')
@@ -1218,15 +1218,15 @@ export class DriverChargingService {
         );
       } else {
         await c.query(
-          `UPDATE driver_charge_intents SET state=$2,reserved_vnd=CASE WHEN $2='rejected' THEN 0 ELSE reserved_vnd END,
-          connector_released_at=CASE WHEN $2='rejected' THEN coalesce(connector_released_at,now()) ELSE connector_released_at END,
-          version=version+1 WHERE command_id=$1 AND state='sent' AND session_id IS NULL`,
+          `UPDATE driver_charge_intents SET state=$2,reserved_vnd=CASE WHEN $2::varchar='rejected' THEN 0 ELSE reserved_vnd END,
+          connector_released_at=CASE WHEN $2::varchar='rejected' THEN coalesce(connector_released_at,now()) ELSE connector_released_at END,
+          version=version+1,updated_at=now() WHERE command_id=$1 AND state='sent' AND session_id IS NULL`,
           [commandId, status === 'timeout' ? 'unknown' : status],
         );
       }
       await c.query(
         `UPDATE remote_commands SET status=$2::text::remote_command_status,response=$3,responded_at=CASE WHEN $2::text='timeout' THEN NULL ELSE now() END,
-        error=CASE WHEN $2='timeout' THEN 'outcome_unknown' ELSE NULL END WHERE id=$1 AND status='sent'`,
+        error=CASE WHEN $2='timeout' THEN 'outcome_unknown' ELSE NULL END,updated_at=now() WHERE id=$1 AND status='sent'`,
         [commandId, status, JSON.stringify(response)],
       );
     });
