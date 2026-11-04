@@ -1,7 +1,14 @@
 /**
  * Unit test hàm thuần `evaluateSeries` — luật đối soát với chuỗi MeterValues thật của EXP-01.
  */
-import { EnergySample, evaluateSeries, ReconciliationInput } from './reconciliation.service.js';
+import type { CsmsConfig } from '../config.js';
+import type { Db } from '../db/db.module.js';
+import {
+  EnergySample,
+  evaluateSeries,
+  ReconciliationInput,
+  ReconciliationService,
+} from './reconciliation.service.js';
 
 const t = (iso: string) => new Date(iso);
 const s = (iso: string, wh: number): EnergySample => ({ cpTimestamp: t(iso), wh });
@@ -197,5 +204,71 @@ describe('evaluateSeries', () => {
     expect(v.gaps).toEqual([{ start: t('2026-09-16T10:00:00Z'), end: t('2026-09-16T10:05:00Z') }]);
     expect(v.seriesLastWh).toBeNull();
     expect(v.sampleCount).toBe(0);
+  });
+});
+
+describe('ReconciliationService — công tắc RECONCILIATION_ENABLED (G6)', () => {
+  /** Executor giả: mọi truy cập DB đều là lỗi, để chứng minh chế độ tắt không chạm DB. */
+  const explosive = new Proxy(
+    {},
+    {
+      get() {
+        throw new Error('chế độ ablation không được truy cập DB');
+      },
+    },
+  ) as never;
+  const frame = {
+    action: 'StopTransaction',
+    cpTimestamp: t('2026-09-16T14:18:52.934Z'),
+    receivedAt: t('2026-09-16T14:20:58.209Z'),
+    messageLogId: 1,
+  };
+  const conflict = evaluateSeries({
+    ...base,
+    meterStartWh: 0,
+    meterStopWh: 242,
+    cpStartedAt: t('2026-09-16T14:18:17.784Z'),
+    cpStoppedAt: t('2026-09-16T14:18:52.934Z'),
+    samples: TX3_AT_STOP,
+  });
+  const make = (reconciliationEnabled?: boolean) =>
+    new ReconciliationService(
+      {} as Db,
+      {
+        meterValueSampleIntervalS: 10,
+        reconcileGapFactor: 3,
+        reconcileEnergyToleranceWh: 1,
+        ...(reconciliationEnabled === undefined ? {} : { reconciliationEnabled }),
+      } as CsmsConfig,
+    );
+
+  it('mặc định (không khai báo) và true là bật; false là tắt', () => {
+    expect(make().enabled).toBe(true);
+    expect(make(true).enabled).toBe(true);
+    expect(make(false).enabled).toBe(false);
+  });
+
+  it('tắt: mọi record* trả null và không truy cập DB, kể cả khi verdict là conflict', async () => {
+    const svc = make(false);
+    expect(conflict.outcome).toBe('conflict');
+    expect(await svc.recordVerdict(explosive, 1, conflict, { kind: 'stop', replayed: true })).toBe(
+      null,
+    );
+    expect(
+      await svc.recordReplay(explosive, 1, frame, {
+        replayed: true,
+        reason: 'x',
+        skewS: 200,
+      } as never),
+    ).toBe(null);
+    expect(await svc.recordDuplicate(explosive, 1, frame)).toBe(null);
+    expect(await svc.recordOrphanStop(explosive, 1, frame)).toBe(null);
+    expect(await svc.recordUnknownIdTag(explosive, 1, 'X')).toBe(null);
+  });
+
+  it('bật: recordVerdict conflict chạm DB (ở đây executor giả nên ném lỗi)', async () => {
+    await expect(
+      make(true).recordVerdict(explosive, 1, conflict, { kind: 'stop', replayed: true }),
+    ).rejects.toThrow('ablation');
   });
 });

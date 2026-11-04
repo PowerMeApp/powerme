@@ -47,6 +47,11 @@ export interface CsmsConfig {
    */
   allowLegacyNoCredential?: boolean;
   /**
+   * G6 / BM02 F30 (thí nghiệm ablation): bật/tắt engine đối soát. Tắt = tin `meterStop` của trụ,
+   * không ghi `reconciliation_records` (xem đầu `reconciliation.service.ts`). Không khai báo = true.
+   */
+  reconciliationEnabled?: boolean;
+  /**
    * CSMS đứng sau reverse proxy (Caddy trên staging): IP trụ cho bộ giới hạn đăng nhập sai (#40)
    * lấy từ giá trị cuối của X-Forwarded-For thay vì địa chỉ socket. Không khai báo = false.
    */
@@ -134,6 +139,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): CsmsConfig {
     consolePort: intEnv(env, 'CONSOLE_PORT', 3000),
     ...(env['OCPP_PUBLIC_URL'] ? { ocppPublicUrl: env['OCPP_PUBLIC_URL'] } : {}),
     allowLegacyNoCredential: boolEnv(env, 'ALLOW_LEGACY_NO_CREDENTIAL', false),
+    reconciliationEnabled: boolEnv(env, 'RECONCILIATION_ENABLED', true),
     ocppTrustProxy: boolEnv(env, 'OCPP_TRUST_PROXY', false),
     offlineGraceS: graceEnv(env, 'OFFLINE_GRACE_S', DEFAULT_OFFLINE_GRACE_S),
     faultResetTimeoutS: positiveSecondsEnv(

@@ -403,10 +403,28 @@ export class SessionsService {
         );
       }
 
-      const verdict = await this.evaluateSession(tx, { ...session, meterStopWh, cpStoppedAt });
-      await this.reconciliation.recordVerdict(tx, session.id, verdict, { kind: 'stop', replayed });
-      const event: SessionEvent =
-        verdict.outcome === 'conflict' ? 'RECONCILE_CONFLICT' : 'RECONCILE_OK';
+      // Ablation (RECONCILIATION_ENABLED=false): tin meterStop của trụ, không đối chiếu chuỗi
+      // MeterValues và không ghi reconciliation_records. meterStop không dùng được vẫn → review.
+      let event: SessionEvent;
+      let verdictNote: string;
+      let verdictLabel: string;
+      let diffLabel: string;
+      if (this.reconciliation.enabled) {
+        const verdict = await this.evaluateSession(tx, { ...session, meterStopWh, cpStoppedAt });
+        await this.reconciliation.recordVerdict(tx, session.id, verdict, {
+          kind: 'stop',
+          replayed,
+        });
+        event = verdict.outcome === 'conflict' ? 'RECONCILE_CONFLICT' : 'RECONCILE_OK';
+        verdictLabel = verdict.outcome;
+        verdictNote = `đối soát=${verdict.outcome}`;
+        diffLabel = String(verdict.energyDifferenceWh ?? 'null');
+      } else {
+        event = meterStopWh === null ? 'RECONCILE_CONFLICT' : 'RECONCILE_OK';
+        verdictLabel = 'tắt';
+        verdictNote = 'đối soát=tắt (ablation: tin meterStop của trụ)';
+        diffLabel = '-';
+      }
       const beforeReconcile = status;
       status = this.stateMachine.apply(status, event); // #12/#12a hoặc #16/#16a
       await tx
@@ -414,11 +432,11 @@ export class SessionsService {
         .set({ status, updatedAt: ctx.receivedAt })
         .where(eq(sessions.id, session.id));
       await this.recordHistory(tx, session.id, beforeReconcile, status, event, ctx.receivedAt, {
-        note: `đối soát=${verdict.outcome}`,
+        note: verdictNote,
       });
       this.logger.log(
         `tx ${req.transactionId} dừng: meterStop=${req.meterStop} reason=${req.reason ?? '-'} ` +
-          `đối soát=${verdict.outcome} diff=${verdict.energyDifferenceWh ?? 'null'} → ${status}` +
+          `đối soát=${verdictLabel} diff=${diffLabel} → ${status}` +
           (replayed ? ' (StopTransaction phát lại)' : ''),
       );
     });
@@ -625,6 +643,7 @@ export class SessionsService {
     session: SessionRow,
     ctx: InboundContext,
   ): Promise<void> {
+    if (!this.reconciliation.enabled) return; // ablation: không đối soát lại mẫu muộn
     const verdict = await this.evaluateSession(tx, session);
     await this.reconciliation.recordVerdict(tx, session.id, verdict, {
       kind: 'late_sample',
