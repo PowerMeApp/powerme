@@ -1,19 +1,19 @@
 /**
- * PillarLoginLimiter — issue #40: failed pillar logins are capped per serial + IP and per IP,
+ * ChargePointLoginLimiter — issue #40: failed charge point logins are capped per serial + IP and per IP,
  * checked before any scrypt hash. A fake clock drives the windows.
  */
-import { PillarLoginLimiter } from './pillar-login-limiter';
+import { ChargePointLoginLimiter } from './charge-point-login-limiter';
 
 const SERIAL = 'RH24D1-00077';
 const IP = '203.0.113.7';
 
 function makeLimiter() {
   let t = 1_000_000;
-  const limiter = new PillarLoginLimiter(undefined, () => t);
+  const limiter = new ChargePointLoginLimiter(undefined, () => t);
   return { limiter, advance: (ms: number) => (t += ms) };
 }
 
-describe('PillarLoginLimiter (issue #40)', () => {
+describe('ChargePointLoginLimiter (issue #40)', () => {
   it('5 failures in 60 s lock the serial from that IP for 15 min; another IP is not affected', () => {
     const { limiter, advance } = makeLimiter();
     for (let i = 1; i <= 4; i++) {

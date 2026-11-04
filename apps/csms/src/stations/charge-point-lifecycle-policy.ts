@@ -1,5 +1,5 @@
 /**
- * PillarLifecyclePolicy — the single place that decides STM-3 (ChargingPillar lifecycle)
+ * ChargePointLifecyclePolicy — the single place that decides STM-3 (ChargePoint lifecycle)
  * transitions for the WF-05 onboarding slice.
  *
  * Why it exists: CD-5 (Report 4 §3.6) puts every STM-3 transition behind one pure class so the
@@ -15,30 +15,30 @@
  *
  * T61 (ADR-0016 D-C) moved connectivity to `charge_points.is_online`; the gateway no longer writes
  * `offline` and migration 0002 rewrote old rows to `in_service`. The enum value itself cannot be
- * dropped from Postgres safely, so it stays as LEGACY and a pillar whose lifecycle still reads
+ * dropped from Postgres safely, so it stays as LEGACY and a charge point whose lifecycle still reads
  * `offline` is treated as `in_service` here: it has been in service before.
  */
-export type PillarLifecycle =
+export type ChargePointLifecycle =
   'registered' | 'awaiting_connection' | 'in_service' | 'offline' | 'disabled' | 'decommissioned';
 
-export type PillarLifecycleEvent =
+export type ChargePointLifecycleEvent =
   'REGISTER' | 'ONBOARD' | 'FIRST_CONNECT' | 'DISABLE' | 'ENABLE' | 'DECOMMISSION';
 
-export class InvalidPillarTransitionError extends Error {
+export class InvalidChargePointTransitionError extends Error {
   constructor(
-    readonly from: PillarLifecycle | null,
-    readonly event: PillarLifecycleEvent,
+    readonly from: ChargePointLifecycle | null,
+    readonly event: ChargePointLifecycleEvent,
   ) {
     super(`STM-3: event ${event} is not allowed from ${from ?? '[*]'}`);
-    this.name = 'InvalidPillarTransitionError';
+    this.name = 'InvalidChargePointTransitionError';
   }
 }
 
 interface Transition {
   no: number;
-  from: PillarLifecycle | null;
-  event: PillarLifecycleEvent;
-  to: PillarLifecycle;
+  from: ChargePointLifecycle | null;
+  event: ChargePointLifecycleEvent;
+  to: ChargePointLifecycle;
 }
 
 /** STM-3 v0.3 transition table (numbers match the diagram and Report 5 TC-STM3-xx). */
@@ -52,30 +52,33 @@ export const STM3_TRANSITIONS: readonly Transition[] = [
 ];
 
 /** Legacy value written by ConnectionRegistry on socket close (pre-T61, no longer written); see header. */
-function normalise(state: PillarLifecycle | null): PillarLifecycle | null {
+function normalise(state: ChargePointLifecycle | null): ChargePointLifecycle | null {
   return state === 'offline' ? 'in_service' : state;
 }
 
-export class PillarLifecyclePolicy {
-  /** Next lifecycle for `event`, or throws InvalidPillarTransitionError. */
-  transition(from: PillarLifecycle | null, event: PillarLifecycleEvent): PillarLifecycle {
+export class ChargePointLifecyclePolicy {
+  /** Next lifecycle for `event`, or throws InvalidChargePointTransitionError. */
+  transition(
+    from: ChargePointLifecycle | null,
+    event: ChargePointLifecycleEvent,
+  ): ChargePointLifecycle {
     const current = normalise(from);
     const t = STM3_TRANSITIONS.find((x) => x.from === current && x.event === event);
-    if (!t) throw new InvalidPillarTransitionError(from, event);
+    if (!t) throw new InvalidChargePointTransitionError(from, event);
     return t.to;
   }
 
-  canApply(from: PillarLifecycle | null, event: PillarLifecycleEvent): boolean {
+  canApply(from: ChargePointLifecycle | null, event: ChargePointLifecycleEvent): boolean {
     const current = normalise(from);
     return STM3_TRANSITIONS.some((x) => x.from === current && x.event === event);
   }
 
   /**
-   * May a pillar in this lifecycle open an OCPP connection (SD-5b step 3)?
-   * Not onboarded yet (`registered`) or retired (`decommissioned`) → no. A `disabled` pillar may
+   * May a charge point in this lifecycle open an OCPP connection (SD-5b step 3)?
+   * Not onboarded yet (`registered`) or retired (`decommissioned`) → no. A `disabled` charge point may
    * stay online (STM-3 note) — it is only hidden from drivers.
    */
-  mayConnect(state: PillarLifecycle): boolean {
+  mayConnect(state: ChargePointLifecycle): boolean {
     return state !== 'registered' && state !== 'decommissioned';
   }
 }

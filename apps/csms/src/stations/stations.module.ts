@@ -1,5 +1,5 @@
 /**
- * Module `stations` — pillar registry and onboarding (WF-05, owner Trần Đức Ân, WP1).
+ * Module `stations` — charge point registry and onboarding (WF-05, owner Trần Đức Ân, WP1).
  *
  * This first slice holds the onboarding service and the connection check used by ocpp-gateway.
  * Per ADR-0016 D-F, Nghĩa's FaultService (WF-04, FE-04) lives here too: the gateway calls it on
@@ -9,18 +9,18 @@
 import { Module } from '@nestjs/common';
 import { DbModule } from '../db/db.module.js';
 import { FaultService } from './faults/fault.service.js';
-import { PillarAuthService } from './pillar-auth.service.js';
-import { PillarLoginLimiter } from './pillar-login-limiter.js';
-import { PillarOnboardingService } from './pillar-onboarding.service.js';
+import { ChargePointAuthService } from './charge-point-auth.service.js';
+import { ChargePointLoginLimiter } from './charge-point-login-limiter.js';
+import { ChargePointOnboardingService } from './charge-point-onboarding.service.js';
 
 @Module({
   imports: [DbModule],
   providers: [
-    PillarOnboardingService,
-    PillarAuthService,
-    { provide: PillarLoginLimiter, useFactory: () => new PillarLoginLimiter() },
+    ChargePointOnboardingService,
+    ChargePointAuthService,
+    { provide: ChargePointLoginLimiter, useFactory: () => new ChargePointLoginLimiter() },
     FaultService,
   ],
-  exports: [PillarOnboardingService, PillarAuthService, FaultService],
+  exports: [ChargePointOnboardingService, ChargePointAuthService, FaultService],
 })
 export class StationsModule {}

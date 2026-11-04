@@ -23,8 +23,8 @@ import {
 } from '../src/sessions/driver-charging.service.js';
 import { SessionStateMachine } from '../src/sessions/session-state-machine.js';
 import { SessionsService } from '../src/sessions/sessions.service.js';
-import { PillarAuthService } from '../src/stations/pillar-auth.service.js';
-import { hashPillarPassword } from '../src/stations/pillar-credential.js';
+import { ChargePointAuthService } from '../src/stations/charge-point-auth.service.js';
+import { hashChargePointPassword } from '../src/stations/charge-point-credential.js';
 import { MIGRATIONS_DIR, resetAndMigrate } from './helpers/apply-migrations.js';
 
 const url = process.env['DATABASE_URL'];
@@ -61,7 +61,7 @@ describeDb('WP3/T31 WF-01 service journey with real OCPP + Postgres', () => {
   let server: OcppServer;
   let sessionsService: SessionsService;
   let registry: ConnectionRegistry;
-  let pillarPassword: string;
+  let chargePointPassword: string;
   let availabilityResponse: 'Accepted' | 'Rejected' | 'Scheduled' | 'silence';
   let grace: OfflineGraceService;
   let client: RPCClient;
@@ -108,12 +108,12 @@ describeDb('WP3/T31 WF-01 service journey with real OCPP + Postgres', () => {
         [op],
       )
     )[0]!.id;
-    const password = (pillarPassword = randomBytes(18).toString('base64url'));
-    const hash = await hashPillarPassword(password);
+    const password = (chargePointPassword = randomBytes(18).toString('base64url'));
+    const hash = await hashChargePointPassword(password);
     const cp = (
       await q(
         `INSERT INTO charge_points(serial_number,display_code,site_id,lifecycle,basic_auth_password_hash)
-      VALUES('T31-PILLAR','PM-D1-HCM-0031',$1,'awaiting_connection',$2) RETURNING id`,
+      VALUES('T31-CP','PM-D1-HCM-0031',$1,'awaiting_connection',$2) RETURNING id`,
         [site, hash],
       )
     )[0]!.id;
@@ -205,13 +205,13 @@ describeDb('WP3/T31 WF-01 service journey with real OCPP + Postgres', () => {
       new ReplayDetector(5),
       new OcppHandlers(sessions, config, service),
       sessions,
-      new PillarAuthService(db, config),
+      new ChargePointAuthService(db, config),
       grace,
     );
     await server.start();
     client = new RPCClient({
       endpoint: `ws://127.0.0.1:${config.ocppPort}/ocpp`,
-      identity: 'T31-PILLAR',
+      identity: 'T31-CP',
       password,
       protocols: ['ocpp1.6'],
       strictMode: true,
@@ -299,7 +299,7 @@ describeDb('WP3/T31 WF-01 service journey with real OCPP + Postgres', () => {
     await server?.stop();
     await until(
       async () =>
-        (await q("SELECT 1 FROM charge_points WHERE serial_number='T31-PILLAR' AND NOT is_online"))
+        (await q("SELECT 1 FROM charge_points WHERE serial_number='T31-CP' AND NOT is_online"))
           .length === 1,
     );
     await until(
@@ -344,17 +344,17 @@ describeDb('WP3/T31 WF-01 service journey with real OCPP + Postgres', () => {
     });
   }
 
-  async function secondPillar() {
+  async function secondChargePoint() {
     const cp = (
       await q(`INSERT INTO charge_points(serial_number,site_id,lifecycle,basic_auth_password_hash)
       SELECT 'T72-SECOND',site_id,'awaiting_connection',basic_auth_password_hash FROM charge_points
-      WHERE serial_number='T31-PILLAR' RETURNING id`)
+      WHERE serial_number='T31-CP' RETURNING id`)
     )[0]!.id;
     await q('INSERT INTO connectors(charge_point_id,connector_no) VALUES($1,1)', [cp]);
     const second = new RPCClient({
       endpoint: `ws://127.0.0.1:${config.ocppPort}/ocpp`,
       identity: 'T72-SECOND',
-      password: pillarPassword,
+      password: chargePointPassword,
       protocols: ['ocpp1.6'],
       strictMode: true,
       reconnect: false,
@@ -401,10 +401,10 @@ describeDb('WP3/T31 WF-01 service journey with real OCPP + Postgres', () => {
     expect(startCount).toBe(1);
   });
 
-  it('T72 Authorize refuses forged P3 tags and a valid intent sent by another authenticated pillar', async () => {
+  it('T72 Authorize refuses forged P3 tags and a valid intent sent by another authenticated charge point', async () => {
     await service.start(driver, 'auth-binding', input);
     expect(await authorize('P3000000000000000000')).toEqual({ idTagInfo: { status: 'Invalid' } });
-    expect(await authorize(tag, await secondPillar())).toEqual({
+    expect(await authorize(tag, await secondChargePoint())).toEqual({
       idTagInfo: { status: 'Invalid' },
     });
     expect(await authorize()).toEqual({ idTagInfo: { status: 'Accepted' } });
@@ -423,7 +423,7 @@ describeDb('WP3/T31 WF-01 service journey with real OCPP + Postgres', () => {
     ['closed credit', "UPDATE credit_accounts SET status='closed',closed_at=now()"],
     ['insufficient credit', 'UPDATE credit_accounts SET balance_vnd=30000'],
     ['released reserve', 'UPDATE driver_charge_intents SET reserved_vnd=0'],
-    ['disabled pillar', "UPDATE charge_points SET lifecycle='disabled'"],
+    ['disabled charge point', "UPDATE charge_points SET lifecycle='disabled'"],
     ['inactive operator', "UPDATE operators SET status='suspended'"],
     ['unowned vehicle', 'UPDATE vehicles SET driver_id=(SELECT max(user_id) FROM drivers)'],
     [
@@ -442,11 +442,11 @@ describeDb('WP3/T31 WF-01 service journey with real OCPP + Postgres', () => {
   it('T72 Authorize refuses a previous-epoch intent after a real reconnect', async () => {
     await service.start(driver, 'auth-old-epoch', input);
     await client.close({ force: true });
-    await until(async () => !registry.get('T31-PILLAR'));
+    await until(async () => !registry.get('T31-CP'));
     client = new RPCClient({
       endpoint: `ws://127.0.0.1:${config.ocppPort}/ocpp`,
-      identity: 'T31-PILLAR',
-      password: pillarPassword,
+      identity: 'T31-CP',
+      password: chargePointPassword,
       protocols: ['ocpp1.6'],
       strictMode: true,
       reconnect: false,
@@ -458,10 +458,10 @@ describeDb('WP3/T31 WF-01 service journey with real OCPP + Postgres', () => {
   });
 
   it.each(['MeterValues', 'StopTransaction'] as const)(
-    'T72 session_pillar_mismatch rejects %s over authenticated OCPP without business mutation',
+    'T72 session_charge_point_mismatch rejects %s over authenticated OCPP without business mutation',
     async (action) => {
       const sid = await observedStart();
-      const second = await secondPillar();
+      const second = await secondChargePoint();
       const snapshot = async () =>
         Promise.all([
           q('SELECT * FROM sessions ORDER BY id'),
@@ -488,7 +488,7 @@ describeDb('WP3/T31 WF-01 service journey with real OCPP + Postgres', () => {
             };
       await expect(second.call(action, params)).rejects.toMatchObject({
         rpcErrorCode: 'GenericError',
-        message: 'session_pillar_mismatch',
+        message: 'session_charge_point_mismatch',
       });
       expect(await snapshot()).toEqual(before);
       expect(
@@ -754,11 +754,11 @@ describeDb('WP3/T31 WF-01 service journey with real OCPP + Postgres', () => {
     const intent = await service.start(driver, 'accepted', input);
     await service.beginStartRecovery(op, intent.intentId, 'before disconnect');
     await client.close({ force: true });
-    await until(async () => !registry.get('T31-PILLAR'));
+    await until(async () => !registry.get('T31-CP'));
     client = new RPCClient({
       endpoint: `ws://127.0.0.1:${config.ocppPort}/ocpp`,
-      identity: 'T31-PILLAR',
-      password: pillarPassword,
+      identity: 'T31-CP',
+      password: chargePointPassword,
       protocols: ['ocpp1.6'],
       strictMode: true,
       reconnect: false,
@@ -867,10 +867,10 @@ describeDb('WP3/T31 WF-01 service journey with real OCPP + Postgres', () => {
     expect(await q('SELECT 1 FROM driver_charge_intents')).toHaveLength(0);
   });
 
-  it('T72 wrong pillar meter and stop cannot mutate another pillar session', async () => {
+  it('T72 wrong charge point meter and stop cannot mutate another charge point session', async () => {
     const sid = await observedStart();
     const ctx = {
-      identity: 'other-pillar',
+      identity: 'other-cp',
       chargePointId: 999,
       epoch: 1,
       epochOpenedAt: new Date(),
@@ -885,13 +885,13 @@ describeDb('WP3/T31 WF-01 service journey with real OCPP + Postgres', () => {
         { connectorId: 1, transactionId: transaction, meterValue: [] },
         ctx,
       ),
-    ).rejects.toThrow('session_pillar_mismatch');
+    ).rejects.toThrow('session_charge_point_mismatch');
     await expect(
       sessionsService.onStopTransaction(
         { transactionId: transaction, meterStop: 11000, timestamp: new Date().toISOString() },
         ctx,
       ),
-    ).rejects.toThrow('session_pillar_mismatch');
+    ).rejects.toThrow('session_charge_point_mismatch');
     expect((await service.progress(driver, sid)).status).toBe('active');
     expect(await q('SELECT 1 FROM charge_settlement_jobs')).toHaveLength(0);
   });
@@ -977,7 +977,7 @@ describeDb('WP3/T31 WF-01 service journey with real OCPP + Postgres', () => {
     ).toHaveLength(2);
     expect((await service.statement(driver, sid)).amount_vnd).toBe('1');
   });
-  it('T72 offline-delivered session settles on the pillar clock, not the reconnect time (BR-P20)', async () => {
+  it('T72 offline-delivered session settles on the charge point clock, not the reconnect time (BR-P20)', async () => {
     // Trụ mất mạng: sạc 11:00–11:30 (giờ VN, khung 1 VND/kWh), StopTransaction tới lúc nối lại
     // 13:00 (khung 1000 VND/kWh). Phải trừ tiền một lần theo khung lúc điện thật sự được giao.
     await twoBands();
@@ -1259,7 +1259,7 @@ describeDb('WP3/T31 WF-01 service journey with real OCPP + Postgres', () => {
   it('T72 independent natural replay can race settlement without rebinding or double charging', async () => {
     const sid = await observedStart();
     await sendStop();
-    const conn = registry.get('T31-PILLAR')!;
+    const conn = registry.get('T31-CP')!;
     const message = (
       await q(
         "SELECT id FROM ocpp_message_log WHERE action='StartTransaction' ORDER BY id DESC LIMIT 1",
@@ -1365,11 +1365,11 @@ describeDb('WP3/T31 WF-01 service journey with real OCPP + Postgres', () => {
   });
   it('T72 review start rejects pre-reconnect Available until fresh current-epoch status', async () => {
     await client.close({ force: true });
-    await until(async () => !registry.get('T31-PILLAR'));
+    await until(async () => !registry.get('T31-CP'));
     client = new RPCClient({
       endpoint: `ws://127.0.0.1:${config.ocppPort}/ocpp`,
-      identity: 'T31-PILLAR',
-      password: pillarPassword,
+      identity: 'T31-CP',
+      password: chargePointPassword,
       protocols: ['ocpp1.6'],
       strictMode: true,
       reconnect: false,
@@ -1397,14 +1397,14 @@ describeDb('WP3/T31 WF-01 service journey with real OCPP + Postgres', () => {
     'future_status',
     'future_last_seen',
     'replayed_status',
-    'future_pillar_timestamp',
+    'future_cp_timestamp',
   ] as const)('T72 review start rejects %s without command or held credit', async (kind) => {
     if (kind === 'unknown_status') await q('UPDATE connectors SET status_changed_at=NULL');
     if (kind === 'future_status')
       await q("UPDATE connectors SET status_changed_at=now()+interval '1 hour'");
     if (kind === 'future_last_seen')
       await q("UPDATE charge_points SET last_message_at=now()+interval '1 hour'");
-    if (kind === 'replayed_status' || kind === 'future_pillar_timestamp')
+    if (kind === 'replayed_status' || kind === 'future_cp_timestamp')
       await client.call('StatusNotification', {
         connectorId: 1,
         errorCode: 'NoError',
@@ -1430,7 +1430,7 @@ describeDb('WP3/T31 WF-01 service journey with real OCPP + Postgres', () => {
     await expect(service.start(driver, 'fault', input)).rejects.toThrow('connector_unavailable');
     expect(startCount).toBe(0);
   });
-  it('WP3/T31 lists an offline in-service pillar but rejects start without creating an intent', async () => {
+  it('WP3/T31 lists an offline in-service charge point but rejects start without creating an intent', async () => {
     await client.close({ force: true });
     await until(
       async () => (await q('SELECT 1 FROM charge_points WHERE NOT is_online')).length === 1,
@@ -1447,7 +1447,7 @@ describeDb('WP3/T31 WF-01 service journey with real OCPP + Postgres', () => {
     expect(await q('SELECT 1 FROM remote_commands')).toHaveLength(0);
     expect(startCount).toBe(0);
   });
-  it('WP3/T31 hides a disabled pillar even with an online socket and rejects start', async () => {
+  it('WP3/T31 hides a disabled charge point even with an online socket and rejects start', async () => {
     await q("UPDATE charge_points SET lifecycle='disabled'");
     expect((await q('SELECT is_online FROM charge_points'))[0]!.is_online).toBe(true);
     expect((await service.findStations(driver, vehicle)).items).toHaveLength(0);
@@ -1773,11 +1773,11 @@ describeDb('WP3/T31 WF-01 service journey with real OCPP + Postgres', () => {
     const initial = await service.stop(driver, 'stop', sid);
     await recoveryEvidence();
     await client.close({ force: true });
-    await until(async () => !registry.get('T31-PILLAR'));
+    await until(async () => !registry.get('T31-CP'));
     client = new RPCClient({
       endpoint: `ws://127.0.0.1:${config.ocppPort}/ocpp`,
-      identity: 'T31-PILLAR',
-      password: pillarPassword,
+      identity: 'T31-CP',
+      password: chargePointPassword,
       protocols: ['ocpp1.6'],
       strictMode: true,
       reconnect: false,
@@ -1789,7 +1789,7 @@ describeDb('WP3/T31 WF-01 service journey with real OCPP + Postgres', () => {
     });
     await client.connect();
     await client.call('Heartbeat', {});
-    await until(async () => Boolean(registry.get('T31-PILLAR')));
+    await until(async () => Boolean(registry.get('T31-CP')));
     service = new DriverChargingService(db, registry, settlement, policy);
     await expect(
       service.recoverStop(op, sid, Number(initial.command_id), 'old epoch'),
@@ -1806,7 +1806,7 @@ describeDb('WP3/T31 WF-01 service journey with real OCPP + Postgres', () => {
       (
         await q("SELECT connection_epoch FROM driver_stop_attempts WHERE kind='operator_recovery'")
       )[0]!.connection_epoch,
-    ).toBe(registry.get('T31-PILLAR')!.epoch);
+    ).toBe(registry.get('T31-CP')!.epoch);
     expect(stopCount).toBe(2);
   });
   it('T72 review received StopTransaction before the lost reply confirms effect without a recovery command', async () => {

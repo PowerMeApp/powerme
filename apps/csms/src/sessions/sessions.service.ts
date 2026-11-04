@@ -309,7 +309,8 @@ export class SessionsService {
       this.logger.warn(`MeterValues cho transactionId ${req.transactionId} không tồn tại — bỏ qua`);
       return;
     }
-    if (session.chargePointId !== ctx.chargePointId) throw new Error('session_pillar_mismatch');
+    if (session.chargePointId !== ctx.chargePointId)
+      throw new Error('session_charge_point_mismatch');
     const frame = this.frameRef('MeterValues', ctx);
     await this.db.transaction(async (tx) => {
       const { inserted, skipped } = await this.ingestSamples(tx, session.id, req.meterValue, ctx);
@@ -347,7 +348,8 @@ export class SessionsService {
       );
       return;
     }
-    if (session.chargePointId !== ctx.chargePointId) throw new Error('session_pillar_mismatch');
+    if (session.chargePointId !== ctx.chargePointId)
+      throw new Error('session_charge_point_mismatch');
     await this.db.transaction(async (tx) => {
       if (session.meterStopWh !== null || !OPEN_STATUSES.includes(session.status)) {
         this.logger.warn(

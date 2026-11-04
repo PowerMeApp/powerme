@@ -1,7 +1,7 @@
 /**
- * PillarOnboardingService — WF-05 "Onboard a pillar and bring it into service", back-end half.
+ * ChargePointOnboardingService — WF-05 "Onboard a charge point and bring it into service", back-end half.
  *
- * Why it exists: FR-09 / UC-OPS-01 (operator onboards a pillar and receives its credential) and
+ * Why it exists: FR-09 / UC-OPS-01 (operator onboards a charge point and receives its credential) and
  * the registry part of FR-15 / UC-ADM-03 (Admin registers the serial first). Build spec: CD-5 and
  * SD-5a in Report 4 §3.6; AD-8 v2.0; STM-3 #1–#2.
  *
@@ -17,15 +17,18 @@
  *
  * Not here (declared in the PR): audit-log table (rejections are logged with Logger.warn),
  * display-code province rules beyond the site-code prefix, disable/enable/decommission endpoints
- * (STM-3 #4–#6 exist in PillarLifecyclePolicy and are unit-tested).
+ * (STM-3 #4–#6 exist in ChargePointLifecyclePolicy and are unit-tested).
  */
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { and, eq, like, sql } from 'drizzle-orm';
 import { CONFIG, CsmsConfig } from '../config.js';
 import { DB, Db } from '../db/db.module.js';
 import { chargePoints, connectors, operatorStaff, sites, users } from '../db/schema/index.js';
-import { generatePillarPassword, hashPillarPassword } from './pillar-credential.js';
-import { PillarLifecycle, PillarLifecyclePolicy } from './pillar-lifecycle-policy.js';
+import { generateChargePointPassword, hashChargePointPassword } from './charge-point-credential.js';
+import {
+  ChargePointLifecycle,
+  ChargePointLifecyclePolicy,
+} from './charge-point-lifecycle-policy.js';
 
 export type OnboardingErrorCode =
   | 'invalid_input'
@@ -80,8 +83,8 @@ export interface OnboardInput {
 export interface OnboardResult {
   chargePointId: number;
   displayCode: string;
-  lifecycle: PillarLifecycle;
-  /** Where the pillar must connect: `{ocppBaseUrl}/{serialNumber}`. */
+  lifecycle: ChargePointLifecycle;
+  /** Where the charge point must connect: `{ocppBaseUrl}/{serialNumber}`. */
   ocppUrl: string;
   /** Basic-auth user name = OCPP identity = serial number. */
   identity: string;
@@ -93,9 +96,9 @@ export interface OnboardResult {
 const SERIAL_RE = /^[A-Za-z0-9._-]{3,48}$/;
 
 @Injectable()
-export class PillarOnboardingService {
-  private readonly logger = new Logger(PillarOnboardingService.name);
-  private readonly policy = new PillarLifecyclePolicy();
+export class ChargePointOnboardingService {
+  private readonly logger = new Logger(ChargePointOnboardingService.name);
+  private readonly policy = new ChargePointLifecyclePolicy();
 
   constructor(
     @Inject(DB) private readonly db: Db,
@@ -130,7 +133,7 @@ export class PillarOnboardingService {
     return { chargePointId: row.id, serialNumber, lifecycle: row.lifecycle };
   }
 
-  /** UC-OPS-01 / SD-5a: operator staff onboard a registered pillar (STM-3 #2). */
+  /** UC-OPS-01 / SD-5a: operator staff onboard a registered charge point (STM-3 #2). */
   async onboard(staffUserId: number, input: OnboardInput): Promise<OnboardResult> {
     const operatorId = await this.operatorOf(staffUserId);
     const serialNumber = input.serialNumber?.trim() ?? '';
@@ -150,8 +153,8 @@ export class PillarOnboardingService {
       throw new OnboardingError('site_of_other_operator', 'site belongs to another operator');
     }
 
-    const password = generatePillarPassword();
-    const passwordHash = await hashPillarPassword(password);
+    const password = generateChargePointPassword();
+    const passwordHash = await hashChargePointPassword(password);
 
     const result = await this.db
       .transaction(async (tx) => {
@@ -175,7 +178,7 @@ export class PillarOnboardingService {
         if (!this.policy.canApply(cp.lifecycle, 'ONBOARD')) {
           throw new OnboardingError(
             'already_onboarded',
-            `${serialNumber} is ${cp.lifecycle}, only a registered pillar can be onboarded`,
+            `${serialNumber} is ${cp.lifecycle}, only a registered charge point can be onboarded`,
           );
         }
         const lifecycle = this.policy.transition(cp.lifecycle, 'ONBOARD');
@@ -224,7 +227,7 @@ export class PillarOnboardingService {
 
   private validateConnectors(list: ConnectorInput[] | undefined): void {
     if (!Array.isArray(list) || list.length < 1 || list.length > 2) {
-      throw new OnboardingError('invalid_input', 'a pillar has 1 or 2 connectors');
+      throw new OnboardingError('invalid_input', 'a charge point has 1 or 2 connectors');
     }
     const nos = list.map((c) => c.connectorNo);
     if (nos.some((n) => n !== 1 && n !== 2) || new Set(nos).size !== nos.length) {

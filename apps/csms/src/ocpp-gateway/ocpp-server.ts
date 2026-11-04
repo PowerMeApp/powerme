@@ -33,7 +33,7 @@ import type { IHandshakeInterface } from 'ocpp-rpc/lib/server-client';
 import { CONFIG, CsmsConfig } from '../config.js';
 import { ReplayDetector } from '../reconciliation/replay-detector.js';
 import { SessionsService } from '../sessions/sessions.service.js';
-import { PillarAuthService } from '../stations/pillar-auth.service.js';
+import { ChargePointAuthService } from '../stations/charge-point-auth.service.js';
 import { Connection, ConnectionRegistry } from './connection-registry.js';
 import { InboundSerializer } from './inbound-serializer.js';
 import type { InboundContext } from './inbound-context.js';
@@ -56,7 +56,7 @@ export class OcppServer implements OnApplicationBootstrap, OnApplicationShutdown
     private readonly handlers: OcppHandlers,
     private readonly sessions: SessionsService,
     /** WF-05 (SD-5b): lifecycle + Basic-auth check. Optional so WF-03 tests can build the server without it. */
-    @Optional() private readonly pillarAuth?: PillarAuthService,
+    @Optional() private readonly chargePointAuth?: ChargePointAuthService,
     /**
      * ADR-0016 D-A: ân hạn trước khi orphan. Optional để test WF-03 dựng server không cần nó —
      * thiếu thì socket đóng orphan NGAY (hành vi trước T61 = ân hạn 0).
@@ -74,20 +74,24 @@ export class OcppServer implements OnApplicationBootstrap, OnApplicationShutdown
 
   async start(): Promise<void> {
     // Review PR #33 (quyết định 3): `@Optional()` chỉ để test WF-03 dựng server không cần service.
-    // Ở app thật, thiếu PillarAuthService nghĩa là bắt tay OCPP KHÔNG kiểm mật khẩu (fail-open) —
+    // Ở app thật, thiếu ChargePointAuthService nghĩa là bắt tay OCPP KHÔNG kiểm mật khẩu (fail-open) —
     // phải kêu to lúc khởi động, không để chạy âm thầm.
-    if (!this.pillarAuth && process.env['NODE_ENV'] !== 'test') {
+    if (!this.chargePointAuth && process.env['NODE_ENV'] !== 'test') {
       this.logger.error(
-        'PillarAuthService không có trong DI — bắt tay OCPP chạy KHÔNG kiểm credential. Kiểm tra OcppGatewayModule có import StationsModule.',
+        'ChargePointAuthService không có trong DI — bắt tay OCPP chạy KHÔNG kiểm credential. Kiểm tra OcppGatewayModule có import StationsModule.',
       );
     }
     const server = new RPCServer({ protocols: ['ocpp1.6'], strictMode: true });
     server.auth(async (accept, reject, handshake) => {
-      if (this.pillarAuth) {
+      if (this.chargePointAuth) {
         // WF-05 / SD-5b: unknown → 404, not onboarded or retired → 403, wrong credential → 401,
         // too many failures → 429 (issue #40).
         const clientIp = this.clientIp(handshake);
-        const res = await this.pillarAuth.verify(handshake.identity, handshake.password, clientIp);
+        const res = await this.chargePointAuth.verify(
+          handshake.identity,
+          handshake.password,
+          clientIp,
+        );
         if (!res.ok) {
           this.logger.warn(
             `từ chối ${handshake.identity} từ ${clientIp}: ${res.status} ${res.reason}`,
