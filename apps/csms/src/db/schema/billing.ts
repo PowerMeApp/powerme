@@ -1,7 +1,10 @@
 /**
  * Module chủ: `billing` (WP5).
- * credit_accounts, credit_transactions, top_ups, e_invoices, invoice_adjustments,
+ * credit_accounts, credit_transactions, top_ups, refunds (0012), e_invoices, invoice_adjustments,
  * loyalty_accounts, loyalty_transactions.
+ *
+ * Việc nền (refund, e-invoice, điều chỉnh) chạy bằng quét DB (WF-02 decisions D7): `status` +
+ * `next_attempt_at` nằm trên dòng nghiệp vụ, có index `(status, next_attempt_at)`.
  *
  * Mọi số tiền là VND integer (`bigint`, ADR-0009). Cột dẫn xuất (/x trong ERD) — balance_vnd,
  * balance_after_vnd, amount_paid_vnd, points_balance — là cột thường, phải cập nhật CÙNG
@@ -26,6 +29,8 @@ import {
   eInvoiceErrorKindEnum,
   eInvoiceStatusEnum,
   loyaltyTransactionTypeEnum,
+  refundKindEnum,
+  refundStatusEnum,
   topUpStatusEnum,
 } from './enums.js';
 import { sessions } from './sessions.js';
@@ -46,7 +51,10 @@ export const creditAccounts = pgTable(
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
     /** Lúc ví đóng (UC-ACC-02). Có giá trị ⇔ status = closed (migration 0003). */
     closedAt: timestamp('closed_at', { withTimezone: true }),
-    /** Lúc Admin hoàn xong số dư chưa dùng khi đóng ví (BR-P21); không trước closed_at. */
+    /**
+     * Lúc mọi refund `account_closure` của ví đã `done` (BR-P21, SD-2f; nghĩa mới từ 0012 — hệ
+     * thống tự hoàn, Admin không thao tác); không trước closed_at.
+     */
     closureRefundedAt: timestamp('closure_refunded_at', { withTimezone: true }),
   },
   (t) => [
@@ -98,6 +106,7 @@ export const topUps = pgTable(
     lateGatewayRef: text('late_gateway_ref'),
     latePaidAt: timestamp('late_paid_at', { withTimezone: true }),
     lateAmountVnd: bigint('late_amount_vnd', { mode: 'number' }),
+    /** Lúc refund `late_payment` của top-up chuyển `done` (SD-2e, nghĩa từ 0012). */
     lateRefundedAt: timestamp('late_refunded_at', { withTimezone: true }),
   },
   (t) => [
@@ -109,6 +118,8 @@ export const topUps = pgTable(
       .on(t.gatewayTransactionNo)
       .where(sql`${t.gatewayTransactionNo} IS NOT NULL`),
     index('top_ups_credit_account_id_idx').on(t.creditAccountId),
+    // Quét top-up pending quá hạn 15 phút (SD-2d, D7; migration 0012).
+    index('top_ups_status_expires_at_idx').on(t.status, t.expiresAt),
     check(
       'top_ups_amount_check',
       sql`${t.amountVnd} > 0 AND ${t.pointsDiscountVnd} >= 0 AND ${t.amountPaidVnd} = ${t.amountVnd} - ${t.pointsDiscountVnd}`,
@@ -202,10 +213,13 @@ export const eInvoices = pgTable(
     lastErrorKind: eInvoiceErrorKindEnum('last_error_kind'),
     lastErrorMessage: text('last_error_message'),
     lastAttemptAt: timestamp('last_attempt_at', { withTimezone: true }),
+    /** Lúc worker được xử lý (D7, 0012): now() khi tạo, +5 phút / 30 phút / 2 giờ sau lỗi tạm thời. */
+    nextAttemptAt: timestamp('next_attempt_at', { withTimezone: true }).defaultNow(),
   },
   (t) => [
     unique('e_invoices_invoice_no_key').on(t.invoiceNo),
     unique('e_invoices_top_up_id_key').on(t.topUpId),
+    index('e_invoices_status_next_attempt_at_idx').on(t.status, t.nextAttemptAt),
     check(
       'e_invoices_issued_check',
       sql`${t.status} <> 'issued' OR (${t.invoiceNo} IS NOT NULL AND ${t.issuedAt} IS NOT NULL)`,
@@ -214,9 +228,74 @@ export const eInvoices = pgTable(
       'e_invoices_last_error_check',
       sql`${t.lastErrorKind} IS NULL OR ${t.lastAttemptAt} IS NOT NULL`,
     ),
+    check(
+      'e_invoices_next_attempt_check',
+      sql`${t.status} NOT IN ('requested', 'failed') OR ${t.nextAttemptAt} IS NOT NULL`,
+    ),
   ],
 );
 
+/**
+ * Hoàn tiền về nguồn thanh toán (STM-10, migration 0012). Tạo cùng transaction với quyết định hoàn
+ * (D1 phần 1); `RefundService.send` gọi VNPay từ worker quét DB (D1 phần 2, D7).
+ */
+export const refunds = pgTable(
+  'refunds',
+  {
+    id: bigint('id', { mode: 'number' }).primaryKey().generatedAlwaysAsIdentity(),
+    topUpId: bigint('top_up_id', { mode: 'number' })
+      .notNull()
+      .references(() => topUps.id),
+    kind: refundKindEnum('kind').notNull(),
+    /** VND > 0; không vượt số đã trả của top-up (RefundService kiểm, DB không kiểm chéo bảng). */
+    amountVnd: bigint('amount_vnd', { mode: 'number' }).notNull(),
+    status: refundStatusEnum('status').notNull().default('requested'),
+    /** Số lần đã gọi VNPay refund; tối đa 4, Admin retry không reset. */
+    attemptCount: integer('attempt_count').notNull().default(0),
+    /** users.id của Admin; NULL = hệ thống tạo (account_closure, SD-2f). */
+    requestedBy: bigint('requested_by', { mode: 'number' }).references(() => users.id),
+    /** Dùng chung enum với e_invoices: transient = hẹn thử lại · data = bị từ chối → failed. */
+    lastErrorKind: eInvoiceErrorKindEnum('last_error_kind'),
+    lastErrorMessage: text('last_error_message'),
+    lastAttemptAt: timestamp('last_attempt_at', { withTimezone: true }),
+    /** Mã hoàn VNPay trả về; bắt buộc khi done, UNIQUE. */
+    gatewayRefundNo: text('gateway_refund_no'),
+    nextAttemptAt: timestamp('next_attempt_at', { withTimezone: true }).defaultNow(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    /** Có giá trị ⇔ status = done. */
+    completedAt: timestamp('completed_at', { withTimezone: true }),
+  },
+  (t) => [
+    unique('refunds_gateway_refund_no_key').on(t.gatewayRefundNo),
+    // Mỗi top-up hoàn tối đa một lần theo từng loại do Admin quyết; account_closure không chặn.
+    uniqueIndex('refunds_one_per_top_up_and_kind')
+      .on(t.topUpId, t.kind)
+      .where(sql`${t.kind} IN ('top_up', 'late_payment')`),
+    index('refunds_top_up_id_idx').on(t.topUpId),
+    index('refunds_status_next_attempt_at_idx').on(t.status, t.nextAttemptAt),
+    check('refunds_amount_check', sql`${t.amountVnd} > 0`),
+    check('refunds_attempt_count_check', sql`${t.attemptCount} >= 0`),
+    check(
+      'refunds_requested_by_check',
+      sql`${t.kind} = 'account_closure' OR ${t.requestedBy} IS NOT NULL`,
+    ),
+    check('refunds_completed_check', sql`(${t.status} = 'done') = (${t.completedAt} IS NOT NULL)`),
+    check(
+      'refunds_gateway_refund_no_check',
+      sql`${t.status} <> 'done' OR ${t.gatewayRefundNo} IS NOT NULL`,
+    ),
+    check(
+      'refunds_last_error_check',
+      sql`${t.lastErrorKind} IS NULL OR ${t.lastAttemptAt} IS NOT NULL`,
+    ),
+    check(
+      'refunds_next_attempt_check',
+      sql`${t.status} <> 'requested' OR ${t.nextAttemptAt} IS NOT NULL`,
+    ),
+  ],
+);
+
+/** Điều chỉnh hoá đơn, tạo sau khi refund done (D5); trạng thái và retry giống e_invoices (STM-7). */
 export const invoiceAdjustments = pgTable(
   'invoice_adjustments',
   {
@@ -228,11 +307,38 @@ export const invoiceAdjustments = pgTable(
     reason: text('reason').notNull(),
     /** Dương = điều chỉnh tăng, âm = giảm. */
     amountVnd: bigint('amount_vnd', { mode: 'number' }).notNull(),
-    issuedAt: timestamp('issued_at', { withTimezone: true }).notNull().defaultNow(),
+    /** Từ 0012: NULL tới khi issued (trước là NOT NULL DEFAULT now()). */
+    issuedAt: timestamp('issued_at', { withTimezone: true }),
+    /** Refund đã done sinh ra điều chỉnh này (Refund 1 – 0..1 InvoiceAdjustment). */
+    refundId: bigint('refund_id', { mode: 'number' }).references(() => refunds.id),
+    status: eInvoiceStatusEnum('status').notNull().default('requested'),
+    attemptCount: integer('attempt_count').notNull().default(0),
+    lastErrorKind: eInvoiceErrorKindEnum('last_error_kind'),
+    lastErrorMessage: text('last_error_message'),
+    lastAttemptAt: timestamp('last_attempt_at', { withTimezone: true }),
+    nextAttemptAt: timestamp('next_attempt_at', { withTimezone: true }).defaultNow(),
+    /** Số điều chỉnh do nhà cung cấp HĐĐT cấp; bắt buộc khi issued. */
+    providerAdjustmentNo: text('provider_adjustment_no'),
   },
   (t) => [
     unique('invoice_adjustments_invoice_adjustment_no_key').on(t.eInvoiceId, t.adjustmentNo),
+    unique('invoice_adjustments_refund_id_key').on(t.refundId),
+    unique('invoice_adjustments_provider_adjustment_no_key').on(t.providerAdjustmentNo),
+    index('invoice_adjustments_status_next_attempt_at_idx').on(t.status, t.nextAttemptAt),
     check('invoice_adjustments_adjustment_no_check', sql`${t.adjustmentNo} >= 1`),
+    check('invoice_adjustments_attempt_count_check', sql`${t.attemptCount} >= 0`),
+    check(
+      'invoice_adjustments_issued_check',
+      sql`${t.status} <> 'issued' OR (${t.issuedAt} IS NOT NULL AND ${t.providerAdjustmentNo} IS NOT NULL)`,
+    ),
+    check(
+      'invoice_adjustments_last_error_check',
+      sql`${t.lastErrorKind} IS NULL OR ${t.lastAttemptAt} IS NOT NULL`,
+    ),
+    check(
+      'invoice_adjustments_next_attempt_check',
+      sql`${t.status} NOT IN ('requested', 'failed') OR ${t.nextAttemptAt} IS NOT NULL`,
+    ),
   ],
 );
 
