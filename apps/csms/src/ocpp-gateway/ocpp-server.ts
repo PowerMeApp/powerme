@@ -9,6 +9,13 @@
  *   4. INSERT ocpp_message_log TRƯỚC khi handler chạy (ADR-0005)
  *   5. OcppHandlers.dispatch → SessionsService
  * Frame chiều ra và CALLRESULT/CALLERROR chiều vào được ghi từ sự kiện `message` của ocpp-rpc.
+ * Frame bị ocpp-rpc loại TRƯỚC handler (G12 / BM02 F42, ocpp-rpc 2.2.1): CALL chiều vào sai schema
+ * → sự kiện `strictValidationFailure` {outbound:false, isCall:true}, phát đồng bộ ngay sau `message`
+ * và trước handler, thư viện tự trả CALLERROR; frame hỏng cấu trúc (không JSON / không mảng /
+ * MessageTypeId lạ / method không phải chuỗi) → `badMessage` {buffer, error, response}. Cả hai được
+ * ghi vào ocpp_message_log (direction 'in', cột validation_error); lỗi ghi log chỉ được log, không
+ * làm sập kết nối. CALLRESULT chiều vào sai schema đã có dòng thô từ sự kiện `message` (không ghi
+ * thêm — bảng append-only không cho gắn cờ sau).
  *
  * Vòng đời socket (STM-3, ADR-0016): `client` event → registry.open (epoch = MAX+1 từ DB,
  * is_online=true, awaiting_connection → in_service) → TriggerMessage(StatusNotification) c0/c1/c2
@@ -39,8 +46,41 @@ import { InboundSerializer } from './inbound-serializer.js';
 import type { InboundContext } from './inbound-context.js';
 import { OfflineGraceService } from './offline-grace.service.js';
 import { OcppHandlers } from './ocpp-handlers.js';
-import { OcppMessageLogger } from './ocpp-message-logger.js';
+import { MessageLogEntry, OcppMessageLogger } from './ocpp-message-logger.js';
 import { cpTimestampOf, InboundCall, MESSAGE_TYPE, parseFrame } from './ocpp-types.js';
+
+/** Payload sự kiện `strictValidationFailure` của ocpp-rpc 2.2.1 (client.js). */
+interface StrictValidationFailureEvent {
+  messageId?: string;
+  method?: string;
+  params?: unknown;
+  error?: Error;
+  outbound?: boolean;
+  isCall?: boolean;
+}
+
+/** Payload sự kiện `badMessage` của ocpp-rpc 2.2.1 (client.js `_onMessage`). */
+interface BadMessageEvent {
+  buffer?: Buffer;
+  error?: Error;
+}
+
+/**
+ * Mã lỗi ocpp-rpc 2.2.1 gắn lên lỗi (`rpcErrorCode`) KHÁC mã nó gửi cho trụ ở hai chỗ do sai chính
+ * tả trong spec OCPP 1.6J (client.js `_onCall`: FormatViolation → FormationViolation,
+ * OccurenceConstraintViolation → OccurrenceConstraintViolation). Ghi mã THỰC SỰ trên dây để dòng
+ * log khớp CALLERROR trụ nhận.
+ */
+const WIRE_CODE: Readonly<Record<string, string>> = {
+  FormatViolation: 'FormationViolation',
+  OccurenceConstraintViolation: 'OccurrenceConstraintViolation',
+};
+
+function describeRpcError(error: (Error & { rpcErrorCode?: string }) | undefined): string {
+  if (!error) return 'unknown';
+  const code = error.rpcErrorCode ?? error.name;
+  return `${WIRE_CODE[code] ?? code}: ${error.message}`.slice(0, 2000);
+}
 
 @Injectable()
 export class OcppServer implements OnApplicationBootstrap, OnApplicationShutdown {
@@ -192,12 +232,36 @@ export class OcppServer implements OnApplicationBootstrap, OnApplicationShutdown
         );
     });
 
-    client.on('strictValidationFailure', (e: { method?: string; error?: Error }) =>
-      this.logger.warn(`${identity} schema ${e.method ?? '?'}: ${e.error?.message ?? '?'}`),
-    );
-    client.on('badMessage', (e: { error?: Error }) =>
-      this.logger.warn(`${identity} bản tin hỏng: ${e.error?.message ?? '?'}`),
-    );
+    client.on('strictValidationFailure', (e: StrictValidationFailureEvent) => {
+      this.logger.warn(`${identity} schema ${e.method ?? '?'}: ${e.error?.message ?? '?'}`);
+      // Chỉ CALL chiều vào: frame chiều ra là lỗi của chính CSMS; CALLRESULT sai schema đã có dòng thô.
+      if (e.outbound || !e.isCall) return;
+      const params = e.params;
+      this.logRejected(identity, connPromise, new Date(), {
+        messageType: MESSAGE_TYPE.CALL,
+        uniqueId: e.messageId ?? '-1',
+        action: e.method ?? null,
+        cpTimestamp: e.method ? cpTimestampOf(e.method, params) : null,
+        raw: [MESSAGE_TYPE.CALL, e.messageId ?? '-1', e.method ?? null, params ?? null],
+        validationError: describeRpcError(e.error),
+      });
+    });
+    client.on('badMessage', (e: BadMessageEvent) => {
+      this.logger.warn(`${identity} bản tin hỏng: ${e.error?.message ?? '?'}`);
+      const text = e.buffer ? e.buffer.toString('utf8') : '';
+      const frame = parseFrame(text);
+      // CALLRESULT/CALLERROR parse được đã có dòng thô từ sự kiện `message`; còn CALL hỏng (method
+      // không phải chuỗi) và frame không parse được thì chưa có dòng nào → ghi ở đây.
+      if (frame && frame.messageType !== MESSAGE_TYPE.CALL) return;
+      this.logRejected(identity, connPromise, new Date(), {
+        messageType: frame && frame.action !== null ? MESSAGE_TYPE.CALL : null,
+        uniqueId: frame?.uniqueId ?? '-1',
+        action: frame?.action ?? null,
+        cpTimestamp: null,
+        raw: frame ? frame.raw : text,
+        validationError: describeRpcError(e.error),
+      });
+    });
 
     client.on('close', ({ code, reason }: { code?: number; reason?: string }) => {
       const closedAt = new Date();
@@ -208,6 +272,34 @@ export class OcppServer implements OnApplicationBootstrap, OnApplicationShutdown
         else await this.sessions.onStationOffline(conn.chargePointId, closedAt);
       });
     });
+  }
+
+  /**
+   * Ghi một frame chiều vào bị ocpp-rpc từ chối. Lỗi ghi chỉ được log — không ném, không đóng
+   * kết nối (trụ đã nhận CALLERROR; mất một dòng log tệ hơn là mất cả kết nối).
+   */
+  private logRejected(
+    identity: string,
+    connPromise: Promise<Connection>,
+    receivedAt: Date,
+    frame: Pick<
+      MessageLogEntry,
+      'messageType' | 'uniqueId' | 'action' | 'cpTimestamp' | 'raw' | 'validationError'
+    >,
+  ): void {
+    connPromise
+      .then((conn) =>
+        this.messageLog.log({
+          chargePointId: conn.chargePointId,
+          epoch: conn.epoch,
+          direction: 'in',
+          receivedAt,
+          ...frame,
+        }),
+      )
+      .catch((err: unknown) =>
+        this.logger.error(`không ghi được log frame bị từ chối ${identity}: ${String(err)}`),
+      );
   }
 
   /**

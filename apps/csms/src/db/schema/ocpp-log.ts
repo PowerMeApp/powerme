@@ -38,8 +38,11 @@ export const ocppMessageLog = pgTable(
     /** Lần kết nối (charge_point_connections.epoch) lúc frame đi qua. */
     epoch: integer('epoch').notNull(),
     direction: ocppDirectionEnum('direction').notNull(),
-    /** 2 = CALL · 3 = CALLRESULT · 4 = CALLERROR. */
-    messageType: smallint('message_type').notNull(),
+    /**
+     * 2 = CALL · 3 = CALLRESULT · 4 = CALLERROR. Null CHỈ khi `validationError` có giá trị (frame
+     * hỏng không xác định được loại — migration 0013).
+     */
+    messageType: smallint('message_type'),
     /** MessageId của frame OCPP-J; dùng ghép CALL với CALLRESULT/CALLERROR. */
     uniqueId: text('unique_id').notNull(),
     /** Chỉ có ở CALL (type 2). */
@@ -55,14 +58,25 @@ export const ocppMessageLog = pgTable(
      * không phải CALL chiều vào). Phải truyền ngay lúc INSERT vì bảng append-only.
      */
     replayed: boolean('replayed'),
+    /**
+     * Lý do ocpp-rpc từ chối frame chiều vào (schema sai hoặc frame hỏng); null = frame hợp lệ.
+     * G12 / BM02 F42, migration 0013. Truyền lúc INSERT (append-only).
+     */
+    validationError: text('validation_error'),
   },
   (t) => [
     primaryKey({ name: 'ocpp_message_log_pkey', columns: [t.id, t.receivedAt] }),
     index('ocpp_message_log_cp_received_at_idx').on(t.chargePointId, t.receivedAt),
     index('ocpp_message_log_cp_unique_id_idx').on(t.chargePointId, t.uniqueId),
     index('ocpp_message_log_action_idx').on(t.action, t.receivedAt),
-    check('ocpp_message_log_message_type_check', sql`${t.messageType} IN (2, 3, 4)`),
-    check('ocpp_message_log_action_check', sql`(${t.messageType} = 2) = (${t.action} IS NOT NULL)`),
+    check(
+      'ocpp_message_log_message_type_check',
+      sql`(${t.messageType} IS NOT NULL AND ${t.messageType} IN (2, 3, 4)) OR (${t.messageType} IS NULL AND ${t.validationError} IS NOT NULL)`,
+    ),
+    check(
+      'ocpp_message_log_action_check',
+      sql`${t.validationError} IS NOT NULL OR (${t.messageType} = 2) = (${t.action} IS NOT NULL)`,
+    ),
   ],
 );
 

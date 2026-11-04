@@ -317,8 +317,8 @@ svg text { fill: var(--muted); font-size: 13px; }
     for (var i = logRows.length - 1; i >= 0; i--) {
       var m = logRows[i];
       var arrow = m.direction === 'in' ? '<span class="arrow-in">←</span>' : '<span class="arrow-out">→</span>';
-      var what = m.message_type === 2 ? m.action : (m.message_type === 3 ? 'CALLRESULT' : 'CALLERROR');
-      h += '<tr' + (m.replayed === true ? ' class="replayed"' : '') + '><td>' + hms(m.received_at) + '</td><td>' + arrow + '</td><td>' + esc(m.station) + ' e' + m.epoch + '</td><td>' + esc(what) + '</td><td>' + esc(m.unique_id.slice(0, 8)) + '</td><td>' + (m.replayed === true ? '<span class="tag">PHÁT LẠI</span>' : '') + '</td></tr>';
+      var what = m.message_type === 2 ? m.action : (m.message_type === 3 ? 'CALLRESULT' : (m.message_type === 4 ? 'CALLERROR' : 'FRAME HỎNG'));
+      h += '<tr' + (m.replayed === true ? ' class="replayed"' : '') + '><td>' + hms(m.received_at) + '</td><td>' + arrow + '</td><td>' + esc(m.station) + ' e' + m.epoch + '</td><td>' + esc(what) + '</td><td>' + esc(m.unique_id.slice(0, 8)) + '</td><td>' + (m.validation_error ? '<span class="tag" title="' + esc(m.validation_error) + '">SAI SCHEMA</span>' : '') + (m.replayed === true ? '<span class="tag">PHÁT LẠI</span>' : '') + '</td></tr>';
     }
     $('log').querySelector('tbody').innerHTML = h || '<tr><td class="empty">Chưa có frame nào.</td></tr>';
   }
