@@ -40,7 +40,7 @@ export const ocppMessageLog = pgTable(
     direction: ocppDirectionEnum('direction').notNull(),
     /**
      * 2 = CALL · 3 = CALLRESULT · 4 = CALLERROR. Null CHỈ khi `validationError` có giá trị (frame
-     * hỏng không xác định được loại — migration 0010).
+     * hỏng không xác định được loại — migration 0013).
      */
     messageType: smallint('message_type'),
     /** MessageId của frame OCPP-J; dùng ghép CALL với CALLRESULT/CALLERROR. */
@@ -60,7 +60,7 @@ export const ocppMessageLog = pgTable(
     replayed: boolean('replayed'),
     /**
      * Lý do ocpp-rpc từ chối frame chiều vào (schema sai hoặc frame hỏng); null = frame hợp lệ.
-     * G12 / BM02 F42, migration 0010. Truyền lúc INSERT (append-only).
+     * G12 / BM02 F42, migration 0013. Truyền lúc INSERT (append-only).
      */
     validationError: text('validation_error'),
   },

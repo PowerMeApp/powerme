@@ -256,7 +256,8 @@ describeDb('migration 0010–0012 — ERD alignment (Physical ERD v1.0)', () => 
         [staff, sessionId],
       );
       const applied = await migrate(db.$client);
-      expect(applied).toEqual([DELETE_RULES]);
+      // Chỉ chốt phần của BE-16: migration thêm sau 0012 không được làm test này đỏ.
+      expect(applied.slice(0, 1)).toEqual([DELETE_RULES]);
       const admins = (await q('SELECT user_id FROM admins ORDER BY user_id')).map((r) =>
         Number(r['user_id']),
       );
@@ -274,7 +275,7 @@ describeDb('migration 0010–0012 — ERD alignment (Physical ERD v1.0)', () => 
         `INSERT INTO users (email, full_name, role) VALUES ('one.a@t','A','admin') RETURNING id`,
       );
       await q(`INSERT INTO users (email, full_name, role) VALUES ('one.d@t','D','driver')`);
-      expect(await migrate(db.$client)).toEqual([ENUM, ADDITIVE, DELETE_RULES]);
+      expect((await migrate(db.$client)).slice(0, 3)).toEqual([ENUM, ADDITIVE, DELETE_RULES]);
       expect((await q('SELECT user_id FROM admins')).map((r) => Number(r['user_id']))).toEqual([a]);
     });
   });

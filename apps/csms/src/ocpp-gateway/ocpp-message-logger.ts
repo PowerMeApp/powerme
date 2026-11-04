@@ -7,7 +7,7 @@
  * ocpp-rpc. Bảng append-only, partition theo tháng trên received_at (ADR-0007).
  *
  * Frame bị ocpp-rpc loại TRƯỚC handler (CALL sai schema, frame hỏng cấu trúc — G12 / BM02 F42)
- * vẫn được ghi, với `validationError` có giá trị (cột `validation_error`, migration 0010): gateway
+ * vẫn được ghi, với `validationError` có giá trị (cột `validation_error`, migration 0013): gateway
  * gọi `logRejected()` từ sự kiện `strictValidationFailure` / `badMessage`.
  */
 import { Inject, Injectable } from '@nestjs/common';

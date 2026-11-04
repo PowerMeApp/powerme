@@ -1,5 +1,5 @@
 -- =============================================================================
--- PowerMe CSMS — migration 0010_log-frame-sai-schema (BE-07, WP2; G12 / BM02 F42)
+-- PowerMe CSMS — migration 0013_log-frame-sai-schema (BE-07, WP2; G12 / BM02 F42)
 --
 -- Migration VIẾT TAY (ADR-0008), áp LÊN DB đã có 0000 … 0009. Schema Drizzle
 -- (apps/csms/src/db/schema/ocpp-log.ts) phải khớp với file này.

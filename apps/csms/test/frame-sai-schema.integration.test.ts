@@ -243,7 +243,7 @@ describeDb('G12 — frame sai schema được ghi vào ocpp_message_log', () => 
     expect(rejected[0]?.validationError).toMatch(/^RpcFrameworkError: /);
   });
 
-  it('ràng buộc DB (migration 0010): message_type NULL chỉ hợp lệ khi có validation_error; dòng bình thường vẫn bị CHECK cũ chặn', async () => {
+  it('ràng buộc DB (migration 0013): message_type NULL chỉ hợp lệ khi có validation_error; dòng bình thường vẫn bị CHECK cũ chặn', async () => {
     const insert = (messageType: number | null, action: string | null, error: string | null) =>
       db.$client.query(
         `INSERT INTO ocpp_message_log(charge_point_id, epoch, direction, message_type, unique_id, action, raw, validation_error)
