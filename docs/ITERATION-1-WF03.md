@@ -10,11 +10,11 @@
 
 Mã sản phẩm **đầu tiên** của `apps/csms`, đúng ba module và một app NestJS:
 
-| Có | Không (để Iteration sau) |
-|---|---|
-| **Gateway OCPP-J 1.6** trên ocpp-rpc 2.2.1 (strictMode): registry kết nối theo serial, epoch khởi tạo từ DB, ghi mọi frame vào `ocpp_message_log` trước khi xử lý, tuần tự hoá chiều vào theo trụ, handler cho 8 action từ trụ lên | HTTP/REST API, xác thực Basic Auth (ADR-0011), lệnh xuống trụ ngoài TriggerMessage |
-| **State machine phiên** STM-1: 9 trạng thái, 22 chuyển của T13, lớp thuần có test từng chuyển | RemoteStart/RemoteStop → `pending`/`stopping` chưa có đường kích hoạt thật (chỉ có trong máy trạng thái) |
-| **Engine đối soát**: phát hiện phát lại theo epoch + skew, so `meterStop − meterStart` với chuỗi MeterValues, lỗ hổng chuỗi, idempotency StartTransaction, ghi `reconciliation_records`, đưa phiên vào `review` | Realtime (BE-08), billing/tính tiền, job nền (hard cap, start timeout, 900 s im lặng), operator giải quyết review |
+| Có                                                                                                                                                                                                                                 | Không (để Iteration sau)                                                                                          |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| **Gateway OCPP-J 1.6** trên ocpp-rpc 2.2.1 (strictMode): registry kết nối theo serial, epoch khởi tạo từ DB, ghi mọi frame vào `ocpp_message_log` trước khi xử lý, tuần tự hoá chiều vào theo trụ, handler cho 8 action từ trụ lên | HTTP/REST API, xác thực Basic Auth (ADR-0011), lệnh xuống trụ ngoài TriggerMessage                                |
+| **State machine phiên** STM-1: 9 trạng thái, 22 chuyển của T13, lớp thuần có test từng chuyển                                                                                                                                      | RemoteStart/RemoteStop → `pending`/`stopping` chưa có đường kích hoạt thật (chỉ có trong máy trạng thái)          |
+| **Engine đối soát**: phát hiện phát lại theo epoch + skew, so `meterStop − meterStart` với chuỗi MeterValues, lỗ hổng chuỗi, idempotency StartTransaction, ghi `reconciliation_records`, đưa phiên vào `review`                    | Realtime (BE-08), billing/tính tiền, job nền (hard cap, start timeout, 900 s im lặng), operator giải quyết review |
 
 Thứ được chấm là **test**: 96 unit test không cần DB và 19 test tích hợp **phát lại 75 frame CALL thật của EXP-01** qua đúng đường xử lý của gateway.
 
@@ -100,30 +100,30 @@ Unit test đặt cạnh mã nguồn (`*.spec.ts`): `session-state-machine.spec.t
 
 File: `apps/csms/src/sessions/session-state-machine.spec.ts`, mỗi dòng là một `it` sinh từ bảng `T13` (`it.each`), tên có dạng `T13 #<số>: <from> --<event>--> <to>`.
 
-| # T13 | Từ → Đến | Sự kiện trong code | Có đường kích hoạt thật ở Iteration 1? |
-|---|---|---|---|
-| 1 | ● → pending | `REMOTE_START_ACCEPTED` | Chưa (RemoteStart) |
-| 2 | ● → active | `START_TRANSACTION` | Có — `onStartTransaction` |
-| 3 | pending → active | `START_TRANSACTION` | Chưa |
-| 4 | pending → failed | `START_TIMEOUT` | Chưa (timer) |
-| 5 | active → paused | `STATUS_SUSPENDED` | Có — StatusNotification SuspendedEV/EVSE |
-| 6 | paused → active | `STATUS_CHARGING` | Có — StatusNotification Charging |
-| 7 | active → stopping | `STOP_REQUESTED` | Chưa (RemoteStop) |
-| 8 | paused → stopping | `STOP_REQUESTED` | Chưa |
-| 9a | stopping → active | `REMOTE_STOP_REJECTED` | Chưa |
-| 9 | stopping → closed | `STOP_TRANSACTION` | Có (nếu phiên ở stopping) |
-| 10 | active → closed | `STOP_TRANSACTION` | Có — tx1, tx2, tx3 trong EXP-01 |
-| 11 | paused → closed | `STOP_TRANSACTION` | Có |
-| 12 | closed → reconciled | `RECONCILE_OK` | Có — tx1, tx2 |
-| 12a | closed → review | `RECONCILE_CONFLICT` | Có — tx3 |
-| 13 | active → orphaned | `STATION_OFFLINE` | Có — tx3; từ T61 chỉ sau ân hạn (`OFFLINE_GRACE_S`) mà trụ chưa nối lại |
-| 14 | paused → orphaned | `STATION_OFFLINE` | Có |
-| 15 | stopping → orphaned | `STATION_OFFLINE` | Có |
-| 16 | orphaned → reconciled | `RECONCILE_OK` | Có (Stop phát lại tới khi còn orphaned) |
-| 16a | orphaned → review | `RECONCILE_CONFLICT` / `HARD_CAP_EXCEEDED` | Có / Chưa (timer) |
-| 17 | review → reconciled | `OPERATOR_RESOLVED` | Chưa (UC-OPS-05) |
-| 18 | orphaned → active | `LIVE_MESSAGE` | Có — tx3 lúc MeterValues live 796 Wh |
-| 19 | reconciled → review | `LATE_SAMPLE_CONFLICT` | Có — `reconcileLateSample` |
+| # T13 | Từ → Đến              | Sự kiện trong code                         | Có đường kích hoạt thật ở Iteration 1?                                  |
+| ----- | --------------------- | ------------------------------------------ | ----------------------------------------------------------------------- |
+| 1     | ● → pending           | `REMOTE_START_ACCEPTED`                    | Chưa (RemoteStart)                                                      |
+| 2     | ● → active            | `START_TRANSACTION`                        | Có — `onStartTransaction`                                               |
+| 3     | pending → active      | `START_TRANSACTION`                        | Chưa                                                                    |
+| 4     | pending → failed      | `START_TIMEOUT`                            | Chưa (timer)                                                            |
+| 5     | active → paused       | `STATUS_SUSPENDED`                         | Có — StatusNotification SuspendedEV/EVSE                                |
+| 6     | paused → active       | `STATUS_CHARGING`                          | Có — StatusNotification Charging                                        |
+| 7     | active → stopping     | `STOP_REQUESTED`                           | Chưa (RemoteStop)                                                       |
+| 8     | paused → stopping     | `STOP_REQUESTED`                           | Chưa                                                                    |
+| 9a    | stopping → active     | `REMOTE_STOP_REJECTED`                     | Chưa                                                                    |
+| 9     | stopping → closed     | `STOP_TRANSACTION`                         | Có (nếu phiên ở stopping)                                               |
+| 10    | active → closed       | `STOP_TRANSACTION`                         | Có — tx1, tx2, tx3 trong EXP-01                                         |
+| 11    | paused → closed       | `STOP_TRANSACTION`                         | Có                                                                      |
+| 12    | closed → reconciled   | `RECONCILE_OK`                             | Có — tx1, tx2                                                           |
+| 12a   | closed → review       | `RECONCILE_CONFLICT`                       | Có — tx3                                                                |
+| 13    | active → orphaned     | `STATION_OFFLINE`                          | Có — tx3; từ T61 chỉ sau ân hạn (`OFFLINE_GRACE_S`) mà trụ chưa nối lại |
+| 14    | paused → orphaned     | `STATION_OFFLINE`                          | Có                                                                      |
+| 15    | stopping → orphaned   | `STATION_OFFLINE`                          | Có                                                                      |
+| 16    | orphaned → reconciled | `RECONCILE_OK`                             | Có (Stop phát lại tới khi còn orphaned)                                 |
+| 16a   | orphaned → review     | `RECONCILE_CONFLICT` / `HARD_CAP_EXCEEDED` | Có / Chưa (timer)                                                       |
+| 17    | review → reconciled   | `OPERATOR_RESOLVED`                        | Chưa (UC-OPS-05)                                                        |
+| 18    | orphaned → active     | `LIVE_MESSAGE`                             | Có — tx3 lúc MeterValues live 796 Wh                                    |
+| 19    | reconciled → review   | `LATE_SAMPLE_CONFLICT`                     | Có — `reconcileLateSample`                                              |
 
 Chuyển không hợp lệ: 14 cặp liệt kê (`reconciled → active`, `failed → *`, `pending → paused`, …) + một test quét **toàn bộ** 10 × 15 cặp (trạng thái, sự kiện) và khẳng định đúng 23 cặp trong bảng được nhận, 127 cặp còn lại ném `InvalidTransitionError`.
 
@@ -161,15 +161,15 @@ Xem job CI của PR (link trong phần "Kiểm chứng" của PR). Cập nhật 
 
 ### 6.3 Các khẳng định của test tích hợp, theo **dữ liệu thật** của EXP-01
 
-| T33 yêu cầu | Dữ liệu thật & khẳng định trong test | Khớp? |
-|---|---|---|
-| (a) 3 phiên, không trùng | **4 phiên** (`transaction_no` 1–4), 4 khoá tự nhiên khác nhau, 0 record `duplicate`. tx4 = StartTransaction c2 (BB2TBR09, meterStart 0, cp_timestamp 14:18:52.934Z) sinh ra lúc offline, phát lại ở epoch 2 — mini-CSMS của lab cấp lại id 1, CSMS thật cấp 4 (WF-03 mục 3 "khoá tự nhiên chưa có"). tx4 `delivered_offline = true`, còn `active` khi trace kết thúc | **Lệch: 4 thay vì 3** — test ghi 4 |
-| (b) tx3 13 `meter_values`, 6 replayed | 13 dòng `Energy.Active.Import.Register` (3 + 4 live + 6 phát lại; 65 dòng tổng vì mỗi MeterValues có 5 SampledValue). Kiểm bằng ReplayDetector trên từng frame (6 MeterValues của tx3 replayed, `before_epoch`, skew 104–127 s, đều nhận sau StopTransaction), bằng 6 record `replay` action=MeterValues + 1 record `replay` action=StopTransaction, và (từ 0001) bằng cột `meter_values.replayed`: 30 dòng `true` (6 MeterValues × 5 SampledValue, epoch 2, trong đó 6 dòng Energy) — test (o); `ocpp_message_log.replayed`: 8 `true`, `null` cho frame không có timestamp — test (p) | Khớp |
-| (c) tx3 `review`, record conflict, diff 242 vs 1042 | `status = review`, `meter_stop_wh = 242`, `energy_wh = 242`, `delivered_offline = true`. Từ 0001: `record_type = conflict` (1 bản ghi), `resolution` bắt đầu `conflict:` (trước 0001 là `meter_gap` + cùng tiền tố); `energy_difference_wh = 801` = round(1042,64) − 242 (SAP làm tròn khi phát meterStop: 600,78 → 601, 996,78 → 997); gap đầu 14:18:47.811 → 14:20:27.901 (100 s). 6 mẫu muộn → 6 record `late_sample` nữa (`conflict (late_sample):`; trước 0001 là `meter_gap`), gap cuối thu còn 14:19:47.867 → 14:20:27.901 (40 s, vẫn > 30 s) | Khớp (801 chứ không phải 800) |
-| (d) tx2 reconciled/consistent (997) | tx2 `reconciled`, 997 Wh, 14 mẫu, 0 record `meter_gap`/`conflict`/`replay`; tx1 `reconciled`, 601 Wh | Khớp (consistent = không có record, vì enum không có `consistent`) |
-| (e) `ocpp_message_log` đúng số frame vào | 75 dòng `direction = in` = 75 CALL chiều vào; 54 epoch 1 + 21 epoch 2; `unique_id` và `received_at` khớp từng frame; cp_timestamp khác null đúng bằng số frame có timestamp; phân bố action: Boot 2, StatusNotification 18, Heartbeat 5, Authorize 2, StartTransaction 4, MeterValues 41, StopTransaction 3 | Khớp |
-| (f) Stop/Start phát lại skew > 100 s → replayed | Đúng **8** frame replayed, tất cả `before_epoch`, skew 104,2–126,8 s: StopTransaction tx3 (125,275 s), StartTransaction c2 (125,709 s), 6 MeterValues; 67 frame còn lại live (skew ≤ 10 ms hoặc không có timestamp) | Khớp |
-| Bổ sung | (g) 18 `connector_status_events`, 0 `unexpected_transition`, c1 Available / c2 Charging cuối trace · (h) 2 epoch, epoch 1 `closed_at` + `1006 …`, `current_epoch = 2`, `last_message_at` = frame cuối · (i) 4 record `unknown_id_tag` (UNDEFINED, BB2TBR09 không có trong `rfid_cards`) · (j) phát lại lần nữa StartTransaction tx3 → trả transactionId 3, vẫn 4 phiên, 1 record `duplicate` · (k) StopTransaction lặp → `orphan_stop`, phiên giữ `review` · (l) nối lại cùng identity khi socket cũ treo → đóng 1012, epoch 3, close muộn của socket cũ không coi là mất kết nối · epoch 2 mở bằng **ConnectionRegistry mới** (mô phỏng CSMS khởi động lại) vẫn ra 2 nhờ DB | — |
+| T33 yêu cầu                                         | Dữ liệu thật & khẳng định trong test                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         | Khớp?                                                              |
+| --------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
+| (a) 3 phiên, không trùng                            | **4 phiên** (`transaction_no` 1–4), 4 khoá tự nhiên khác nhau, 0 record `duplicate`. tx4 = StartTransaction c2 (BB2TBR09, meterStart 0, cp_timestamp 14:18:52.934Z) sinh ra lúc offline, phát lại ở epoch 2 — mini-CSMS của lab cấp lại id 1, CSMS thật cấp 4 (WF-03 mục 3 "khoá tự nhiên chưa có"). tx4 `delivered_offline = true`, còn `active` khi trace kết thúc                                                                                                                                                                                                                                                                                                         | **Lệch: 4 thay vì 3** — test ghi 4                                 |
+| (b) tx3 13 `meter_values`, 6 replayed               | 13 dòng `Energy.Active.Import.Register` (3 + 4 live + 6 phát lại; 65 dòng tổng vì mỗi MeterValues có 5 SampledValue). Kiểm bằng ReplayDetector trên từng frame (6 MeterValues của tx3 replayed, `before_epoch`, skew 104–127 s, đều nhận sau StopTransaction), bằng 6 record `replay` action=MeterValues + 1 record `replay` action=StopTransaction, và (từ 0001) bằng cột `meter_values.replayed`: 30 dòng `true` (6 MeterValues × 5 SampledValue, epoch 2, trong đó 6 dòng Energy) — test (o); `ocpp_message_log.replayed`: 8 `true`, `null` cho frame không có timestamp — test (p)                                                                                       | Khớp                                                               |
+| (c) tx3 `review`, record conflict, diff 242 vs 1042 | `status = review`, `meter_stop_wh = 242`, `energy_wh = 242`, `delivered_offline = true`. Từ 0001: `record_type = conflict` (1 bản ghi), `resolution` bắt đầu `conflict:` (trước 0001 là `meter_gap` + cùng tiền tố); `energy_difference_wh = 801` = round(1042,64) − 242 (SAP làm tròn khi phát meterStop: 600,78 → 601, 996,78 → 997); gap đầu 14:18:47.811 → 14:20:27.901 (100 s). 6 mẫu muộn → 6 record `late_sample` nữa (`conflict (late_sample):`; trước 0001 là `meter_gap`), gap cuối thu còn 14:19:47.867 → 14:20:27.901 (40 s, vẫn > 30 s)                                                                                                                         | Khớp (801 chứ không phải 800)                                      |
+| (d) tx2 reconciled/consistent (997)                 | tx2 `reconciled`, 997 Wh, 14 mẫu, 0 record `meter_gap`/`conflict`/`replay`; tx1 `reconciled`, 601 Wh                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         | Khớp (consistent = không có record, vì enum không có `consistent`) |
+| (e) `ocpp_message_log` đúng số frame vào            | 75 dòng `direction = in` = 75 CALL chiều vào; 54 epoch 1 + 21 epoch 2; `unique_id` và `received_at` khớp từng frame; cp_timestamp khác null đúng bằng số frame có timestamp; phân bố action: Boot 2, StatusNotification 18, Heartbeat 5, Authorize 2, StartTransaction 4, MeterValues 41, StopTransaction 3                                                                                                                                                                                                                                                                                                                                                                  | Khớp                                                               |
+| (f) Stop/Start phát lại skew > 100 s → replayed     | Đúng **8** frame replayed, tất cả `before_epoch`, skew 104,2–126,8 s: StopTransaction tx3 (125,275 s), StartTransaction c2 (125,709 s), 6 MeterValues; 67 frame còn lại live (skew ≤ 10 ms hoặc không có timestamp)                                                                                                                                                                                                                                                                                                                                                                                                                                                          | Khớp                                                               |
+| Bổ sung                                             | (g) 18 `connector_status_events`, 0 `unexpected_transition`, c1 Available / c2 Charging cuối trace · (h) 2 epoch, epoch 1 `closed_at` + `1006 …`, `current_epoch = 2`, `last_message_at` = frame cuối · (i) 4 record `unknown_id_tag` (UNDEFINED, BB2TBR09 không có trong `rfid_cards`) · (j) phát lại lần nữa StartTransaction tx3 → trả transactionId 3, vẫn 4 phiên, 1 record `duplicate` · (k) StopTransaction lặp → `orphan_stop`, phiên giữ `review` · (l) nối lại cùng identity khi socket cũ treo → đóng 1012, epoch 3, close muộn của socket cũ không coi là mất kết nối · epoch 2 mở bằng **ConnectionRegistry mới** (mô phỏng CSMS khởi động lại) vẫn ra 2 nhờ DB | —                                                                  |
 
 Đường trạng thái thật của tx3 trong test: `active` → (socket đóng) `orphaned` #13 → (MeterValues live 796 Wh) `active` #18 → (StopTransaction phát lại) `closed` #10 → (conflict) `review` #12a → 6 mẫu muộn: giữ `review`, thêm record. Không đi #16a vì #18 đã kéo về `active` trước khi Stop tới — đúng như EXP-01 giai đoạn D.
 Từ migration 0001 đường này nằm trong `session_status_history` (test (m)): `● -START_TRANSACTION-> active`, `active -STATION_OFFLINE-> orphaned` (actor `system`), `orphaned -LIVE_MESSAGE-> active`, `active -STOP_TRANSACTION-> closed`, `closed -RECONCILE_CONFLICT-> review`; `sessions.orphaned_at` = 14:19:01.000Z (test (n)).
@@ -200,3 +200,27 @@ Từ migration 0001 đường này nằm trong `session_status_history` (test (m
 7. **`OCPP_PORT`** (9000, như lab) song song `CSMS_OCPP_WS_PORT` (3001, compose/Caddy): config đọc `OCPP_PORT` trước. Thống nhất một tên khi dựng staging.
 8. Mỗi mẫu muộn làm thay đổi lỗ hổng → một record mới (từ 0001 là `late_sample`; append-only theo WF-03). EXP-01 sinh 7 record cho tx3 (1 `conflict` + 6 `late_sample`) — chấp nhận, hay chỉ ghi record khi kết luận (`conflict`/`gap_detected`) đổi?
 9. Nest 12 / drizzle-orm là ESM-only; app build CommonJS và chạy được trên Node 24 nhờ `require(esm)`; Jest cần `--experimental-vm-modules` (bọc trong `scripts/run-jest.cjs`). Có muốn chuyển cả app sang ESM (`"type": "module"`) ở Iteration 2?
+
+## 9. Chế độ ablation (`RECONCILIATION_ENABLED`, G6 / BM02 F30)
+
+Câu hỏi nghiên cứu so CSMS **bật** với **tắt** engine đối soát dưới cùng kịch bản ngắt (NFR-REC-01), nên engine phải tắt được. Biến môi trường `RECONCILIATION_ENABLED` (mặc định `true`; `CsmsConfig.reconciliationEnabled` là tuỳ chọn, không khai báo = bật nên test cũ không phải sửa).
+
+**Định nghĩa baseline "đối soát tắt": tin `meterStop` của trụ là sự thật, không kiểm.**
+
+| Việc                                                                                       | Bật (mặc định)                           | Tắt                                                                                                                   |
+| ------------------------------------------------------------------------------------------ | ---------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| Log frame thô `ocpp_message_log`                                                           | có                                       | có                                                                                                                    |
+| Khử trùng StartTransaction (ADR-0010)                                                      | có                                       | có (chống tính tiền hai lần, không phải đối soát)                                                                     |
+| Phát hiện bản tin phát lại, `delivered_offline`, `meter_values.replayed`                   | có                                       | có                                                                                                                    |
+| Máy trạng thái phiên (STM-1)                                                               | có                                       | có                                                                                                                    |
+| So `meterStop` với chuỗi MeterValues, phát hiện lỗ hổng                                    | có                                       | **không**                                                                                                             |
+| Ghi `reconciliation_records` (mọi loại, kể cả replay/duplicate/orphan_stop/unknown_id_tag) | có                                       | **không** (0 dòng)                                                                                                    |
+| Đối soát lại khi mẫu muộn tới                                                              | có                                       | **không**                                                                                                             |
+| Sau `closed`                                                                               | `reconciled` hoặc `review` theo kết luận | luôn `reconciled` qua chuyển #12 `RECONCILE_OK` (không thêm chuyển mới); `session_status_history.note` ghi "ablation" |
+| `energy_wh`                                                                                | `meterStop − meterStart`, đã đối chiếu   | `meterStop − meterStart`, không cross-check                                                                           |
+
+Ngoại lệ duy nhất: `meterStop < meterStart` (không lưu được, `energy_wh` null) vẫn đi `RECONCILE_CONFLICT` → `review` vì không có số nào để tin.
+
+**Tình huống EXP-01.** tx3 nhận StopTransaction phát lại mang `meterStop = 242 Wh` trong khi chuỗi MeterValues live đã tới 1042,64 Wh. Với đối soát **tắt**, tx3 được ghi `reconciled` 242 Wh — hoá đơn sai 4,3 lần (1043 / 242). Với đối soát **bật**, tx3 vào `review` (conflict, lệch 801 Wh) cho operator quyết (UC-OPS-05). Test: `test/wf03-ablation.integration.test.ts` phát lại trace thật ở cả hai chế độ (kết quả thật: xem mô tả PR).
+
+Cách bật cho thí nghiệm: `RECONCILIATION_ENABLED=false` trong môi trường của CSMS. Không bật trên staging/production.

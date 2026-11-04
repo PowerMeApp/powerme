@@ -21,6 +21,20 @@
  *     StopTransaction cho phiên đã dừng → orphan_stop; idTag lạ → unknown_id_tag (ADR-0012).
  * Trước 0001 conflict và mẫu muộn được lưu là meter_gap + tiền tố resolution; bản ghi cũ còn nguyên
  * trong DB và console vẫn đọc được (console.mappers.reconciliationKind).
+ *
+ * CHẾ ĐỘ ABLATION (G6, BM02 F30, `RECONCILIATION_ENABLED=false`): câu hỏi nghiên cứu so CSMS
+ * có và không có engine này dưới cùng kịch bản ngắt, nên engine phải tắt được. Baseline "đối soát
+ * tắt" được định nghĩa là TIN `meterStop` CỦA TRỤ LÀ SỰ THẬT, KHÔNG KIỂM: phiên đi `closed →
+ * reconciled` trực tiếp (chuyển #12 RECONCILE_OK, không thêm chuyển mới), `energy = meterStop −
+ * meterStart`, không cross-check với chuỗi MeterValues, và KHÔNG ghi bất kỳ dòng
+ * `reconciliation_records` nào (kể cả replay/duplicate/orphan_stop/unknown_id_tag — các dòng này
+ * cũng do engine đối soát sinh ra). Vẫn giữ nguyên: log frame thô, khử trùng StartTransaction
+ * (ADR-0010 — chống tính tiền hai lần, không phải đối soát), cờ `delivered_offline` cho bản tin
+ * phát lại, và máy trạng thái. Ngoại lệ duy nhất: meterStop < meterStart (không lưu được, energy
+ * null) vẫn vào `review` vì không có số để tin.
+ * Tình huống EXP-01: tx3 có StopTransaction phát lại meterStop = 242 Wh trong khi chuỗi đo live
+ * đã tới 1042 Wh. Đối soát TẮT → tx3 `reconciled` với 242 Wh (hoá đơn sai 4,3 lần). Đối soát BẬT →
+ * tx3 vào `review` (conflict, lệch 801 Wh) cho operator quyết (UC-OPS-05).
  */
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { and, desc, eq, inArray, sql } from 'drizzle-orm';
@@ -149,6 +163,11 @@ export class ReconciliationService {
     @Inject(CONFIG) private readonly config: CsmsConfig,
   ) {}
 
+  /** Engine đối soát đang bật? (`RECONCILIATION_ENABLED`, mặc định true — xem chế độ ablation ở đầu file.) */
+  get enabled(): boolean {
+    return this.config.reconciliationEnabled !== false;
+  }
+
   /** Đối soát với tham số cấu hình (ngưỡng lỗ hổng, dung sai) — bọc evaluateSeries. */
   evaluate(
     input: Omit<ReconciliationInput, 'sampleIntervalS' | 'gapFactor' | 'energyToleranceWh'>,
@@ -173,7 +192,7 @@ export class ReconciliationService {
     verdict: ReconciliationVerdict,
     trigger: ReconcileTrigger,
   ): Promise<number | null> {
-    if (verdict.outcome === 'consistent') return null;
+    if (!this.enabled || verdict.outcome === 'consistent') return null;
     const firstGap = verdict.gaps[0] ?? null;
     if (trigger.kind === 'late_sample') {
       const prev = await this.lastVerdictRecord(ex, sessionId);
@@ -213,7 +232,7 @@ export class ReconciliationService {
     sessionId: number,
     frame: FrameRef,
     verdict: ReplayVerdict,
-  ): Promise<number> {
+  ): Promise<number | null> {
     return this.insert(ex, sessionId, {
       recordType: 'replay',
       gapStart: frame.cpTimestamp,
@@ -226,7 +245,11 @@ export class ReconciliationService {
   }
 
   /** StartTransaction trùng khoá tự nhiên (ADR-0010) hoặc MeterValues trùng (session, cp_timestamp, measurand). */
-  async recordDuplicate(ex: DbExecutor, sessionId: number, frame: FrameRef): Promise<number> {
+  async recordDuplicate(
+    ex: DbExecutor,
+    sessionId: number,
+    frame: FrameRef,
+  ): Promise<number | null> {
     return this.insert(ex, sessionId, {
       recordType: 'duplicate',
       gapStart: frame.cpTimestamp,
@@ -237,7 +260,11 @@ export class ReconciliationService {
   }
 
   /** StopTransaction tới cho phiên đã có meter_stop hoặc đã kết thúc. */
-  async recordOrphanStop(ex: DbExecutor, sessionId: number, frame: FrameRef): Promise<number> {
+  async recordOrphanStop(
+    ex: DbExecutor,
+    sessionId: number,
+    frame: FrameRef,
+  ): Promise<number | null> {
     return this.insert(ex, sessionId, {
       recordType: 'orphan_stop',
       gapStart: frame.cpTimestamp,
@@ -258,7 +285,7 @@ export class ReconciliationService {
     sessionId: number,
     idTag: string,
     cardStatus?: string,
-  ): Promise<number> {
+  ): Promise<number | null> {
     return this.insert(ex, sessionId, {
       recordType: 'unknown_id_tag',
       gapStart: null,
@@ -277,7 +304,7 @@ export class ReconciliationService {
     intentId: string,
     boundSessionId: string,
     frame: FrameRef,
-  ): Promise<number> {
+  ): Promise<number | null> {
     return this.insert(ex, sessionId, {
       recordType: 'conflict',
       gapStart: frame.cpTimestamp,
@@ -333,7 +360,8 @@ export class ReconciliationService {
       energyDifferenceWh: number | null;
       resolution: string;
     },
-  ): Promise<number> {
+  ): Promise<number | null> {
+    if (!this.enabled) return null; // ablation: không ghi bản ghi đối soát nào
     const [agg] = await ex
       .select({ max: sql<number>`coalesce(max(${reconciliationRecords.recordNo}), 0)` })
       .from(reconciliationRecords)

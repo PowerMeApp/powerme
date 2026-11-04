@@ -65,3 +65,20 @@ describe('loadConfig — FAULT_RESET_TIMEOUT_S (WF-04, STM-6 t6)', () => {
     );
   });
 });
+
+describe('loadConfig — RECONCILIATION_ENABLED (G6, ablation)', () => {
+  it('mặc định true khi không khai báo hoặc rỗng', () => {
+    expect(loadConfig({ ...base }).reconciliationEnabled).toBe(true);
+    expect(loadConfig({ ...base, RECONCILIATION_ENABLED: '' }).reconciliationEnabled).toBe(true);
+  });
+
+  it.each(['false', '0', 'off', 'NO'])('"%s" tắt engine đối soát', (v) => {
+    expect(loadConfig({ ...base, RECONCILIATION_ENABLED: v }).reconciliationEnabled).toBe(false);
+  });
+
+  it('giá trị rác ném lỗi nêu tên biến', () => {
+    expect(() => loadConfig({ ...base, RECONCILIATION_ENABLED: 'maybe' })).toThrow(
+      /RECONCILIATION_ENABLED/,
+    );
+  });
+});
