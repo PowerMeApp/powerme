@@ -14,6 +14,8 @@ export function loadChargePolicy(env: NodeJS.ProcessEnv = process.env): ChargePo
       read('OCPP_HEARTBEAT_INTERVAL_SECONDS', 300) * 2000,
     ),
     stationOfflineAfterMs: read('OCPP_OFFLINE_THRESHOLD_SECONDS', 900) * 1000,
+    remoteStopRetryMax: read('REMOTE_STOP_RETRY_MAX', 3),
+    remoteStopRetryIntervalMs: read('REMOTE_STOP_RETRY_INTERVAL_S', 30) * 1000,
   };
   validateChargePolicy(policy);
   return policy;

@@ -1,5 +1,6 @@
 import { Injectable, Logger, OnApplicationBootstrap, OnApplicationShutdown } from '@nestjs/common';
 import { ChargeSettlementService } from './charge-settlement.service.js';
+import { DriverChargingService } from './driver-charging.service.js';
 
 @Injectable()
 export class ChargeRecoveryService implements OnApplicationBootstrap, OnApplicationShutdown {
@@ -7,7 +8,10 @@ export class ChargeRecoveryService implements OnApplicationBootstrap, OnApplicat
   private timer?: ReturnType<typeof setInterval>;
   private running = false;
 
-  constructor(private readonly settlement: ChargeSettlementService) {}
+  constructor(
+    private readonly settlement: ChargeSettlementService,
+    private readonly driverCharging: DriverChargingService,
+  ) {}
 
   async onApplicationBootstrap(): Promise<void> {
     await this.tick();
@@ -27,6 +31,12 @@ export class ChargeRecoveryService implements OnApplicationBootstrap, OnApplicat
       await this.settlement.retryPending();
     } catch {
       this.logger.error('WP3/T72 settlement recovery unavailable; retained jobs will retry');
+    }
+    try {
+      // BE-17: RemoteStop timeout → gửi lại có giới hạn; trạng thái nằm trong DB nên restart không mất.
+      await this.driverCharging.retryUnknownStops();
+    } catch {
+      this.logger.error('BE-17 stop retry sweep unavailable; unknown stops will be retried');
     } finally {
       this.running = false;
     }

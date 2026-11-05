@@ -99,7 +99,7 @@ Lệnh chung: unit test `npm test -w @powerme/csms -- <tên>` (không cần DB);
 | "Quyết toán hai lần có xảy ra không?" | `sessions/charge-settlement.service.ts:155` | `FOR UPDATE` phiên, kiểm statement trước, UNIQUE `session_debit`, cả bút toán trong một transaction |
 | "Làm tròn ở đâu, mấy lần?" | `:216` | Một lần trên tổng milli-VND, half-up (BR-P45); đoạn theo luỹ kế nên tổng đoạn = tổng phiên |
 | "Vì sao phiên thẻ RFID không được tính tiền?" | `:170` (`origin='app_qr'`) | Quyết toán cần intent của app; phiên thẻ là K1 (14/11). Nói thẳng, đừng vòng |
-| "RemoteStop timeout thì sao?" | `driver-charging.service.ts` | Hiện kẹt `stopping`, không gửi lại — gap đã ghi, sửa sau Review 2 |
+| "RemoteStop timeout thì sao?" | `driver-charging.service.ts` | BE-17: timeout → intent `unknown`, phiên giữ `stopping` (chưa biết kết quả nên không hạ về `active`); `retryUnknownStops()` (quét DB mỗi 10 s) gửi lại tối đa `REMOTE_STOP_RETRY_MAX`=3 lần, cách `REMOTE_STOP_RETRY_INTERVAL_S`=30 s, kind `auto_retry` trên cùng intent. Hết lượt: lệnh cuối `error='stop_retry_exhausted'` + log `remote_stop_retry_exhausted`, chờ operator recovery. Chi tiết `docs/BE-17-REMOTESTOP-RETRY.md` |
 | "Vì sao `onMeter` chỉ xét phiên có intent?" | `driver-charging.service.ts:914` | Sửa 28/10: phiên thẻ không có intent làm `stopCommand` ném `not_found` mỗi 10 s |
 
 **Sửa tại chỗ:** đổi `CHARGE_MINIMUM_START_VND` 50.000 → 30.000 (`charge-policy.config.ts`), chạy `-- charge-start-policy` (unit); hoặc đổi dung sai làm tròn trong test "two 0.4 VND portions" rồi giải thích vì sao tổng vẫn 1 VND.
