@@ -155,7 +155,7 @@ Cộng tiền, dòng sổ cái và điểm nằm trong **một** DB transaction,
 SD-2f vẽ hệ thống tự hoàn ngay khi tài xế đóng tài khoản. SRS (UC-ACC-02, UC-ADM-08, §3.4.1) ghi **Admin thực hiện hoàn**. Chốt 06/11: theo SRS, SD-2f cần vẽ lại (mục "Còn mở"). Luồng chia thành hai bước.
 
 **Bước 1: tài xế đóng tài khoản.** `POST …/me/account/close` → `AccountClosureService.requestClosure(driverId)`, một DB transaction:
-- Kiểm tra: tài khoản `active` (số dư ≥ 0), không có top-up đang mở, không có phiên sạc đang chạy. Sai → `ClosureNotAllowed(reason)` → 409 / 422 (MSG23).
+- Kiểm tra: tài khoản `active` (số dư ≥ 0), không có top-up đang mở, không có phiên sạc đang chạy, **không có phiên đã dừng mà chưa quyết toán** (`charge_settlement_jobs.state = 'pending'`, xem "Còn mở"). Sai → `ClosureNotAllowed(reason)` → 409 / 422 (MSG23).
 - `active → closed`, ghi `closed_at`, khoá đăng nhập.
 - **Không ghi sổ cái, không tạo refund.** Số dư giữ nguyên tới khi Admin hoàn.
 - Số dư = 0 lúc đóng: không có gì để hoàn, nên ghi luôn `closure_refunded_at = closed_at`. Tài khoản này không vào danh sách chờ hoàn.
@@ -177,7 +177,7 @@ SD-2f vẽ hệ thống tự hoàn ngay khi tài xế đóng tài khoản. SRS (
 - Trả **202 `{refundIds, refundTotalVnd, nonRefundableVnd, status: 'requested'}`**.
 - Mỗi refund được gửi như SD-2e phần 2: `done` thì điều chỉnh hoá đơn và báo tài xế (MSG25); `failed` thì hiện ở Billing Exceptions, Admin retry. Khi không còn refund `account_closure` nào chưa `done` thì ghi `closure_refunded_at` (D1).
 
-Repo: khoá đăng nhập qua interface `UserAccountService.disableLogin` (stub, chưa có module `users`); kiểm tra phiên đang chạy qua `SessionQuery.hasRunningSession` (stub).
+Repo: khoá đăng nhập qua interface `UserAccountService.disableLogin` (stub, chưa có module `users`); kiểm tra phiên đang chạy qua `SessionQuery.hasRunningSession` (stub); phiên chưa quyết toán cần thêm `hasUnsettledSession` (xem "Còn mở").
 
 ## D7. Việc nền chạy bằng quét DB ⊕
 
@@ -243,3 +243,4 @@ Diagram chỉ ghi "job" / "queue" / "after commit". Repo chưa có BullMQ (Redis
 - VNPay sandbox: refund có chống trùng không, có API tra trạng thái hoàn không (`VnpayAdapter.queryRefund`), thời hạn được hoàn, danh sách mã IPN.
 - Cách tạo `CreditAccount` + `LoyaltyAccount` khi tài xế đăng ký (WF-05 gọi billing hay billing nghe event).
 - Chiều gọi `session_debit` và loyalty `earn` từ WF-01/03.
+- **Đóng tài khoản khi còn phiên chưa quyết toán** (phát hiện ở T32 Phần 3): điều kiện bước 1 của D6 phải chặn cả phiên đã dừng mà `charge_settlement_jobs` còn `state = 'pending'`, không chỉ phiên đang chạy. Nếu không, job quyết toán chạy sau khi đóng bị `CreditLedgerService.post` từ chối (`account_closed`: tài khoản `closed` chỉ nhận `refund` / `adjustment`) và kẹt `pending`. `SessionQuery` cần thêm `hasUnsettledSession` (hoặc mở rộng `hasRunningSession`). Thống nhất với Sơn (WP3) trước Phần 11.
