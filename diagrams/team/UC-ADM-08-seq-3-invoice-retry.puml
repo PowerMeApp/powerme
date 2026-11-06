@@ -1,0 +1,62 @@
+@startuml UC-ADM-08-seq-3-invoice-retry
+!include _team.iuml
+title UC-ADM-08 Sequence 3: tab "Invoices to retry" — retry one needs_review e-invoice
+footer Content: Trần Trọng Nghĩa (WP4), uc-adm-08-seq-3-invoice-retry 26/10/2026 · PlantUML source of the draw.io diagram, content unchanged · STM-7 #6 → #2 or #3/#5 · tests TC-ADM08-17…22, TC-STM7-06
+hide footbox
+actor "Admin" as adm
+box "dashboard (WP4)" #FAFBFD
+participant "BillingExceptionsPage\n«page»" as page
+participant "billingApi\n«RTK Query»" as api
+end box
+box "csms · billing (WP5)" #FAFBFD
+participant "AdminEInvoiceController\n«proposed»" as ctl
+participant "EInvoiceService" as svc
+participant "EInvoiceProviderAdapter" as prov
+end box
+database "PostgreSQL" as db
+
+== A — open the tab ==
+adm -> page : open tab "Invoices to retry"
+page -> api : useListNeedsReviewInvoicesQuery({page})
+api -> ctl : GET /api/admin/billing/e-invoices?status=needs_review
+ctl -> svc : listNeedsReview(page) «proposed»
+svc -> db : SELECT e_invoices WHERE status = needs_review
+db --> svc : rows (attempt_count, last_error_kind, last_error_message)
+svc --> ctl : Page<NeedsReviewInvoiceDto>
+ctl --> api : 200 {items, total}
+api --> page : data · providesTags [EInvoice:LIST]
+
+== B — retry one invoice ==
+adm -> page : click Retry → ConfirmActionDialog → confirmed
+page -> api : retryInvoice(id) — row shows spinner
+api -> ctl : POST /api/admin/billing/e-invoices/{id}/retry «proposed»
+ctl -> svc : retryOnce(invoiceId, adminId) «proposed» [RolesGuard: Admin]
+svc -> db : SELECT e_invoices FOR UPDATE
+alt status ≠ needs_review (already retried / issued)
+  svc --> ctl : throw InvalidTransition
+  ctl --> api : 409 InvalidTransition
+  api --> page : error → toast "Invoice is no longer waiting for review"; refetch
+else needs_review
+  svc -> db : UPDATE status = requested (STM-7 #6, counter kept)
+  svc -> prov : issueInvoice(data) — one attempt, timeout 15 s
+  alt provider returns invoiceNo
+    prov --> svc : invoiceNo
+    svc -> db : UPDATE status = issued, invoice_no, issued_at, attempt_count + 1 (#2)
+    svc --> ctl : EInvoice (issued)
+    ctl --> api : 200 {status: issued, invoiceNo}
+    api -> api : invalidatesTags [EInvoice:LIST] → refetch
+    api --> page : success → toast with invoice no.; row leaves the tab
+  else provider error or timeout
+    prov --> svc : ProviderError
+    svc -> db : UPDATE status = needs_review, attempt_count + 1, last_error_* (#3 → #5)
+    svc --> ctl : EInvoice (needs_review)
+    ctl --> api : 200 {status: needs_review, lastErrorKind, lastErrorMessage}
+    api --> page : warning toast; row stays with the new error and attempt count
+  end
+end
+note over svc, db
+  No automatic retries after an admin retry (one attempt). The credit
+  is never touched (TC-STM7-03). If BE-08 exists, invoice.issued also
+  invalidates [EInvoice:LIST] for other open dashboards.
+end note
+@enduml

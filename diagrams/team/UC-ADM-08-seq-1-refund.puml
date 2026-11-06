@@ -1,0 +1,55 @@
+@startuml UC-ADM-08-seq-1-refund
+!include _team.iuml
+title UC-ADM-08 Sequence 1: tab "Top-ups to refund" — list and refund a credited top-up
+footer Content: Trần Trọng Nghĩa (WP4), uc-adm-08-seq-1-refund 26/10/2026 · PlantUML source of the draw.io diagram, content unchanged · STM-4 #7, backend = SD-2c phase E (WP5) · tests TC-ADM08-01…10, TC-STM4-12/13/14
+hide footbox
+actor "Admin" as adm
+box "dashboard (WP4)" #FAFBFD
+participant "BillingExceptionsPage\n«page»" as page
+participant "billingApi\n«RTK Query»" as api
+end box
+box "csms · billing (WP5)" #FAFBFD
+participant "AdminTopUpController" as ctl
+participant "TopUpService" as svc
+end box
+
+== A — open the tab ==
+adm -> page : open /billing/exceptions?tab=refund
+page -> api : useListRefundableTopUpsQuery({from, to, q, page})
+api -> ctl : GET /api/admin/billing/top-ups?status=credited&page=
+ctl -> svc : listRefundable(filter, page) «proposed»
+svc --> ctl : Page<RefundableTopUpDto> (balanceVnd, refundable)
+ctl --> api : 200 {items, total}
+api --> page : data · providesTags [TopUp:LIST]
+page -> page : render rows; Refund disabled where refundable = false\n(tooltip "balance lower than amount")
+
+== B — refund one top-up ==
+adm -> page : click Refund on a row
+page -> page : open ConfirmActionDialog(amountPaidVnd, pointsRedeemed)
+alt Admin cancels
+  page -> page : close dialog, no request sent
+else Admin confirms
+  page -> api : refundTopUp(id) — Confirm disabled while pending
+  api -> ctl : POST /api/admin/billing/top-ups/{id}/refund
+  ctl -> svc : refund(topUpId, adminId) [RolesGuard: Admin]
+  alt credited and balance ≥ amountVnd
+    svc --> ctl : TopUp (status = refunded)
+    ctl --> api : 200 {status: refunded}
+    api -> api : invalidatesTags [TopUp:LIST] → refetch list
+    api --> page : success → toast "Refunded 195,000 VND"; row leaves the tab
+  else status ≠ credited, e.g. already refunded (TC-STM4-14)
+    svc --> ctl : throw InvalidTransition
+    ctl --> api : 409 InvalidTransition
+    api --> page : error → toast "Already refunded"; refetch list
+  else balance < amountVnd, credit partly spent (TC-STM4-12)
+    svc --> ctl : throw RefundNotAllowed
+    ctl --> api : 422 RefundNotAllowed
+    api --> page : error → toast "Credit already spent"; row stays, Refund disabled
+  end
+end
+note over ctl, svc
+  Inside refund(): STM-4 credited → refunded, ledger refund row,
+  points restored, invoice adjustment, VNPay refund after commit
+  — see SD-2c phase E. The dashboard only sees the HTTP result.
+end note
+@enduml

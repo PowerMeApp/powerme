@@ -1,6 +1,6 @@
 @startuml AD-7_fault_and_alert
 !include _style.iuml
-title AD-7 (WF-04) Pillar Fault: Report, Alert and Remote Recovery\n<size:11>Scope: PowerMe «software system» · Trigger: driver report, pillar fault or pillar silent · Owner: Trần Trọng Nghĩa · v2.0</size>
+title AD-7 (WF-04) Pillar Fault: Report, Alert and Remote Recovery\n<size:11>Scope: PowerMe «software system» · Trigger: driver report, pillar fault or pillar silent · Owner: Trần Trọng Nghĩa · v2.1</size>
 
 |PowerMe Platform\n«software system»|
 |Operator\n«person»|
@@ -31,13 +31,20 @@ endswitch
 if ( ) then ([remote reset may fix it])
   :Send remote reset\n(UC-OPS-04);
   |PowerMe Platform\n«software system»|
+  if ( ) then ([a driver is charging on\nanother connector])
+    :Warn: reset restarts the whole pillar; <<output>>
+    |Operator\n«person»|
+    :Confirm the reset a second time;
+    |PowerMe Platform\n«software system»|
+  else ([else])
+  endif
   :FaultEvent\n[resetting]; <<task>>
   :Send reset command; <<output>>
   |#EEEEEE|Charging Pillar\n«external system»|
   :Restart and report status;
   |PowerMe Platform\n«software system»|
-  if ( ) then ([connector reports Available])
-    :Connector\n[Available]; <<task>>
+  if ( ) then ([connector works again: Available,\nPreparing, Charging, …])
+    :Connector\n[working]; <<task>>
     :Show connector in search again;
     :FaultEvent\n[resolved]; <<task>>
     stop
@@ -54,6 +61,11 @@ stop
 note right
   Maintenance tickets are Should (FR-18),
   not part of WF-04.
+  v2.1 (28/10/2026, PR #61 review): a fault
+  closes on any working status, not only
+  Available; reset asks twice when another
+  connector is charging. Unavailable during
+  the reboot does not close the fault.
 end note
 !include _legend.iuml
 @enduml

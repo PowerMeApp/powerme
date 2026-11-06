@@ -1,0 +1,61 @@
+@startuml UC-ADM-08-seq-2-late-refund
+!include _team.iuml
+title UC-ADM-08 Sequence 2: tab "Late payments to refund" — refund a payment that arrived after LATE_WINDOW
+footer Content: Trần Trọng Nghĩa (WP4), uc-adm-08-seq-2-late-refund 26/10/2026 · PlantUML source of the draw.io diagram, content unchanged · top-up stays expired (no STM-4 transition) · rows = SD-2c phase D · tests TC-ADM08-11…16, TC-STM4-06/15
+hide footbox
+actor "Admin" as adm
+box "dashboard (WP4)" #FAFBFD
+participant "BillingExceptionsPage\n«page»" as page
+participant "billingApi\n«RTK Query»" as api
+end box
+box "csms · billing (WP5)" #FAFBFD
+participant "AdminTopUpController" as ctl
+participant "TopUpService" as svc
+participant "VnpayAdapter" as vnp
+end box
+database "PostgreSQL" as db
+
+== A — open the tab ==
+adm -> page : open tab "Late payments"
+page -> api : useListLatePaymentsQuery({from, to, q, page})
+api -> ctl : GET /api/admin/billing/top-ups/late-payments «proposed»
+ctl -> svc : listLatePayments(filter, page) «proposed»
+svc -> db : SELECT top_ups WHERE status = expired AND late_gateway_ref IS NOT NULL\nAND late_refunded_at IS NULL
+db --> svc : rows
+svc --> ctl : Page<LatePaymentDto> (lateAmountVnd, latePaidAt, lateGatewayRef)
+ctl --> api : 200 {items, total}
+api --> page : data · providesTags [LatePayment:LIST]
+
+== B — refund one late payment ==
+adm -> page : click Refund late payment
+page -> page : ConfirmActionDialog(lateAmountVnd, lateGatewayRef) → confirmed
+page -> api : refundLatePayment(id)
+api -> ctl : POST /api/admin/billing/top-ups/{id}/late-refund «proposed»
+ctl -> svc : lateRefund(topUpId, adminId) «proposed» [RolesGuard: Admin]
+svc -> db : SELECT top_ups FOR UPDATE
+alt no late payment, or late_refunded_at already set
+  svc --> ctl : throw LateRefundNotAllowed
+  ctl --> api : 409 LateRefundNotAllowed
+  api --> page : error → toast "Already refunded"; refetch list
+else late payment not refunded yet
+  svc -> vnp : refund(lateGatewayRef, lateAmountVnd, requestId)
+  alt VNPay accepts
+    vnp --> svc : accepted
+    svc -> db : UPDATE top_ups SET late_refunded_at = now (status stays expired)
+    svc --> ctl : TopUp (lateRefundedAt)
+    ctl --> api : 200 {lateRefundedAt}
+    api -> api : invalidatesTags [LatePayment:LIST] → refetch
+    api --> page : success → toast; row leaves the tab
+  else VNPay error or timeout
+    vnp --> svc : GatewayError
+    svc --> ctl : throw GatewayError — nothing written
+    ctl --> api : 502 GatewayError
+    api --> page : error → toast "VNPay refund failed, try again"; row stays
+  end
+end
+note over svc, db
+  No ledger row, no points, no invoice: the money never became credit
+  (SD-2c D). requestId makes a repeated call safe if the DB write fails
+  after VNPay accepted (open question Q2).
+end note
+@enduml

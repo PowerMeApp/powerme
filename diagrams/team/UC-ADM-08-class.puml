@@ -1,0 +1,127 @@
+@startuml UC-ADM-08-class
+!include _team.iuml
+skinparam class<<wp4>> {
+  HeaderBackgroundColor #D5E8D4
+}
+skinparam linetype ortho
+skinparam nodesep 30
+skinparam ranksep 50
+hide empty members
+hide stereotype
+title UC-ADM-08 Class diagram: Billing Exceptions screen (admin dashboard) and the WP5 endpoints it calls
+footer Content: Trần Trọng Nghĩa (WP4), uc-adm-08-class 26/10/2026 · PlantUML source of the draw.io diagram, content unchanged · «proposed» = not in CD-2 v0.1 yet · DTOs live in @powerme/shared
+
+package "features/billing (Presentation + Business Logic)" {
+  class "RequireRole\n<size:9>«route guard»</size>" as RequireRole <<wp4>> {
+    + role: "Admin"
+    + render(children)
+  }
+  class "BillingExceptionsPage\n<size:9>«page»</size>" as Page <<wp4>> {
+    - activeTab: BillingTab
+    - dialog: PendingAction | null
+    + render()
+    + onTabChange(tab)
+    + askConfirm(action)
+  }
+  class "ConfirmActionDialog\n<size:9>«component»</size>" as Dialog <<wp4>> {
+    + title, amountVnd, reference
+    + busy: boolean
+    + onConfirm()
+    + onCancel()
+  }
+  enum BillingTab <<enumeration>> {
+    refund
+    late
+    invoices
+  }
+  class "RefundableTopUpsTab\n<size:9>«component»</size>" as Tab1 <<wp4>> {
+    + render(rows, filter)
+    - canRefund(row): boolean
+  }
+  class "LatePaymentsTab\n<size:9>«component»</size>" as Tab2 <<wp4>> {
+    + render(rows, filter)
+  }
+  class "NeedsReviewInvoicesTab\n<size:9>«component»</size>" as Tab3 <<wp4>> {
+    + render(rows)
+    - errorLabel(kind): string
+  }
+}
+
+package "core/api · core/realtime" {
+  class "billingApi\n<size:9>«RTK Query api slice»</size>" as Api <<wp4>> {
+    tagTypes: TopUp, LatePayment, EInvoice
+    + listRefundableTopUps(q): Page<RefundableTopUpDto>
+    + listLatePayments(q): Page<LatePaymentDto>
+    + listNeedsReviewInvoices(q): Page<NeedsReviewInvoiceDto>
+    + refundTopUp(id)
+    + refundLatePayment(id)
+    + retryInvoice(id)
+  }
+  class "useBillingRealtime\n<size:9>«hook»</size>" as Rt <<wp4>> {
+    + on topup.status → invalidate TopUp
+    + on invoice.issued → invalidate EInvoice
+  }
+}
+
+package "@powerme/shared/billing «library»" {
+  class "RefundableTopUpDto\n<size:9>«type»</size>" as D1 {
+    id, driverName, gatewayRef
+    amountVnd, amountPaidVnd
+    pointsRedeemed, completedAt
+    balanceVnd, refundable: boolean
+  }
+  class "LatePaymentDto\n<size:9>«type»</size>" as D2 {
+    id, driverName
+    lateGatewayRef, lateAmountVnd
+    latePaidAt, expiresAt
+  }
+  class "NeedsReviewInvoiceDto\n<size:9>«type»</size>" as D3 {
+    id, topUpId, amountVnd
+    attemptCount, lastErrorKind
+    lastErrorMessage, updatedAt
+  }
+  class "Page<T>\n<size:9>«type»</size>" as PageT {
+    items: T[]
+    total, page, pageSize
+  }
+  class "ApiError\n<size:9>«type»</size>" as Err {
+    status: 401|403|404|409|422|502
+    code, message
+  }
+}
+
+package "csms · billing (WP5) — HTTP, RolesGuard: Admin" {
+  class "AdminTopUpController\n<size:9>«controller»</size>" as C1 {
+    + refund(topUpId, admin)
+    + listRefundable(q) «proposed»
+    + listLatePayments(q) «proposed»
+    + lateRefund(topUpId, admin) «proposed»
+  }
+  class "AdminEInvoiceController\n<size:9>«controller»</size>" as C2 {
+    + listNeedsReview(q) «proposed»
+    + retry(invoiceId, admin) «proposed»
+  }
+  class "RealtimeGateway\n<size:9>«gateway»</size>" as RG {
+    + emit(event, room, payload)
+  }
+}
+
+RequireRole --> Page : guards
+Page --> BillingTab
+Page *-- Tab1
+Page *-- Tab2
+Page *-- Tab3
+Page --> Dialog : askConfirm
+Tab1 ..> Api : uses
+Tab2 ..> Api : uses
+Tab3 ..> Api : uses
+Rt ..> Api : invalidates tags
+Api ..> D1
+Api ..> D2
+Api ..> D3
+Api ..> PageT
+Api ..> Err
+Api ..> C1 : HTTP /api/admin/billing/top-ups
+Api ..> C2 : HTTP /api/admin/billing/e-invoices
+Rt ..> RG : Socket.IO (BE-08)
+@enduml

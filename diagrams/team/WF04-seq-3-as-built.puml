@@ -1,0 +1,100 @@
+@startuml WF04-seq-3-as-built
+!include _team.iuml
+title WF-04 Sequence 3 (as built, Iteration 1): fault, acknowledge, guarded reset, recovery
+footer Content: Trần Trọng Nghĩa (WP4), 28/10/2026 · drawn from the code on branch wp4/fe-04-iteration-1-wf04 (PR #61) · sequences 1–2 stay the target design
+hide footbox
+participant "Charging pillar" as cp <<external>>
+box "ocpp-gateway" #FAFBFD
+participant "OcppServer\n+ OcppHandlers" as gw
+participant "Connection\nRegistry" as reg
+end box
+participant "SessionsService" as ses
+box "stations" #FAFBFD
+participant "FaultService" as fs
+participant "Scheduler" as tm
+end box
+box "console (BE-08, dev/demo)" #FAFBFD
+participant "ConsoleCommands" as cc
+end box
+database "PostgreSQL" as db
+actor "Operator" as op
+
+== A — Faulted arrives (STM-6 t1) ==
+cp -> gw : StatusNotification(c1, Faulted, GroundFailure)
+gw -> db : INSERT ocpp_message_log (before any handler, ADR-0005)
+gw -> ses : onStatusNotification(req, ctx)
+ses -> db : INSERT connector_status_events · UPDATE connectors
+gw -> fs : onConnectorStatus({status, errorCode, receivedAt, occurredAt})
+note right of fs
+  occurredAt = pillar timestamp only for a replayed frame,
+  clamped to [receivedAt − 30 days, receivedAt] (eventTime)
+end note
+fs -> db : SELECT open fault FOR UPDATE
+alt no open fault on c1
+  fs -> db : INSERT fault_events (source ocpp, raised)
+else open fault exists
+  fs -> fs : attach (SIGNAL is a no-op, first error_code kept)
+end
+gw --> cp : CALLRESULT {}
+note over gw, fs : a fault-write error is only logged — the pillar never gets a CALLERROR (T13)
+
+== B — operator acknowledges (t2) ==
+op -> cc : POST /api/admin/faults/{id}/acknowledge
+cc -> fs : acknowledge(id)
+fs -> db : raised → acknowledged · acknowledged_at
+cc --> op : 200 {status: acknowledged}
+
+== C — operator resets (t4), with the guards ==
+op -> cc : POST /api/admin/faults/{id}/reset?type=Soft
+alt fault not acknowledged
+  cc --> op : 409 fault_not_acknowledged
+else pillar offline (not in ConnectionRegistry)
+  cc --> op : 409 station_offline
+else another fault on the pillar is resetting
+  cc --> op : 409 reset_in_progress
+else session pending/active/paused/stopping/orphaned on ANOTHER connector, force not set
+  cc --> op : 409 sessions_active (lists connector + session)
+  op -> cc : confirms twice → POST …/reset?type=Soft&force=true
+end
+cc -> fs : beginReset(id, {type, force})
+fs -> db : INSERT remote_commands (Reset, payload {type, force?}, pending)\nacknowledged → resetting · reset_command_id
+fs -> tm : schedule onResetTimeout(FAULT_RESET_TIMEOUT_S = 120 s)
+cc -> fs : markSent(commandId)
+cc -> reg : get(serial).client.call(Reset {type})
+reg -> cp : Reset(Soft)
+alt pillar answers Accepted
+  cp --> reg : CALLRESULT Accepted
+  cc -> fs : onResetResult(commandId, Accepted)
+  fs -> db : command accepted (fault stays resetting)
+else Rejected
+  cp --> reg : CALLRESULT Rejected
+  cc -> fs : onResetResult(commandId, Rejected)
+  fs -> db : command rejected · resetting → acknowledged (t6)
+  fs -> tm : cancel timer
+else CALLERROR / no answer
+  cc -> fs : onResetResult(commandId, error)
+  fs -> db : command failed · resetting → acknowledged (t6)
+  cc --> op : 502 station_error
+end
+cc --> op : 200 {reset_status, fault_status, forced}
+
+== D — pillar reboots and the connector works again (t5) ==
+cp -> gw : BootNotification · StatusNotification(c1, Unavailable)
+gw -> fs : onConnectorStatus(Unavailable)
+fs -> fs : ignored — Unavailable is the reboot step, not a fix
+cp -> gw : StatusNotification(c1, Available | Preparing | Charging | …)
+gw -> fs : onConnectorStatus(recovered status)
+alt frame is a replay older than raised_at
+  fs -> fs : stale — logged, fault unchanged
+else live or newer
+  fs -> db : resetting → resolved · resolved_at
+  fs -> tm : cancel timer
+end
+
+== E — still Faulted after the timeout (t6) ==
+tm -> fs : onResetTimeout(faultId, commandId)
+fs -> db : only if reset_command_id = commandId:\nresetting → acknowledged (command stays accepted, or timeout if no answer)
+op -> cc : POST /api/admin/faults/{id}/close (after the site visit, t7)
+cc -> fs : close(id)
+fs -> db : acknowledged → resolved
+@enduml
