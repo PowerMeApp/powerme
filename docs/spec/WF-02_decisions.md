@@ -1,6 +1,6 @@
 # WF-02 – Quyết định thiết kế
 
-> Đặt tại `docs/spec/WF-02_decisions.md`. Cập nhật: 03/11/2026.
+> Đặt tại `docs/spec/WF-02_decisions.md`. Cập nhật: 06/11/2026.
 > **Nguồn chính là diagram trong `diagrams/wf02/`** (CD-2, SD-2a…2f v2.0, 01/11/2026, bản đã chia sẻ vào tài liệu chung của nhóm). File này chỉ ghi lại:
 > (1) những điểm trong diagram mà code phải bám, viết ra cho dễ tra;
 > (2) cách khớp diagram với repo hiện tại;
@@ -17,7 +17,7 @@
 | SD-2c `SD-2c_einvoice_issue.puml` | Xuất e-invoice chạy nền, có retry | STM-7 |
 | SD-2d `SD-2d_timeout_late_payment.puml` | Quá 15 phút chưa có kết quả; thanh toán trễ | STM-4 |
 | SD-2e `SD-2e_admin_refund.puml` | Admin hoàn top-up; gửi refund về nguồn thanh toán | STM-4, STM-10, STM-7 |
-| SD-2f `SD-2f_close_account.puml` | Tài xế đóng tài khoản, hoàn số dư | STM-5, STM-10 |
+| SD-2f `SD-2f_close_account.puml` | Tài xế đóng tài khoản; Admin hoàn số dư (**diagram vẽ sai**, theo D6) | STM-5, STM-10 |
 
 STM-4 TopUp, STM-5 CreditAccount, STM-7 EInvoice (cũng dùng cho InvoiceAdjustment), **STM-10 Refund** (STM-8 đã là RfidCard; file `diagrams/stm/STM-10_Refund.puml` v1.0, 01/11). Code: `TopUpStateMachine`, `RefundStateMachine` trong `apps/csms/src/billing/` (T32 Phần 2).
 
@@ -58,7 +58,7 @@ Không có `failed → done`.
 | `amountVnd` | bigint > 0 |
 | `status` | enum `requested` · `done` · `failed` |
 | `attemptCount` | int, mặc định 0 |
-| `requestedBy` [0..1] | FK → `admins (user_id)` (ISA của BE-16/0011; chốt 04/11); **null = hệ thống tạo** (đóng tài khoản, SD-2f). Thay `top_ups.refunded_by` (bỏ ở 0015, ERD Alignment B5) |
+| `requestedBy` [0..1] | FK → `admins (user_id)` (ISA của BE-16/0011; chốt 04/11). Thay `top_ups.refunded_by` (bỏ ở 0015, ERD Alignment B5). 0015 cho phép null với `account_closure` (theo SD-2f cũ). Từ 06/11, refund `account_closure` cũng do Admin tạo (D6), nên code **luôn ghi** `requestedBy` |
 | `lastErrorKind`, `lastErrorMessage`, `lastAttemptAt` [0..1] | theo mẫu `e_invoices` |
 | `gatewayRefundNo` [0..1] | mã hoàn VNPay trả về |
 | `nextAttemptAt` [0..1] | lịch chạy nền (D4) |
@@ -66,19 +66,22 @@ Không có `failed → done`.
 
 Ràng buộc / index đề xuất cho migration:
 - Partial unique `(top_up_id, kind) WHERE kind IN ('top_up','late_payment')`.
-- CHECK `kind = 'account_closure' OR requested_by IS NOT NULL`.
+- CHECK `kind = 'account_closure' OR requested_by IS NOT NULL` (đã có ở 0015; có thể siết thành `requested_by IS NOT NULL`, xem "Còn mở").
 - CHECK `(status = 'done') = (completed_at IS NOT NULL)`; `status <> 'done' OR gateway_refund_no IS NOT NULL`.
 - Index `(status, next_attempt_at)` cho worker; index `(top_up_id)`.
 
 Nghĩa của cột đã có:
 - `top_ups.late_refunded_at` = lúc refund `late_payment` chuyển `done`.
-- `credit_accounts.closure_refunded_at` = lúc **mọi** refund `account_closure` của tài khoản đã `done`.
+- `credit_accounts.closure_refunded_at` = lúc tài khoản `closed` không còn refund `account_closure` nào chưa `done` (chốt 06/11, D6). Có ba trường hợp:
+  - refund cuối cùng chuyển `done`;
+  - bước 2 không tạo refund nào (toàn bộ số dư là phần dư) → `now()` trong cùng transaction;
+  - số dư = 0 lúc đóng → `closed_at`, ghi ở bước 1.
 
 ## D2. Tạo top-up (SD-2a)
 
 - `POST …/billing/top-ups {amountVnd, redeemPoints}`, header `Idempotency-Key`. Cùng key trả lại cùng top-up.
 - Kiểm tra: tài khoản chưa đóng, hạn mức **BR-P22 theo ADR-0013**: mỗi lần nạp 50.000–2.000.000 VND, số dư sau nạp ≤ 5.000.000 VND; không có top-up đang mở khác. Sai → `TopUpRejected(reason)` → 409 / 422 `{reason}`.
-- `redeemPoints` và còn ≥ 500 điểm → tính `discountVnd`. **Chỉ trừ điểm khi cộng tiền** (SD-2b).
+- `redeemPoints` và còn ≥ 500 điểm → tính `discountVnd`. **Chỉ trừ điểm khi cộng tiền** (SD-2b). Điểm hết hạn trong lúc chờ thanh toán: xem D3 ⊕.
 - Lưu top-up `pending`, `expiresAt = now + 15 phút`; `VnpayAdapter.buildPaymentUrl(topUp, amountVnd − discountVnd)`; trả **201 `{topUpId, paymentUrl}`**.
 - Return URL chỉ hiển thị. Chỉ IPN có chữ ký (SD-2b) hoặc querydr sau 15 phút (SD-2d) mới cộng tiền.
 - ⊕ "Top-up đang mở" chỉ tính `pending`; `expired` (kể cả trong cửa sổ trễ 1 giờ) không chặn tạo mới.
@@ -96,6 +99,16 @@ Nghĩa của cột đã có:
 | Đã trả | `pending → credited`, `CreditLedgerService.post(+amountVnd)` (`in_shortfall → active` nếu số dư ≥ 0), `LoyaltyService.redeemForTopUp` nếu có dùng điểm, `EInvoiceService.requestForTopUp` chạy sau commit | 00 |
 
 Cộng tiền, dòng sổ cái và điểm nằm trong **một** DB transaction, nên IPN lặp không cộng hai lần.
+⊕ **Điểm đã dùng hết hạn trước lúc cộng tiền** (chốt 06/11). Tài xế đã trả giá sau giảm `amountVnd − discountVnd`, nên:
+- vẫn cộng đủ `amountVnd`;
+- `redeemForTopUp` ghi dòng `redeem` chỉ cho số điểm còn hiệu lực (`points` = −số điểm còn hiệu lực);
+- phần điểm thiếu (điểm đã hết hạn) ghi thêm một dòng loyalty `adjust`, `top_up_id` = top-up, **`points = 0`**:
+  - dòng `expire` đã trừ các điểm này rồi, nên dòng `adjust` không trừ thêm và `pointsBalance` không bị âm;
+  - dòng này chỉ ghi lại rằng top-up đã được giảm giá cho số điểm không còn. Số điểm thiếu = `top_ups.points_redeemed` − |Σ `redeem` của top-up|;
+- không từ chối, không bắt tài xế trả thêm.
+
+Áp dụng cho mọi đường cộng tiền (D4).
+⊕ **`restoreForTopUp` (Admin hoàn top-up, D1) trả lại số điểm thực tế đã trừ** = −Σ `points` của các dòng `redeem` có `top_up_id` này (giữ hạn cũ). Không lấy theo `top_ups.points_redeemed`, vì như vậy sẽ trả dư phần điểm đã hết hạn.
 ⊕ Kết quả thanh toán tới khi top-up đã có kết quả không đổi trạng thái (BR-P13), không ném lỗi (chốt 04/11, T32 Phần 2):
 - `already_applied` → RspCode 02: thành công trên `credited` / `refunded` với `transactionNo` = `gateway_transaction_no` đã ghi; lỗi trên `failed` / `expired`.
 - `conflicting_result` → không ghi gì, service log warn: thành công trên `credited` / `refunded` với `transactionNo` **khác** (có thể là lần trả thứ hai cho cùng top-up); lỗi trên `credited` / `refunded`.
@@ -110,7 +123,7 @@ Cộng tiền, dòng sổ cái và điểm nằm trong **một** DB transaction,
   - trong vòng 1 giờ sau khi hết hạn và chưa áp dụng → `expired → credited` + ghi sổ;
   - quá 1 giờ → ghi khoản trễ (`late_*`), top-up vẫn `expired`, đưa lên Billing Exceptions để Admin hoàn (SD-2e, `late_payment`).
   - Trả 00.
-- ⊕ Mọi đường cộng tiền ở đây (querydr, IPN trễ) làm giống nhánh "đã trả" của SD-2b: trừ điểm đã dùng và yêu cầu e-invoice.
+- ⊕ Mọi đường cộng tiền ở đây (querydr, IPN trễ) làm giống nhánh "đã trả" của SD-2b: trừ điểm đã dùng (điểm hết hạn thì ghi `adjust` cho phần thiếu, D3 ⊕) và yêu cầu e-invoice.
 - ⊕ Trước khi cộng tiền trễ, **kiểm tra lại** tài khoản chưa đóng và số dư sau nạp ≤ 5.000.000. Vi phạm → không cộng, ghi thành khoản trễ để Admin hoàn.
 - ⊕ querydr lỗi hoặc timeout → giữ `pending`, hẹn quét lại; không chuyển `expired` khi chưa biết kết quả.
 - ⊕ **Thành công tới khi top-up đã `failed`** (VNPay báo lỗi/huỷ trước, rồi báo đã trả): giữ `failed`, ghi khoản trễ như IPN sau cửa sổ (không cộng, không hoá đơn, Admin hoàn `late_payment`). Không xét cửa sổ trễ hay hạn mức. Chốt 04/11.
@@ -137,15 +150,34 @@ Cộng tiền, dòng sổ cái và điểm nằm trong **một** DB transaction,
 - Cột thêm cho `invoice_adjustments` (khớp repo): `refund_id` (FK, unique), `status`, `attempt_count`, `last_error_kind`, `last_error_message`, `last_attempt_at`, `next_attempt_at`, `provider_adjustment_no` [0..1]; `issued_at` thành [0..1].
 - Provider là **stub**: không gọi HTTP; trả `invoiceNo` / `adjustmentNo` giả theo định dạng ổn định; cấu hình được để giả lập thành công, lỗi `transient`, lỗi `data`, độ trễ; viết qua interface để sau thay provider thật.
 
-## D6. Đóng tài khoản (SD-2f)
+## D6. Đóng tài khoản (SD-2f; theo SRS UC-ACC-02 + UC-ADM-08) ⊕
 
-`POST …/me/account/close` → `AccountClosureService.requestClosure(driverId)`:
-- Kiểm tra: tài khoản `active` (số dư ≥ 0), không có top-up đang mở, không có phiên sạc đang chạy. Sai → `ClosureNotAllowed(reason)` → 409 / 422.
-- `CreditLedgerService.post(accountId, refund, −balanceVnd)` đưa số dư về 0.
-- Chia số dư về các top-up `credited` **mới nhất trước**, mỗi phần ≤ `amountPaidVnd` của top-up đó; mỗi phần gọi `RefundService.create(topUpId, kind = account_closure, shareVnd, requestedBy = null)`.
-- `active → closed`, khoá đăng nhập; trả **200 `{closed, refundTotalVnd}`**.
-- Mỗi refund được gửi như SD-2e phần 2. **Admin không cần làm gì**; refund `failed` hiện ở Billing Exceptions như các refund khác.
-- Repo: khoá đăng nhập qua interface `UserAccountService.disableLogin` (stub, chưa có module `users`); kiểm tra phiên đang chạy qua `SessionQuery.hasRunningSession` (stub).
+SD-2f vẽ hệ thống tự hoàn ngay khi tài xế đóng tài khoản. SRS (UC-ACC-02, UC-ADM-08, §3.4.1) ghi **Admin thực hiện hoàn**. Chốt 06/11: theo SRS, SD-2f cần vẽ lại (mục "Còn mở"). Luồng chia thành hai bước.
+
+**Bước 1: tài xế đóng tài khoản.** `POST …/me/account/close` → `AccountClosureService.requestClosure(driverId)`, một DB transaction:
+- Kiểm tra: tài khoản `active` (số dư ≥ 0), không có top-up đang mở, không có phiên sạc đang chạy. Sai → `ClosureNotAllowed(reason)` → 409 / 422 (MSG23).
+- `active → closed`, ghi `closed_at`, khoá đăng nhập.
+- **Không ghi sổ cái, không tạo refund.** Số dư giữ nguyên tới khi Admin hoàn.
+- Số dư = 0 lúc đóng: không có gì để hoàn, nên ghi luôn `closure_refunded_at = closed_at`. Tài khoản này không vào danh sách chờ hoàn.
+- Trả **200 `{closed: true}`**.
+
+**Bước 2: Admin hoàn số dư.** `POST /api/admin/billing/credit-accounts/{id}/closure-refund` → `AccountClosureService.refundClosedAccount(accountId, adminId)`, một DB transaction:
+- **Guard chống bấm đúp:** unique `(top_up_id, transaction_type)` không chặn được dòng `refund` có `top_up_id` NULL. Vì vậy:
+  - khoá `credit_accounts … FOR UPDATE` trước;
+  - chỉ chạy khi `status = 'closed'` và `balance_vnd > 0`; ngược lại → `RefundNotAllowed(reason)` → 409.
+  - Request thứ hai chờ khoá, sau đó thấy số dư = 0 và bị từ chối.
+- Chia số dư về các top-up `credited` (chưa hoàn) **mới nhất trước**. Mỗi phần ≤ `amountPaidVnd` của top-up đó (tiền thật đã trả qua VNPay).
+- **Phần dư không hoàn được:** nếu số dư lớn hơn tổng `amountPaidVnd` của các top-up này (vd. phần giảm giá bằng điểm, bút toán `adjustment` cũ), phần vượt là phần dư. Phần dư không hoàn về nguồn nào. SRS chưa nói gì về trường hợp này (BR-P21, mục "Còn mở").
+- Ghi sổ, đưa số dư về 0:
+  - `CreditLedgerService.post(accountId, refund, −tổng các phần)`: một dòng, `top_up_id` NULL. Unique `(top_up_id, transaction_type)` chỉ áp khi `top_up_id` khác NULL.
+  - Nếu có phần dư: `CreditLedgerService.post(accountId, adjustment, −phần dư)`.
+  - `CreditLedgerService.post` trên tài khoản `closed` **chỉ nhận** loại `refund` và `adjustment`; loại khác bị từ chối. Không đổi `status`, vì `active ↔ in_shortfall` không áp dụng ở đây.
+- Mỗi phần gọi `RefundService.create(topUpId, kind = account_closure, shareVnd, requestedBy = adminId)` → refund `requested`.
+- Không tạo refund nào (toàn bộ số dư là phần dư) → ghi `closure_refunded_at = now()` trong cùng transaction.
+- Trả **202 `{refundIds, refundTotalVnd, nonRefundableVnd, status: 'requested'}`**.
+- Mỗi refund được gửi như SD-2e phần 2: `done` thì điều chỉnh hoá đơn và báo tài xế (MSG25); `failed` thì hiện ở Billing Exceptions, Admin retry. Khi không còn refund `account_closure` nào chưa `done` thì ghi `closure_refunded_at` (D1).
+
+Repo: khoá đăng nhập qua interface `UserAccountService.disableLogin` (stub, chưa có module `users`); kiểm tra phiên đang chạy qua `SessionQuery.hasRunningSession` (stub).
 
 ## D7. Việc nền chạy bằng quét DB ⊕
 
@@ -195,7 +227,7 @@ Diagram chỉ ghi "job" / "queue" / "after commit". Repo chưa có BullMQ (Redis
 | `GET /api/admin/billing/top-ups/late-payments` | khoản trễ | |
 | `POST /api/admin/billing/top-ups/{id}/late-refund` | hoàn khoản trễ | Dashboard mong `{lateRefundedAt}`; theo SD-2e trả `{refundId, status:'requested'}`, `lateRefundedAt` chỉ có khi refund `done` |
 | `GET /api/admin/billing/e-invoices?status=needs_review`, `POST …/e-invoices/{id}/retry` | retry hoá đơn (SD-2c) | Dashboard dùng `lastErrorKind: 'temporary' \| 'rejected'`; DB dùng `transient \| data`. Chốt một bộ tên |
-| `GET /api/admin/billing/credit-accounts?status=closed_unrefunded` | tài khoản đóng chờ hoàn | Theo SD-2f, Admin **không** phải bấm hoàn: chỉ để xem các refund `account_closure` chưa `done` |
+| `GET /api/admin/billing/credit-accounts?status=closed_unrefunded`, `POST …/credit-accounts/{id}/closure-refund` | tài khoản đóng chờ hoàn | Theo D6, **Admin bấm hoàn** (UC-ADM-08). Dashboard đang mong `{status:'refunded', allocations, uncoveredVnd}`; theo D6 trả **202** `{refundIds, refundTotalVnd, nonRefundableVnd, status:'requested'}`. Hộp thoại xác nhận phải hiện số **không hoàn được** (phần dư) trước khi Admin bấm |
 | (chưa có) | refund `failed` + `POST …/refunds/{id}/retry` | WP4 cần thêm mục này |
 
 ## Còn mở (hỏi trước khi code phần liên quan)
@@ -203,6 +235,9 @@ Diagram chỉ ghi "job" / "queue" / "after commit". Repo chưa có BullMQ (Redis
 - Vẽ lại diagram: đưa các mục ⊕ vào; sửa "monthly cap" ở SD-2a; ~~bỏ `reservation_fee` ở CD-2~~ (không cần nữa, 0010 đã thêm vào enum); ghi số migration 0015 thay 0012 ở CD-2; ~~thêm file STM-10 Refund vào `diagrams/stm/`~~ (đã có, v1.0).
 - STM-4: thêm ghi chú ở `failed` giống ghi chú ở `expired` (thành công sau đó ghi thành khoản trễ, không cộng, Admin hoàn); ghi rõ kết quả lặp / khoản trễ trùng `transactionNo` là no-op (D3, D4 ⊕).
 - Thống nhất D10 với WP4.
+- **SD-2f cần vẽ lại** theo D6: tài xế chỉ đóng (bước 1), Admin hoàn (bước 2, `requestedBy = adminId`). Sửa cả nhãn SD-2f trong bảng diagram.
+- **BR-P21 cần sửa SRS:** số dư lúc đóng lớn hơn tổng `amountPaidVnd` của các top-up `credited` chưa hoàn thì phần dư không hoàn được, ghi credit `adjustment` −phần dư để số dư về 0 (D6, chốt 06/11). BR-P21 hiện chưa nói về trường hợp này.
+- **Migration mới ở Phần 6** (gộp với migration nới `top_ups_late_payment_status_check`, D4 ⊕) có thể siết `refunds_requested_by_check` của 0015 thành `requested_by IS NOT NULL`, vì giờ mọi `kind` đều do Admin tạo (D6). Trí review.
 - **Lần trả thứ hai cho cùng top-up** (D3 ⊕: thành công với `transactionNo` khác trên `credited` / `refunded` → `conflicting_result`): tiền đã vào VNPay nhưng không có cột để ghi (`late_*` chỉ dành cho top-up chưa cộng, `gateway_transaction_no` đã có giá trị). Cần chốt cách ghi và cách Admin hoàn (cột mới? bảng riêng? `refunds.kind` mới?) trước Phần 6.
 - Đổi tên `lateGatewayRef` → `lateGatewayTransactionNo`?
 - VNPay sandbox: refund có chống trùng không, có API tra trạng thái hoàn không (`VnpayAdapter.queryRefund`), thời hạn được hoàn, danh sách mã IPN.
