@@ -297,6 +297,26 @@ export class ReconciliationService {
     });
   }
 
+  /**
+   * BE-19 (G8): thẻ `online` đang `active` nhưng không đạt BR-P23/BR-P18 lúc phiên bắt đầu (thẻ chưa
+   * gắn tài xế, ví đóng, số dư dưới mức tối thiểu...). Phiên đã diễn ra nên vẫn được ghi; operator
+   * thấy lý do qua `card_denied=` (cùng cách phân biệt bằng resolution như `card_status=`).
+   */
+  async recordCardDenied(
+    ex: DbExecutor,
+    sessionId: number,
+    idTag: string,
+    reason: string,
+  ): Promise<number | null> {
+    return this.insert(ex, sessionId, {
+      recordType: 'unknown_id_tag',
+      gapStart: null,
+      gapEnd: null,
+      energyDifferenceWh: null,
+      resolution: `unknown_id_tag: id_tag=${idTag} card_denied=${reason} (the active nhung khong dat BR-P23/BR-P18)`,
+    });
+  }
+
   // WP3/T31: retain the physical start and its conflicting app binding without assigning a payer.
   async recordAppIntentReuse(
     ex: DbExecutor,
