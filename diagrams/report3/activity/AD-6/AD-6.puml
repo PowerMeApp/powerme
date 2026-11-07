@@ -1,0 +1,78 @@
+@startuml AD-6
+!include _style.iuml
+title AD-6 (System level) — Session started at the Charge Point (RFID card, password or free vend)\nTrigger: Driver starts charging at the Charge Point without the app · Use cases: UC-INT-02, UC-INT-03, UC-OPS-05 · Rules: BR-P23, BR-P28, ADR-0012
+
+|«person»\nDriver|
+|«software system»\nPowerMe Platform|
+|«external system»\nCharge Point|
+|«person»\nOperator|
+|«person»\nDriver|
+start
+:Tap RFID card, enter Charge Point\npassword, or plug in (free vend);
+|«external system»\nCharge Point|
+if ( ) then ([RFID card tapped])
+  :Ask platform to\nauthorize the card>
+  |«software system»\nPowerMe Platform|
+  :Check card in the\ncard registry;
+  if ( ) then ([unknown, unlinked or blocked card,\nonline card with credit < start minimum,\nor connector held for another Driver])
+    :Refuse card (Charge Point\nshows the refusal)>
+    stop
+  else ([online card with enough\ncredit, or wallet card])
+    :Accept card>
+  endif
+else ([password entered or\nfree-vend plug-in])
+  |«external system»\nCharge Point|
+  :Authorize locally\n(platform not asked);
+endif
+|«external system»\nCharge Point|
+:Start energy delivery and\nreport session start>
+|«software system»\nPowerMe Platform|
+:Record session (never dropped)\nand classify its tag;
+:ChargingSession\n&#91;active&#93;]
+if ( ) then ([tag not in the registry])
+  :Log unknown tag for\nOperator review;
+  :ReconciliationRecord\n&#91;unknown_id_tag&#93;]
+else ([else])
+endif
+if ( ) then ([connector was reserved\nfor another Driver])
+  :Void that reservation (no fee)\nand notify its holder;
+  :Reservation\n&#91;voided&#93;]
+else ([else])
+endif
+|«external system»\nCharge Point|
+:Deliver energy and\nsend meter readings>
+if ( ) then ([Driver stops at\nthe Charge Point])
+  |«person»\nDriver|
+  :Tap card again or\npress Stop;
+else ([battery full])
+endif
+|«external system»\nCharge Point|
+:Stop delivery and\nreport session end>
+|«software system»\nPowerMe Platform|
+:Close session and price\nit per tariff period;
+:ChargingSession\n&#91;closed&#93;]
+if ( ) then ([online card:\ncsms_billed])
+  :Debit Charging Credit, split platform\nfee and Operator share, award points;
+  :ChargingSession\n&#91;reconciled&#93;]
+  :CreditTransaction\n&#91;session_debit&#93;]
+  if ( ) then ([cost > credit balance])
+    :CreditAccount\n&#91;in_shortfall&#93;]
+  else ([else])
+  endif
+  |«person»\nDriver|
+  :View charging statement\nin the app;
+  stop
+else ([else])
+  |«software system»\nPowerMe Platform|
+  if ( ) then ([wallet card:\nstation_wallet])
+    :Keep price for reconciliation\nonly (no debit, no invoice);
+    :ChargingSession\n&#91;reconciled&#93;]
+    stop
+  else ([password, free-vend or\nunknown tag: unattributed])
+    :Add to the unattributed\nsession list;
+    |«person»\nOperator|
+    :Resolve unattributed\nsession (UC-OPS-05);
+    stop
+  endif
+endif
+@enduml

@@ -1,0 +1,72 @@
+@startuml AD-9
+!include _style.iuml
+title AD-9 (System level) — Handle billing exceptions: refunds and e-invoice retry\nTrigger: Admin picks an item on Billing Exceptions, or a Driver closes the account\nUse cases: UC-ADM-08, UC-ACC-02 · Rules: BR-P13, BR-P14, BR-P21, BR-P44, BR-P45
+
+|«person»\nDriver|
+|«person»\nAdmin|
+|«software system»\nPowerMe Platform|
+|«external system»\nPayment\nGateway|
+|«external system»\nE-Invoice\nProvider|
+|«software system»\nPowerMe Platform|
+start
+if ( ) then ([Admin picks an item])
+  |«person»\nAdmin|
+  :Open Billing Exceptions\nand choose an item;
+  |«software system»\nPowerMe Platform|
+  if ( ) then ([top-up to refund])
+    :Check that the balance\ncovers the top-up;
+    if ( ) then ([balance < top-up amount,\nor top-up not credited])
+      :Refuse with reason;
+      stop
+    else ([balance covers it])
+      :Record the refund at once: debit\ncredit, restore redeemed points;
+      :TopUp\n&#91;refunded&#93;]
+      :LoyaltyTransaction\n&#91;restore&#93;]
+    endif
+  else ([else])
+    if ( ) then ([e-invoice needs review])
+      :Send the e-invoice to the provider\nagain, once (attempt count not reset)>
+      if ( ) then ([issued by the provider])
+        :EInvoice\n&#91;issued&#93;]
+      else ([provider error])
+        :EInvoice\n&#91;needs_review&#93;]
+      endif
+      stop
+    else ([late payment to refund,\nor failed refund to retry])
+    endif
+  endif
+else ([Driver closed the account])
+  |«software system»\nPowerMe Platform|
+  :Debit unused credit and split it\nover the newest credited top-ups;
+  :CreditAccount\n&#91;closed&#93;]
+endif
+if ( ) then ([failed refund\nbeing retried])
+else ([new refund])
+  :Create refund request\n(one per top-up and kind);
+  :Refund\n&#91;requested&#93;]
+endif
+:Send refund to the original payment\nsource (automatic retries after 5 min,\n30 min, 2 h; unknown result: query\nthe gateway before any resend)>
+|«external system»\nPayment\nGateway|
+:Process refund and\nreturn the result>
+|«software system»\nPowerMe Platform|
+if ( ) then ([rejected, or fourth\nattempt failed])
+  :List the failed refund on\nBilling Exceptions, notify Admin;
+  :Refund\n&#91;failed&#93;]
+  stop
+else ([confirmed by the gateway])
+endif
+:Refund\n&#91;done&#93;]
+:Request adjustment invoice\nfor the amount refunded>
+|«external system»\nE-Invoice\nProvider|
+:Issue adjustment\ninvoice;
+|«software system»\nPowerMe Platform|
+if ( ) then ([issued])
+  :InvoiceAdjustment\n&#91;issued&#93;]
+else ([error after\nautomatic retries])
+  :InvoiceAdjustment\n&#91;needs_review&#93;]
+endif
+:Notify Driver that the\nrefund was sent (MSG25);
+|«person»\nDriver|
+:Receive refund\nconfirmation;
+stop
+@enduml

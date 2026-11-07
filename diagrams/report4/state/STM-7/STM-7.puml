@@ -1,0 +1,23 @@
+@startuml STM-7
+!include _style.iuml
+title STM-7 (System level) — Lifecycle of an EInvoice\ne_invoices.status, invoice_adjustments.status · v1.0 · 01/11/2026
+
+state c1 <<choice>>
+[*] --> requested : / send invoice data\nto provider
+note left of requested
+  created when a top-up is credited
+  (EInvoice) or a refund is done
+  (InvoiceAdjustment)
+end note
+requested --> issued : provider returns invoice number\n/ send invoice to Driver
+requested --> c1 : provider error or no reply\n/ attempts + 1, record error kind
+c1 --> failed : [transient error\nand attempts < 4]
+c1 --> needs_review : [else]\n/ notify Admin with the error
+failed --> requested : after(retry delay)\n/ send again
+needs_review --> requested : Admin retries\n/ rebuild invoice data,\ncounter not reset
+issued --> [*]
+note right of issued
+  An invoice failure never blocks
+  charging. Retry delays: 5 min, 30 min, 2 h.
+end note
+@enduml

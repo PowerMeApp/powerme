@@ -1,0 +1,22 @@
+@startuml STM-8
+!include _style.iuml
+title STM-8 (System level) — Status of an RfidCard\nrfid_cards.status · v1.0 · 01/11/2026
+
+[*] --> unlinked
+note left of unlinked
+  created when the Admin registers
+  a card (UC-ADM-04); kind online,
+  wallet or free_vend
+end note
+unlinked --> active : Admin links it\nto a Driver
+active --> unlinked : Admin unlinks it
+active --> blocked : Admin blocks it\n(lost or misused)
+blocked --> active : Admin unblocks it
+blocked --> [*] : Admin retires it
+note right of active
+  Only active cards are accepted at the
+  Charge Point. A session started offline
+  with an unlinked or blocked card is still
+  recorded, as unattributed (AD-6).
+end note
+@enduml

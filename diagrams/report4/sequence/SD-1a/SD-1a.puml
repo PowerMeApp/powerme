@@ -1,0 +1,59 @@
+@startuml SD-1a
+!include ../_style.iuml
+title SD-1a (Software level, Driver App) — Driver finds a station and charges with the app\nPrecondition: Driver is logged in and has a compatible vehicle · System view: AD-1 · State: STM-1 · API: Driver API contract v0.1.0 (#69)
+footer Owner: Lý Hoàng Sơn (WP3) · v2.1 · 01/11/2026 · names = CD-1 (apps/mobile) · left gate = Driver (UI), right gate = CSMS /api/driver/v1 · no realtime in v0.1.0: the app polls
+
+participant "«component»\n<u>:StationsController</u>" as SC
+participant "«port»\n<u>:StationRepository</u>" as SR
+participant "«component»\n<u>:ChargingController</u>" as CC
+participant "«port»\n<u>:ChargingRepository</u>" as CR
+
+[-> SC ++ : find(vehicleId, query)
+SC -> SR ++ : find(vehicleId, query) : List<StationOption>
+SR ->] : GET /stations?vehicleId&q [HTTPS, JWT]
+SR <--] : 200 stations with live connector status
+SR --> SC -- : options
+[<-- SC -- : show ranked stations
+
+... Driver goes to the station, plugs in and scans the connector QR code ...
+
+[-> CC ++ : start(request : StartRequest)
+CC -> CR ++ : start(request) : CommandOutcome
+CR ->] : POST /charges {connectorId, vehicleId, mode, limit} [HTTPS, JWT, Idempotency-Key]
+note right : {d ≤ 10 s}, else\nretry with the same key
+CR <--] : 202 {outcome} | 409 / 422 {reasonCode}
+CR --> CC -- : outcome
+break outcome = rejected (connector busy, incompatible, credit below start minimum)
+  [<-- CC : show reason, offer top-up (ref SD-2a)
+end
+loop until outcome.sessionId ≠ null (Charge Point confirmed the start)
+  CC -> CR ++ : outcome(key) : CommandOutcome
+  CR ->] : GET /charges/{key}
+  CR <--] : 200 {outcome, sessionId}
+  CR --> CC -- : outcome
+end
+[<-- CC -- : show "Charging" {state = active}
+
+CC -> CR ++ : watch(sessionId) : Stream<SessionSnapshot>
+loop every 5 s until state is closed, reconciled or failed
+  CR ->] : GET /sessions/{id}/progress
+  CR <--] : 200 {state, energyWh, estimatedCostVnd, availableCreditVnd, socPercent}
+  CR ->> CC : snapshot(SessionSnapshot)
+  [<<- CC : show live energy, cost, credit left
+end
+deactivate CR
+note over SC, CR : Charging also ends without the Driver: limit reached, battery full or credit at cutoff (SD-1b).
+
+[-> CC ++ : stop(sessionId, key)
+CC -> CR ++ : stop(sessionId, key) : CommandOutcome
+CR ->] : POST /sessions/{id}/stop [HTTPS, JWT, Idempotency-Key]
+CR <--] : 202 {outcome, state = stopping}
+CR --> CC -- : accepted
+[<-- CC -- : show "Stopping…"
+
+CR ->] : GET /sessions/{id}/statement
+note right : after the CSMS settles\nthe session (ref SD-1b)
+CR <--] : 200 {energyWh, amountVnd, earnedPoints, balanceVnd}
+CR ->> CC : snapshot(Statement)
+[<<- CC : show receipt
+@enduml

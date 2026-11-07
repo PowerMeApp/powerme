@@ -1,0 +1,6755 @@
+{
+  "TABLE": {
+    "User": "users",
+    "Admin": "admins",
+    "OperatorStaff": "operator_staff",
+    "Driver": "drivers",
+    "Operator": "operators",
+    "Site": "sites",
+    "ChargePoint": "charge_points",
+    "Connector": "connectors",
+    "ConnectorStatusEvent": "connector_status_events",
+    "RemoteCommand": "remote_commands",
+    "FaultEvent": "fault_events",
+    "FaultReport": "fault_reports",
+    "MaintenanceTicket": "maintenance_tickets",
+    "PolicyTemplate": "policy_templates",
+    "TariffPeriod": "tariff_periods",
+    "Promotion": "promotions",
+    "Reservation": "reservations",
+    "ChargingSession": "sessions",
+    "SessionPause": "session_pauses",
+    "SessionStatusChange": "session_status_history",
+    "MeterReading": "meter_values",
+    "SessionTariffSegment": "session_tariff_segments",
+    "ReconciliationRecord": "reconciliation_records",
+    "Vehicle": "vehicles",
+    "VehicleModel": "vehicle_models",
+    "RfidCard": "rfid_cards",
+    "CreditAccount": "credit_accounts",
+    "CreditTransaction": "credit_transactions",
+    "TopUp": "top_ups",
+    "EInvoice": "e_invoices",
+    "InvoiceAdjustment": "invoice_adjustments",
+    "Refund": "refunds",
+    "LoyaltyAccount": "loyalty_accounts",
+    "LoyaltyTransaction": "loyalty_transactions"
+  },
+  "TECH": [
+    "charge_point_connections",
+    "ocpp_message_log",
+    "driver_charge_intents",
+    "driver_charge_intent_events",
+    "driver_stop_intents",
+    "driver_stop_attempts",
+    "driver_start_recoveries",
+    "charge_settlement_jobs",
+    "charge_tariff_boundary_evidence",
+    "charging_statements"
+  ],
+  "ROWS": {
+    "admins": [
+      {
+        "key": "PK,FK",
+        "planned": true,
+        "name": "user_id",
+        "type": "bigint",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      }
+    ],
+    "charge_point_connections": [
+      {
+        "key": "PK",
+        "planned": false,
+        "name": "id",
+        "type": "bigint",
+        "nn": true,
+        "default": "identity",
+        "raw_default": ""
+      },
+      {
+        "key": "FK,UQ1",
+        "planned": false,
+        "name": "charge_point_id",
+        "type": "bigint",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "UQ1",
+        "planned": false,
+        "name": "epoch",
+        "type": "integer",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "opened_at",
+        "type": "timestamptz",
+        "nn": true,
+        "default": "now()",
+        "raw_default": "now()"
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "closed_at",
+        "type": "timestamptz",
+        "nn": false,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "close_reason",
+        "type": "text",
+        "nn": false,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "remote_address",
+        "type": "varchar(64)",
+        "nn": false,
+        "default": "",
+        "raw_default": ""
+      }
+    ],
+    "charge_points": [
+      {
+        "key": "PK",
+        "planned": false,
+        "name": "id",
+        "type": "bigint",
+        "nn": true,
+        "default": "identity",
+        "raw_default": ""
+      },
+      {
+        "key": "UQ",
+        "planned": false,
+        "name": "serial_number",
+        "type": "varchar(25)",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "UQ",
+        "planned": false,
+        "name": "display_code",
+        "type": "varchar(100)",
+        "nn": false,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "FK",
+        "planned": false,
+        "name": "site_id",
+        "type": "bigint",
+        "nn": false,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "model",
+        "type": "varchar(20)",
+        "nn": false,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "firmware_version",
+        "type": "varchar(50)",
+        "nn": false,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "rated_power_kw",
+        "type": "numeric(7,2)",
+        "nn": false,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "warranty_until",
+        "type": "date",
+        "nn": false,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "lifecycle",
+        "type": "charge_point_lifecycle",
+        "nn": true,
+        "default": "'registered'",
+        "raw_default": "'registered'::charge_point_lifecycle"
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "free_vend_tag",
+        "type": "varchar(20)",
+        "nn": false,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "reports_soc",
+        "type": "boolean",
+        "nn": true,
+        "default": "false",
+        "raw_default": "false"
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "supports_reservation",
+        "type": "boolean",
+        "nn": true,
+        "default": "false",
+        "raw_default": "false"
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "current_epoch",
+        "type": "integer",
+        "nn": true,
+        "default": "0",
+        "raw_default": "0"
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "basic_auth_password_hash",
+        "type": "text",
+        "nn": false,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "last_message_at",
+        "type": "timestamptz",
+        "nn": false,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "is_online",
+        "type": "boolean",
+        "nn": true,
+        "default": "false",
+        "raw_default": "false"
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "online_changed_at",
+        "type": "timestamptz",
+        "nn": false,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "created_at",
+        "type": "timestamptz",
+        "nn": true,
+        "default": "now()",
+        "raw_default": "now()"
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "updated_at",
+        "type": "timestamptz",
+        "nn": true,
+        "default": "now()",
+        "raw_default": "now()"
+      }
+    ],
+    "charge_settlement_jobs": [
+      {
+        "key": "PK,FK",
+        "planned": false,
+        "name": "session_id",
+        "type": "bigint",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "state",
+        "type": "varchar(20)",
+        "nn": true,
+        "default": "'pending'",
+        "raw_default": "'pending'::text"
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "reason",
+        "type": "varchar(30)",
+        "nn": true,
+        "default": "'stop_observed'",
+        "raw_default": "'stop_observed'::text"
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "attempts",
+        "type": "integer",
+        "nn": true,
+        "default": "0",
+        "raw_default": "0"
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "last_error_code",
+        "type": "varchar(50)",
+        "nn": false,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "next_attempt_at",
+        "type": "timestamptz",
+        "nn": true,
+        "default": "now()",
+        "raw_default": "now()"
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "updated_at",
+        "type": "timestamptz",
+        "nn": true,
+        "default": "now()",
+        "raw_default": "now()"
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "created_at",
+        "type": "timestamptz",
+        "nn": true,
+        "default": "now()",
+        "raw_default": "now()"
+      }
+    ],
+    "charge_tariff_boundary_evidence": [
+      {
+        "key": "PK,FK",
+        "planned": false,
+        "name": "session_id",
+        "type": "bigint",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "PK",
+        "planned": false,
+        "name": "boundary_at",
+        "type": "timestamptz",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "meter_wh",
+        "type": "bigint",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "FK",
+        "planned": false,
+        "name": "recorded_by",
+        "type": "bigint",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "evidence_note",
+        "type": "text",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "created_at",
+        "type": "timestamptz",
+        "nn": true,
+        "default": "now()",
+        "raw_default": "now()"
+      }
+    ],
+    "charging_statements": [
+      {
+        "key": "PK,FK",
+        "planned": false,
+        "name": "session_id",
+        "type": "bigint",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "FK",
+        "planned": false,
+        "name": "driver_id",
+        "type": "bigint",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "energy_wh",
+        "type": "bigint",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "amount_vnd",
+        "type": "bigint",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "earned_points",
+        "type": "bigint",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "FK,UQ",
+        "planned": false,
+        "name": "debit_id",
+        "type": "bigint",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "FK,UQ",
+        "planned": false,
+        "name": "loyalty_entry_id",
+        "type": "bigint",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "created_at",
+        "type": "timestamptz",
+        "nn": true,
+        "default": "now()",
+        "raw_default": "now()"
+      }
+    ],
+    "connector_status_events": [
+      {
+        "key": "PK",
+        "planned": false,
+        "name": "id",
+        "type": "bigint",
+        "nn": true,
+        "default": "identity",
+        "raw_default": ""
+      },
+      {
+        "key": "FK,UQ1",
+        "planned": false,
+        "name": "charge_point_id",
+        "type": "bigint",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "UQ1",
+        "planned": false,
+        "name": "connector_no",
+        "type": "smallint",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "status",
+        "type": "connector_status",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "error_code",
+        "type": "varchar(30)",
+        "nn": true,
+        "default": "'NoError'",
+        "raw_default": "'NoError'::text"
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "vendor_error_code",
+        "type": "varchar(50)",
+        "nn": false,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "info",
+        "type": "varchar(50)",
+        "nn": false,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "cp_timestamp",
+        "type": "timestamptz",
+        "nn": false,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "UQ1",
+        "planned": false,
+        "name": "received_at",
+        "type": "timestamptz",
+        "nn": true,
+        "default": "now()",
+        "raw_default": "now()"
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "unexpected_transition",
+        "type": "boolean",
+        "nn": true,
+        "default": "false",
+        "raw_default": "false"
+      }
+    ],
+    "connectors": [
+      {
+        "key": "PK",
+        "planned": false,
+        "name": "id",
+        "type": "bigint",
+        "nn": true,
+        "default": "identity",
+        "raw_default": ""
+      },
+      {
+        "key": "FK,UQ1",
+        "planned": false,
+        "name": "charge_point_id",
+        "type": "bigint",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "UQ1",
+        "planned": false,
+        "name": "connector_no",
+        "type": "smallint",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "connector_type",
+        "type": "connector_type",
+        "nn": true,
+        "default": "'ccs2'",
+        "raw_default": "'ccs2'::connector_type"
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "max_power_kw",
+        "type": "numeric(7,2)",
+        "nn": false,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "status",
+        "type": "connector_status",
+        "nn": true,
+        "default": "'Unavailable'",
+        "raw_default": "'Unavailable'::connector_status"
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "status_changed_at",
+        "type": "timestamptz",
+        "nn": false,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "created_at",
+        "type": "timestamptz",
+        "nn": true,
+        "default": "now()",
+        "raw_default": "now()"
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "updated_at",
+        "type": "timestamptz",
+        "nn": true,
+        "default": "now()",
+        "raw_default": "now()"
+      }
+    ],
+    "credit_accounts": [
+      {
+        "key": "PK",
+        "planned": false,
+        "name": "id",
+        "type": "bigint",
+        "nn": true,
+        "default": "identity",
+        "raw_default": ""
+      },
+      {
+        "key": "FK,UQ",
+        "planned": false,
+        "name": "driver_id",
+        "type": "bigint",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "status",
+        "type": "credit_account_status",
+        "nn": true,
+        "default": "'active'",
+        "raw_default": "'active'::credit_account_status"
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "balance_vnd",
+        "type": "bigint",
+        "nn": true,
+        "default": "0",
+        "raw_default": "0"
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "closed_at",
+        "type": "timestamptz",
+        "nn": false,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "closure_refunded_at",
+        "type": "timestamptz",
+        "nn": false,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "created_at",
+        "type": "timestamptz",
+        "nn": true,
+        "default": "now()",
+        "raw_default": "now()"
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "updated_at",
+        "type": "timestamptz",
+        "nn": true,
+        "default": "now()",
+        "raw_default": "now()"
+      }
+    ],
+    "credit_transactions": [
+      {
+        "key": "PK",
+        "planned": false,
+        "name": "id",
+        "type": "bigint",
+        "nn": true,
+        "default": "identity",
+        "raw_default": ""
+      },
+      {
+        "key": "FK,UQ1",
+        "planned": false,
+        "name": "credit_account_id",
+        "type": "bigint",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "UQ1",
+        "planned": false,
+        "name": "entry_no",
+        "type": "bigint",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "transaction_type",
+        "type": "credit_transaction_type",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "amount_vnd",
+        "type": "bigint",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "balance_after_vnd",
+        "type": "bigint",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "FK",
+        "planned": false,
+        "name": "session_id",
+        "type": "bigint",
+        "nn": false,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "FK",
+        "planned": false,
+        "name": "top_up_id",
+        "type": "bigint",
+        "nn": false,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "FK,UQ",
+        "planned": true,
+        "name": "reservation_id",
+        "type": "bigint",
+        "nn": false,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "created_at",
+        "type": "timestamptz",
+        "nn": true,
+        "default": "now()",
+        "raw_default": "now()"
+      }
+    ],
+    "driver_charge_intent_events": [
+      {
+        "key": "PK",
+        "planned": false,
+        "name": "id",
+        "type": "bigint",
+        "nn": true,
+        "default": "identity",
+        "raw_default": ""
+      },
+      {
+        "key": "FK",
+        "planned": false,
+        "name": "intent_id",
+        "type": "bigint",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "FK",
+        "planned": false,
+        "name": "actor_id",
+        "type": "bigint",
+        "nn": false,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "event",
+        "type": "varchar(50)",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "note",
+        "type": "text",
+        "nn": false,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "created_at",
+        "type": "timestamptz",
+        "nn": true,
+        "default": "now()",
+        "raw_default": "now()"
+      }
+    ],
+    "driver_charge_intents": [
+      {
+        "key": "PK",
+        "planned": false,
+        "name": "id",
+        "type": "bigint",
+        "nn": true,
+        "default": "identity",
+        "raw_default": ""
+      },
+      {
+        "key": "FK,UQ1",
+        "planned": false,
+        "name": "driver_id",
+        "type": "bigint",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "FK",
+        "planned": false,
+        "name": "connector_id",
+        "type": "bigint",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "FK",
+        "planned": false,
+        "name": "vehicle_id",
+        "type": "bigint",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "UQ1",
+        "planned": false,
+        "name": "idempotency_key",
+        "type": "varchar(64)",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "request_hash",
+        "type": "varchar(64)",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "UQ",
+        "planned": false,
+        "name": "id_tag",
+        "type": "varchar(20)",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "energy_limit_wh",
+        "type": "bigint",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "reserved_vnd",
+        "type": "bigint",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "FK,UQ",
+        "planned": false,
+        "name": "command_id",
+        "type": "bigint",
+        "nn": false,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "FK,UQ",
+        "planned": false,
+        "name": "session_id",
+        "type": "bigint",
+        "nn": false,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "state",
+        "type": "varchar(20)",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "rejection_reason",
+        "type": "text",
+        "nn": false,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "max_energy_wh",
+        "type": "bigint",
+        "nn": false,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "version",
+        "type": "integer",
+        "nn": true,
+        "default": "1",
+        "raw_default": "1"
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "connector_released_at",
+        "type": "timestamptz",
+        "nn": false,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "billing_review_required",
+        "type": "boolean",
+        "nn": true,
+        "default": "false",
+        "raw_default": "false"
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "created_at",
+        "type": "timestamptz",
+        "nn": true,
+        "default": "now()",
+        "raw_default": "now()"
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "updated_at",
+        "type": "timestamptz",
+        "nn": true,
+        "default": "now()",
+        "raw_default": "now()"
+      }
+    ],
+    "driver_start_recoveries": [
+      {
+        "key": "PK,FK",
+        "planned": false,
+        "name": "intent_id",
+        "type": "bigint",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "FK",
+        "planned": false,
+        "name": "operator_user_id",
+        "type": "bigint",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "connection_epoch",
+        "type": "integer",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "FK,UQ",
+        "planned": false,
+        "name": "fence_command_id",
+        "type": "bigint",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "FK,UQ",
+        "planned": false,
+        "name": "restore_command_id",
+        "type": "bigint",
+        "nn": false,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "evidence_note",
+        "type": "text",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "released_vnd",
+        "type": "bigint",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "released_at",
+        "type": "timestamptz",
+        "nn": false,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "fence_attempt",
+        "type": "integer",
+        "nn": true,
+        "default": "1",
+        "raw_default": "1"
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "restore_attempt",
+        "type": "integer",
+        "nn": true,
+        "default": "0",
+        "raw_default": "0"
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "created_at",
+        "type": "timestamptz",
+        "nn": true,
+        "default": "now()",
+        "raw_default": "now()"
+      }
+    ],
+    "driver_stop_attempts": [
+      {
+        "key": "PK,FK",
+        "planned": false,
+        "name": "command_id",
+        "type": "bigint",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "FK,UQ1,UQ2",
+        "planned": false,
+        "name": "intent_id",
+        "type": "bigint",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "UQ1",
+        "planned": false,
+        "name": "attempt_no",
+        "type": "integer",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "kind",
+        "type": "varchar(20)",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "FK,UQ",
+        "planned": false,
+        "name": "previous_command_id",
+        "type": "bigint",
+        "nn": false,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "connection_epoch",
+        "type": "integer",
+        "nn": false,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "UQ2",
+        "planned": false,
+        "name": "evidence_meter_id",
+        "type": "bigint",
+        "nn": false,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "UQ2",
+        "planned": false,
+        "name": "evidence_received_at",
+        "type": "timestamptz",
+        "nn": false,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "FK",
+        "planned": false,
+        "name": "operator_user_id",
+        "type": "bigint",
+        "nn": false,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "note",
+        "type": "text",
+        "nn": false,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "created_at",
+        "type": "timestamptz",
+        "nn": true,
+        "default": "now()",
+        "raw_default": "now()"
+      }
+    ],
+    "driver_stop_intents": [
+      {
+        "key": "PK",
+        "planned": false,
+        "name": "id",
+        "type": "bigint",
+        "nn": true,
+        "default": "identity",
+        "raw_default": ""
+      },
+      {
+        "key": "FK,UQ1",
+        "planned": false,
+        "name": "driver_id",
+        "type": "bigint",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "FK",
+        "planned": false,
+        "name": "session_id",
+        "type": "bigint",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "UQ1",
+        "planned": false,
+        "name": "idempotency_key",
+        "type": "varchar(64)",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "FK,UQ",
+        "planned": false,
+        "name": "command_id",
+        "type": "bigint",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "state",
+        "type": "varchar(20)",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "created_at",
+        "type": "timestamptz",
+        "nn": true,
+        "default": "now()",
+        "raw_default": "now()"
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "updated_at",
+        "type": "timestamptz",
+        "nn": true,
+        "default": "now()",
+        "raw_default": "now()"
+      }
+    ],
+    "drivers": [
+      {
+        "key": "PK,FK",
+        "planned": false,
+        "name": "user_id",
+        "type": "bigint",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "consent_version",
+        "type": "varchar(20)",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "consent_given_at",
+        "type": "timestamptz",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      }
+    ],
+    "e_invoices": [
+      {
+        "key": "PK",
+        "planned": false,
+        "name": "id",
+        "type": "bigint",
+        "nn": true,
+        "default": "identity",
+        "raw_default": ""
+      },
+      {
+        "key": "UQ",
+        "planned": false,
+        "name": "invoice_no",
+        "type": "varchar(20)",
+        "nn": false,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "FK,UQ",
+        "planned": false,
+        "name": "top_up_id",
+        "type": "bigint",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "status",
+        "type": "e_invoice_status",
+        "nn": true,
+        "default": "'requested'",
+        "raw_default": "'requested'::e_invoice_status"
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "amount_vnd",
+        "type": "bigint",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "vat_amount_vnd",
+        "type": "bigint",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "issued_at",
+        "type": "timestamptz",
+        "nn": false,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "attempt_count",
+        "type": "integer",
+        "nn": true,
+        "default": "0",
+        "raw_default": "0"
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "last_error_kind",
+        "type": "e_invoice_error_kind",
+        "nn": false,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "last_error_message",
+        "type": "text",
+        "nn": false,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "last_attempt_at",
+        "type": "timestamptz",
+        "nn": false,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "created_at",
+        "type": "timestamptz",
+        "nn": true,
+        "default": "now()",
+        "raw_default": "now()"
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "updated_at",
+        "type": "timestamptz",
+        "nn": true,
+        "default": "now()",
+        "raw_default": "now()"
+      }
+    ],
+    "fault_events": [
+      {
+        "key": "PK",
+        "planned": false,
+        "name": "id",
+        "type": "bigint",
+        "nn": true,
+        "default": "identity",
+        "raw_default": ""
+      },
+      {
+        "key": "UQ",
+        "planned": false,
+        "name": "event_no",
+        "type": "bigint",
+        "nn": true,
+        "default": "sequence",
+        "raw_default": "nextval('fault_events_event_no_seq'::regclass)"
+      },
+      {
+        "key": "FK",
+        "planned": false,
+        "name": "charge_point_id",
+        "type": "bigint",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "FK",
+        "planned": false,
+        "name": "connector_id",
+        "type": "bigint",
+        "nn": false,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "source",
+        "type": "fault_source",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "error_code",
+        "type": "varchar(50)",
+        "nn": false,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "status",
+        "type": "fault_event_status",
+        "nn": true,
+        "default": "'raised'",
+        "raw_default": "'raised'::fault_event_status"
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "raised_at",
+        "type": "timestamptz",
+        "nn": true,
+        "default": "now()",
+        "raw_default": "now()"
+      },
+      {
+        "key": "FK",
+        "planned": false,
+        "name": "acknowledged_by",
+        "type": "bigint",
+        "nn": false,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "acknowledged_at",
+        "type": "timestamptz",
+        "nn": false,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "resolved_at",
+        "type": "timestamptz",
+        "nn": false,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "FK",
+        "planned": false,
+        "name": "reset_command_id",
+        "type": "bigint",
+        "nn": false,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "updated_at",
+        "type": "timestamptz",
+        "nn": true,
+        "default": "now()",
+        "raw_default": "now()"
+      }
+    ],
+    "fault_reports": [
+      {
+        "key": "PK",
+        "planned": false,
+        "name": "id",
+        "type": "bigint",
+        "nn": true,
+        "default": "identity",
+        "raw_default": ""
+      },
+      {
+        "key": "UQ",
+        "planned": false,
+        "name": "report_no",
+        "type": "bigint",
+        "nn": true,
+        "default": "sequence",
+        "raw_default": "nextval('fault_reports_report_no_seq'::regclass)"
+      },
+      {
+        "key": "FK",
+        "planned": false,
+        "name": "driver_id",
+        "type": "bigint",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "FK",
+        "planned": false,
+        "name": "connector_id",
+        "type": "bigint",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "description",
+        "type": "text",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "reported_at",
+        "type": "timestamptz",
+        "nn": true,
+        "default": "now()",
+        "raw_default": "now()"
+      },
+      {
+        "key": "FK",
+        "planned": false,
+        "name": "fault_event_id",
+        "type": "bigint",
+        "nn": false,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "cleared_at",
+        "type": "timestamptz",
+        "nn": false,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "FK",
+        "planned": false,
+        "name": "cleared_by",
+        "type": "bigint",
+        "nn": false,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "updated_at",
+        "type": "timestamptz",
+        "nn": true,
+        "default": "now()",
+        "raw_default": "now()"
+      }
+    ],
+    "invoice_adjustments": [
+      {
+        "key": "PK",
+        "planned": false,
+        "name": "id",
+        "type": "bigint",
+        "nn": true,
+        "default": "identity",
+        "raw_default": ""
+      },
+      {
+        "key": "FK,UQ1",
+        "planned": false,
+        "name": "e_invoice_id",
+        "type": "bigint",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "UQ1",
+        "planned": false,
+        "name": "adjustment_no",
+        "type": "smallint",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "reason",
+        "type": "text",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "amount_vnd",
+        "type": "bigint",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "issued_at",
+        "type": "timestamptz",
+        "nn": false,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "FK,UQ",
+        "planned": true,
+        "name": "refund_id",
+        "type": "bigint",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "UQ",
+        "planned": true,
+        "name": "provider_adjustment_no",
+        "type": "varchar(20)",
+        "nn": false,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": true,
+        "name": "status",
+        "type": "e_invoice_status",
+        "nn": true,
+        "default": "'requested'",
+        "raw_default": "'requested'::e_invoice_status"
+      },
+      {
+        "key": "",
+        "planned": true,
+        "name": "attempt_count",
+        "type": "integer",
+        "nn": true,
+        "default": "0",
+        "raw_default": "0"
+      },
+      {
+        "key": "",
+        "planned": true,
+        "name": "last_error_kind",
+        "type": "e_invoice_error_kind",
+        "nn": false,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": true,
+        "name": "last_error_message",
+        "type": "text",
+        "nn": false,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": true,
+        "name": "last_attempt_at",
+        "type": "timestamptz",
+        "nn": false,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": true,
+        "name": "created_at",
+        "type": "timestamptz",
+        "nn": true,
+        "default": "now()",
+        "raw_default": "now()"
+      },
+      {
+        "key": "",
+        "planned": true,
+        "name": "updated_at",
+        "type": "timestamptz",
+        "nn": true,
+        "default": "now()",
+        "raw_default": "now()"
+      }
+    ],
+    "loyalty_accounts": [
+      {
+        "key": "PK",
+        "planned": false,
+        "name": "id",
+        "type": "bigint",
+        "nn": true,
+        "default": "identity",
+        "raw_default": ""
+      },
+      {
+        "key": "FK,UQ",
+        "planned": false,
+        "name": "driver_id",
+        "type": "bigint",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "points_balance",
+        "type": "bigint",
+        "nn": true,
+        "default": "0",
+        "raw_default": "0"
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "created_at",
+        "type": "timestamptz",
+        "nn": true,
+        "default": "now()",
+        "raw_default": "now()"
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "updated_at",
+        "type": "timestamptz",
+        "nn": true,
+        "default": "now()",
+        "raw_default": "now()"
+      }
+    ],
+    "loyalty_transactions": [
+      {
+        "key": "PK",
+        "planned": false,
+        "name": "id",
+        "type": "bigint",
+        "nn": true,
+        "default": "identity",
+        "raw_default": ""
+      },
+      {
+        "key": "FK,UQ1",
+        "planned": false,
+        "name": "loyalty_account_id",
+        "type": "bigint",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "UQ1",
+        "planned": false,
+        "name": "entry_no",
+        "type": "bigint",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "transaction_type",
+        "type": "loyalty_transaction_type",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "points",
+        "type": "bigint",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "expires_at",
+        "type": "timestamptz",
+        "nn": false,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "FK",
+        "planned": false,
+        "name": "session_id",
+        "type": "bigint",
+        "nn": false,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "FK",
+        "planned": false,
+        "name": "top_up_id",
+        "type": "bigint",
+        "nn": false,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "created_at",
+        "type": "timestamptz",
+        "nn": true,
+        "default": "now()",
+        "raw_default": "now()"
+      }
+    ],
+    "maintenance_tickets": [
+      {
+        "key": "PK",
+        "planned": false,
+        "name": "id",
+        "type": "bigint",
+        "nn": true,
+        "default": "identity",
+        "raw_default": ""
+      },
+      {
+        "key": "UQ",
+        "planned": false,
+        "name": "ticket_no",
+        "type": "bigint",
+        "nn": true,
+        "default": "sequence",
+        "raw_default": "nextval('maintenance_tickets_ticket_no_seq'::regclass)"
+      },
+      {
+        "key": "FK",
+        "planned": false,
+        "name": "fault_event_id",
+        "type": "bigint",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "FK",
+        "planned": false,
+        "name": "assigned_to",
+        "type": "bigint",
+        "nn": false,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "status",
+        "type": "maintenance_ticket_status",
+        "nn": true,
+        "default": "'open'",
+        "raw_default": "'open'::maintenance_ticket_status"
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "opened_at",
+        "type": "timestamptz",
+        "nn": true,
+        "default": "now()",
+        "raw_default": "now()"
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "closed_at",
+        "type": "timestamptz",
+        "nn": false,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "updated_at",
+        "type": "timestamptz",
+        "nn": true,
+        "default": "now()",
+        "raw_default": "now()"
+      }
+    ],
+    "meter_values": [
+      {
+        "key": "PK",
+        "planned": false,
+        "name": "id",
+        "type": "bigint",
+        "nn": true,
+        "default": "identity",
+        "raw_default": ""
+      },
+      {
+        "key": "PK",
+        "planned": false,
+        "name": "received_at",
+        "type": "timestamptz",
+        "nn": true,
+        "default": "now()",
+        "raw_default": "now()"
+      },
+      {
+        "key": "FK",
+        "planned": false,
+        "name": "session_id",
+        "type": "bigint",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "cp_timestamp",
+        "type": "timestamptz",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "measurand",
+        "type": "varchar(40)",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "value",
+        "type": "numeric(14,3)",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "unit",
+        "type": "varchar(20)",
+        "nn": false,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "context",
+        "type": "varchar(20)",
+        "nn": false,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "phase",
+        "type": "varchar(10)",
+        "nn": false,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "replayed",
+        "type": "boolean",
+        "nn": true,
+        "default": "false",
+        "raw_default": "false"
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "epoch",
+        "type": "integer",
+        "nn": false,
+        "default": "",
+        "raw_default": ""
+      }
+    ],
+    "ocpp_message_log": [
+      {
+        "key": "PK",
+        "planned": false,
+        "name": "id",
+        "type": "bigint",
+        "nn": true,
+        "default": "identity",
+        "raw_default": ""
+      },
+      {
+        "key": "PK",
+        "planned": false,
+        "name": "received_at",
+        "type": "timestamptz",
+        "nn": true,
+        "default": "now()",
+        "raw_default": "now()"
+      },
+      {
+        "key": "FK",
+        "planned": false,
+        "name": "charge_point_id",
+        "type": "bigint",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "epoch",
+        "type": "integer",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "direction",
+        "type": "ocpp_direction",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "message_type",
+        "type": "smallint",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "unique_id",
+        "type": "varchar(36)",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "action",
+        "type": "varchar(40)",
+        "nn": false,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "cp_timestamp",
+        "type": "timestamptz",
+        "nn": false,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "raw",
+        "type": "jsonb",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "replayed",
+        "type": "boolean",
+        "nn": false,
+        "default": "",
+        "raw_default": ""
+      }
+    ],
+    "operator_staff": [
+      {
+        "key": "PK,FK",
+        "planned": false,
+        "name": "user_id",
+        "type": "bigint",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "FK",
+        "planned": false,
+        "name": "operator_id",
+        "type": "bigint",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "staff_role",
+        "type": "staff_role",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      }
+    ],
+    "operators": [
+      {
+        "key": "PK",
+        "planned": false,
+        "name": "id",
+        "type": "bigint",
+        "nn": true,
+        "default": "identity",
+        "raw_default": ""
+      },
+      {
+        "key": "UQ",
+        "planned": false,
+        "name": "tax_code",
+        "type": "varchar(14)",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "legal_name",
+        "type": "text",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "address",
+        "type": "text",
+        "nn": false,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "status",
+        "type": "operator_status",
+        "nn": true,
+        "default": "'active'",
+        "raw_default": "'active'::operator_status"
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "created_at",
+        "type": "timestamptz",
+        "nn": true,
+        "default": "now()",
+        "raw_default": "now()"
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "updated_at",
+        "type": "timestamptz",
+        "nn": true,
+        "default": "now()",
+        "raw_default": "now()"
+      }
+    ],
+    "policy_templates": [
+      {
+        "key": "PK",
+        "planned": false,
+        "name": "id",
+        "type": "bigint",
+        "nn": true,
+        "default": "identity",
+        "raw_default": ""
+      },
+      {
+        "key": "UQ",
+        "planned": false,
+        "name": "template_code",
+        "type": "varchar(30)",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "FK",
+        "planned": true,
+        "name": "created_by",
+        "type": "bigint",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "template_type",
+        "type": "varchar(30)",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "content",
+        "type": "text",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "created_at",
+        "type": "timestamptz",
+        "nn": true,
+        "default": "now()",
+        "raw_default": "now()"
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "updated_at",
+        "type": "timestamptz",
+        "nn": true,
+        "default": "now()",
+        "raw_default": "now()"
+      }
+    ],
+    "promotions": [
+      {
+        "key": "PK",
+        "planned": false,
+        "name": "id",
+        "type": "bigint",
+        "nn": true,
+        "default": "identity",
+        "raw_default": ""
+      },
+      {
+        "key": "UQ",
+        "planned": false,
+        "name": "promotion_code",
+        "type": "varchar(20)",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "FK",
+        "planned": false,
+        "name": "operator_id",
+        "type": "bigint",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "discount_type",
+        "type": "discount_type",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "discount_value",
+        "type": "bigint",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "valid_from",
+        "type": "timestamptz",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "valid_to",
+        "type": "timestamptz",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "created_at",
+        "type": "timestamptz",
+        "nn": true,
+        "default": "now()",
+        "raw_default": "now()"
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "updated_at",
+        "type": "timestamptz",
+        "nn": true,
+        "default": "now()",
+        "raw_default": "now()"
+      }
+    ],
+    "reconciliation_records": [
+      {
+        "key": "PK",
+        "planned": false,
+        "name": "id",
+        "type": "bigint",
+        "nn": true,
+        "default": "identity",
+        "raw_default": ""
+      },
+      {
+        "key": "FK,UQ1",
+        "planned": false,
+        "name": "session_id",
+        "type": "bigint",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "UQ1",
+        "planned": false,
+        "name": "record_no",
+        "type": "smallint",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "record_type",
+        "type": "reconciliation_record_type",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "gap_start",
+        "type": "timestamptz",
+        "nn": false,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "gap_end",
+        "type": "timestamptz",
+        "nn": false,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "energy_difference_wh",
+        "type": "bigint",
+        "nn": false,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "FK",
+        "planned": true,
+        "name": "reviewed_by",
+        "type": "bigint",
+        "nn": false,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "reviewed_at",
+        "type": "timestamptz",
+        "nn": false,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "resolution",
+        "type": "text",
+        "nn": false,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "created_at",
+        "type": "timestamptz",
+        "nn": true,
+        "default": "now()",
+        "raw_default": "now()"
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "updated_at",
+        "type": "timestamptz",
+        "nn": true,
+        "default": "now()",
+        "raw_default": "now()"
+      }
+    ],
+    "refunds": [
+      {
+        "key": "PK",
+        "planned": true,
+        "name": "id",
+        "type": "bigint",
+        "nn": true,
+        "default": "identity",
+        "raw_default": ""
+      },
+      {
+        "key": "FK,UQ1",
+        "planned": true,
+        "name": "top_up_id",
+        "type": "bigint",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "UQ1",
+        "planned": true,
+        "name": "kind",
+        "type": "refund_kind",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": true,
+        "name": "amount_vnd",
+        "type": "bigint",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": true,
+        "name": "status",
+        "type": "refund_status",
+        "nn": true,
+        "default": "'requested'",
+        "raw_default": "'requested'::refund_status"
+      },
+      {
+        "key": "",
+        "planned": true,
+        "name": "attempt_count",
+        "type": "integer",
+        "nn": true,
+        "default": "0",
+        "raw_default": "0"
+      },
+      {
+        "key": "",
+        "planned": true,
+        "name": "last_error_kind",
+        "type": "refund_error_kind",
+        "nn": false,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": true,
+        "name": "last_error_message",
+        "type": "text",
+        "nn": false,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": true,
+        "name": "last_attempt_at",
+        "type": "timestamptz",
+        "nn": false,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "UQ",
+        "planned": true,
+        "name": "gateway_refund_no",
+        "type": "varchar(20)",
+        "nn": false,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "FK",
+        "planned": true,
+        "name": "requested_by",
+        "type": "bigint",
+        "nn": false,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": true,
+        "name": "completed_at",
+        "type": "timestamptz",
+        "nn": false,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": true,
+        "name": "created_at",
+        "type": "timestamptz",
+        "nn": true,
+        "default": "now()",
+        "raw_default": "now()"
+      },
+      {
+        "key": "",
+        "planned": true,
+        "name": "updated_at",
+        "type": "timestamptz",
+        "nn": true,
+        "default": "now()",
+        "raw_default": "now()"
+      }
+    ],
+    "remote_commands": [
+      {
+        "key": "PK",
+        "planned": false,
+        "name": "id",
+        "type": "bigint",
+        "nn": true,
+        "default": "identity",
+        "raw_default": ""
+      },
+      {
+        "key": "FK",
+        "planned": false,
+        "name": "charge_point_id",
+        "type": "bigint",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "connector_no",
+        "type": "smallint",
+        "nn": false,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "action",
+        "type": "varchar(40)",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "payload",
+        "type": "jsonb",
+        "nn": false,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "status",
+        "type": "remote_command_status",
+        "nn": true,
+        "default": "'pending'",
+        "raw_default": "'pending'::remote_command_status"
+      },
+      {
+        "key": "FK",
+        "planned": true,
+        "name": "requested_by",
+        "type": "bigint",
+        "nn": false,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "idempotency_key",
+        "type": "varchar(64)",
+        "nn": false,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "requested_at",
+        "type": "timestamptz",
+        "nn": true,
+        "default": "now()",
+        "raw_default": "now()"
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "sent_at",
+        "type": "timestamptz",
+        "nn": false,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "responded_at",
+        "type": "timestamptz",
+        "nn": false,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "response",
+        "type": "jsonb",
+        "nn": false,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "error",
+        "type": "text",
+        "nn": false,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "updated_at",
+        "type": "timestamptz",
+        "nn": true,
+        "default": "now()",
+        "raw_default": "now()"
+      }
+    ],
+    "reservations": [
+      {
+        "key": "PK",
+        "planned": false,
+        "name": "id",
+        "type": "bigint",
+        "nn": true,
+        "default": "identity",
+        "raw_default": ""
+      },
+      {
+        "key": "UQ",
+        "planned": false,
+        "name": "reservation_no",
+        "type": "integer",
+        "nn": true,
+        "default": "sequence",
+        "raw_default": "nextval('reservations_reservation_no_seq'::regclass)"
+      },
+      {
+        "key": "FK",
+        "planned": false,
+        "name": "driver_id",
+        "type": "bigint",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "FK",
+        "planned": false,
+        "name": "connector_id",
+        "type": "bigint",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "status",
+        "type": "reservation_status",
+        "nn": true,
+        "default": "'active'",
+        "raw_default": "'active'::reservation_status"
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "hold_mode",
+        "type": "reservation_hold_mode",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "expires_at",
+        "type": "timestamptz",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "created_at",
+        "type": "timestamptz",
+        "nn": true,
+        "default": "now()",
+        "raw_default": "now()"
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "updated_at",
+        "type": "timestamptz",
+        "nn": true,
+        "default": "now()",
+        "raw_default": "now()"
+      }
+    ],
+    "rfid_cards": [
+      {
+        "key": "PK",
+        "planned": false,
+        "name": "id",
+        "type": "bigint",
+        "nn": true,
+        "default": "identity",
+        "raw_default": ""
+      },
+      {
+        "key": "UQ",
+        "planned": false,
+        "name": "card_identifier",
+        "type": "varchar(20)",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "card_kind",
+        "type": "rfid_card_kind",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "FK",
+        "planned": false,
+        "name": "driver_id",
+        "type": "bigint",
+        "nn": false,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "status",
+        "type": "rfid_card_status",
+        "nn": true,
+        "default": "'unlinked'",
+        "raw_default": "'unlinked'::rfid_card_status"
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "issued_at",
+        "type": "timestamptz",
+        "nn": true,
+        "default": "now()",
+        "raw_default": "now()"
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "updated_at",
+        "type": "timestamptz",
+        "nn": true,
+        "default": "now()",
+        "raw_default": "now()"
+      }
+    ],
+    "session_pauses": [
+      {
+        "key": "PK",
+        "planned": false,
+        "name": "id",
+        "type": "bigint",
+        "nn": true,
+        "default": "identity",
+        "raw_default": ""
+      },
+      {
+        "key": "FK,UQ1",
+        "planned": false,
+        "name": "session_id",
+        "type": "bigint",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "UQ1",
+        "planned": false,
+        "name": "paused_at",
+        "type": "timestamptz",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "resumed_at",
+        "type": "timestamptz",
+        "nn": false,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "pause_cause",
+        "type": "pause_cause",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "updated_at",
+        "type": "timestamptz",
+        "nn": true,
+        "default": "now()",
+        "raw_default": "now()"
+      }
+    ],
+    "session_status_history": [
+      {
+        "key": "PK",
+        "planned": false,
+        "name": "id",
+        "type": "bigint",
+        "nn": true,
+        "default": "identity",
+        "raw_default": ""
+      },
+      {
+        "key": "FK",
+        "planned": false,
+        "name": "session_id",
+        "type": "bigint",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "from_status",
+        "type": "session_status",
+        "nn": false,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "to_status",
+        "type": "session_status",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "event",
+        "type": "varchar(50)",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "actor",
+        "type": "varchar(50)",
+        "nn": true,
+        "default": "'system'",
+        "raw_default": "'system'::text"
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "note",
+        "type": "text",
+        "nn": false,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "occurred_at",
+        "type": "timestamptz",
+        "nn": true,
+        "default": "now()",
+        "raw_default": "now()"
+      }
+    ],
+    "session_tariff_segments": [
+      {
+        "key": "PK,FK",
+        "planned": false,
+        "name": "session_id",
+        "type": "bigint",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "PK,FK",
+        "planned": false,
+        "name": "tariff_period_id",
+        "type": "bigint",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "PK",
+        "planned": false,
+        "name": "segment_start",
+        "type": "timestamptz",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "segment_end",
+        "type": "timestamptz",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "energy_wh",
+        "type": "bigint",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "amount_vnd",
+        "type": "bigint",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "exact_amount_milli_vnd",
+        "type": "numeric(40,0)",
+        "nn": false,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "created_at",
+        "type": "timestamptz",
+        "nn": true,
+        "default": "now()",
+        "raw_default": "now()"
+      }
+    ],
+    "sessions": [
+      {
+        "key": "PK",
+        "planned": false,
+        "name": "id",
+        "type": "bigint",
+        "nn": true,
+        "default": "identity",
+        "raw_default": ""
+      },
+      {
+        "key": "UQ",
+        "planned": false,
+        "name": "transaction_no",
+        "type": "integer",
+        "nn": true,
+        "default": "sequence",
+        "raw_default": "nextval('sessions_transaction_no_seq'::regclass)"
+      },
+      {
+        "key": "FK",
+        "planned": false,
+        "name": "connector_id",
+        "type": "bigint",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "FK,UQ1",
+        "planned": false,
+        "name": "charge_point_id",
+        "type": "bigint",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "FK,UQ1",
+        "planned": false,
+        "name": "connector_no",
+        "type": "smallint",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "UQ1",
+        "planned": false,
+        "name": "id_tag",
+        "type": "varchar(20)",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "FK",
+        "planned": false,
+        "name": "driver_id",
+        "type": "bigint",
+        "nn": false,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "FK",
+        "planned": false,
+        "name": "vehicle_id",
+        "type": "bigint",
+        "nn": false,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "FK",
+        "planned": false,
+        "name": "rfid_card_id",
+        "type": "bigint",
+        "nn": false,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "FK",
+        "planned": false,
+        "name": "promotion_id",
+        "type": "bigint",
+        "nn": false,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "origin",
+        "type": "session_origin",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "payment_mode",
+        "type": "payment_mode",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "billing_mode",
+        "type": "billing_mode",
+        "nn": true,
+        "default": "'full'",
+        "raw_default": "'full'::billing_mode"
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "limit_value",
+        "type": "bigint",
+        "nn": false,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "status",
+        "type": "session_status",
+        "nn": true,
+        "default": "'pending'",
+        "raw_default": "'pending'::session_status"
+      },
+      {
+        "key": "UQ1",
+        "planned": false,
+        "name": "cp_started_at",
+        "type": "timestamptz",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "received_started_at",
+        "type": "timestamptz",
+        "nn": true,
+        "default": "now()",
+        "raw_default": "now()"
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "cp_stopped_at",
+        "type": "timestamptz",
+        "nn": false,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "received_stopped_at",
+        "type": "timestamptz",
+        "nn": false,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "UQ1",
+        "planned": false,
+        "name": "meter_start_wh",
+        "type": "bigint",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "meter_stop_wh",
+        "type": "bigint",
+        "nn": false,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "stop_reason",
+        "type": "varchar(20)",
+        "nn": false,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "delivered_offline",
+        "type": "boolean",
+        "nn": true,
+        "default": "false",
+        "raw_default": "false"
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "energy_wh",
+        "type": "bigint",
+        "nn": false,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "total_cost_vnd",
+        "type": "bigint",
+        "nn": false,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "orphaned_at",
+        "type": "timestamptz",
+        "nn": false,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "FK,UQ",
+        "planned": true,
+        "name": "reservation_id",
+        "type": "bigint",
+        "nn": false,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "created_at",
+        "type": "timestamptz",
+        "nn": true,
+        "default": "now()",
+        "raw_default": "now()"
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "updated_at",
+        "type": "timestamptz",
+        "nn": true,
+        "default": "now()",
+        "raw_default": "now()"
+      }
+    ],
+    "sites": [
+      {
+        "key": "PK",
+        "planned": false,
+        "name": "id",
+        "type": "bigint",
+        "nn": true,
+        "default": "identity",
+        "raw_default": ""
+      },
+      {
+        "key": "UQ",
+        "planned": false,
+        "name": "site_code",
+        "type": "varchar(20)",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "FK",
+        "planned": false,
+        "name": "operator_id",
+        "type": "bigint",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "site_name",
+        "type": "text",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "address",
+        "type": "text",
+        "nn": false,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "latitude",
+        "type": "numeric(9,6)",
+        "nn": false,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "longitude",
+        "type": "numeric(9,6)",
+        "nn": false,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "vinfast_only",
+        "type": "boolean",
+        "nn": true,
+        "default": "false",
+        "raw_default": "false"
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "created_at",
+        "type": "timestamptz",
+        "nn": true,
+        "default": "now()",
+        "raw_default": "now()"
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "updated_at",
+        "type": "timestamptz",
+        "nn": true,
+        "default": "now()",
+        "raw_default": "now()"
+      }
+    ],
+    "tariff_periods": [
+      {
+        "key": "PK",
+        "planned": false,
+        "name": "id",
+        "type": "bigint",
+        "nn": true,
+        "default": "identity",
+        "raw_default": ""
+      },
+      {
+        "key": "FK,UQ1",
+        "planned": false,
+        "name": "operator_id",
+        "type": "bigint",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "UQ1",
+        "planned": false,
+        "name": "band",
+        "type": "tariff_band",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "UQ1",
+        "planned": false,
+        "name": "time_start",
+        "type": "time",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "UQ1",
+        "planned": false,
+        "name": "time_end",
+        "type": "time",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "price_per_kwh_vnd",
+        "type": "bigint",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "UQ1",
+        "planned": false,
+        "name": "effective_from",
+        "type": "date",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "effective_to",
+        "type": "date",
+        "nn": false,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "created_at",
+        "type": "timestamptz",
+        "nn": true,
+        "default": "now()",
+        "raw_default": "now()"
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "updated_at",
+        "type": "timestamptz",
+        "nn": true,
+        "default": "now()",
+        "raw_default": "now()"
+      }
+    ],
+    "top_ups": [
+      {
+        "key": "PK",
+        "planned": false,
+        "name": "id",
+        "type": "bigint",
+        "nn": true,
+        "default": "identity",
+        "raw_default": ""
+      },
+      {
+        "key": "UQ",
+        "planned": false,
+        "name": "gateway_reference",
+        "type": "varchar(100)",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "FK",
+        "planned": false,
+        "name": "credit_account_id",
+        "type": "bigint",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "amount_vnd",
+        "type": "bigint",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "points_discount_vnd",
+        "type": "bigint",
+        "nn": true,
+        "default": "0",
+        "raw_default": "0"
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "amount_paid_vnd",
+        "type": "bigint",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "status",
+        "type": "top_up_status",
+        "nn": true,
+        "default": "'pending'",
+        "raw_default": "'pending'::top_up_status"
+      },
+      {
+        "key": "UQ",
+        "planned": false,
+        "name": "idempotency_key",
+        "type": "varchar(64)",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "completed_at",
+        "type": "timestamptz",
+        "nn": false,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "gateway_transaction_no",
+        "type": "varchar(20)",
+        "nn": false,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "points_redeemed",
+        "type": "integer",
+        "nn": true,
+        "default": "0",
+        "raw_default": "0"
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "expires_at",
+        "type": "timestamptz",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "refunded_at",
+        "type": "timestamptz",
+        "nn": false,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "UQ",
+        "planned": false,
+        "name": "late_gateway_ref",
+        "type": "varchar(100)",
+        "nn": false,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "late_paid_at",
+        "type": "timestamptz",
+        "nn": false,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "late_amount_vnd",
+        "type": "bigint",
+        "nn": false,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "late_refunded_at",
+        "type": "timestamptz",
+        "nn": false,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "created_at",
+        "type": "timestamptz",
+        "nn": true,
+        "default": "now()",
+        "raw_default": "now()"
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "updated_at",
+        "type": "timestamptz",
+        "nn": true,
+        "default": "now()",
+        "raw_default": "now()"
+      }
+    ],
+    "users": [
+      {
+        "key": "PK",
+        "planned": false,
+        "name": "id",
+        "type": "bigint",
+        "nn": true,
+        "default": "identity",
+        "raw_default": ""
+      },
+      {
+        "key": "UQ",
+        "planned": false,
+        "name": "email",
+        "type": "varchar(254)",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "full_name",
+        "type": "text",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "phone_number",
+        "type": "varchar(16)",
+        "nn": false,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "role",
+        "type": "user_role",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "account_status",
+        "type": "user_account_status",
+        "nn": true,
+        "default": "'active'",
+        "raw_default": "'active'::user_account_status"
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "password_hash",
+        "type": "text",
+        "nn": false,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "created_at",
+        "type": "timestamptz",
+        "nn": true,
+        "default": "now()",
+        "raw_default": "now()"
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "updated_at",
+        "type": "timestamptz",
+        "nn": true,
+        "default": "now()",
+        "raw_default": "now()"
+      }
+    ],
+    "vehicle_models": [
+      {
+        "key": "PK",
+        "planned": false,
+        "name": "id",
+        "type": "bigint",
+        "nn": true,
+        "default": "identity",
+        "raw_default": ""
+      },
+      {
+        "key": "UQ1",
+        "planned": false,
+        "name": "brand",
+        "type": "text",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "UQ1",
+        "planned": false,
+        "name": "model_name",
+        "type": "text",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "connector_type",
+        "type": "connector_type",
+        "nn": true,
+        "default": "'ccs2'",
+        "raw_default": "'ccs2'::connector_type"
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "battery_capacity_kwh",
+        "type": "numeric(6,2)",
+        "nn": false,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "rated_range_km",
+        "type": "integer",
+        "nn": false,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "max_dc_kw",
+        "type": "numeric(6,2)",
+        "nn": false,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "is_vinfast",
+        "type": "boolean",
+        "nn": true,
+        "default": "false",
+        "raw_default": "false"
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "created_at",
+        "type": "timestamptz",
+        "nn": true,
+        "default": "now()",
+        "raw_default": "now()"
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "updated_at",
+        "type": "timestamptz",
+        "nn": true,
+        "default": "now()",
+        "raw_default": "now()"
+      }
+    ],
+    "vehicles": [
+      {
+        "key": "PK",
+        "planned": false,
+        "name": "id",
+        "type": "bigint",
+        "nn": true,
+        "default": "identity",
+        "raw_default": ""
+      },
+      {
+        "key": "UQ",
+        "planned": false,
+        "name": "plate_number",
+        "type": "varchar(12)",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "FK",
+        "planned": false,
+        "name": "driver_id",
+        "type": "bigint",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "FK",
+        "planned": false,
+        "name": "vehicle_model_id",
+        "type": "bigint",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "is_default",
+        "type": "boolean",
+        "nn": true,
+        "default": "false",
+        "raw_default": "false"
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "created_at",
+        "type": "timestamptz",
+        "nn": true,
+        "default": "now()",
+        "raw_default": "now()"
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "updated_at",
+        "type": "timestamptz",
+        "nn": true,
+        "default": "now()",
+        "raw_default": "now()"
+      }
+    ]
+  },
+  "CONS": {
+    "admins": [
+      {
+        "type": "p",
+        "name": "admins_pkey",
+        "defn": "PRIMARY KEY (user_id)",
+        "cols": ["user_id"]
+      },
+      {
+        "type": "f",
+        "name": "admins_user_id_fkey",
+        "defn": "FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE",
+        "cols": ["user_id"]
+      }
+    ],
+    "charge_point_connections": [
+      {
+        "type": "u",
+        "name": "charge_point_connections_charge_point_id_epoch_key",
+        "defn": "UNIQUE (charge_point_id, epoch)",
+        "cols": ["charge_point_id", "epoch"]
+      },
+      {
+        "type": "f",
+        "name": "charge_point_connections_charge_point_id_fkey",
+        "defn": "FOREIGN KEY (charge_point_id) REFERENCES charge_points(id)",
+        "cols": ["charge_point_id"]
+      },
+      {
+        "type": "p",
+        "name": "charge_point_connections_pkey",
+        "defn": "PRIMARY KEY (id)",
+        "cols": ["id"]
+      }
+    ],
+    "charge_points": [
+      {
+        "type": "u",
+        "name": "charge_points_display_code_key",
+        "defn": "UNIQUE (display_code)",
+        "cols": ["display_code"]
+      },
+      {
+        "type": "p",
+        "name": "charge_points_pkey",
+        "defn": "PRIMARY KEY (id)",
+        "cols": ["id"]
+      },
+      {
+        "type": "u",
+        "name": "charge_points_serial_number_key",
+        "defn": "UNIQUE (serial_number)",
+        "cols": ["serial_number"]
+      },
+      {
+        "type": "f",
+        "name": "charge_points_site_id_fkey",
+        "defn": "FOREIGN KEY (site_id) REFERENCES sites(id)",
+        "cols": ["site_id"]
+      }
+    ],
+    "charge_settlement_jobs": [
+      {
+        "type": "p",
+        "name": "charge_settlement_jobs_pkey",
+        "defn": "PRIMARY KEY (session_id)",
+        "cols": ["session_id"]
+      },
+      {
+        "type": "f",
+        "name": "charge_settlement_jobs_session_id_fkey",
+        "defn": "FOREIGN KEY (session_id) REFERENCES sessions(id)",
+        "cols": ["session_id"]
+      },
+      {
+        "type": "c",
+        "name": "charge_settlement_jobs_state_check",
+        "defn": "CHECK (((state)::text = ANY (ARRAY['pending'::text, 'posted'::text, 'ineligible'::text])))",
+        "cols": ["state"]
+      }
+    ],
+    "charge_tariff_boundary_evidence": [
+      {
+        "type": "c",
+        "name": "charge_tariff_boundary_evidence_evidence_note_check",
+        "defn": "CHECK (((char_length(evidence_note) >= 1) AND (char_length(evidence_note) <= 500)))",
+        "cols": ["evidence_note"]
+      },
+      {
+        "type": "c",
+        "name": "charge_tariff_boundary_evidence_meter_wh_check",
+        "defn": "CHECK ((meter_wh >= 0))",
+        "cols": ["meter_wh"]
+      },
+      {
+        "type": "p",
+        "name": "charge_tariff_boundary_evidence_pkey",
+        "defn": "PRIMARY KEY (session_id, boundary_at)",
+        "cols": ["session_id", "boundary_at"]
+      },
+      {
+        "type": "f",
+        "name": "charge_tariff_boundary_evidence_recorded_by_fkey",
+        "defn": "FOREIGN KEY (recorded_by) REFERENCES users(id)",
+        "cols": ["recorded_by"]
+      },
+      {
+        "type": "f",
+        "name": "charge_tariff_boundary_evidence_session_id_fkey",
+        "defn": "FOREIGN KEY (session_id) REFERENCES sessions(id)",
+        "cols": ["session_id"]
+      }
+    ],
+    "charging_statements": [
+      {
+        "type": "c",
+        "name": "charging_statements_amount_vnd_check",
+        "defn": "CHECK ((amount_vnd >= 0))",
+        "cols": ["amount_vnd"]
+      },
+      {
+        "type": "f",
+        "name": "charging_statements_debit_id_fkey",
+        "defn": "FOREIGN KEY (debit_id) REFERENCES credit_transactions(id)",
+        "cols": ["debit_id"]
+      },
+      {
+        "type": "u",
+        "name": "charging_statements_debit_id_key",
+        "defn": "UNIQUE (debit_id)",
+        "cols": ["debit_id"]
+      },
+      {
+        "type": "f",
+        "name": "charging_statements_driver_id_fkey",
+        "defn": "FOREIGN KEY (driver_id) REFERENCES drivers(user_id)",
+        "cols": ["driver_id"]
+      },
+      {
+        "type": "c",
+        "name": "charging_statements_earned_points_check",
+        "defn": "CHECK ((earned_points >= 0))",
+        "cols": ["earned_points"]
+      },
+      {
+        "type": "c",
+        "name": "charging_statements_energy_wh_check",
+        "defn": "CHECK ((energy_wh >= 0))",
+        "cols": ["energy_wh"]
+      },
+      {
+        "type": "f",
+        "name": "charging_statements_loyalty_entry_id_fkey",
+        "defn": "FOREIGN KEY (loyalty_entry_id) REFERENCES loyalty_transactions(id)",
+        "cols": ["loyalty_entry_id"]
+      },
+      {
+        "type": "u",
+        "name": "charging_statements_loyalty_entry_id_key",
+        "defn": "UNIQUE (loyalty_entry_id)",
+        "cols": ["loyalty_entry_id"]
+      },
+      {
+        "type": "p",
+        "name": "charging_statements_pkey",
+        "defn": "PRIMARY KEY (session_id)",
+        "cols": ["session_id"]
+      },
+      {
+        "type": "f",
+        "name": "charging_statements_session_id_fkey",
+        "defn": "FOREIGN KEY (session_id) REFERENCES sessions(id)",
+        "cols": ["session_id"]
+      }
+    ],
+    "connector_status_events": [
+      {
+        "type": "f",
+        "name": "connector_status_events_charge_point_id_fkey",
+        "defn": "FOREIGN KEY (charge_point_id) REFERENCES charge_points(id) ON DELETE CASCADE",
+        "cols": ["charge_point_id"]
+      },
+      {
+        "type": "c",
+        "name": "connector_status_events_connector_no_check",
+        "defn": "CHECK ((connector_no = ANY (ARRAY[0, 1, 2])))",
+        "cols": ["connector_no"]
+      },
+      {
+        "type": "u",
+        "name": "connector_status_events_cp_no_received_key",
+        "defn": "UNIQUE (charge_point_id, connector_no, received_at)",
+        "cols": ["charge_point_id", "connector_no", "received_at"]
+      },
+      {
+        "type": "p",
+        "name": "connector_status_events_pkey",
+        "defn": "PRIMARY KEY (id)",
+        "cols": ["id"]
+      }
+    ],
+    "connectors": [
+      {
+        "type": "u",
+        "name": "connectors_charge_point_id_connector_no_key",
+        "defn": "UNIQUE (charge_point_id, connector_no)",
+        "cols": ["charge_point_id", "connector_no"]
+      },
+      {
+        "type": "f",
+        "name": "connectors_charge_point_id_fkey",
+        "defn": "FOREIGN KEY (charge_point_id) REFERENCES charge_points(id) ON DELETE CASCADE",
+        "cols": ["charge_point_id"]
+      },
+      {
+        "type": "c",
+        "name": "connectors_connector_no_check",
+        "defn": "CHECK ((connector_no = ANY (ARRAY[1, 2])))",
+        "cols": ["connector_no"]
+      },
+      {
+        "type": "u",
+        "name": "connectors_id_charge_point_id_connector_no_key",
+        "defn": "UNIQUE (id, charge_point_id, connector_no)",
+        "cols": ["id", "charge_point_id", "connector_no"]
+      },
+      {
+        "type": "p",
+        "name": "connectors_pkey",
+        "defn": "PRIMARY KEY (id)",
+        "cols": ["id"]
+      }
+    ],
+    "credit_accounts": [
+      {
+        "type": "c",
+        "name": "credit_accounts_closed_check",
+        "defn": "CHECK (((status = 'closed'::credit_account_status) = (closed_at IS NOT NULL)))",
+        "cols": ["status", "closed_at"]
+      },
+      {
+        "type": "c",
+        "name": "credit_accounts_closure_refunded_check",
+        "defn": "CHECK (((closure_refunded_at IS NULL) OR ((closed_at IS NOT NULL) AND (closure_refunded_at >= closed_at))))",
+        "cols": ["closure_refunded_at", "closed_at"]
+      },
+      {
+        "type": "f",
+        "name": "credit_accounts_driver_id_fkey",
+        "defn": "FOREIGN KEY (driver_id) REFERENCES drivers(user_id)",
+        "cols": ["driver_id"]
+      },
+      {
+        "type": "u",
+        "name": "credit_accounts_driver_id_key",
+        "defn": "UNIQUE (driver_id)",
+        "cols": ["driver_id"]
+      },
+      {
+        "type": "p",
+        "name": "credit_accounts_pkey",
+        "defn": "PRIMARY KEY (id)",
+        "cols": ["id"]
+      }
+    ],
+    "credit_transactions": [
+      {
+        "type": "u",
+        "name": "credit_transactions_account_entry_no_key",
+        "defn": "UNIQUE (credit_account_id, entry_no)",
+        "cols": ["credit_account_id", "entry_no"]
+      },
+      {
+        "type": "f",
+        "name": "credit_transactions_credit_account_id_fkey",
+        "defn": "FOREIGN KEY (credit_account_id) REFERENCES credit_accounts(id) ON DELETE RESTRICT",
+        "cols": ["credit_account_id"]
+      },
+      {
+        "type": "p",
+        "name": "credit_transactions_pkey",
+        "defn": "PRIMARY KEY (id)",
+        "cols": ["id"]
+      },
+      {
+        "type": "c",
+        "name": "credit_transactions_reservation_fee_check",
+        "defn": "CHECK (((transaction_type = 'reservation_fee'::credit_transaction_type) = (reservation_id IS NOT NULL)))",
+        "cols": ["transaction_type", "reservation_id"]
+      },
+      {
+        "type": "f",
+        "name": "credit_transactions_reservation_id_fkey",
+        "defn": "FOREIGN KEY (reservation_id) REFERENCES reservations(id)",
+        "cols": ["reservation_id"]
+      },
+      {
+        "type": "u",
+        "name": "credit_transactions_reservation_id_key",
+        "defn": "UNIQUE (reservation_id)",
+        "cols": ["reservation_id"]
+      },
+      {
+        "type": "c",
+        "name": "credit_transactions_session_debit_check",
+        "defn": "CHECK (((transaction_type <> 'session_debit'::credit_transaction_type) OR (session_id IS NOT NULL)))",
+        "cols": ["transaction_type", "session_id"]
+      },
+      {
+        "type": "f",
+        "name": "credit_transactions_session_id_fkey",
+        "defn": "FOREIGN KEY (session_id) REFERENCES sessions(id)",
+        "cols": ["session_id"]
+      },
+      {
+        "type": "c",
+        "name": "credit_transactions_top_up_check",
+        "defn": "CHECK (((transaction_type <> 'top_up'::credit_transaction_type) OR (top_up_id IS NOT NULL)))",
+        "cols": ["transaction_type", "top_up_id"]
+      },
+      {
+        "type": "f",
+        "name": "credit_transactions_top_up_id_fkey",
+        "defn": "FOREIGN KEY (top_up_id) REFERENCES top_ups(id)",
+        "cols": ["top_up_id"]
+      }
+    ],
+    "driver_charge_intent_events": [
+      {
+        "type": "f",
+        "name": "driver_charge_intent_events_actor_id_fkey",
+        "defn": "FOREIGN KEY (actor_id) REFERENCES users(id)",
+        "cols": ["actor_id"]
+      },
+      {
+        "type": "f",
+        "name": "driver_charge_intent_events_intent_id_fkey",
+        "defn": "FOREIGN KEY (intent_id) REFERENCES driver_charge_intents(id)",
+        "cols": ["intent_id"]
+      },
+      {
+        "type": "p",
+        "name": "driver_charge_intent_events_pkey",
+        "defn": "PRIMARY KEY (id)",
+        "cols": ["id"]
+      }
+    ],
+    "driver_charge_intents": [
+      {
+        "type": "f",
+        "name": "driver_charge_intents_command_id_fkey",
+        "defn": "FOREIGN KEY (command_id) REFERENCES remote_commands(id)",
+        "cols": ["command_id"]
+      },
+      {
+        "type": "u",
+        "name": "driver_charge_intents_command_id_key",
+        "defn": "UNIQUE (command_id)",
+        "cols": ["command_id"]
+      },
+      {
+        "type": "f",
+        "name": "driver_charge_intents_connector_id_fkey",
+        "defn": "FOREIGN KEY (connector_id) REFERENCES connectors(id)",
+        "cols": ["connector_id"]
+      },
+      {
+        "type": "f",
+        "name": "driver_charge_intents_driver_id_fkey",
+        "defn": "FOREIGN KEY (driver_id) REFERENCES drivers(user_id)",
+        "cols": ["driver_id"]
+      },
+      {
+        "type": "u",
+        "name": "driver_charge_intents_driver_id_idempotency_key_key",
+        "defn": "UNIQUE (driver_id, idempotency_key)",
+        "cols": ["driver_id", "idempotency_key"]
+      },
+      {
+        "type": "c",
+        "name": "driver_charge_intents_energy_limit_wh_check",
+        "defn": "CHECK ((energy_limit_wh > 0))",
+        "cols": ["energy_limit_wh"]
+      },
+      {
+        "type": "u",
+        "name": "driver_charge_intents_id_tag_key",
+        "defn": "UNIQUE (id_tag)",
+        "cols": ["id_tag"]
+      },
+      {
+        "type": "p",
+        "name": "driver_charge_intents_pkey",
+        "defn": "PRIMARY KEY (id)",
+        "cols": ["id"]
+      },
+      {
+        "type": "c",
+        "name": "driver_charge_intents_reserved_vnd_check",
+        "defn": "CHECK ((reserved_vnd >= 0))",
+        "cols": ["reserved_vnd"]
+      },
+      {
+        "type": "f",
+        "name": "driver_charge_intents_session_id_fkey",
+        "defn": "FOREIGN KEY (session_id) REFERENCES sessions(id)",
+        "cols": ["session_id"]
+      },
+      {
+        "type": "u",
+        "name": "driver_charge_intents_session_id_key",
+        "defn": "UNIQUE (session_id)",
+        "cols": ["session_id"]
+      },
+      {
+        "type": "c",
+        "name": "driver_charge_intents_state_check",
+        "defn": "CHECK (((state)::text = ANY (ARRAY['sent'::text, 'accepted'::text, 'rejected'::text, 'unknown'::text, 'effect'::text, 'settled'::text, 'released'::text])))",
+        "cols": ["state"]
+      },
+      {
+        "type": "f",
+        "name": "driver_charge_intents_vehicle_id_fkey",
+        "defn": "FOREIGN KEY (vehicle_id) REFERENCES vehicles(id)",
+        "cols": ["vehicle_id"]
+      },
+      {
+        "type": "c",
+        "name": "driver_charge_intents_version_check",
+        "defn": "CHECK ((version > 0))",
+        "cols": ["version"]
+      }
+    ],
+    "driver_start_recoveries": [
+      {
+        "type": "c",
+        "name": "driver_start_recoveries_evidence_note_check",
+        "defn": "CHECK (((char_length(evidence_note) >= 1) AND (char_length(evidence_note) <= 500)))",
+        "cols": ["evidence_note"]
+      },
+      {
+        "type": "f",
+        "name": "driver_start_recoveries_fence_command_id_fkey",
+        "defn": "FOREIGN KEY (fence_command_id) REFERENCES remote_commands(id)",
+        "cols": ["fence_command_id"]
+      },
+      {
+        "type": "u",
+        "name": "driver_start_recoveries_fence_command_id_key",
+        "defn": "UNIQUE (fence_command_id)",
+        "cols": ["fence_command_id"]
+      },
+      {
+        "type": "f",
+        "name": "driver_start_recoveries_intent_id_fkey",
+        "defn": "FOREIGN KEY (intent_id) REFERENCES driver_charge_intents(id)",
+        "cols": ["intent_id"]
+      },
+      {
+        "type": "f",
+        "name": "driver_start_recoveries_operator_user_id_fkey",
+        "defn": "FOREIGN KEY (operator_user_id) REFERENCES users(id)",
+        "cols": ["operator_user_id"]
+      },
+      {
+        "type": "p",
+        "name": "driver_start_recoveries_pkey",
+        "defn": "PRIMARY KEY (intent_id)",
+        "cols": ["intent_id"]
+      },
+      {
+        "type": "c",
+        "name": "driver_start_recoveries_released_vnd_check",
+        "defn": "CHECK ((released_vnd >= 0))",
+        "cols": ["released_vnd"]
+      },
+      {
+        "type": "f",
+        "name": "driver_start_recoveries_restore_command_id_fkey",
+        "defn": "FOREIGN KEY (restore_command_id) REFERENCES remote_commands(id)",
+        "cols": ["restore_command_id"]
+      },
+      {
+        "type": "u",
+        "name": "driver_start_recoveries_restore_command_id_key",
+        "defn": "UNIQUE (restore_command_id)",
+        "cols": ["restore_command_id"]
+      }
+    ],
+    "driver_stop_attempts": [
+      {
+        "type": "c",
+        "name": "driver_stop_attempts_attempt_no_check",
+        "defn": "CHECK ((attempt_no > 0))",
+        "cols": ["attempt_no"]
+      },
+      {
+        "type": "c",
+        "name": "driver_stop_attempts_check",
+        "defn": "CHECK ((((kind)::text <> 'operator_recovery'::text) OR ((previous_command_id IS NOT NULL) AND (connection_epoch IS NOT NULL) AND (evidence_meter_id IS NOT NULL) AND (evidence_received_at IS NOT NULL) AND (operator_user_id IS NOT NULL) AND (note IS NOT NULL))))",
+        "cols": [
+          "kind",
+          "previous_command_id",
+          "connection_epoch",
+          "evidence_meter_id",
+          "evidence_received_at",
+          "operator_user_id",
+          "note"
+        ]
+      },
+      {
+        "type": "f",
+        "name": "driver_stop_attempts_command_id_fkey",
+        "defn": "FOREIGN KEY (command_id) REFERENCES remote_commands(id)",
+        "cols": ["command_id"]
+      },
+      {
+        "type": "u",
+        "name": "driver_stop_attempts_intent_id_attempt_no_key",
+        "defn": "UNIQUE (intent_id, attempt_no)",
+        "cols": ["intent_id", "attempt_no"]
+      },
+      {
+        "type": "u",
+        "name": "driver_stop_attempts_intent_id_evidence_meter_id_evidence_r_key",
+        "defn": "UNIQUE (intent_id, evidence_meter_id, evidence_received_at)",
+        "cols": ["intent_id", "evidence_meter_id", "evidence_received_at"]
+      },
+      {
+        "type": "f",
+        "name": "driver_stop_attempts_intent_id_fkey",
+        "defn": "FOREIGN KEY (intent_id) REFERENCES driver_stop_intents(id)",
+        "cols": ["intent_id"]
+      },
+      {
+        "type": "c",
+        "name": "driver_stop_attempts_kind_check",
+        "defn": "CHECK (((kind)::text = ANY (ARRAY['initial'::text, 'auto_retry'::text, 'operator_recovery'::text])))",
+        "cols": ["kind"]
+      },
+      {
+        "type": "c",
+        "name": "driver_stop_attempts_note_check",
+        "defn": "CHECK (((char_length(note) >= 1) AND (char_length(note) <= 500)))",
+        "cols": ["note"]
+      },
+      {
+        "type": "f",
+        "name": "driver_stop_attempts_operator_user_id_fkey",
+        "defn": "FOREIGN KEY (operator_user_id) REFERENCES users(id)",
+        "cols": ["operator_user_id"]
+      },
+      {
+        "type": "p",
+        "name": "driver_stop_attempts_pkey",
+        "defn": "PRIMARY KEY (command_id)",
+        "cols": ["command_id"]
+      },
+      {
+        "type": "f",
+        "name": "driver_stop_attempts_previous_command_id_fkey",
+        "defn": "FOREIGN KEY (previous_command_id) REFERENCES remote_commands(id)",
+        "cols": ["previous_command_id"]
+      },
+      {
+        "type": "u",
+        "name": "driver_stop_attempts_previous_command_id_key",
+        "defn": "UNIQUE (previous_command_id)",
+        "cols": ["previous_command_id"]
+      }
+    ],
+    "driver_stop_intents": [
+      {
+        "type": "f",
+        "name": "driver_stop_intents_command_id_fkey",
+        "defn": "FOREIGN KEY (command_id) REFERENCES remote_commands(id)",
+        "cols": ["command_id"]
+      },
+      {
+        "type": "u",
+        "name": "driver_stop_intents_command_id_key",
+        "defn": "UNIQUE (command_id)",
+        "cols": ["command_id"]
+      },
+      {
+        "type": "f",
+        "name": "driver_stop_intents_driver_id_fkey",
+        "defn": "FOREIGN KEY (driver_id) REFERENCES drivers(user_id)",
+        "cols": ["driver_id"]
+      },
+      {
+        "type": "u",
+        "name": "driver_stop_intents_driver_id_idempotency_key_key",
+        "defn": "UNIQUE (driver_id, idempotency_key)",
+        "cols": ["driver_id", "idempotency_key"]
+      },
+      {
+        "type": "p",
+        "name": "driver_stop_intents_pkey",
+        "defn": "PRIMARY KEY (id)",
+        "cols": ["id"]
+      },
+      {
+        "type": "f",
+        "name": "driver_stop_intents_session_id_fkey",
+        "defn": "FOREIGN KEY (session_id) REFERENCES sessions(id)",
+        "cols": ["session_id"]
+      },
+      {
+        "type": "c",
+        "name": "driver_stop_intents_state_check",
+        "defn": "CHECK (((state)::text = ANY (ARRAY['sent'::text, 'accepted'::text, 'rejected'::text, 'unknown'::text, 'effect'::text])))",
+        "cols": ["state"]
+      }
+    ],
+    "drivers": [
+      {
+        "type": "p",
+        "name": "drivers_pkey",
+        "defn": "PRIMARY KEY (user_id)",
+        "cols": ["user_id"]
+      },
+      {
+        "type": "f",
+        "name": "drivers_user_id_fkey",
+        "defn": "FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE",
+        "cols": ["user_id"]
+      }
+    ],
+    "e_invoices": [
+      {
+        "type": "u",
+        "name": "e_invoices_invoice_no_key",
+        "defn": "UNIQUE (invoice_no)",
+        "cols": ["invoice_no"]
+      },
+      {
+        "type": "c",
+        "name": "e_invoices_issued_check",
+        "defn": "CHECK (((status <> 'issued'::e_invoice_status) OR ((invoice_no IS NOT NULL) AND (issued_at IS NOT NULL))))",
+        "cols": ["status", "invoice_no", "issued_at"]
+      },
+      {
+        "type": "c",
+        "name": "e_invoices_last_error_check",
+        "defn": "CHECK (((last_error_kind IS NULL) OR (last_attempt_at IS NOT NULL)))",
+        "cols": ["last_error_kind", "last_attempt_at"]
+      },
+      {
+        "type": "p",
+        "name": "e_invoices_pkey",
+        "defn": "PRIMARY KEY (id)",
+        "cols": ["id"]
+      },
+      {
+        "type": "f",
+        "name": "e_invoices_top_up_id_fkey",
+        "defn": "FOREIGN KEY (top_up_id) REFERENCES top_ups(id)",
+        "cols": ["top_up_id"]
+      },
+      {
+        "type": "u",
+        "name": "e_invoices_top_up_id_key",
+        "defn": "UNIQUE (top_up_id)",
+        "cols": ["top_up_id"]
+      }
+    ],
+    "fault_events": [
+      {
+        "type": "f",
+        "name": "fault_events_acknowledged_by_fkey",
+        "defn": "FOREIGN KEY (acknowledged_by) REFERENCES operator_staff(user_id)",
+        "cols": ["acknowledged_by"]
+      },
+      {
+        "type": "f",
+        "name": "fault_events_charge_point_id_fkey",
+        "defn": "FOREIGN KEY (charge_point_id) REFERENCES charge_points(id)",
+        "cols": ["charge_point_id"]
+      },
+      {
+        "type": "f",
+        "name": "fault_events_connector_id_fkey",
+        "defn": "FOREIGN KEY (connector_id) REFERENCES connectors(id)",
+        "cols": ["connector_id"]
+      },
+      {
+        "type": "u",
+        "name": "fault_events_event_no_key",
+        "defn": "UNIQUE (event_no)",
+        "cols": ["event_no"]
+      },
+      {
+        "type": "p",
+        "name": "fault_events_pkey",
+        "defn": "PRIMARY KEY (id)",
+        "cols": ["id"]
+      },
+      {
+        "type": "f",
+        "name": "fault_events_reset_command_id_fkey",
+        "defn": "FOREIGN KEY (reset_command_id) REFERENCES remote_commands(id)",
+        "cols": ["reset_command_id"]
+      }
+    ],
+    "fault_reports": [
+      {
+        "type": "f",
+        "name": "fault_reports_cleared_by_fkey",
+        "defn": "FOREIGN KEY (cleared_by) REFERENCES operator_staff(user_id)",
+        "cols": ["cleared_by"]
+      },
+      {
+        "type": "f",
+        "name": "fault_reports_connector_id_fkey",
+        "defn": "FOREIGN KEY (connector_id) REFERENCES connectors(id)",
+        "cols": ["connector_id"]
+      },
+      {
+        "type": "f",
+        "name": "fault_reports_driver_id_fkey",
+        "defn": "FOREIGN KEY (driver_id) REFERENCES drivers(user_id)",
+        "cols": ["driver_id"]
+      },
+      {
+        "type": "f",
+        "name": "fault_reports_fault_event_id_fkey",
+        "defn": "FOREIGN KEY (fault_event_id) REFERENCES fault_events(id)",
+        "cols": ["fault_event_id"]
+      },
+      {
+        "type": "p",
+        "name": "fault_reports_pkey",
+        "defn": "PRIMARY KEY (id)",
+        "cols": ["id"]
+      },
+      {
+        "type": "u",
+        "name": "fault_reports_report_no_key",
+        "defn": "UNIQUE (report_no)",
+        "cols": ["report_no"]
+      }
+    ],
+    "invoice_adjustments": [
+      {
+        "type": "c",
+        "name": "invoice_adjustments_adjustment_no_check",
+        "defn": "CHECK ((adjustment_no >= 1))",
+        "cols": ["adjustment_no"]
+      },
+      {
+        "type": "c",
+        "name": "invoice_adjustments_attempt_count_check",
+        "defn": "CHECK ((attempt_count >= 0))",
+        "cols": ["attempt_count"]
+      },
+      {
+        "type": "f",
+        "name": "invoice_adjustments_e_invoice_id_fkey",
+        "defn": "FOREIGN KEY (e_invoice_id) REFERENCES e_invoices(id) ON DELETE RESTRICT",
+        "cols": ["e_invoice_id"]
+      },
+      {
+        "type": "u",
+        "name": "invoice_adjustments_invoice_adjustment_no_key",
+        "defn": "UNIQUE (e_invoice_id, adjustment_no)",
+        "cols": ["e_invoice_id", "adjustment_no"]
+      },
+      {
+        "type": "c",
+        "name": "invoice_adjustments_issued_check",
+        "defn": "CHECK (((status <> 'issued'::e_invoice_status) OR ((provider_adjustment_no IS NOT NULL) AND (issued_at IS NOT NULL))))",
+        "cols": ["status", "provider_adjustment_no", "issued_at"]
+      },
+      {
+        "type": "c",
+        "name": "invoice_adjustments_last_error_check",
+        "defn": "CHECK (((last_error_kind IS NULL) OR (last_attempt_at IS NOT NULL)))",
+        "cols": ["last_error_kind", "last_attempt_at"]
+      },
+      {
+        "type": "p",
+        "name": "invoice_adjustments_pkey",
+        "defn": "PRIMARY KEY (id)",
+        "cols": ["id"]
+      },
+      {
+        "type": "u",
+        "name": "invoice_adjustments_provider_adjustment_no_key",
+        "defn": "UNIQUE (provider_adjustment_no)",
+        "cols": ["provider_adjustment_no"]
+      },
+      {
+        "type": "f",
+        "name": "invoice_adjustments_refund_id_fkey",
+        "defn": "FOREIGN KEY (refund_id) REFERENCES refunds(id) ON DELETE RESTRICT",
+        "cols": ["refund_id"]
+      },
+      {
+        "type": "u",
+        "name": "invoice_adjustments_refund_id_key",
+        "defn": "UNIQUE (refund_id)",
+        "cols": ["refund_id"]
+      }
+    ],
+    "loyalty_accounts": [
+      {
+        "type": "f",
+        "name": "loyalty_accounts_driver_id_fkey",
+        "defn": "FOREIGN KEY (driver_id) REFERENCES drivers(user_id)",
+        "cols": ["driver_id"]
+      },
+      {
+        "type": "u",
+        "name": "loyalty_accounts_driver_id_key",
+        "defn": "UNIQUE (driver_id)",
+        "cols": ["driver_id"]
+      },
+      {
+        "type": "p",
+        "name": "loyalty_accounts_pkey",
+        "defn": "PRIMARY KEY (id)",
+        "cols": ["id"]
+      }
+    ],
+    "loyalty_transactions": [
+      {
+        "type": "u",
+        "name": "loyalty_transactions_account_entry_no_key",
+        "defn": "UNIQUE (loyalty_account_id, entry_no)",
+        "cols": ["loyalty_account_id", "entry_no"]
+      },
+      {
+        "type": "f",
+        "name": "loyalty_transactions_loyalty_account_id_fkey",
+        "defn": "FOREIGN KEY (loyalty_account_id) REFERENCES loyalty_accounts(id) ON DELETE RESTRICT",
+        "cols": ["loyalty_account_id"]
+      },
+      {
+        "type": "p",
+        "name": "loyalty_transactions_pkey",
+        "defn": "PRIMARY KEY (id)",
+        "cols": ["id"]
+      },
+      {
+        "type": "f",
+        "name": "loyalty_transactions_session_id_fkey",
+        "defn": "FOREIGN KEY (session_id) REFERENCES sessions(id)",
+        "cols": ["session_id"]
+      },
+      {
+        "type": "f",
+        "name": "loyalty_transactions_top_up_id_fkey",
+        "defn": "FOREIGN KEY (top_up_id) REFERENCES top_ups(id)",
+        "cols": ["top_up_id"]
+      }
+    ],
+    "maintenance_tickets": [
+      {
+        "type": "f",
+        "name": "maintenance_tickets_assigned_to_fkey",
+        "defn": "FOREIGN KEY (assigned_to) REFERENCES operator_staff(user_id)",
+        "cols": ["assigned_to"]
+      },
+      {
+        "type": "c",
+        "name": "maintenance_tickets_closed_check",
+        "defn": "CHECK (((status = 'closed'::maintenance_ticket_status) = (closed_at IS NOT NULL)))",
+        "cols": ["status", "closed_at"]
+      },
+      {
+        "type": "f",
+        "name": "maintenance_tickets_fault_event_id_fkey",
+        "defn": "FOREIGN KEY (fault_event_id) REFERENCES fault_events(id)",
+        "cols": ["fault_event_id"]
+      },
+      {
+        "type": "p",
+        "name": "maintenance_tickets_pkey",
+        "defn": "PRIMARY KEY (id)",
+        "cols": ["id"]
+      },
+      {
+        "type": "u",
+        "name": "maintenance_tickets_ticket_no_key",
+        "defn": "UNIQUE (ticket_no)",
+        "cols": ["ticket_no"]
+      }
+    ],
+    "meter_values": [
+      {
+        "type": "p",
+        "name": "meter_values_pkey",
+        "defn": "PRIMARY KEY (id, received_at)",
+        "cols": ["id", "received_at"]
+      },
+      {
+        "type": "f",
+        "name": "meter_values_session_id_fkey",
+        "defn": "FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE RESTRICT",
+        "cols": ["session_id"]
+      }
+    ],
+    "ocpp_message_log": [
+      {
+        "type": "c",
+        "name": "ocpp_message_log_action_check",
+        "defn": "CHECK (((message_type = 2) = (action IS NOT NULL)))",
+        "cols": ["message_type", "action"]
+      },
+      {
+        "type": "f",
+        "name": "ocpp_message_log_charge_point_id_fkey",
+        "defn": "FOREIGN KEY (charge_point_id) REFERENCES charge_points(id)",
+        "cols": ["charge_point_id"]
+      },
+      {
+        "type": "c",
+        "name": "ocpp_message_log_message_type_check",
+        "defn": "CHECK ((message_type = ANY (ARRAY[2, 3, 4])))",
+        "cols": ["message_type"]
+      },
+      {
+        "type": "p",
+        "name": "ocpp_message_log_pkey",
+        "defn": "PRIMARY KEY (id, received_at)",
+        "cols": ["id", "received_at"]
+      }
+    ],
+    "operator_staff": [
+      {
+        "type": "f",
+        "name": "operator_staff_operator_id_fkey",
+        "defn": "FOREIGN KEY (operator_id) REFERENCES operators(id)",
+        "cols": ["operator_id"]
+      },
+      {
+        "type": "p",
+        "name": "operator_staff_pkey",
+        "defn": "PRIMARY KEY (user_id)",
+        "cols": ["user_id"]
+      },
+      {
+        "type": "f",
+        "name": "operator_staff_user_id_fkey",
+        "defn": "FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE",
+        "cols": ["user_id"]
+      }
+    ],
+    "operators": [
+      {
+        "type": "p",
+        "name": "operators_pkey",
+        "defn": "PRIMARY KEY (id)",
+        "cols": ["id"]
+      },
+      {
+        "type": "u",
+        "name": "operators_tax_code_key",
+        "defn": "UNIQUE (tax_code)",
+        "cols": ["tax_code"]
+      }
+    ],
+    "policy_templates": [
+      {
+        "type": "f",
+        "name": "policy_templates_created_by_fkey",
+        "defn": "FOREIGN KEY (created_by) REFERENCES admins(user_id)",
+        "cols": ["created_by"]
+      },
+      {
+        "type": "p",
+        "name": "policy_templates_pkey",
+        "defn": "PRIMARY KEY (id)",
+        "cols": ["id"]
+      },
+      {
+        "type": "u",
+        "name": "policy_templates_template_code_key",
+        "defn": "UNIQUE (template_code)",
+        "cols": ["template_code"]
+      }
+    ],
+    "promotions": [
+      {
+        "type": "c",
+        "name": "promotions_discount_value_check",
+        "defn": "CHECK (((discount_value >= 0) AND ((discount_type <> 'percent'::discount_type) OR (discount_value <= 100))))",
+        "cols": ["discount_value", "discount_type"]
+      },
+      {
+        "type": "f",
+        "name": "promotions_operator_id_fkey",
+        "defn": "FOREIGN KEY (operator_id) REFERENCES operators(id)",
+        "cols": ["operator_id"]
+      },
+      {
+        "type": "p",
+        "name": "promotions_pkey",
+        "defn": "PRIMARY KEY (id)",
+        "cols": ["id"]
+      },
+      {
+        "type": "u",
+        "name": "promotions_promotion_code_key",
+        "defn": "UNIQUE (promotion_code)",
+        "cols": ["promotion_code"]
+      },
+      {
+        "type": "c",
+        "name": "promotions_valid_check",
+        "defn": "CHECK ((valid_to > valid_from))",
+        "cols": ["valid_to", "valid_from"]
+      }
+    ],
+    "reconciliation_records": [
+      {
+        "type": "p",
+        "name": "reconciliation_records_pkey",
+        "defn": "PRIMARY KEY (id)",
+        "cols": ["id"]
+      },
+      {
+        "type": "c",
+        "name": "reconciliation_records_record_no_check",
+        "defn": "CHECK ((record_no >= 1))",
+        "cols": ["record_no"]
+      },
+      {
+        "type": "f",
+        "name": "reconciliation_records_reviewed_by_fkey",
+        "defn": "FOREIGN KEY (reviewed_by) REFERENCES operator_staff(user_id)",
+        "cols": ["reviewed_by"]
+      },
+      {
+        "type": "c",
+        "name": "reconciliation_records_reviewed_check",
+        "defn": "CHECK (((reviewed_by IS NULL) = (reviewed_at IS NULL)))",
+        "cols": ["reviewed_by", "reviewed_at"]
+      },
+      {
+        "type": "f",
+        "name": "reconciliation_records_session_id_fkey",
+        "defn": "FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE RESTRICT",
+        "cols": ["session_id"]
+      },
+      {
+        "type": "u",
+        "name": "reconciliation_records_session_id_record_no_key",
+        "defn": "UNIQUE (session_id, record_no)",
+        "cols": ["session_id", "record_no"]
+      }
+    ],
+    "refunds": [
+      {
+        "type": "c",
+        "name": "refunds_amount_check",
+        "defn": "CHECK ((amount_vnd > 0))",
+        "cols": ["amount_vnd"]
+      },
+      {
+        "type": "c",
+        "name": "refunds_attempt_count_check",
+        "defn": "CHECK ((attempt_count >= 0))",
+        "cols": ["attempt_count"]
+      },
+      {
+        "type": "c",
+        "name": "refunds_completed_check",
+        "defn": "CHECK (((completed_at IS NULL) OR (completed_at >= created_at)))",
+        "cols": ["completed_at", "created_at"]
+      },
+      {
+        "type": "c",
+        "name": "refunds_done_check",
+        "defn": "CHECK (((status = 'done'::refund_status) = (completed_at IS NOT NULL)))",
+        "cols": ["status", "completed_at"]
+      },
+      {
+        "type": "c",
+        "name": "refunds_done_no_check",
+        "defn": "CHECK (((status <> 'done'::refund_status) OR (gateway_refund_no IS NOT NULL)))",
+        "cols": ["status", "gateway_refund_no"]
+      },
+      {
+        "type": "u",
+        "name": "refunds_gateway_refund_no_key",
+        "defn": "UNIQUE (gateway_refund_no)",
+        "cols": ["gateway_refund_no"]
+      },
+      {
+        "type": "c",
+        "name": "refunds_last_error_check",
+        "defn": "CHECK (((last_error_kind IS NULL) OR (last_attempt_at IS NOT NULL)))",
+        "cols": ["last_error_kind", "last_attempt_at"]
+      },
+      {
+        "type": "p",
+        "name": "refunds_pkey",
+        "defn": "PRIMARY KEY (id)",
+        "cols": ["id"]
+      },
+      {
+        "type": "f",
+        "name": "refunds_requested_by_fkey",
+        "defn": "FOREIGN KEY (requested_by) REFERENCES admins(user_id)",
+        "cols": ["requested_by"]
+      },
+      {
+        "type": "f",
+        "name": "refunds_top_up_id_fkey",
+        "defn": "FOREIGN KEY (top_up_id) REFERENCES top_ups(id) ON DELETE RESTRICT",
+        "cols": ["top_up_id"]
+      },
+      {
+        "type": "u",
+        "name": "refunds_top_up_kind_key",
+        "defn": "UNIQUE (top_up_id, kind)",
+        "cols": ["top_up_id", "kind"]
+      }
+    ],
+    "remote_commands": [
+      {
+        "type": "f",
+        "name": "remote_commands_charge_point_id_fkey",
+        "defn": "FOREIGN KEY (charge_point_id) REFERENCES charge_points(id)",
+        "cols": ["charge_point_id"]
+      },
+      {
+        "type": "c",
+        "name": "remote_commands_connector_no_check",
+        "defn": "CHECK (((connector_no IS NULL) OR (connector_no = ANY (ARRAY[0, 1, 2]))))",
+        "cols": ["connector_no"]
+      },
+      {
+        "type": "p",
+        "name": "remote_commands_pkey",
+        "defn": "PRIMARY KEY (id)",
+        "cols": ["id"]
+      },
+      {
+        "type": "f",
+        "name": "remote_commands_requested_by_fkey",
+        "defn": "FOREIGN KEY (requested_by) REFERENCES operator_staff(user_id)",
+        "cols": ["requested_by"]
+      },
+      {
+        "type": "c",
+        "name": "remote_commands_responded_check",
+        "defn": "CHECK (((responded_at IS NULL) OR ((sent_at IS NOT NULL) AND (responded_at >= sent_at))))",
+        "cols": ["responded_at", "sent_at"]
+      },
+      {
+        "type": "c",
+        "name": "remote_commands_sent_check",
+        "defn": "CHECK (((sent_at IS NULL) OR (sent_at >= requested_at)))",
+        "cols": ["sent_at", "requested_at"]
+      }
+    ],
+    "reservations": [
+      {
+        "type": "f",
+        "name": "reservations_connector_id_fkey",
+        "defn": "FOREIGN KEY (connector_id) REFERENCES connectors(id)",
+        "cols": ["connector_id"]
+      },
+      {
+        "type": "f",
+        "name": "reservations_driver_id_fkey",
+        "defn": "FOREIGN KEY (driver_id) REFERENCES drivers(user_id)",
+        "cols": ["driver_id"]
+      },
+      {
+        "type": "c",
+        "name": "reservations_expires_check",
+        "defn": "CHECK ((expires_at > created_at))",
+        "cols": ["expires_at", "created_at"]
+      },
+      {
+        "type": "p",
+        "name": "reservations_pkey",
+        "defn": "PRIMARY KEY (id)",
+        "cols": ["id"]
+      },
+      {
+        "type": "u",
+        "name": "reservations_reservation_no_key",
+        "defn": "UNIQUE (reservation_no)",
+        "cols": ["reservation_no"]
+      }
+    ],
+    "rfid_cards": [
+      {
+        "type": "u",
+        "name": "rfid_cards_card_identifier_key",
+        "defn": "UNIQUE (card_identifier)",
+        "cols": ["card_identifier"]
+      },
+      {
+        "type": "f",
+        "name": "rfid_cards_driver_id_fkey",
+        "defn": "FOREIGN KEY (driver_id) REFERENCES drivers(user_id)",
+        "cols": ["driver_id"]
+      },
+      {
+        "type": "p",
+        "name": "rfid_cards_pkey",
+        "defn": "PRIMARY KEY (id)",
+        "cols": ["id"]
+      }
+    ],
+    "session_pauses": [
+      {
+        "type": "p",
+        "name": "session_pauses_pkey",
+        "defn": "PRIMARY KEY (id)",
+        "cols": ["id"]
+      },
+      {
+        "type": "c",
+        "name": "session_pauses_resumed_check",
+        "defn": "CHECK (((resumed_at IS NULL) OR (resumed_at >= paused_at)))",
+        "cols": ["resumed_at", "paused_at"]
+      },
+      {
+        "type": "f",
+        "name": "session_pauses_session_id_fkey",
+        "defn": "FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE",
+        "cols": ["session_id"]
+      },
+      {
+        "type": "u",
+        "name": "session_pauses_session_id_paused_at_key",
+        "defn": "UNIQUE (session_id, paused_at)",
+        "cols": ["session_id", "paused_at"]
+      }
+    ],
+    "session_status_history": [
+      {
+        "type": "p",
+        "name": "session_status_history_pkey",
+        "defn": "PRIMARY KEY (id)",
+        "cols": ["id"]
+      },
+      {
+        "type": "f",
+        "name": "session_status_history_session_id_fkey",
+        "defn": "FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE RESTRICT",
+        "cols": ["session_id"]
+      }
+    ],
+    "session_tariff_segments": [
+      {
+        "type": "c",
+        "name": "session_tariff_segments_nonneg_check",
+        "defn": "CHECK (((energy_wh >= 0) AND (amount_vnd >= 0)))",
+        "cols": ["energy_wh", "amount_vnd"]
+      },
+      {
+        "type": "p",
+        "name": "session_tariff_segments_pkey",
+        "defn": "PRIMARY KEY (session_id, tariff_period_id, segment_start)",
+        "cols": ["session_id", "tariff_period_id", "segment_start"]
+      },
+      {
+        "type": "c",
+        "name": "session_tariff_segments_range_check",
+        "defn": "CHECK ((segment_end >= segment_start))",
+        "cols": ["segment_end", "segment_start"]
+      },
+      {
+        "type": "f",
+        "name": "session_tariff_segments_session_id_fkey",
+        "defn": "FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE RESTRICT",
+        "cols": ["session_id"]
+      },
+      {
+        "type": "f",
+        "name": "session_tariff_segments_tariff_period_id_fkey",
+        "defn": "FOREIGN KEY (tariff_period_id) REFERENCES tariff_periods(id)",
+        "cols": ["tariff_period_id"]
+      }
+    ],
+    "sessions": [
+      {
+        "type": "f",
+        "name": "sessions_connector_fk",
+        "defn": "FOREIGN KEY (connector_id, charge_point_id, connector_no) REFERENCES connectors(id, charge_point_id, connector_no)",
+        "cols": ["connector_id", "charge_point_id", "connector_no"]
+      },
+      {
+        "type": "f",
+        "name": "sessions_driver_id_fkey",
+        "defn": "FOREIGN KEY (driver_id) REFERENCES drivers(user_id)",
+        "cols": ["driver_id"]
+      },
+      {
+        "type": "c",
+        "name": "sessions_limit_value_check",
+        "defn": "CHECK (((limit_value IS NULL) OR (limit_value > 0)))",
+        "cols": ["limit_value"]
+      },
+      {
+        "type": "c",
+        "name": "sessions_meter_check",
+        "defn": "CHECK (((meter_stop_wh IS NULL) OR (meter_stop_wh >= meter_start_wh)))",
+        "cols": ["meter_stop_wh", "meter_start_wh"]
+      },
+      {
+        "type": "p",
+        "name": "sessions_pkey",
+        "defn": "PRIMARY KEY (id)",
+        "cols": ["id"]
+      },
+      {
+        "type": "f",
+        "name": "sessions_promotion_id_fkey",
+        "defn": "FOREIGN KEY (promotion_id) REFERENCES promotions(id)",
+        "cols": ["promotion_id"]
+      },
+      {
+        "type": "f",
+        "name": "sessions_reservation_id_fkey",
+        "defn": "FOREIGN KEY (reservation_id) REFERENCES reservations(id)",
+        "cols": ["reservation_id"]
+      },
+      {
+        "type": "u",
+        "name": "sessions_reservation_id_key",
+        "defn": "UNIQUE (reservation_id)",
+        "cols": ["reservation_id"]
+      },
+      {
+        "type": "f",
+        "name": "sessions_rfid_card_id_fkey",
+        "defn": "FOREIGN KEY (rfid_card_id) REFERENCES rfid_cards(id)",
+        "cols": ["rfid_card_id"]
+      },
+      {
+        "type": "u",
+        "name": "sessions_start_tx_natural_key",
+        "defn": "UNIQUE (charge_point_id, connector_no, id_tag, meter_start_wh, cp_started_at)",
+        "cols": ["charge_point_id", "connector_no", "id_tag", "meter_start_wh", "cp_started_at"]
+      },
+      {
+        "type": "u",
+        "name": "sessions_transaction_no_key",
+        "defn": "UNIQUE (transaction_no)",
+        "cols": ["transaction_no"]
+      },
+      {
+        "type": "f",
+        "name": "sessions_vehicle_id_fkey",
+        "defn": "FOREIGN KEY (vehicle_id) REFERENCES vehicles(id)",
+        "cols": ["vehicle_id"]
+      }
+    ],
+    "sites": [
+      {
+        "type": "f",
+        "name": "sites_operator_id_fkey",
+        "defn": "FOREIGN KEY (operator_id) REFERENCES operators(id)",
+        "cols": ["operator_id"]
+      },
+      {
+        "type": "p",
+        "name": "sites_pkey",
+        "defn": "PRIMARY KEY (id)",
+        "cols": ["id"]
+      },
+      {
+        "type": "u",
+        "name": "sites_site_code_key",
+        "defn": "UNIQUE (site_code)",
+        "cols": ["site_code"]
+      }
+    ],
+    "tariff_periods": [
+      {
+        "type": "c",
+        "name": "tariff_periods_effective_check",
+        "defn": "CHECK (((effective_to IS NULL) OR (effective_to >= effective_from)))",
+        "cols": ["effective_to", "effective_from"]
+      },
+      {
+        "type": "u",
+        "name": "tariff_periods_operator_band_range_key",
+        "defn": "UNIQUE (operator_id, band, time_start, time_end, effective_from)",
+        "cols": ["operator_id", "band", "time_start", "time_end", "effective_from"]
+      },
+      {
+        "type": "f",
+        "name": "tariff_periods_operator_id_fkey",
+        "defn": "FOREIGN KEY (operator_id) REFERENCES operators(id) ON DELETE CASCADE",
+        "cols": ["operator_id"]
+      },
+      {
+        "type": "p",
+        "name": "tariff_periods_pkey",
+        "defn": "PRIMARY KEY (id)",
+        "cols": ["id"]
+      },
+      {
+        "type": "c",
+        "name": "tariff_periods_price_check",
+        "defn": "CHECK ((price_per_kwh_vnd >= 0))",
+        "cols": ["price_per_kwh_vnd"]
+      }
+    ],
+    "top_ups": [
+      {
+        "type": "c",
+        "name": "top_ups_amount_check",
+        "defn": "CHECK (((amount_vnd > 0) AND (points_discount_vnd >= 0) AND (amount_paid_vnd = (amount_vnd - points_discount_vnd))))",
+        "cols": ["amount_vnd", "points_discount_vnd", "amount_paid_vnd"]
+      },
+      {
+        "type": "f",
+        "name": "top_ups_credit_account_id_fkey",
+        "defn": "FOREIGN KEY (credit_account_id) REFERENCES credit_accounts(id)",
+        "cols": ["credit_account_id"]
+      },
+      {
+        "type": "c",
+        "name": "top_ups_expires_at_check",
+        "defn": "CHECK ((expires_at > created_at))",
+        "cols": ["expires_at", "created_at"]
+      },
+      {
+        "type": "u",
+        "name": "top_ups_gateway_reference_key",
+        "defn": "UNIQUE (gateway_reference)",
+        "cols": ["gateway_reference"]
+      },
+      {
+        "type": "u",
+        "name": "top_ups_idempotency_key_key",
+        "defn": "UNIQUE (idempotency_key)",
+        "cols": ["idempotency_key"]
+      },
+      {
+        "type": "u",
+        "name": "top_ups_late_gateway_ref_key",
+        "defn": "UNIQUE (late_gateway_ref)",
+        "cols": ["late_gateway_ref"]
+      },
+      {
+        "type": "c",
+        "name": "top_ups_late_payment_check",
+        "defn": "CHECK ((((late_gateway_ref IS NULL) AND (late_paid_at IS NULL) AND (late_amount_vnd IS NULL)) OR ((late_gateway_ref IS NOT NULL) AND (late_paid_at IS NOT NULL) AND (late_amount_vnd IS NOT NULL) AND (late_amount_vnd >= 0))))",
+        "cols": ["late_gateway_ref", "late_paid_at", "late_amount_vnd"]
+      },
+      {
+        "type": "c",
+        "name": "top_ups_late_payment_status_check",
+        "defn": "CHECK (((late_gateway_ref IS NULL) OR (status = 'expired'::top_up_status)))",
+        "cols": ["late_gateway_ref", "status"]
+      },
+      {
+        "type": "c",
+        "name": "top_ups_late_refunded_check",
+        "defn": "CHECK (((late_refunded_at IS NULL) OR ((late_paid_at IS NOT NULL) AND (late_refunded_at >= late_paid_at))))",
+        "cols": ["late_refunded_at", "late_paid_at"]
+      },
+      {
+        "type": "p",
+        "name": "top_ups_pkey",
+        "defn": "PRIMARY KEY (id)",
+        "cols": ["id"]
+      },
+      {
+        "type": "c",
+        "name": "top_ups_points_check",
+        "defn": "CHECK (((points_redeemed = 0) = (points_discount_vnd = 0)))",
+        "cols": ["points_redeemed", "points_discount_vnd"]
+      },
+      {
+        "type": "c",
+        "name": "top_ups_points_redeemed_check",
+        "defn": "CHECK ((points_redeemed >= 0))",
+        "cols": ["points_redeemed"]
+      },
+      {
+        "type": "c",
+        "name": "top_ups_refunded_check",
+        "defn": "CHECK (((status = 'refunded'::top_up_status) = (refunded_at IS NOT NULL)))",
+        "cols": ["status", "refunded_at"]
+      }
+    ],
+    "users": [
+      {
+        "type": "u",
+        "name": "users_email_key",
+        "defn": "UNIQUE (email)",
+        "cols": ["email"]
+      },
+      {
+        "type": "p",
+        "name": "users_pkey",
+        "defn": "PRIMARY KEY (id)",
+        "cols": ["id"]
+      }
+    ],
+    "vehicle_models": [
+      {
+        "type": "u",
+        "name": "vehicle_models_brand_model_name_key",
+        "defn": "UNIQUE (brand, model_name)",
+        "cols": ["brand", "model_name"]
+      },
+      {
+        "type": "p",
+        "name": "vehicle_models_pkey",
+        "defn": "PRIMARY KEY (id)",
+        "cols": ["id"]
+      }
+    ],
+    "vehicles": [
+      {
+        "type": "f",
+        "name": "vehicles_driver_id_fkey",
+        "defn": "FOREIGN KEY (driver_id) REFERENCES drivers(user_id)",
+        "cols": ["driver_id"]
+      },
+      {
+        "type": "p",
+        "name": "vehicles_pkey",
+        "defn": "PRIMARY KEY (id)",
+        "cols": ["id"]
+      },
+      {
+        "type": "u",
+        "name": "vehicles_plate_number_key",
+        "defn": "UNIQUE (plate_number)",
+        "cols": ["plate_number"]
+      },
+      {
+        "type": "f",
+        "name": "vehicles_vehicle_model_id_fkey",
+        "defn": "FOREIGN KEY (vehicle_model_id) REFERENCES vehicle_models(id)",
+        "cols": ["vehicle_model_id"]
+      }
+    ]
+  },
+  "IDX": {
+    "charge_point_connections": [
+      {
+        "name": "charge_point_connections_opened_at_idx",
+        "defn": "(charge_point_id, opened_at)",
+        "unique": false
+      }
+    ],
+    "charge_points": [
+      {
+        "name": "charge_points_site_id_idx",
+        "defn": "(site_id)",
+        "unique": false
+      }
+    ],
+    "charge_settlement_jobs": [
+      {
+        "name": "charge_settlement_jobs_due",
+        "defn": "(next_attempt_at) WHERE ((state)::text = 'pending'::text)",
+        "unique": false
+      }
+    ],
+    "charge_tariff_boundary_evidence": [
+      {
+        "name": "charge_tariff_boundary_evidence_recorded_by_idx",
+        "defn": "(recorded_by)",
+        "unique": false
+      }
+    ],
+    "credit_transactions": [
+      {
+        "name": "credit_transactions_one_debit_per_session",
+        "defn": "(session_id) WHERE (transaction_type = 'session_debit'::credit_transaction_type)",
+        "unique": true
+      },
+      {
+        "name": "credit_transactions_one_per_top_up_and_type",
+        "defn": "(top_up_id, transaction_type) WHERE (top_up_id IS NOT NULL)",
+        "unique": true
+      }
+    ],
+    "driver_charge_intent_events": [
+      {
+        "name": "driver_charge_intent_events_actor_id_idx",
+        "defn": "(actor_id)",
+        "unique": false
+      },
+      {
+        "name": "driver_charge_intent_events_intent_id_idx",
+        "defn": "(intent_id)",
+        "unique": false
+      }
+    ],
+    "driver_charge_intents": [
+      {
+        "name": "driver_charge_intents_driver",
+        "defn": "(driver_id)",
+        "unique": false
+      },
+      {
+        "name": "driver_charge_intents_open_connector",
+        "defn": "(connector_id) WHERE ((connector_released_at IS NULL) AND ((state)::text <> ALL (ARRAY['rejected'::text, 'settled'::text])))",
+        "unique": true
+      },
+      {
+        "name": "driver_charge_intents_vehicle_id_idx",
+        "defn": "(vehicle_id)",
+        "unique": false
+      }
+    ],
+    "driver_start_recoveries": [
+      {
+        "name": "driver_start_recoveries_operator_user_id_idx",
+        "defn": "(operator_user_id)",
+        "unique": false
+      }
+    ],
+    "driver_stop_attempts": [
+      {
+        "name": "driver_stop_attempts_operator_user_id_idx",
+        "defn": "(operator_user_id)",
+        "unique": false
+      }
+    ],
+    "driver_stop_intents": [
+      {
+        "name": "driver_stop_intents_open_session",
+        "defn": "(session_id) WHERE ((state)::text <> 'rejected'::text)",
+        "unique": true
+      }
+    ],
+    "fault_events": [
+      {
+        "name": "fault_events_acknowledged_by_idx",
+        "defn": "(acknowledged_by)",
+        "unique": false
+      },
+      {
+        "name": "fault_events_charge_point_id_raised_at_idx",
+        "defn": "(charge_point_id, raised_at)",
+        "unique": false
+      },
+      {
+        "name": "fault_events_connector_id_idx",
+        "defn": "(connector_id)",
+        "unique": false
+      },
+      {
+        "name": "fault_events_one_open_per_connector_key",
+        "defn": "(charge_point_id, COALESCE(connector_id, (0)::bigint)) WHERE (status <> 'resolved'::fault_event_status)",
+        "unique": true
+      },
+      {
+        "name": "fault_events_open_idx",
+        "defn": "(status) WHERE (status <> 'resolved'::fault_event_status)",
+        "unique": false
+      },
+      {
+        "name": "fault_events_reset_command_id_idx",
+        "defn": "(reset_command_id)",
+        "unique": false
+      }
+    ],
+    "fault_reports": [
+      {
+        "name": "fault_reports_cleared_by_idx",
+        "defn": "(cleared_by)",
+        "unique": false
+      },
+      {
+        "name": "fault_reports_connector_id_idx",
+        "defn": "(connector_id)",
+        "unique": false
+      },
+      {
+        "name": "fault_reports_driver_id_idx",
+        "defn": "(driver_id)",
+        "unique": false
+      },
+      {
+        "name": "fault_reports_fault_event_id_idx",
+        "defn": "(fault_event_id)",
+        "unique": false
+      }
+    ],
+    "loyalty_transactions": [
+      {
+        "name": "loyalty_transactions_one_earn_per_session",
+        "defn": "(session_id) WHERE ((transaction_type = 'earn'::loyalty_transaction_type) AND (session_id IS NOT NULL))",
+        "unique": true
+      },
+      {
+        "name": "loyalty_transactions_session_id_idx",
+        "defn": "(session_id)",
+        "unique": false
+      },
+      {
+        "name": "loyalty_transactions_top_up_id_idx",
+        "defn": "(top_up_id)",
+        "unique": false
+      }
+    ],
+    "maintenance_tickets": [
+      {
+        "name": "maintenance_tickets_assigned_to_idx",
+        "defn": "(assigned_to)",
+        "unique": false
+      },
+      {
+        "name": "maintenance_tickets_fault_event_id_idx",
+        "defn": "(fault_event_id)",
+        "unique": false
+      }
+    ],
+    "meter_values": [
+      {
+        "name": "meter_values_session_id_cp_timestamp_idx",
+        "defn": "(session_id, cp_timestamp, measurand)",
+        "unique": false
+      }
+    ],
+    "ocpp_message_log": [
+      {
+        "name": "ocpp_message_log_action_idx",
+        "defn": "(action, received_at)",
+        "unique": false
+      },
+      {
+        "name": "ocpp_message_log_cp_received_at_idx",
+        "defn": "(charge_point_id, received_at)",
+        "unique": false
+      },
+      {
+        "name": "ocpp_message_log_cp_unique_id_idx",
+        "defn": "(charge_point_id, unique_id)",
+        "unique": false
+      }
+    ],
+    "operator_staff": [
+      {
+        "name": "operator_staff_operator_id_idx",
+        "defn": "(operator_id)",
+        "unique": false
+      }
+    ],
+    "policy_templates": [
+      {
+        "name": "policy_templates_created_by_idx",
+        "defn": "(created_by)",
+        "unique": false
+      }
+    ],
+    "promotions": [
+      {
+        "name": "promotions_operator_id_idx",
+        "defn": "(operator_id)",
+        "unique": false
+      }
+    ],
+    "reconciliation_records": [
+      {
+        "name": "reconciliation_records_reviewed_by_idx",
+        "defn": "(reviewed_by)",
+        "unique": false
+      },
+      {
+        "name": "reconciliation_records_unreviewed_idx",
+        "defn": "(record_type, created_at) WHERE (reviewed_at IS NULL)",
+        "unique": false
+      }
+    ],
+    "refunds": [
+      {
+        "name": "refunds_open_idx",
+        "defn": "(status, last_attempt_at) WHERE (status <> 'done'::refund_status)",
+        "unique": false
+      },
+      {
+        "name": "refunds_requested_by_idx",
+        "defn": "(requested_by)",
+        "unique": false
+      }
+    ],
+    "remote_commands": [
+      {
+        "name": "remote_commands_cp_requested_at_idx",
+        "defn": "(charge_point_id, requested_at DESC)",
+        "unique": false
+      },
+      {
+        "name": "remote_commands_idempotency_key_key",
+        "defn": "(idempotency_key) WHERE (idempotency_key IS NOT NULL)",
+        "unique": true
+      },
+      {
+        "name": "remote_commands_in_flight_idx",
+        "defn": "(status) WHERE (status = ANY (ARRAY['pending'::remote_command_status, 'sent'::remote_command_status]))",
+        "unique": false
+      },
+      {
+        "name": "remote_commands_requested_by_idx",
+        "defn": "(requested_by)",
+        "unique": false
+      }
+    ],
+    "reservations": [
+      {
+        "name": "reservations_one_active_per_connector",
+        "defn": "(connector_id) WHERE (status = 'active'::reservation_status)",
+        "unique": true
+      },
+      {
+        "name": "reservations_one_active_per_driver",
+        "defn": "(driver_id) WHERE (status = 'active'::reservation_status)",
+        "unique": true
+      }
+    ],
+    "rfid_cards": [
+      {
+        "name": "rfid_cards_driver_id_idx",
+        "defn": "(driver_id)",
+        "unique": false
+      }
+    ],
+    "session_status_history": [
+      {
+        "name": "session_status_history_session_id_occurred_at_idx",
+        "defn": "(session_id, occurred_at)",
+        "unique": false
+      }
+    ],
+    "session_tariff_segments": [
+      {
+        "name": "session_tariff_segments_tariff_period_id_idx",
+        "defn": "(tariff_period_id)",
+        "unique": false
+      }
+    ],
+    "sessions": [
+      {
+        "name": "sessions_connector_id_received_started_at_idx",
+        "defn": "(connector_id, received_started_at)",
+        "unique": false
+      },
+      {
+        "name": "sessions_driver_id_idx",
+        "defn": "(driver_id)",
+        "unique": false
+      },
+      {
+        "name": "sessions_promotion_id_idx",
+        "defn": "(promotion_id)",
+        "unique": false
+      },
+      {
+        "name": "sessions_rfid_card_id_idx",
+        "defn": "(rfid_card_id)",
+        "unique": false
+      },
+      {
+        "name": "sessions_status_idx",
+        "defn": "(status)",
+        "unique": false
+      },
+      {
+        "name": "sessions_vehicle_id_idx",
+        "defn": "(vehicle_id)",
+        "unique": false
+      }
+    ],
+    "sites": [
+      {
+        "name": "sites_operator_id_idx",
+        "defn": "(operator_id)",
+        "unique": false
+      }
+    ],
+    "top_ups": [
+      {
+        "name": "top_ups_credit_account_id_idx",
+        "defn": "(credit_account_id)",
+        "unique": false
+      },
+      {
+        "name": "top_ups_gateway_transaction_no_key",
+        "defn": "(gateway_transaction_no) WHERE (gateway_transaction_no IS NOT NULL)",
+        "unique": true
+      }
+    ],
+    "users": [
+      {
+        "name": "users_phone_number_idx",
+        "defn": "(phone_number)",
+        "unique": false
+      }
+    ],
+    "vehicles": [
+      {
+        "name": "vehicles_driver_id_idx",
+        "defn": "(driver_id)",
+        "unique": false
+      },
+      {
+        "name": "vehicles_one_default_per_driver",
+        "defn": "(driver_id) WHERE is_default",
+        "unique": true
+      },
+      {
+        "name": "vehicles_vehicle_model_id_idx",
+        "defn": "(vehicle_model_id)",
+        "unique": false
+      }
+    ]
+  },
+  "PART": {
+    "meter_values": "RANGE (received_at)",
+    "ocpp_message_log": "RANGE (received_at)"
+  },
+  "TRIG": {
+    "driver_stop_attempts": ["driver_stop_attempts_no_update_delete"],
+    "ocpp_message_log": ["ocpp_message_log_no_update_delete"],
+    "ocpp_message_log_2026_10": ["ocpp_message_log_no_update_delete"],
+    "ocpp_message_log_2026_11": ["ocpp_message_log_no_update_delete"],
+    "ocpp_message_log_2026_12": ["ocpp_message_log_no_update_delete"],
+    "ocpp_message_log_2027_01": ["ocpp_message_log_no_update_delete"],
+    "ocpp_message_log_default": ["ocpp_message_log_no_update_delete"],
+    "session_status_history": ["session_status_history_no_update_delete"],
+    "sessions": ["wp3_session_settlement"]
+  },
+  "ENUMS": {
+    "billing_mode": ["full", "timed", "energy_kwh", "amount_vnd"],
+    "charge_point_lifecycle": [
+      "registered",
+      "awaiting_connection",
+      "in_service",
+      "offline",
+      "disabled",
+      "decommissioned"
+    ],
+    "connector_status": [
+      "Available",
+      "Preparing",
+      "Charging",
+      "SuspendedEVSE",
+      "SuspendedEV",
+      "Finishing",
+      "Reserved",
+      "Unavailable",
+      "Faulted"
+    ],
+    "connector_type": ["ccs2", "chademo", "gbt", "type2"],
+    "credit_account_status": ["active", "in_shortfall", "closed"],
+    "credit_transaction_type": [
+      "top_up",
+      "session_debit",
+      "refund",
+      "adjustment",
+      "reservation_fee"
+    ],
+    "discount_type": ["percent", "fixed_vnd"],
+    "e_invoice_error_kind": ["transient", "data"],
+    "e_invoice_status": ["requested", "issued", "failed", "needs_review"],
+    "fault_event_status": ["raised", "acknowledged", "resetting", "resolved"],
+    "fault_source": ["ocpp", "driver_report", "operator"],
+    "loyalty_transaction_type": ["earn", "redeem", "expire", "adjust", "restore"],
+    "maintenance_ticket_status": ["open", "in_progress", "closed"],
+    "ocpp_direction": ["in", "out"],
+    "operator_status": ["active", "suspended", "closed"],
+    "pause_cause": ["ev", "evse"],
+    "payment_mode": ["csms_billed", "station_wallet", "free", "unattributed"],
+    "reconciliation_record_type": [
+      "replay",
+      "duplicate",
+      "meter_gap",
+      "orphan_stop",
+      "unknown_id_tag",
+      "conflict",
+      "late_sample"
+    ],
+    "refund_error_kind": ["transient", "unknown", "rejected"],
+    "refund_kind": ["top_up", "late_payment", "account_closure"],
+    "refund_status": ["requested", "done", "failed"],
+    "remote_command_status": ["pending", "sent", "accepted", "rejected", "timeout", "failed"],
+    "reservation_hold_mode": ["reserve_now", "csms_only"],
+    "reservation_status": [
+      "active",
+      "fulfilled",
+      "cancelled_free",
+      "cancelled_late",
+      "expired_no_show",
+      "voided"
+    ],
+    "rfid_card_kind": ["online", "wallet", "free_vend"],
+    "rfid_card_status": ["unlinked", "active", "blocked"],
+    "session_origin": ["app_qr", "rfid", "hmi_password", "free_vend"],
+    "session_status": [
+      "pending",
+      "active",
+      "paused",
+      "stopping",
+      "closed",
+      "review",
+      "reconciled",
+      "orphaned",
+      "failed"
+    ],
+    "staff_role": ["manager", "technician"],
+    "tariff_band": ["off_peak", "normal", "peak"],
+    "top_up_status": ["pending", "credited", "failed", "expired", "refunded"],
+    "user_account_status": ["active", "suspended", "closed"],
+    "user_role": ["driver", "operator_staff", "admin"]
+  },
+  "FKS": [
+    {
+      "table": "admins",
+      "name": "admins_user_id_fkey",
+      "cols": ["user_id"],
+      "ref": "users",
+      "ref_cols": ["id"],
+      "on_delete": "CASCADE"
+    },
+    {
+      "table": "charge_point_connections",
+      "name": "charge_point_connections_charge_point_id_fkey",
+      "cols": ["charge_point_id"],
+      "ref": "charge_points",
+      "ref_cols": ["id"],
+      "on_delete": "NO ACTION"
+    },
+    {
+      "table": "charge_points",
+      "name": "charge_points_site_id_fkey",
+      "cols": ["site_id"],
+      "ref": "sites",
+      "ref_cols": ["id"],
+      "on_delete": "NO ACTION"
+    },
+    {
+      "table": "charge_settlement_jobs",
+      "name": "charge_settlement_jobs_session_id_fkey",
+      "cols": ["session_id"],
+      "ref": "sessions",
+      "ref_cols": ["id"],
+      "on_delete": "NO ACTION"
+    },
+    {
+      "table": "charge_tariff_boundary_evidence",
+      "name": "charge_tariff_boundary_evidence_recorded_by_fkey",
+      "cols": ["recorded_by"],
+      "ref": "users",
+      "ref_cols": ["id"],
+      "on_delete": "NO ACTION"
+    },
+    {
+      "table": "charge_tariff_boundary_evidence",
+      "name": "charge_tariff_boundary_evidence_session_id_fkey",
+      "cols": ["session_id"],
+      "ref": "sessions",
+      "ref_cols": ["id"],
+      "on_delete": "NO ACTION"
+    },
+    {
+      "table": "charging_statements",
+      "name": "charging_statements_debit_id_fkey",
+      "cols": ["debit_id"],
+      "ref": "credit_transactions",
+      "ref_cols": ["id"],
+      "on_delete": "NO ACTION"
+    },
+    {
+      "table": "charging_statements",
+      "name": "charging_statements_driver_id_fkey",
+      "cols": ["driver_id"],
+      "ref": "drivers",
+      "ref_cols": ["user_id"],
+      "on_delete": "NO ACTION"
+    },
+    {
+      "table": "charging_statements",
+      "name": "charging_statements_loyalty_entry_id_fkey",
+      "cols": ["loyalty_entry_id"],
+      "ref": "loyalty_transactions",
+      "ref_cols": ["id"],
+      "on_delete": "NO ACTION"
+    },
+    {
+      "table": "charging_statements",
+      "name": "charging_statements_session_id_fkey",
+      "cols": ["session_id"],
+      "ref": "sessions",
+      "ref_cols": ["id"],
+      "on_delete": "NO ACTION"
+    },
+    {
+      "table": "connector_status_events",
+      "name": "connector_status_events_charge_point_id_fkey",
+      "cols": ["charge_point_id"],
+      "ref": "charge_points",
+      "ref_cols": ["id"],
+      "on_delete": "CASCADE"
+    },
+    {
+      "table": "connectors",
+      "name": "connectors_charge_point_id_fkey",
+      "cols": ["charge_point_id"],
+      "ref": "charge_points",
+      "ref_cols": ["id"],
+      "on_delete": "CASCADE"
+    },
+    {
+      "table": "credit_accounts",
+      "name": "credit_accounts_driver_id_fkey",
+      "cols": ["driver_id"],
+      "ref": "drivers",
+      "ref_cols": ["user_id"],
+      "on_delete": "NO ACTION"
+    },
+    {
+      "table": "credit_transactions",
+      "name": "credit_transactions_credit_account_id_fkey",
+      "cols": ["credit_account_id"],
+      "ref": "credit_accounts",
+      "ref_cols": ["id"],
+      "on_delete": "RESTRICT"
+    },
+    {
+      "table": "credit_transactions",
+      "name": "credit_transactions_reservation_id_fkey",
+      "cols": ["reservation_id"],
+      "ref": "reservations",
+      "ref_cols": ["id"],
+      "on_delete": "NO ACTION"
+    },
+    {
+      "table": "credit_transactions",
+      "name": "credit_transactions_session_id_fkey",
+      "cols": ["session_id"],
+      "ref": "sessions",
+      "ref_cols": ["id"],
+      "on_delete": "NO ACTION"
+    },
+    {
+      "table": "credit_transactions",
+      "name": "credit_transactions_top_up_id_fkey",
+      "cols": ["top_up_id"],
+      "ref": "top_ups",
+      "ref_cols": ["id"],
+      "on_delete": "NO ACTION"
+    },
+    {
+      "table": "driver_charge_intent_events",
+      "name": "driver_charge_intent_events_actor_id_fkey",
+      "cols": ["actor_id"],
+      "ref": "users",
+      "ref_cols": ["id"],
+      "on_delete": "NO ACTION"
+    },
+    {
+      "table": "driver_charge_intent_events",
+      "name": "driver_charge_intent_events_intent_id_fkey",
+      "cols": ["intent_id"],
+      "ref": "driver_charge_intents",
+      "ref_cols": ["id"],
+      "on_delete": "NO ACTION"
+    },
+    {
+      "table": "driver_charge_intents",
+      "name": "driver_charge_intents_command_id_fkey",
+      "cols": ["command_id"],
+      "ref": "remote_commands",
+      "ref_cols": ["id"],
+      "on_delete": "NO ACTION"
+    },
+    {
+      "table": "driver_charge_intents",
+      "name": "driver_charge_intents_connector_id_fkey",
+      "cols": ["connector_id"],
+      "ref": "connectors",
+      "ref_cols": ["id"],
+      "on_delete": "NO ACTION"
+    },
+    {
+      "table": "driver_charge_intents",
+      "name": "driver_charge_intents_driver_id_fkey",
+      "cols": ["driver_id"],
+      "ref": "drivers",
+      "ref_cols": ["user_id"],
+      "on_delete": "NO ACTION"
+    },
+    {
+      "table": "driver_charge_intents",
+      "name": "driver_charge_intents_session_id_fkey",
+      "cols": ["session_id"],
+      "ref": "sessions",
+      "ref_cols": ["id"],
+      "on_delete": "NO ACTION"
+    },
+    {
+      "table": "driver_charge_intents",
+      "name": "driver_charge_intents_vehicle_id_fkey",
+      "cols": ["vehicle_id"],
+      "ref": "vehicles",
+      "ref_cols": ["id"],
+      "on_delete": "NO ACTION"
+    },
+    {
+      "table": "driver_start_recoveries",
+      "name": "driver_start_recoveries_fence_command_id_fkey",
+      "cols": ["fence_command_id"],
+      "ref": "remote_commands",
+      "ref_cols": ["id"],
+      "on_delete": "NO ACTION"
+    },
+    {
+      "table": "driver_start_recoveries",
+      "name": "driver_start_recoveries_intent_id_fkey",
+      "cols": ["intent_id"],
+      "ref": "driver_charge_intents",
+      "ref_cols": ["id"],
+      "on_delete": "NO ACTION"
+    },
+    {
+      "table": "driver_start_recoveries",
+      "name": "driver_start_recoveries_operator_user_id_fkey",
+      "cols": ["operator_user_id"],
+      "ref": "users",
+      "ref_cols": ["id"],
+      "on_delete": "NO ACTION"
+    },
+    {
+      "table": "driver_start_recoveries",
+      "name": "driver_start_recoveries_restore_command_id_fkey",
+      "cols": ["restore_command_id"],
+      "ref": "remote_commands",
+      "ref_cols": ["id"],
+      "on_delete": "NO ACTION"
+    },
+    {
+      "table": "driver_stop_attempts",
+      "name": "driver_stop_attempts_command_id_fkey",
+      "cols": ["command_id"],
+      "ref": "remote_commands",
+      "ref_cols": ["id"],
+      "on_delete": "NO ACTION"
+    },
+    {
+      "table": "driver_stop_attempts",
+      "name": "driver_stop_attempts_intent_id_fkey",
+      "cols": ["intent_id"],
+      "ref": "driver_stop_intents",
+      "ref_cols": ["id"],
+      "on_delete": "NO ACTION"
+    },
+    {
+      "table": "driver_stop_attempts",
+      "name": "driver_stop_attempts_operator_user_id_fkey",
+      "cols": ["operator_user_id"],
+      "ref": "users",
+      "ref_cols": ["id"],
+      "on_delete": "NO ACTION"
+    },
+    {
+      "table": "driver_stop_attempts",
+      "name": "driver_stop_attempts_previous_command_id_fkey",
+      "cols": ["previous_command_id"],
+      "ref": "remote_commands",
+      "ref_cols": ["id"],
+      "on_delete": "NO ACTION"
+    },
+    {
+      "table": "driver_stop_intents",
+      "name": "driver_stop_intents_command_id_fkey",
+      "cols": ["command_id"],
+      "ref": "remote_commands",
+      "ref_cols": ["id"],
+      "on_delete": "NO ACTION"
+    },
+    {
+      "table": "driver_stop_intents",
+      "name": "driver_stop_intents_driver_id_fkey",
+      "cols": ["driver_id"],
+      "ref": "drivers",
+      "ref_cols": ["user_id"],
+      "on_delete": "NO ACTION"
+    },
+    {
+      "table": "driver_stop_intents",
+      "name": "driver_stop_intents_session_id_fkey",
+      "cols": ["session_id"],
+      "ref": "sessions",
+      "ref_cols": ["id"],
+      "on_delete": "NO ACTION"
+    },
+    {
+      "table": "drivers",
+      "name": "drivers_user_id_fkey",
+      "cols": ["user_id"],
+      "ref": "users",
+      "ref_cols": ["id"],
+      "on_delete": "CASCADE"
+    },
+    {
+      "table": "e_invoices",
+      "name": "e_invoices_top_up_id_fkey",
+      "cols": ["top_up_id"],
+      "ref": "top_ups",
+      "ref_cols": ["id"],
+      "on_delete": "NO ACTION"
+    },
+    {
+      "table": "fault_events",
+      "name": "fault_events_acknowledged_by_fkey",
+      "cols": ["acknowledged_by"],
+      "ref": "operator_staff",
+      "ref_cols": ["user_id"],
+      "on_delete": "NO ACTION"
+    },
+    {
+      "table": "fault_events",
+      "name": "fault_events_charge_point_id_fkey",
+      "cols": ["charge_point_id"],
+      "ref": "charge_points",
+      "ref_cols": ["id"],
+      "on_delete": "NO ACTION"
+    },
+    {
+      "table": "fault_events",
+      "name": "fault_events_connector_id_fkey",
+      "cols": ["connector_id"],
+      "ref": "connectors",
+      "ref_cols": ["id"],
+      "on_delete": "NO ACTION"
+    },
+    {
+      "table": "fault_events",
+      "name": "fault_events_reset_command_id_fkey",
+      "cols": ["reset_command_id"],
+      "ref": "remote_commands",
+      "ref_cols": ["id"],
+      "on_delete": "NO ACTION"
+    },
+    {
+      "table": "fault_reports",
+      "name": "fault_reports_cleared_by_fkey",
+      "cols": ["cleared_by"],
+      "ref": "operator_staff",
+      "ref_cols": ["user_id"],
+      "on_delete": "NO ACTION"
+    },
+    {
+      "table": "fault_reports",
+      "name": "fault_reports_connector_id_fkey",
+      "cols": ["connector_id"],
+      "ref": "connectors",
+      "ref_cols": ["id"],
+      "on_delete": "NO ACTION"
+    },
+    {
+      "table": "fault_reports",
+      "name": "fault_reports_driver_id_fkey",
+      "cols": ["driver_id"],
+      "ref": "drivers",
+      "ref_cols": ["user_id"],
+      "on_delete": "NO ACTION"
+    },
+    {
+      "table": "fault_reports",
+      "name": "fault_reports_fault_event_id_fkey",
+      "cols": ["fault_event_id"],
+      "ref": "fault_events",
+      "ref_cols": ["id"],
+      "on_delete": "NO ACTION"
+    },
+    {
+      "table": "invoice_adjustments",
+      "name": "invoice_adjustments_e_invoice_id_fkey",
+      "cols": ["e_invoice_id"],
+      "ref": "e_invoices",
+      "ref_cols": ["id"],
+      "on_delete": "RESTRICT"
+    },
+    {
+      "table": "invoice_adjustments",
+      "name": "invoice_adjustments_refund_id_fkey",
+      "cols": ["refund_id"],
+      "ref": "refunds",
+      "ref_cols": ["id"],
+      "on_delete": "RESTRICT"
+    },
+    {
+      "table": "loyalty_accounts",
+      "name": "loyalty_accounts_driver_id_fkey",
+      "cols": ["driver_id"],
+      "ref": "drivers",
+      "ref_cols": ["user_id"],
+      "on_delete": "NO ACTION"
+    },
+    {
+      "table": "loyalty_transactions",
+      "name": "loyalty_transactions_loyalty_account_id_fkey",
+      "cols": ["loyalty_account_id"],
+      "ref": "loyalty_accounts",
+      "ref_cols": ["id"],
+      "on_delete": "RESTRICT"
+    },
+    {
+      "table": "loyalty_transactions",
+      "name": "loyalty_transactions_session_id_fkey",
+      "cols": ["session_id"],
+      "ref": "sessions",
+      "ref_cols": ["id"],
+      "on_delete": "NO ACTION"
+    },
+    {
+      "table": "loyalty_transactions",
+      "name": "loyalty_transactions_top_up_id_fkey",
+      "cols": ["top_up_id"],
+      "ref": "top_ups",
+      "ref_cols": ["id"],
+      "on_delete": "NO ACTION"
+    },
+    {
+      "table": "maintenance_tickets",
+      "name": "maintenance_tickets_assigned_to_fkey",
+      "cols": ["assigned_to"],
+      "ref": "operator_staff",
+      "ref_cols": ["user_id"],
+      "on_delete": "NO ACTION"
+    },
+    {
+      "table": "maintenance_tickets",
+      "name": "maintenance_tickets_fault_event_id_fkey",
+      "cols": ["fault_event_id"],
+      "ref": "fault_events",
+      "ref_cols": ["id"],
+      "on_delete": "NO ACTION"
+    },
+    {
+      "table": "meter_values",
+      "name": "meter_values_session_id_fkey",
+      "cols": ["session_id"],
+      "ref": "sessions",
+      "ref_cols": ["id"],
+      "on_delete": "RESTRICT"
+    },
+    {
+      "table": "ocpp_message_log",
+      "name": "ocpp_message_log_charge_point_id_fkey",
+      "cols": ["charge_point_id"],
+      "ref": "charge_points",
+      "ref_cols": ["id"],
+      "on_delete": "NO ACTION"
+    },
+    {
+      "table": "operator_staff",
+      "name": "operator_staff_operator_id_fkey",
+      "cols": ["operator_id"],
+      "ref": "operators",
+      "ref_cols": ["id"],
+      "on_delete": "NO ACTION"
+    },
+    {
+      "table": "operator_staff",
+      "name": "operator_staff_user_id_fkey",
+      "cols": ["user_id"],
+      "ref": "users",
+      "ref_cols": ["id"],
+      "on_delete": "CASCADE"
+    },
+    {
+      "table": "policy_templates",
+      "name": "policy_templates_created_by_fkey",
+      "cols": ["created_by"],
+      "ref": "admins",
+      "ref_cols": ["user_id"],
+      "on_delete": "NO ACTION"
+    },
+    {
+      "table": "promotions",
+      "name": "promotions_operator_id_fkey",
+      "cols": ["operator_id"],
+      "ref": "operators",
+      "ref_cols": ["id"],
+      "on_delete": "NO ACTION"
+    },
+    {
+      "table": "reconciliation_records",
+      "name": "reconciliation_records_reviewed_by_fkey",
+      "cols": ["reviewed_by"],
+      "ref": "operator_staff",
+      "ref_cols": ["user_id"],
+      "on_delete": "NO ACTION"
+    },
+    {
+      "table": "reconciliation_records",
+      "name": "reconciliation_records_session_id_fkey",
+      "cols": ["session_id"],
+      "ref": "sessions",
+      "ref_cols": ["id"],
+      "on_delete": "RESTRICT"
+    },
+    {
+      "table": "refunds",
+      "name": "refunds_requested_by_fkey",
+      "cols": ["requested_by"],
+      "ref": "admins",
+      "ref_cols": ["user_id"],
+      "on_delete": "NO ACTION"
+    },
+    {
+      "table": "refunds",
+      "name": "refunds_top_up_id_fkey",
+      "cols": ["top_up_id"],
+      "ref": "top_ups",
+      "ref_cols": ["id"],
+      "on_delete": "RESTRICT"
+    },
+    {
+      "table": "remote_commands",
+      "name": "remote_commands_charge_point_id_fkey",
+      "cols": ["charge_point_id"],
+      "ref": "charge_points",
+      "ref_cols": ["id"],
+      "on_delete": "NO ACTION"
+    },
+    {
+      "table": "remote_commands",
+      "name": "remote_commands_requested_by_fkey",
+      "cols": ["requested_by"],
+      "ref": "operator_staff",
+      "ref_cols": ["user_id"],
+      "on_delete": "NO ACTION"
+    },
+    {
+      "table": "reservations",
+      "name": "reservations_connector_id_fkey",
+      "cols": ["connector_id"],
+      "ref": "connectors",
+      "ref_cols": ["id"],
+      "on_delete": "NO ACTION"
+    },
+    {
+      "table": "reservations",
+      "name": "reservations_driver_id_fkey",
+      "cols": ["driver_id"],
+      "ref": "drivers",
+      "ref_cols": ["user_id"],
+      "on_delete": "NO ACTION"
+    },
+    {
+      "table": "rfid_cards",
+      "name": "rfid_cards_driver_id_fkey",
+      "cols": ["driver_id"],
+      "ref": "drivers",
+      "ref_cols": ["user_id"],
+      "on_delete": "NO ACTION"
+    },
+    {
+      "table": "session_pauses",
+      "name": "session_pauses_session_id_fkey",
+      "cols": ["session_id"],
+      "ref": "sessions",
+      "ref_cols": ["id"],
+      "on_delete": "CASCADE"
+    },
+    {
+      "table": "session_status_history",
+      "name": "session_status_history_session_id_fkey",
+      "cols": ["session_id"],
+      "ref": "sessions",
+      "ref_cols": ["id"],
+      "on_delete": "RESTRICT"
+    },
+    {
+      "table": "session_tariff_segments",
+      "name": "session_tariff_segments_session_id_fkey",
+      "cols": ["session_id"],
+      "ref": "sessions",
+      "ref_cols": ["id"],
+      "on_delete": "RESTRICT"
+    },
+    {
+      "table": "session_tariff_segments",
+      "name": "session_tariff_segments_tariff_period_id_fkey",
+      "cols": ["tariff_period_id"],
+      "ref": "tariff_periods",
+      "ref_cols": ["id"],
+      "on_delete": "NO ACTION"
+    },
+    {
+      "table": "sessions",
+      "name": "sessions_connector_fk",
+      "cols": ["connector_id", "charge_point_id", "connector_no"],
+      "ref": "connectors",
+      "ref_cols": ["id", "charge_point_id", "connector_no"],
+      "on_delete": "NO ACTION"
+    },
+    {
+      "table": "sessions",
+      "name": "sessions_driver_id_fkey",
+      "cols": ["driver_id"],
+      "ref": "drivers",
+      "ref_cols": ["user_id"],
+      "on_delete": "NO ACTION"
+    },
+    {
+      "table": "sessions",
+      "name": "sessions_promotion_id_fkey",
+      "cols": ["promotion_id"],
+      "ref": "promotions",
+      "ref_cols": ["id"],
+      "on_delete": "NO ACTION"
+    },
+    {
+      "table": "sessions",
+      "name": "sessions_reservation_id_fkey",
+      "cols": ["reservation_id"],
+      "ref": "reservations",
+      "ref_cols": ["id"],
+      "on_delete": "NO ACTION"
+    },
+    {
+      "table": "sessions",
+      "name": "sessions_rfid_card_id_fkey",
+      "cols": ["rfid_card_id"],
+      "ref": "rfid_cards",
+      "ref_cols": ["id"],
+      "on_delete": "NO ACTION"
+    },
+    {
+      "table": "sessions",
+      "name": "sessions_vehicle_id_fkey",
+      "cols": ["vehicle_id"],
+      "ref": "vehicles",
+      "ref_cols": ["id"],
+      "on_delete": "NO ACTION"
+    },
+    {
+      "table": "sites",
+      "name": "sites_operator_id_fkey",
+      "cols": ["operator_id"],
+      "ref": "operators",
+      "ref_cols": ["id"],
+      "on_delete": "NO ACTION"
+    },
+    {
+      "table": "tariff_periods",
+      "name": "tariff_periods_operator_id_fkey",
+      "cols": ["operator_id"],
+      "ref": "operators",
+      "ref_cols": ["id"],
+      "on_delete": "CASCADE"
+    },
+    {
+      "table": "top_ups",
+      "name": "top_ups_credit_account_id_fkey",
+      "cols": ["credit_account_id"],
+      "ref": "credit_accounts",
+      "ref_cols": ["id"],
+      "on_delete": "NO ACTION"
+    },
+    {
+      "table": "vehicles",
+      "name": "vehicles_driver_id_fkey",
+      "cols": ["driver_id"],
+      "ref": "drivers",
+      "ref_cols": ["user_id"],
+      "on_delete": "NO ACTION"
+    },
+    {
+      "table": "vehicles",
+      "name": "vehicles_vehicle_model_id_fkey",
+      "cols": ["vehicle_model_id"],
+      "ref": "vehicle_models",
+      "ref_cols": ["id"],
+      "on_delete": "NO ACTION"
+    }
+  ]
+}

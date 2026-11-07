@@ -1,0 +1,57 @@
+@startuml AD-7
+!include _style.iuml
+title AD-7 (System level) — Charge Point fault: report, alert, remote reset\nTrigger: a Driver fault report, a Faulted status, or an offline alert\nUse cases: UC-CHG-05, UC-INT-04, UC-OPS-03, UC-OPS-04, UC-OPS-08 [Should] · Rules: BR-P28, BR-P42
+
+|«person»\nOperator|
+|«software system»\nPowerMe Platform|
+|«external system»\nCharge Point|
+|«software system»\nPowerMe Platform|
+start
+:Receive fault signal (Driver report,\nFaulted status or offline alert)<
+if ( ) then ([Driver report])
+  :Record the report\nagainst the connector;
+  :FaultReport]
+  if ( ) then ([2nd Driver within 2 h, or\nconnector status abnormal])
+    :Show "reported issue"\nlabel on the connector;
+  else ([else])
+    :Keep the report for\nlater grouping;
+    stop
+  endif
+else ([Faulted status\nor offline alert])
+endif
+:Raise fault event, hide connector from\nsearch and suggestions, void its\nreservations (no fee), alert Operator>
+:FaultEvent\n&#91;raised&#93;]
+:Reservation\n&#91;voided&#93;]
+|«person»\nOperator|
+:Acknowledge the alert;
+:FaultEvent\n&#91;acknowledged&#93;]
+if ( ) then ([remote reset may fix it])
+  :Choose soft or hard reset;
+  |«software system»\nPowerMe Platform|
+  :Send reset command>
+  :FaultEvent\n&#91;resetting&#93;]
+  |«external system»\nCharge Point|
+  :Restart and report\nconnector status>
+  |«person»\nOperator|
+else ([needs a site visit])
+endif
+|«software system»\nPowerMe Platform|
+if ( ) then ([connector reports Available\nwithin the reset timeout])
+else ([reset rejected, timed out or still\nfaulted, or site visit needed])
+  |«person»\nOperator|
+  if ( ) then ([maintenance tickets\nin use (Should)])
+    :Create maintenance ticket;
+    :MaintenanceTicket\n&#91;open&#93;]
+    :Fix on site and\nclose the ticket;
+    :MaintenanceTicket\n&#91;closed&#93;]
+  else ([Must only])
+    :Fix on site outside\nthe system;
+  endif
+  |«external system»\nCharge Point|
+  :Report connector\nAvailable>
+  |«software system»\nPowerMe Platform|
+endif
+:Resolve fault, show connector again\nand clear "reported issue" label;
+:FaultEvent\n&#91;resolved&#93;]
+stop
+@enduml

@@ -1,0 +1,117 @@
+@startuml CD-5
+!include ../_style.iuml
+skinparam nodesep 45
+skinparam ranksep 55
+title CD-5 (Software level, CSMS) — Class diagram of WF-05: register, onboard and connect a Charge Point\nModules: stations, ocpp-gateway · Behaviour: SD-5a, SD-5b · State: STM-3
+footer Owner: Trần Đức Ân (WP1) · v2.0 · 01/11/2026 · names = code after the Charge Point rename (T90) · main members only
+
+package "ocpp-gateway" {
+  class OcppServer <<component>> {
+    + start() : void
+    - onHandshake(identity : string, password : string, ip : string) : void
+  }
+  class ConnectionRegistry <<component>> {
+    + open(identity : string, client : OcppClient) : Connection
+    + close(client : OcppClient, closedAt : Date) : Connection
+    + latestEpoch(chargePointId : number) : number
+  }
+}
+
+package "stations" {
+  class ChargePointOnboardingService <<component>> {
+    + registerDevice(adminUserId : number, input : RegisterDeviceInput) : ChargePoint
+    + onboard(staffUserId : number, input : OnboardInput) : OnboardResult
+    - requireRole(userId : number, role : Role) : void
+    - operatorOf(staffUserId : number) : number
+  }
+  class ChargePointAuthService <<component>> {
+    + verify(identity : string, password : string, clientIp : string) : AuthResult
+  }
+  class ChargePointLifecyclePolicy {
+    + transition(from : ChargePointLifecycle, event : ChargePointLifecycleEvent) : ChargePointLifecycle
+    + canApply(from : ChargePointLifecycle, event : ChargePointLifecycleEvent) : boolean
+    + mayConnect(state : ChargePointLifecycle) : boolean
+  }
+  class ChargePointLoginLimiter {
+    + check(serial : string, ip : string) : LockState
+    + recordFailure(serial : string, ip : string) : FailureResult
+    + recordSuccess(serial : string, ip : string) : void
+  }
+  class ChargePointCredential <<utility>> {
+    + generatePassword() : string
+    + hashPassword(password : string) : string
+    + verifyPassword(password : string, hash : string) : boolean
+  }
+  class OnboardingError {
+    + code : OnboardingErrorCode
+    + status : 400 | 403 | 404 | 409
+  }
+  enum ChargePointLifecycle <<enumeration>> {
+    registered
+    awaiting_connection
+    in_service
+    disabled
+    decommissioned
+  }
+  enum ChargePointLifecycleEvent <<enumeration>> {
+    REGISTER
+    ONBOARD
+    FIRST_CONNECT
+    DISABLE
+    ENABLE
+    DECOMMISSION
+  }
+}
+
+package "domain (tables)" {
+  class Operator <<entity>> {
+    + legalName : string
+    + status : active | suspended
+  }
+  class Site <<entity>> {
+    + siteCode : string
+    + siteName : string
+  }
+  class ChargePoint <<entity>> {
+    + serialNumber : string {unique}
+    + displayCode : string
+    + lifecycle : ChargePointLifecycle
+    + basicAuthPasswordHash : string [0..1]
+    + isOnline : boolean
+    + currentEpoch : number
+  }
+  class Connector <<entity>> {
+    + connectorNo : 1..2
+    + connectorType : ccs2 | chademo | gbt | type2
+    + status : ConnectorStatus
+  }
+}
+
+ChargePointOnboardingService .down.> ChargePointLifecyclePolicy : <<use>>
+ChargePointOnboardingService .down.> ChargePointCredential : <<use>>
+ChargePointOnboardingService .right.> OnboardingError : <<throw>>
+ChargePointOnboardingService .down.> ChargePoint : <<create>>
+ChargePointAuthService .down.> ChargePointLifecyclePolicy : <<use>>
+ChargePointAuthService .down.> ChargePointCredential : <<use>>
+ChargePointAuthService "1" -down-> "1" ChargePointLoginLimiter
+ChargePointLifecyclePolicy .down.> ChargePointLifecycle
+ChargePointLifecyclePolicy .down.> ChargePointLifecycleEvent
+OcppServer "1" -down-> "0..1" ChargePointAuthService : verifies with >
+OcppServer "1" -right-> "1" ConnectionRegistry
+ConnectionRegistry .down.> ChargePoint : <<update>>
+
+Operator "1" o-down- "0..*" Site : owns >
+Site "0..1" o-down- "0..*" ChargePoint : hosts >
+ChargePoint "1" *-down- "1..2" Connector
+
+note bottom of ConnectionRegistry
+  open() sets lifecycle awaiting_connection → in_service
+  (STM-3 #3 FIRST_CONNECT) directly in SQL,
+  not through ChargePointLifecyclePolicy.
+end note
+note bottom of Connector
+  ChargePoint: site is empty while registered (Admin) and
+  set at onboard (Operator). Online / offline is
+  isOnline, not a lifecycle value (ADR-0016 D-C).
+end note
+@enduml

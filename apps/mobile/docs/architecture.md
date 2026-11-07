@@ -4,7 +4,7 @@
 
 ## Authority và cách dùng
 
-Đọc nguyên [PKG-3_mobile](../../../diagrams/team/PKG-3_mobile.puml), [WF01-class](../../../diagrams/team/WF01-class.puml) và [WF01-seq](../../../diagrams/team/WF01-seq.puml), sau đó matching [SRS](../../../docs/requirements/report3-srs.md) / [registration v1.3 candidate](../../../docs/requirements/registration-form-v1.3.md). Không sửa diagram theo code hoặc copy policy từ app cũ. Mỗi slice ghi view/FR/UC/BR/NFR, class/signature/package tác động, dependency/DEC, expected states/test trước implementation; cập nhật tiến độ trong screens.md sau kiểm.
+Đọc nguyên [PKG-3_mobile](../../../diagrams/report4/package/PKG-3/PKG-3.puml), [WF01-class](../../../diagrams/report4/class/CD-1/CD-1.puml) và [WF01-seq](../../../diagrams/report4/sequence/SD-1a/SD-1a.puml), sau đó matching [SRS](../../../docs/requirements/report3-srs.md) / [registration v1.3 candidate](../../../docs/requirements/registration-form-v1.3.md). Không sửa diagram theo code hoặc copy policy từ app cũ. Mỗi slice ghi view/FR/UC/BR/NFR, class/signature/package tác động, dependency/DEC, expected states/test trước implementation; cập nhật tiến độ trong screens.md sau kiểm.
 
 PKG-3 là hướng phụ thuộc; WF01 là logical class design của Stations/Charging, không phải toàn bộ UML Profile/Payments. ProfileRepository/ProfileController là project-specific adapter/controller phục vụ slice account, không giả là class có trong WF01. Nếu cần mở rộng model để render detail, ghi field bổ sung rõ thay vì thay tên/signature class nguồn. Không tạo stub 8 feature hoặc fake generated DTO chỉ để đủ tầng.
 

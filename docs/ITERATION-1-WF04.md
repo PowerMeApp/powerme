@@ -3,8 +3,8 @@
 **Date:** 27/10/2026 (updated after review of PR #61, see §10) · **Owner:** Trần Trọng Nghĩa (WP4) · **Branch:** `wp4/fe-04-iteration-1-wf04` (from `main` @ `34ec95a`, merged with `main` @ `c107c94`)
 
 **Sources:**
-- Design: `docs/WF-04-XU-LY-LOI-TRU.md` (sequence diagrams 1–2, class diagram, mapping table §5, open questions §6), `diagrams/team/WF04-*`, AD-7 (`diagrams/ad/AD-7_fault_and_alert.puml`).
-- State machines: STM-6 FaultEvent v0.2 (`diagrams/stm/STM-6_FaultEvent.puml`), STM-2 Connector, STM-1 ChargingSession, plus `docs/XAC-NHAN-STATE-MACHINE-T13.md`.
+- Design: `docs/WF-04-XU-LY-LOI-TRU.md` (sequence diagrams 1–2, class diagram, mapping table §5, open questions §6), `diagrams/report4/class/CD-4/`, `diagrams/report4/sequence/SD-4a/`, `SD-4b/`, AD-7 (`diagrams/report3/activity/AD-7/AD-7.puml`).
+- State machines: STM-6 FaultEvent v0.2 (`diagrams/report4/state/STM-6/STM-6.puml`), STM-2 Connector, STM-1 ChargingSession, plus `docs/XAC-NHAN-STATE-MACHINE-T13.md`.
 - Schema and ADRs: migration `0001` (`remote_commands`), ADR-0016 D-F (FaultService lives in `stations`).
 - Simulator: `simulator/d1-hmi` (`fault` / `clearfault`, Reset = reboot).
 - Format: `docs/ITERATION-1-WF03.md`.

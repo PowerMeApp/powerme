@@ -1,0 +1,116 @@
+@startuml CD-3
+!include ../_style.iuml
+skinparam nodesep 40
+skinparam ranksep 50
+title CD-3 (Software level, CSMS) — Class diagram of WF-03: lost connection, replay and reconciliation\nFrom apps/csms/src at origin/main ce3902c · Behaviour: SD-3a, SD-3b · State: STM-1
+footer Owner: Ngô Văn Minh Trí (WP2) · v2.0 · 01/11/2026 · names = code · main members only
+
+package "ocpp-gateway" {
+  class OcppServer <<component>> {
+    + start() : void
+    - onCall(identity : string, action : string, params : unknown) : unknown
+  }
+  class ConnectionRegistry <<component>> {
+    + open(identity : string, client : OcppClient) : Connection
+    + close(client : OcppClient, closedAt : Date) : Connection
+    + latestEpoch(chargePointId : number) : number
+  }
+  class OfflineGraceService <<component>> {
+    + onSocketClosed(chargePointId : number, epoch : number, closedAt : Date) : void
+    + check(chargePointId : number, epoch : number) : reconnected | orphaned
+    + recoverAfterRestart() : RecoverySummary
+  }
+  class OcppMessageLogger <<component>> {
+    + log(entry : MessageLogEntry) : number
+  }
+  class OcppHandlers <<component>> {
+    + dispatch(action : string, params : unknown, ctx : InboundContext) : object
+  }
+}
+package "reconciliation" {
+  class ReplayDetector {
+    + classify(cpTimestamp : Date, receivedAt : Date, epochOpenedAt : Date) : ReplayVerdict
+  }
+  class ReconciliationService <<component>> {
+    + evaluate(series : EnergySample[], meterStop : number) : ReconciliationVerdict
+    + recordVerdict(sessionId : number, verdict : ReconciliationVerdict) : void
+    + recordReplay(sessionId : number, frame : FrameRef) : number
+    + recordDuplicate(sessionId : number, frame : FrameRef) : number
+  }
+}
+package "sessions" {
+  class SessionsService <<component>> {
+    + onStartTransaction(req, ctx) : TransactionId
+    + onMeterValues(req, ctx) : void
+    + onStopTransaction(req, ctx) : void
+    + onStationOffline(chargePointId : number, at : Date) : number
+  }
+  class SessionStateMachine {
+    + apply(from : SessionStatus, event : SessionEvent) : SessionStatus
+  }
+  enum SessionStatus <<enumeration>> {
+    pending
+    active
+    paused
+    stopping
+    closed
+    review
+    reconciled
+    orphaned
+    failed
+  }
+}
+package "entities (tables)" {
+  class ChargePointConnection <<entity>> {
+    + epoch : number
+    + openedAt : Date
+    + closedAt : Date [0..1]
+  }
+  class OcppMessageLog <<entity>> {
+    + epoch : number
+    + direction : in | out
+    + replayed : boolean
+    + raw : json
+  }
+  class Session <<entity>> {
+    + transactionNo : number
+    + status : SessionStatus
+    + paymentMode : csms_billed | station_wallet | unattributed
+    + meterStartWh : number
+    + meterStopWh : number [0..1]
+    + orphanedAt : Date [0..1]
+  }
+  class MeterValue <<entity>> {
+    + cpTimestamp : Date
+    + replayed : boolean
+    + epoch : number
+  }
+  class ReconciliationRecord <<entity>> {
+    + recordType : replay | duplicate | meter_gap | orphan_stop | unknown_id_tag | conflict | late_sample
+    + energyDifferenceWh : number [0..1]
+  }
+}
+
+OcppServer --> ConnectionRegistry
+OcppServer --> ReplayDetector
+OcppServer --> OcppMessageLogger
+OcppServer --> OcppHandlers
+OcppServer --> OfflineGraceService
+OcppHandlers --> SessionsService
+OfflineGraceService --> SessionsService
+SessionsService --> SessionStateMachine
+SessionsService --> ReconciliationService
+SessionStateMachine ..> SessionStatus
+ConnectionRegistry ..> ChargePointConnection : <<create>>
+OcppMessageLogger ..> OcppMessageLog : <<create>>
+SessionsService ..> Session : <<update>>
+SessionsService ..> MeterValue : <<create>>
+ReconciliationService ..> ReconciliationRecord : <<create>>
+Session "1" *-- "0..*" MeterValue
+Session "1" *-- "0..*" ReconciliationRecord
+
+note bottom of SessionStateMachine
+  STM-1 transition 16a HARD_CAP_EXCEEDED (orphaned → review
+  after 24 h) is in the table but no job fires it yet
+end note
+@enduml

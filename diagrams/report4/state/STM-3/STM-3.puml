@@ -1,0 +1,26 @@
+@startuml STM-3
+!include _style.iuml
+title STM-3 (System level) — Lifecycle of a Charge Point\ncharge_points.lifecycle · v1.0 · 01/11/2026
+
+[*] --> registered
+note left of registered
+  created when the Admin registers
+  the serial number (UC-ADM-03)
+end note
+registered --> awaiting_connection : Operator onboards it to a site\n/ create connectors, issue credential
+awaiting_connection : Charge Point connects [wrong credential]\n/ reject connection, log attempt
+awaiting_connection --> in_service : Charge Point connects [credential valid]\n/ read capabilities, show on map
+in_service : Charge Point restarts / read capabilities again
+in_service --> disabled : Operator takes it out of service\n/ hide from search
+disabled --> in_service : Operator returns it to service\n/ show in search
+disabled --> decommissioned : Admin retires it
+decommissioned --> [*]
+
+note right of in_service
+  Online / offline is not a lifecycle state:
+  it is kept as a connection flag
+  (is_online, last_seen_at). An in_service
+  Charge Point can be offline; a disabled
+  one can be online. Offline alert: STM-6.
+end note
+@enduml

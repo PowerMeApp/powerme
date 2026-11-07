@@ -1,0 +1,79 @@
+@startuml AD-2
+!include _style.iuml
+title AD-2 (System level) — Top up Charging Credit (with optional points redemption)\nTrigger: Driver opens Top Up, or is sent here from AD-1 · Use cases: UC-PAY-01, UC-PAY-03
+
+|«person»\nDriver|
+start
+:Enter top-up amount and\nchoose whether to redeem points;
+|«software system»\nPowerMe Platform|
+:Check amount limits, balance\ncap and open top-ups;
+if ( ) then ([amount outside 50,000–2,000,000 VND,\nbalance after > 5,000,000 VND\nor another top-up still open])
+  :Reject with reason;
+  stop
+else ([valid])
+endif
+if ( ) then ([redeem chosen and\npoints ≥ 500])
+  :Compute points discount\n(≤ 50% of the amount);
+else ([else])
+endif
+:Create top-up and send payment\nrequest for amount − discount>
+:TopUp\n&#91;pending&#93;]
+|«person»\nDriver|
+:Pay on the payment\ngateway page;
+|«external system»\nPayment Gateway|
+:Process payment and\nsend payment result>
+|«software system»\nPowerMe Platform|
+if ( ) then ([payment failed or\nDriver cancelled])
+  :Mark top-up failed, keep\ncredit and points, offer retry;
+  :TopUp\n&#91;failed&#93;]
+  stop
+else ([else])
+  if ( ) then ([no result within 15 min])
+    :Query payment status\n(retry every 5 min while\nthe gateway is unavailable)>
+    |«external system»\nPayment Gateway|
+    :Return payment status>
+    |«software system»\nPowerMe Platform|
+    if ( ) then ([not paid])
+      :TopUp\n&#91;expired&#93;]
+      if ( ) then ([late payment within 1 h,\nnot yet applied])
+      else ([else])
+        if ( ) then ([late payment\nafter 1 h])
+          :Record late payment\nfor Admin refund (AD-9);
+          stop
+        else ([no late payment])
+          stop
+        endif
+      endif
+    else ([paid, amount matches])
+    endif
+  else ([paid, signature valid,\namount matches,\nnot yet applied])
+  endif
+endif
+:Credit the full amount\nand settle any shortfall;
+:CreditTransaction\n&#91;top_up&#93;]
+:TopUp\n&#91;credited&#93;]
+if ( ) then ([points were redeemed])
+  :Deduct redeemed points;
+  :LoyaltyTransaction\n&#91;redeem&#93;]
+else ([else])
+endif
+fork
+  :Show new balance\nand receipt;
+  |«person»\nDriver|
+  :View new balance;
+fork again
+  |«software system»\nPowerMe Platform|
+  :Request e-invoice for the\namount collected>
+  :EInvoice\n&#91;requested&#93;]
+  |«external system»\nE-Invoice\nProvider|
+  :Issue e-invoice;
+  |«software system»\nPowerMe Platform|
+  if ( ) then ([issued])
+    :EInvoice\n&#91;issued&#93;]
+  else ([provider error after\nautomatic retries])
+    :Alert Admin to\nretry the e-invoice;
+    :EInvoice\n&#91;needs_review&#93;]
+  endif
+end fork
+stop
+@enduml

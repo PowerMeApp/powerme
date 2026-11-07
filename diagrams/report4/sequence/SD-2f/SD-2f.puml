@@ -1,0 +1,30 @@
+@startuml SD-2f
+!include ../_style.iuml
+title SD-2f (Software level, CSMS billing) — Driver closes the account and unused credit is refunded\nPrecondition: credit account is active · System view: AD-9 · State: STM-5, STM-10
+footer Owner: Lê Bảo Khang (WP5) · v2.0 · 01/11/2026 · closure refunds created by the system (R8 Q1, Khang to confirm) · left gate = Driver App
+
+participant "«component»\n<u>:AccountClosureController</u>" as AC
+participant "«component»\n<u>:AccountClosureService</u>" as AS
+participant "«component»\n<u>:CreditLedgerService</u>" as CL
+participant "«component»\n<u>:RefundService</u>" as RS
+
+[-> AC ++ : POST /me/account/close [HTTPS, JWT]
+AC -> AS ++ : requestClosure(driverId)
+AS -> AS : check account active (balance ≥ 0),\nno open top-up, no running session
+break a rule is not met
+  AS --> AC : ClosureNotAllowed(reason)
+  [<-- AC : 409 / 422 {reason}
+end
+AS -> CL ++ : post(accountId, refund, −balanceVnd)
+CL --> AS --
+AS -> AS : split the balance over the newest credited top-ups
+loop for each top-up share
+  AS -> RS ++ : create(topUpId, kind = account_closure, shareVnd, requestedBy = null)
+  RS --> AS -- : refundId
+end
+AS -> AS : active → closed, disable login
+hnote over AS : {creditAccount.status = closed}
+AS --> AC -- : closed, refund total
+[<-- AC -- : 200 {closed, refundTotalVnd}
+note over AC, RS : Each refund is then sent to its original payment source exactly as in SD-2e (part 2). No Admin action is needed.
+@enduml

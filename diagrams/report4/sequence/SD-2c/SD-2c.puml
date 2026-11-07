@@ -1,0 +1,32 @@
+@startuml SD-2c
+!include ../_style.iuml
+title SD-2c (Software level, CSMS billing) — E-invoice is issued in the background, with retries\nPrecondition: top-up credited, invoice requested · System view: AD-2, AD-9 · State: STM-7
+footer Owner: Lê Bảo Khang (WP5) · v2.0 · 01/11/2026 · names = CD-2 class diagram, EInvoiceProviderAdapter is new (add to CD-2) · right gate = E-Invoice Provider · 4 attempts (decision 01/11)
+
+participant "«component»\n<u>:EInvoiceService</u>" as EI
+participant "«port»\n<u>:EInvoiceProviderAdapter</u>" as EP
+
+[o-> EI ++ : issue(invoiceId)  (job einvoice.issue)
+hnote over EI : {invoice.status = requested}
+EI -> EP ++ : createInvoice(buyer, items, amountVnd) : invoiceNo
+EP ->] : create invoice [HTTPS]
+note right : {d ≤ 10 s}, else error
+EP <--] : invoiceNo | error
+EP --> EI -- : result
+alt invoiceNo returned
+  EI -> EI : requested → issued
+else transient error and attempts < 4
+  EI -> EI : requested → failed, attempts + 1
+  EI -> EI : schedule retry after 5 min / 30 min / 2 h
+else rejected, or 4th attempt failed
+  EI -> EI : requested → needs_review
+  EI ->>] : notify Admin (Billing Exceptions)
+end
+deactivate EI
+
+... retry delay ...
+[o-> EI ++ : issue(invoiceId)
+EI -> EI : failed → requested, then as above
+deactivate EI
+note over EI, EP : The top-up stays credited whatever happens to the invoice. A needs_review invoice is retried by the Admin (SD-2e pattern, one attempt, counter not reset).
+@enduml

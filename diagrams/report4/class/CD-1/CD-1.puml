@@ -1,0 +1,114 @@
+@startuml CD-1
+!include ../_style.iuml
+skinparam nodesep 40
+skinparam ranksep 50
+title CD-1 (Software level, Driver App) — Class diagram of WF-01: find a station and charge\nFrom apps/mobile/lib at origin/main ce3902c (#70) · Behaviour: SD-1a · State: STM-1 (SessionState mirrors session_status)
+footer Owner: Lý Hoàng Sơn (WP3) · v2.0 · 01/11/2026 · names = code · main members only · ApiChargingRepository «planned» = Driver API contract #69
+
+package "application" {
+  class StationsController <<Notifier>> {
+    + find(vehicleId : String, query : String) : Future<void>
+    + suggest(vehicleId : String) : Future<void>
+    + selectFilter(filter : StationFilter) : void
+  }
+  class QrConnectionController <<Notifier>> {
+    + resolve(reference : String) : Future<String?>
+  }
+  class ChargingController <<Notifier>> {
+    + prepare(connectorId : String, vehicleId : String, mode : ChargingMode, limit : int?) : Future<void>
+    + start(request : StartRequest) : Future<void>
+    + stop(sessionId : String, key : String) : Future<void>
+    + recover(key : String) : Future<void>
+    + watch(sessionId : String) : void
+  }
+}
+
+package "domain" {
+  interface StationRepository {
+    + find(vehicleId : String, query : String) : Future<List<StationOption>>
+    + suggest(vehicleId : String) : Future<List<StationOption>>
+  }
+  interface ChargingPreparation {
+    + preview(connectorId : String, vehicleId : String, mode : ChargingMode, limit : int?) : Future<StartPreview>
+  }
+  interface ChargingRepository {
+    + start(request : StartRequest) : Future<CommandOutcome>
+    + stop(sessionId : String, key : String) : Future<CommandOutcome>
+    + outcome(key : String) : Future<CommandOutcome>
+    + snapshot(sessionId : String) : Future<SessionSnapshot>
+    + watch(sessionId : String) : Stream<SessionSnapshot>
+  }
+  class StartRequest {
+    + connectorId : String
+    + vehicleId : String
+    + mode : ChargingMode
+    + limitValue : int [0..1]
+    + key : String
+  }
+  class CommandOutcome {
+    + requestKey : String
+    + status : CommandState
+    + sessionId : String [0..1]
+    + reasonCode : String [0..1]
+  }
+  class SessionSnapshot {
+    + sessionId : String
+    + state : SessionState
+    + settlement : SettlementState
+    + energyWh : int [0..1]
+    + estimatedCostVnd : int [0..1]
+    + availableCreditVnd : int [0..1]
+    + socPercent : int [0..1]
+    + paymentMode : PaymentMode
+  }
+  class Statement {
+    + energyWh : int
+    + amountVnd : int
+    + earnedPoints : int
+  }
+  enum SessionState <<enumeration>> {
+    pending
+    active
+    paused
+    stopping
+    closed
+    reconciled
+    orphaned
+    review
+    failed
+    unknown
+  }
+  enum ChargingMode <<enumeration>> {
+    autoFull
+    timed
+    energy
+    cost
+  }
+}
+
+package "data" {
+  class MockStationRepository
+  class MockChargingRepository
+  class ApiChargingRepository <<planned>> {
+    + start() → POST /api/driver/v1/charges
+    + outcome() → GET /charges/{key}
+    + watch() → GET /sessions/{id}/progress every 5 s
+    + stop() → POST /sessions/{id}/stop
+  }
+}
+
+StationsController --> "1" StationRepository
+QrConnectionController ..> ChargingRepository : <<use>>
+ChargingController --> "1" ChargingRepository
+ChargingController --> "1" ChargingPreparation
+ChargingRepository ..> StartRequest
+ChargingRepository ..> CommandOutcome
+ChargingRepository ..> SessionSnapshot
+SessionSnapshot "1" o-- "0..1" Statement
+SessionSnapshot ..> SessionState
+StartRequest ..> ChargingMode
+MockStationRepository ..|> StationRepository
+MockChargingRepository ..|> ChargingRepository
+MockChargingRepository ..|> ChargingPreparation
+ApiChargingRepository ..|> ChargingRepository
+@enduml

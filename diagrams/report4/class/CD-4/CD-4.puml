@@ -1,0 +1,101 @@
+@startuml CD-4
+!include ../_style.iuml
+skinparam nodesep 40
+skinparam ranksep 50
+title CD-4 (Software level, CSMS) — Class diagram of WF-04: Charge Point fault, alert and remote reset\nFrom apps/csms/src at origin/main ce3902c · Behaviour: SD-4a, SD-4b · State: STM-6, STM-2
+footer Owner: Trần Trọng Nghĩa (WP4) · v2.0 · 01/11/2026 · names = code (StationsService / RemoteCommandService / OcppDispatchService of v1 do not exist) · «planned» = design only
+
+package "ocpp-gateway" {
+  class OcppHandlers <<component>> {
+    + dispatch(action : string, params : unknown, ctx : InboundContext) : object
+  }
+  class ConnectionRegistry <<component>> {
+    + get(identity : string) : Connection
+  }
+}
+package "sessions" {
+  class SessionsService <<component>> {
+    + onStatusNotification(req, ctx) : void
+  }
+}
+package "stations / faults" {
+  class FaultService <<component>> {
+    + onConnectorStatus(input : ConnectorStatusInput) : StatusOutcome
+    + acknowledge(faultId : number, operatorId : number) : void
+    + beginReset(faultId : number, opts : ResetOptions) : BeginResetResult
+    + markSent(commandId : number) : void
+    + onResetResult(commandId : number, result : ResetResult) : void
+    + onResetTimeout(faultId : number, commandId : number) : timed_out | noop
+    + close(faultId : number, operatorId : number) : void
+    + reportFromDriver(driverId : number, connectorId : number, text : string) : FaultReport «planned»
+  }
+  class FaultStateMachine {
+    + apply(from : FaultStatus, trigger : FaultTrigger) : FaultStatus
+  }
+  class ErrorCodeGuide <<utility>> {
+    + guideFor(errorCode : string) : Guide
+  }
+  enum FaultStatus <<enumeration>> {
+    raised
+    acknowledged
+    resetting
+    resolved
+  }
+}
+package "console" {
+  class ConsoleCommands <<component>> {
+    + acknowledgeFault(id : number) : void
+    + resetFault(id : number, type : Soft | Hard) : ResetReply
+    + closeFault(id : number) : void
+  }
+}
+package "entities (tables)" {
+  class Connector <<entity>> {
+    + connectorNo : 1..2
+    + status : ConnectorStatus
+  }
+  class ConnectorStatusEvent <<entity>> {
+    + status : ConnectorStatus
+    + errorCode : string
+    + unexpectedTransition : boolean
+  }
+  class FaultEvent <<entity>> {
+    + source : ocpp | driver_report
+    + status : FaultStatus
+    + raisedAt : Date
+  }
+  class RemoteCommand <<entity>> {
+    + action : string
+    + status : pending | sent | accepted | rejected | timeout | failed
+  }
+  class FaultReport <<entity>> {
+    + description : string
+    + reportedAt : Date
+  }
+  class MaintenanceTicket <<entity>> {
+    + status : open | in_progress | closed
+  }
+}
+
+OcppHandlers --> SessionsService
+OcppHandlers --> FaultService
+ConsoleCommands --> FaultService
+ConsoleCommands --> ConnectionRegistry : send Reset
+FaultService --> FaultStateMachine
+FaultService ..> ErrorCodeGuide : <<use>>
+FaultStateMachine ..> FaultStatus
+SessionsService ..> Connector : <<update>>
+SessionsService ..> ConnectorStatusEvent : <<create>>
+FaultService ..> FaultEvent : <<create / update>>
+FaultService ..> RemoteCommand : <<create>>
+Connector "1" -- "0..*" FaultEvent : has >
+FaultEvent "0..1" -- "0..*" FaultReport : raised by >
+FaultEvent "1" -- "0..1" RemoteCommand : reset by >
+FaultEvent "1" -- "0..*" MaintenanceTicket : [Should]
+
+note bottom of ConsoleCommands
+  Iteration 1 operator API; the dashboard
+  operator-api «planned» calls the same
+  FaultService operations
+end note
+@enduml
