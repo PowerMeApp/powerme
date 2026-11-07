@@ -1,0 +1,73 @@
+@startuml WF04-seq-1
+!include _team.iuml
+title WF-04 Sequence 1: Faulted status, acknowledge, remote reset, back to Available
+footer Content: Trần Trọng Nghĩa (WP4), wf-04-seq-1 24/10/2026 · redrawn in the Report 4 diagram style, content unchanged
+hide footbox
+participant "Charging pillar" as cp <<external>>
+box "ocpp-gateway" #FAFBFD
+participant "OcppGateway" as gw
+end box
+box "stations" #FAFBFD
+participant "StationsService" as st
+participant "FaultService" as fs
+participant "Reservation\nService" as rs
+participant "RemoteCommand\nService" as rc
+end box
+participant "SessionsService" as ses
+participant "RealtimeGateway" as rt
+participant "Dashboard" as ui
+actor "Operator" as op
+
+== A — fault reported while connector 1 is Charging (session active) ==
+cp -> gw : StatusNotification(c1, Faulted, GroundFailure)
+gw -> gw : INSERT ocpp_message_log (inbound) before handler
+gw -> st : onStatusNotification(req)
+st -> st : Charging → Faulted · INSERT connector_status_events · UPDATE connectors
+st -> fs : onConnectorStatus(c1, Faulted, GroundFailure)
+fs -> fs : no open fault for c1 → INSERT fault_events (ocpp, raised)
+fs -> rs : voidForConnector(c1) «Should»
+fs -> rt : alert.raised
+st -> rt : connector.status (Faulted)
+rt -> ui : push room station:{id}
+gw --> cp : CALLRESULT
+
+== B — the pillar ends the session itself (AD-1: close with fault reason, bill energy delivered) ==
+cp -> gw : StopTransaction(tx, meterStop, reason=Other)
+gw -> ses : onStopTransaction(req)
+ses -> ses : STM-1 active → closed · stop_reason verbatim
+ses -> rt : transaction.stopped
+gw --> cp : CALLRESULT
+
+== C — operator acknowledges (STM-6 raised → acknowledged) ==
+ui -> op : alert + handling guide for GroundFailure
+op -> ui : Acknowledge
+ui -> fs : POST /api/admin/faults/{id}/acknowledge
+fs -> fs : raised → acknowledged · acknowledged_by, acknowledged_at
+fs -> rt : alert.updated (acknowledged)
+fs --> ui : 200 OK
+
+== D — operator sends a remote reset (STM-6 acknowledged → resetting) ==
+op -> ui : Remote reset (Soft)
+ui -> rc : POST /stations/{id}/commands {reset, Soft}
+rc --> ui : 202 Accepted + commandId
+rc -> fs : markResetting(faultId, commandId)
+fs -> fs : acknowledged → resetting · start reset timer
+rc -> gw : OcppDispatchService.call(Reset Soft)
+gw -> cp : Reset(Soft)
+cp --> gw : CALLRESULT Accepted
+rc -> rt : command.result (Accepted)
+rt -> ui : waiting for the pillar
+
+== E — pillar restarts and reports Available (STM-6 resetting → resolved) ==
+cp -->x gw : socket closes during reboot
+cp -> gw : BootNotification
+gw -> st : onBootNotification(req)
+cp -> gw : StatusNotification(c1, Available, NoError)
+gw -> st : onStatusNotification(req)
+st -> st : Faulted → Available · INSERT connector_status_events · UPDATE connectors
+st -> fs : onConnectorStatus(c1, Available)
+fs -> fs : resetting → resolved · resolved_at · stop reset timer
+fs -> rt : alert.resolved
+st -> rt : connector.status (Available)
+rt -> ui : push room station:{id}
+@enduml

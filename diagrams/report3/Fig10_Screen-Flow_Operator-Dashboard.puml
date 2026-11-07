@@ -1,0 +1,41 @@
+@startuml fig10_sf_operator
+!include _sf_style.iuml
+state "Login" as Login
+state "Signed in (Operator)" as Signed {
+  state "Operator Dashboard" as Dash
+  state "Pillar List / Map" as Pillars
+  state "Pillar Onboarding" as Onboard <<sheet>>
+  state "Pillar Detail\n(status, remote commands)" as Detail
+  state "Fault Alerts" as Alerts
+  state "Unattributed Sessions" as Unattr
+  state "Pricing & Promotions" as Pricing
+  state "Maintenance Tickets [Should]" as Tickets
+  state "Revenue Analytics [Should]" as Analytics
+  [*] --> Dash
+  Dash --> Pillars : open pillars
+  Pillars --> Dash : back
+  Dash --> Alerts : open alerts
+  Alerts --> Dash : back
+  Dash --> Unattr : open unattributed sessions
+  Unattr --> Dash : back
+  Dash --> Pricing : open pricing
+  Pricing --> Dash : back
+  Dash --> Analytics : open analytics
+  Analytics --> Dash : back
+  Pillars --> Onboard : add pillar
+  Onboard --> Pillars : save / cancel
+  Pillars --> Detail : select pillar
+  Detail --> Pillars : back
+  Alerts --> Detail : select alert
+  Detail --> Tickets : open tickets
+  Tickets --> Detail : back
+}
+[*] --> Login : open dashboard
+Login --> Signed : log in [Operator role]
+Signed --> [*] : log out
+legend bottom right
+  Screen navigation flow (UML state-machine notation)
+  each state = one screen; shaded = pop-up sheet
+  transition label = user action [guard]
+endlegend
+@enduml

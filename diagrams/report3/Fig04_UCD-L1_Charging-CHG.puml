@@ -1,0 +1,29 @@
+@startuml fig04_ucd_chg
+!include style.iuml
+left to right direction
+actor Driver
+actor "Charging Pillar" as CP <<system>>
+actor "Map & Routing Service" as MR <<system>>
+rectangle "PowerMe Platform — Charging" {
+  usecase "UC-CHG-01\nFind Charging Station" as C1
+  usecase "UC-CHG-07\nGet Station Suggestion" as C7
+  usecase "UC-CHG-06\nReserve Charging Connector\n[Should]" as C6
+  usecase "UC-CHG-02\nStart Charging Session" as C2
+  usecase "UC-CHG-03\nStop Charging Session" as C3
+  usecase "UC-CHG-04\nMonitor Charging Progress" as C4
+  usecase "UC-CHG-05\nReport Faulty Pillar" as C5
+  usecase "UC-CHG-08\nGet Availability Alert\n[Could]" as C8
+}
+Driver -- C1
+Driver -- C7
+Driver -- C6
+Driver -- C2
+Driver -- C3
+Driver -- C4
+Driver -- C5
+Driver -- C8
+C7 -- MR
+C6 -- CP
+C2 -- CP
+C3 -- CP
+@enduml

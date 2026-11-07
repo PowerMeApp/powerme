@@ -1,0 +1,128 @@
+@startuml WF03-seq-1
+!include _team.iuml
+title WF-03 Sequence 1: disconnect and reconciliation (tx3, epoch 1 → 2)
+footer Content: Ngô Văn Minh Trí (WP2), WF03-sequence-1-ngat-ket-noi-doi-soat 23/10/2026 · redrawn in the Report 4 diagram style and translated to English, content unchanged
+autonumber
+hide footbox
+participant "Charging pillar\n(SAP simulator)" as cp <<external>>
+participant "Caddy / WS" as caddy
+box "ocpp-gateway" #FAFBFD
+participant "OcppGateway" as gw
+participant "MessageLog" as log
+end box
+box "sessions / reconciliation" #FAFBFD
+participant "SessionsService" as ses
+participant "Reconciliation\nService" as rec
+end box
+participant "RealtimeGateway" as rt
+participant "Dashboard" as ui
+
+== A — tx3 active, epoch 1, pillar in_service ==
+cp -> caddy : MeterValues tx3 E=242 Wh (cp_timestamp 14:18:47)
+caddy -> gw : frame
+gw -> gw : ReplayDetector: skew 0.0 s → replayed=false
+gw -> log : INSERT ocpp_message_log (received_at, cp_timestamp, epoch=1, replayed=false)
+gw -> ses : handler MeterValues
+ses -> ses : dedup (tx3, cp_timestamp, measurand) → new → INSERT meter_values
+ses -> rt : transaction.meter (in-process event)
+rt -> ui : push room transaction:3
+gw -> log : INSERT outbound
+gw --> cp : CALLRESULT MeterValues
+
+== B — socket closed for 81 s (14:19:01 → 14:20:22), tx3 has no StopTransaction yet ==
+caddy --> gw : socket close
+gw -> gw : ConnectionRegistry.markOffline(identity)
+gw -> ses : station.connection offline (identity, epoch=1)
+note right of gw
+  Target design: stations receives this event first, moves STM-3
+  in_service → offline, then forwards it. Merged here to save participants.
+end note
+ses -> ses : SessionStateMachine.apply(tx3, STATION_OFFLINE): active → orphaned
+ses -> ses : UPDATE sessions SET status=orphaned, orphaned_at
+ses -> rt : transaction.orphaned
+rt -> ui : "connection lost" flag on tx3 and the pillar
+
+== C — pillar reconnects at 14:20:22, does NOT send BootNotification ==
+cp -> caddy : WebSocket open /ocpp/SN (Basic Auth)
+caddy -> gw : upgrade
+gw -> gw : ConnectionRegistry.open(identity): closes the old socket if still open, epoch=2, epoch_opened_at=14:20:22
+gw -> ses : station.connection online (identity, epoch=2)
+ses -> rt : station.online
+rt -> ui : pillar back online, tx3 still orphaned
+
+== D — live MeterValues, tx3 still charging on the pillar ==
+loop 4 samples, 14:20:27 → 14:20:57, E = 796 → 873 → 922 → 1042 Wh
+  cp -> caddy : MeterValues tx3 (skew 0.0 s)
+  caddy -> gw : frame
+  gw -> gw : ReplayDetector: cp_timestamp ≥ epoch_opened_at → replayed=false
+  gw -> log : INSERT (epoch=2, replayed=false)
+  gw -> ses : handler MeterValues
+  ses -> ses : dedup → new → INSERT meter_values
+  ses -> rt : transaction.meter
+  gw --> cp : CALLRESULT
+end
+note over ses, rec
+  STM-1 has no orphaned → active transition yet when live MeterValues
+  arrive for an orphaned session (see section 6). This draft keeps it orphaned.
+end note
+
+newpage WF-03 Sequence 1 (continued): disconnect and reconciliation (tx3, epoch 1 → 2)
+== E — StopTransaction carrying an old meterStop (14:20:58) ==
+cp -> caddy : StopTransaction tx3 meterStop=242 reason=Local (cp_timestamp 14:18:52)
+caddy -> gw : frame (received_at 14:20:58)
+gw -> gw : ReplayDetector: cp_timestamp 14:18:52 < epoch_opened_at 14:20:22 → replayed=true, skew 125.3 s
+gw -> log : INSERT (epoch=2, replayed=true)
+gw -> ses : handler StopTransaction
+ses -> ses : dedup by transactionId → tx3 has no meter_stop yet → accept
+ses -> ses : UPDATE sessions SET meter_stop_wh=242, stopped_at, stop_reason, delivered_offline=true
+gw -> log : INSERT outbound
+gw --> cp : CALLRESULT StopTransaction (idTagInfo Accepted)
+ses -> rec : transaction.stopped (tx3, replayed=true)
+rec -> ses : getMeterSeries(tx3)
+ses --> rec : [64, 142, 242 | 796, 873, 922, 1042] Wh
+rec -> rec : energy = meterStop − meterStart = 242 − 0 = 242 Wh
+rec -> rec : last sample 1042 Wh, difference 800 Wh, series monotonic, gap 14:18:47 → 14:20:27 (100 s, ~8 samples missing)
+alt consistent — meterStop matches the last sample within tolerance, no gap
+  rec -> rec : INSERT reconciliation_records (record_type=consistent, resolution=auto)
+  rec -> ses : resolve(tx3, RECONCILED, actor=system)
+  ses -> ses : apply(tx3, RECONCILE_OK): orphaned → reconciled
+  ses -> rt : transaction.reconciled
+  rt -> ui : tx3 flag cleared, billing prices the session
+else gap_detected — series gap explained by the offline window, meterStop still matches
+  rec -> rec : INSERT reconciliation_records (record_type=gap_detected, gap_start, gap_end, resolution=auto)
+  rec -> ses : resolve(tx3, RECONCILED, actor=system)
+  ses -> ses : apply(tx3, RECONCILE_OK): orphaned → reconciled
+  ses -> rt : transaction.reconciled
+  rt -> ui : tx3 flag cleared, with a missing-samples note
+else conflict — EXP-01: 242 Wh ≠ 1042 Wh, energy_difference_wh = 800
+  rec -> rec : INSERT reconciliation_records (record_type=conflict, energy_difference_wh=800, gap_start, gap_end, resolution=pending)
+  rec -> ses : flagForReview(tx3, record_id)
+  ses -> ses : apply(tx3, RECONCILE_CONFLICT): orphaned → review
+  ses -> rt : transaction.review
+  rt -> ui : "needs reconciliation" flag on tx3, showing 242 vs 1042 Wh
+  note right of rt
+    billing does NOT receive transaction.stopped for tx3 until
+    the operator resolves it (UC-OPS-05, review → reconciled)
+  end note
+end
+
+== F — 6 replayed samples arrive AFTER StopTransaction (14:20:58 → 14:21:54), 2 of 8 samples silently lost ==
+opt MeterValues replayed from the offline queue
+  loop 6 samples, E = 303 → 538 Wh, cp_timestamp 14:18:57 → 14:19:47, skew 104–127 s
+    cp -> caddy : MeterValues tx3
+    caddy -> gw : frame
+    gw -> gw : ReplayDetector → replayed=true
+    gw -> log : INSERT (epoch=2, replayed=true)
+    gw -> ses : handler MeterValues
+    ses -> ses : dedup → new → INSERT meter_values (replayed=true), session already has meter_stop
+    gw --> cp : CALLRESULT
+  end
+  ses -> rec : transaction.meter_late (tx3)
+  rec -> ses : getMeterSeries(tx3)
+  ses --> rec : merged series, 13 samples
+  rec -> rec : reconcile again: gap narrowed to 14:19:47 → 14:20:27, conflict remains
+  rec -> rec : INSERT a new reconciliation_records row (append-only, old row not edited)
+  rec -> rt : transaction.amended
+  rt -> ui : update flag details
+end
+@enduml

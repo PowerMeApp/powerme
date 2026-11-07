@@ -1,0 +1,13 @@
+hide empty description
+skinparam shadowing false
+skinparam defaultFontName "DejaVu Sans"
+skinparam defaultFontSize 15
+skinparam dpi 300
+skinparam state {
+  BackgroundColor #EEF2F8
+  BorderColor #555555
+  BackgroundColor<<sheet>> #FFF4D6
+  ArrowColor #333333
+}
+skinparam stereotypeFontSize 1
+skinparam stereotypeFontColor #FFF4D6

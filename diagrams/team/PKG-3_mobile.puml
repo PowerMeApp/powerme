@@ -1,0 +1,41 @@
+@startuml PKG-3_mobile
+!include _team.iuml
+skinparam linetype polyline
+skinparam nodesep 40
+skinparam ranksep 50
+title PKG-3 Package diagram: Driver App (apps/mobile, Flutter)
+footer Content: Lý Hoàng Sơn (WP3), t20-mobile-packages 24/10/2026 · redrawn in the Report 4 diagram style, content unchanged
+
+package "Flutter Driver App / WP3" as APP {
+  rectangle "<b>App composition / router</b>\nWiring and navigation" as comp
+  package "Feature modules" as FM {
+    rectangle "<b>Auth</b>\nLogin and consent" as auth
+    rectangle "<b>Profile</b>\nDriver and vehicles" as prof
+    rectangle "<b>History</b>\nStatements and invoices" as hist
+    rectangle "<b>Stations</b>\nDiscovery and suggestions" as st
+    rectangle "<b>Charging</b>\nSession and progress" as chg
+    rectangle "<b>Payments</b>\nCredit and top-up" as pay
+    rectangle "<b>Support</b>\nFault reports" as sup
+    rectangle "<b>Loyalty</b>\nPoints and redemption" as loy
+  }
+  rectangle "<b>Shared UI</b>\nTheme and widgets" as ui
+  rectangle "<b>API adapter</b>\nBusiness requests" as api
+  rectangle "<b>Realtime adapter</b>\nSession and status events" as rt
+}
+rectangle "<b>WP2 Backend (external)</b>\nWP4 ranking / WP5 money and points" as BE
+
+comp ..> FM : compose
+comp ..> api : wire
+comp ..> rt : wire
+chg ..> prof : vehicle
+st ..> prof : vehicle
+chg ..> st : connector
+sup ..> st : connector
+chg ..> pay : credit
+pay ..> loy : redeem
+FM ..> ui : render
+FM ..> api : requests
+FM ..> rt : updates
+api -- BE : HTTPS / REST
+rt -- BE : TLS / Socket.IO
+@enduml

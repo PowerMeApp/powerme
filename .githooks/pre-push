@@ -1,0 +1,52 @@
+#!/usr/bin/env sh
+#
+# Chặn push thẳng vào main.
+#
+# Org PowerMeApp đang ở gói Free, GitHub KHÔNG thực thi branch protection trên
+# repo private. Hook này là rào chắn thay thế, chạy trên máy từng người.
+#
+# Nó chặn được lỗi thật hay xảy ra: gõ nhầm nhánh lúc 2 giờ sáng.
+# Nó KHÔNG chống được người cố tình — và đó không phải việc của nó.
+#
+# Cài: npm run setup:hooks   (hoặc tự động khi chạy npm install)
+# Vượt rào có chủ đích: POWERME_ALLOW_MAIN_PUSH=1 git push origin main
+
+PROTECTED="main"
+
+if [ "$POWERME_ALLOW_MAIN_PUSH" = "1" ]; then
+  echo "⚠️  pre-push: bỏ qua rào chắn main theo POWERME_ALLOW_MAIN_PUSH=1"
+  exit 0
+fi
+
+while read -r _local_ref _local_sha remote_ref _remote_sha; do
+  case "$remote_ref" in
+    "refs/heads/$PROTECTED")
+      cat >&2 <<'MSG'
+
+  ✗ Không push thẳng vào main.
+
+  Mọi thay đổi đi qua Pull Request — xem CONTRIBUTING.md mục 2.
+
+  Làm thế này:
+
+      git switch -c wp<số>/<mã-task>-<mô-tả>
+      git push -u origin wp<số>/<mã-task>-<mô-tả>
+      gh pr create
+
+  Nếu bạn đã lỡ commit vào main, chuyển chúng sang nhánh mới:
+
+      git switch -c wp1/ten-nhanh-moi
+      git switch main && git reset --hard origin/main
+      git switch wp1/ten-nhanh-moi
+
+  Thật sự cần push thẳng (hiếm, và phải báo nhóm trước):
+
+      POWERME_ALLOW_MAIN_PUSH=1 git push origin main
+
+MSG
+      exit 1
+      ;;
+  esac
+done
+
+exit 0

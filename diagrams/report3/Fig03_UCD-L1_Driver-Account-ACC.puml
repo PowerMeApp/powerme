@@ -1,0 +1,13 @@
+@startuml fig03_ucd_acc
+!include style.iuml
+left to right direction
+actor Driver
+rectangle "PowerMe Platform — Driver Account" {
+  usecase "UC-ACC-01\nRegister Account" as A1
+  usecase "UC-ACC-02\nManage Driver Profile" as A2
+  usecase "UC-ACC-03\nManage Vehicle Profile" as A3
+}
+Driver -- A1
+Driver -- A2
+Driver -- A3
+@enduml

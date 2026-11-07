@@ -3,5 +3,33 @@
   "version": "0.1.0",
   "private": true,
   "description": "CSMS OCPP 1.6J — WebSocket server, state machine dual gun, engine doi soat (WP2)",
-  "scripts": {}
+  "main": "dist/main.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "start": "node dist/main.js",
+    "typecheck": "tsc --noEmit",
+    "test": "node scripts/run-jest.cjs",
+    "demo": "node demo/run-demo.mjs",
+    "demo:reset": "node demo/run-demo.mjs --reset",
+    "demo:db": "node demo/db-embedded.mjs"
+  },
+  "dependencies": {
+    "@nestjs/common": "12.3.2",
+    "@nestjs/core": "12.3.2",
+    "drizzle-orm": "0.45.4",
+    "ocpp-rpc": "2.2.1",
+    "pg": "8.23.1",
+    "reflect-metadata": "0.2.2",
+    "rxjs": "7.8.2"
+  },
+  "devDependencies": {
+    "@types/jest": "30.0.0",
+    "@types/node": "24.19.2",
+    "@types/pg": "8.23.1",
+    "drizzle-kit": "0.31.11",
+    "embedded-postgres": "17.10.0-beta.17",
+    "jest": "30.5.2",
+    "ts-jest": "29.4.15",
+    "typescript": "5.9.3"
+  }
 }

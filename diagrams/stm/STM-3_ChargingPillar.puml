@@ -1,0 +1,17 @@
+@startuml STM-3_ChargingPillar
+!include _style.iuml
+title STM-3 ChargingPillar lifecycle · v0.3 (ADR-0016) · 25/10/2026 · #1–#3 in code (PillarLifecyclePolicy, PR 33)\ncharge_points.lifecycle (administrative only) · connectivity online/offline is a separate attribute (T61, Trí)
+[*] --> registered : Admin adds serial to registry
+registered --> awaiting_connection : Operator onboards\n/ issue credential
+awaiting_connection --> in_service : first accepted connection\n(BootNotification)
+in_service --> disabled : Operator takes pillar out of service\n/ hide from search
+disabled --> in_service : Operator returns pillar to service
+disabled --> decommissioned : Admin retires device
+decommissioned --> [*]
+note bottom
+  Connectivity (not a lifecycle state): is_online + last_seen_at,
+  set by ocpp-gateway on connect / socket close / ping timeout.
+  A disabled pillar can still be online; an in_service pillar can be offline.
+  Offline alert (FaultEvent) is raised after the alert delay, ≤ 900 s (F-10).
+end note
+@enduml

@@ -1,0 +1,123 @@
+@startuml CD-5_onboarding_classes
+!include ../team/_team.iuml
+skinparam linetype polyline
+skinparam nodesep 35
+skinparam ranksep 55
+skinparam class<<planned>> {
+  BorderStyle dashed
+  BackgroundColor #FAFAFA
+}
+hide empty members
+title CD-5 (WF-05) Class diagram: pillar onboarding slice of the CSMS back end\n<size:11>v1.3 · names = code in PR #33 (apps/csms/src/stations) · dashed = planned, not in code yet · status values = STM-3 / STM-2</size>
+footer PowerMe · WF-05 owner Trần Đức Ân (WP1) · v1.3 · 25/10/2026
+
+package "stations (WP1)" {
+  class PillarController <<planned>> {
+    POST /api/v1/operator/pillars
+    POST /api/admin/registry/pillars
+  }
+  class PillarOnboardingService <<service>> {
+    + registerDevice(adminUserId, input): RegisterResult
+    + onboard(staffUserId, input): OnboardResult
+    - operatorOf(staffUserId): operatorId
+    - requireRole(userId, role)
+    - validateConnectors(list)
+    - nextDisplayCode(tx, model, siteCode): string
+  }
+  class OnboardingError <<error>> {
+    + code: OnboardingErrorCode
+    + status: 400 | 403 | 404 | 409
+  }
+  class PillarAuthService <<service>> {
+    + verify(identity, password): PillarAuthResult
+  }
+  class PillarLifecyclePolicy <<domain>> {
+    + transition(from, event): PillarLifecycle
+    + canApply(from, event): boolean
+    + mayConnect(state): boolean
+  }
+  class "pillar-credential" as cred <<module>> {
+    + generatePillarPassword(): string
+    + hashPillarPassword(pw): string
+    + verifyPillarPassword(pw, stored): boolean
+  }
+}
+
+package "ocpp-gateway (WP2)" {
+  class OcppServer {
+    + start()  «auth: pillarAuth.verify»
+    - attach(client)
+  }
+  class ConnectionRegistry {
+    + open(identity, client): Connection
+    + close(client): Connection
+  }
+  class OcppHandlers {
+    + dispatch(action, params, ctx)
+    - bootNotification(req, ctx)
+  }
+}
+
+package "sessions (WP2)" {
+  class SessionsService {
+    + onStatusNotification(req, ctx)
+  }
+}
+
+package "entities" {
+  class "ChargePoint\n<size:9>charge_points</size>" as ChargePoint <<entity>> {
+    id
+    serialNumber {unique}
+    displayCode {unique} [0..1]
+    siteId [0..1]
+    model, ratedPowerKw
+    lifecycle: PillarLifecycle
+    basicAuthPasswordHash [0..1]
+    currentEpoch, lastMessageAt
+  }
+  class "Connector\n<size:9>connectors</size>" as Connector <<entity>> {
+    id
+    chargePointId
+    connectorNo: 1..2
+    connectorType, maxPowerKw
+    status: ConnectorStatus
+  }
+  class "Site\n<size:9>sites</size>" as Site <<entity>> {
+    id
+    siteCode {unique}
+    operatorId
+  }
+  class "OperatorStaff\n<size:9>operator_staff</size>" as Staff <<entity>> {
+    userId
+    operatorId
+  }
+  enum PillarLifecycle <<enumeration>> {
+    registered
+    awaiting_connection
+    in_service
+    disabled
+    decommissioned
+  }
+}
+
+PillarController ..> PillarOnboardingService
+PillarOnboardingService --> PillarLifecyclePolicy
+PillarOnboardingService --> cred : generate + hash
+PillarOnboardingService ..> OnboardingError : throws
+PillarOnboardingService ..> Site
+PillarOnboardingService ..> Staff
+PillarOnboardingService ..> ChargePoint : UPDATE (row lock)
+PillarOnboardingService ..> Connector : INSERT 1..2 (Unavailable)
+OcppServer --> PillarAuthService : verify at upgrade
+PillarAuthService --> PillarLifecyclePolicy : mayConnect
+PillarAuthService --> cred : verify
+PillarAuthService ..> ChargePoint
+OcppServer --> ConnectionRegistry
+OcppServer --> OcppHandlers
+OcppHandlers --> SessionsService
+ConnectionRegistry ..> ChargePoint : lifecycle in_service
+SessionsService ..> Connector : status
+Site "1" o-- "0..*" ChargePoint : hosts
+ChargePoint "1" *-- "1..2" Connector : has
+ChargePoint ..> PillarLifecycle
+@enduml

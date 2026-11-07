@@ -11,8 +11,9 @@
 
 | | |
 |---|---|
-| Sprint hiện tại | S1 — Khởi động và đặc tả (24/08 – 06/09) |
-| Cột mốc kế tiếp | **M1 — 06/09/2026** · Đặc tả chốt, simulator chạy |
+| Sprint hiện tại | S5 — Tiền và vận hành (19/10 – 01/11) · Review 2 (tag `review-2`) |
+| Cột mốc kế tiếp | **M4 — 01/11/2026** · Tính tiền và vận hành thông |
+| Hiện trạng code | `apps/csms` (NestJS): gateway OCPP, onboarding trụ, phiên sạc, đối soát, console vận hành; trụ giả lập `simulator/d1-hmi`; cấu hình staging `infra/staging` (chưa chạy trên VPS). Chi tiết và việc chưa làm: [docs/DESIGN-BRIEF-WP2-INPUT.md](docs/DESIGN-BRIEF-WP2-INPUT.md) (Known Gaps) |
 | Kế hoạch đầy đủ | [docs/KE-HOACH-POWERME.md](docs/KE-HOACH-POWERME.md) |
 
 ---
@@ -24,7 +25,7 @@ powerme/
 ├── apps/
 │   ├── csms/          WP2 — CSMS: WebSocket OCPP 1.6J, state machine, engine đối soát (NestJS)
 │   ├── dashboard/     WP4 — Dashboard vận hành: giám sát, cảnh báo, biểu giá (React + Vite)
-│   └── mobile/        WP3 — App tài xế: quét QR, màn hình sạc realtime (React Native / Expo)
+│   └── mobile/        WP3 — App tài xế: quét QR, màn hình sạc realtime (Flutter)
 ├── packages/
 │   └── shared/        Kiểu dữ liệu dùng chung, client sinh từ OpenAPI, hằng số OCPP
 ├── simulator/         WP5 — SAP simulator + bản patch nhánh 1.6 (task QA-02)
@@ -33,7 +34,7 @@ powerme/
 └── scripts/           Tiện ích thiết lập và vận hành kho mã
 ```
 
-Ba đầu ra TypeScript nằm chung một npm workspace để dùng chung kiểu dữ liệu qua `packages/shared` — hợp đồng API chỉ định nghĩa một lần.
+`apps/csms` và `apps/dashboard` (TypeScript) nằm chung một npm workspace để dùng chung kiểu dữ liệu qua `packages/shared`. `apps/mobile` (Flutter) nằm trong kho nhưng ngoài workspace; app lấy hợp đồng API từ `openapi.json` sinh từ NestJS.
 
 ---
 
@@ -43,7 +44,7 @@ Ba đầu ra TypeScript nằm chung một npm workspace để dùng chung kiểu
 |---|---|
 | Backend CSMS | NestJS + TypeScript · PostgreSQL · Redis |
 | Dashboard | React + Vite + TypeScript |
-| App | React Native / Expo |
+| App | Flutter — hợp đồng API qua `openapi.json` sinh từ NestJS |
 | Charge point mô phỏng | [SAP e-mobility-charging-stations-simulator](https://github.com/SAP/e-mobility-charging-stations-simulator) (Apache-2.0) |
 | CSMS đối chứng | [SteVe](https://github.com/steve-community/steve) — **chạy tiến trình riêng, không fork, không copy code** |
 | Load test | k6 |
@@ -53,20 +54,22 @@ Ba đầu ra TypeScript nằm chung một npm workspace để dùng chung kiểu
 
 ## Bắt đầu
 
-**Yêu cầu:** Node.js ≥ 22 (xem [.nvmrc](.nvmrc)) · Docker Desktop · Git
+**Yêu cầu:** Node.js 24 (đúng bản trong [.nvmrc](.nvmrc), `engines` yêu cầu `>=24`) · Docker Desktop · Git
 
 ```bash
-git clone <URL-KHO-MA>
+git clone https://github.com/PowerMeApp/powerme.git
 cd powerme
 npm install
 
 cp infra/.env.example infra/.env    # điền giá trị cho máy của bạn
-npm run infra:up                    # PostgreSQL + Redis + SteVe (CSMS đối chứng)
+npm run infra:up                    # PostgreSQL + Redis (SteVe nằm ở profile `reference`, xem infra/README.md)
 ```
+
+`npm install` tự bật hook `pre-push` của dự án. Nếu nghi ngờ chưa bật, chạy `npm run setup:hooks`.
 
 | Lệnh | Việc |
 |---|---|
-| `npm run infra:up` | Bật PostgreSQL, Redis, SteVe |
+| `npm run infra:up` | Bật PostgreSQL, Redis (SteVe chỉ bật với `--profile reference`, xem [infra/README.md](infra/README.md)) |
 | `npm run infra:down` | Tắt hạ tầng (giữ dữ liệu) |
 | `npm run infra:reset` | Tắt và **xoá sạch volume** |
 | `npm run build` | Build toàn bộ workspace |
@@ -80,6 +83,23 @@ npm run infra:up                    # PostgreSQL + Redis + SteVe (CSMS đối ch
 Đọc [CONTRIBUTING.md](CONTRIBUTING.md) trước khi mở nhánh đầu tiên. Tóm tắt:
 
 - Nhánh `main` được bảo vệ — **không push thẳng**, mọi thay đổi đi qua Pull Request.
+
+> ⚠️ **GitHub không thực thi bảo vệ nhánh trên repo này.** Org `PowerMeApp` ở gói Free, mà GitHub
+> chỉ cho branch protection và ruleset hoạt động trên repo public hoặc gói trả phí. Nâng org lên
+> GitHub Team (miễn phí qua GitHub Education) rồi chạy `bash scripts/setup-github.sh PowerMeApp/powerme`
+> là có lại. Trong lúc chờ, nhóm dùng ba rào chắn thay thế dưới đây.
+
+### Ba rào chắn thay cho branch protection
+
+| Rào | Ở đâu | Chặn được gì |
+|---|---|---|
+| Hook `pre-push` | [.githooks/pre-push](.githooks/pre-push) — bật qua `npm run setup:hooks` | Chặn `git push` vào `main` **ngay trên máy**, trước khi lệnh chạm tới GitHub |
+| Quét bí mật `gitleaks` | [.github/workflows/security.yml](.github/workflows/security.yml) | Fail PR nếu có token, khoá, mật khẩu lọt vào mã nguồn. Thay cho Secret scanning — thứ gói Free không bật được trên repo private |
+| Cảnh gác `main` | [.github/workflows/main-push-guard.yml](.github/workflows/main-push-guard.yml) | Không chặn, nhưng mỗi commit vào `main` không qua PR sẽ tự sinh một issue gán cho người push |
+
+Hiểu đúng giới hạn: hook nằm trên máy nên người cố tình vẫn vượt được, và cảnh gác `main` chỉ ghi
+nhận sau khi việc đã xảy ra. Chúng chặn **lỗi bất cẩn**, không chặn **ý định**. Với một nhóm đồ án
+thì gần như toàn bộ sự cố thuộc loại thứ nhất.
 - Đặt tên nhánh: `wp<số>/<mã-task>-<mô-tả-ngắn>` — ví dụ `wp2/be-04-state-machine-dual-gun`.
 - Mỗi PR cần **ít nhất một approve** và CI xanh.
 - Commit theo [Conventional Commits](https://www.conventionalcommits.org/).

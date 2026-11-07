@@ -1,0 +1,66 @@
+@startuml fig12b_erd_operations
+hide circle
+hide empty methods
+skinparam shadowing false
+skinparam defaultFontName "DejaVu Sans"
+skinparam defaultFontSize 15
+skinparam dpi 300
+skinparam linetype polyline
+skinparam class {
+  BackgroundColor #EEF2F8
+  BorderColor #555555
+  ArrowColor #333333
+}
+entity "PolicyTemplate" as PolicyTemplate <<Should>> {
+  * TemplateCode
+}
+entity Operator {
+  * TaxCode
+}
+entity User {
+  * Email
+}
+entity "TariffPeriod" as TariffPeriod <<see Fig. 12a>> {
+  * Band
+  * TimeRange [within operator]
+}
+entity "Promotion" as Promotion <<see Fig. 12a>> {
+  * PromotionCode
+}
+entity Site {
+  * SiteCode
+}
+entity OperatorStaff
+entity Admin
+entity "Driver" as Driver <<see Fig. 12a>>
+entity "ChargingPillar" as ChargingPillar <<see Fig. 12a>> {
+  * SerialNumber
+}
+entity "Connector" as Connector <<see Fig. 12a>> {
+  * ConnectorNo [within pillar]
+}
+entity FaultReport {
+  * ReportNo
+}
+entity FaultEvent {
+  * EventNo
+}
+entity "MaintenanceTicket" as MaintenanceTicket <<Should>> {
+  * TicketNo
+}
+PolicyTemplate |o--o{ TariffPeriod : is basis for
+Operator ||--o{ TariffPeriod : defines
+Operator ||--o{ Promotion : runs
+Operator ||--o{ Site : owns
+Operator ||--o{ OperatorStaff : employs
+User <|-- OperatorStaff
+User <|-- Admin
+User <|-- Driver
+Site ||--o{ ChargingPillar : hosts
+ChargingPillar ||--|{ Connector : has (max 2)
+ChargingPillar ||--o{ FaultReport : is subject of
+Driver ||--o{ FaultReport : submits
+Connector ||--o{ FaultEvent : raises
+FaultEvent |o--o| MaintenanceTicket : leads to
+FaultReport |o--o| MaintenanceTicket : leads to
+@enduml

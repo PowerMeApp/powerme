@@ -1,0 +1,26 @@
+@startuml fig05_ucd_pay
+!include style.iuml
+actor Driver
+actor "Payment Gateway" as PG <<system>>
+actor "E-Invoice Provider" as EI <<system>>
+rectangle "PowerMe Platform — Payment & Invoicing" {
+  usecase "UC-PAY-02\nView Charging History" as PAY02
+  usecase "UC-PAY-04\nView Loyalty Points" as PAY04
+  usecase "UC-PAY-01\nTop Up Charging Credit" as PAY01
+  usecase "UC-PAY-03\nRedeem Loyalty Points" as PAY03
+}
+PAY02 -[hidden]down- PAY04
+PAY04 -[hidden]down- PAY01
+Driver -right- PAY02
+Driver -right- PAY04
+Driver -right- PAY01
+PAY01 -right- PG
+PAY01 -right- EI
+PG -[hidden]down- EI
+PAY03 .up.> PAY01 : <<extend>>
+note bottom of PAY03
+  condition: {Driver chooses to
+  redeem points and balance
+  ≥ redemption minimum}
+end note
+@enduml

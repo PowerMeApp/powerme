@@ -1,0 +1,34 @@
+@startuml STM-2_Connector
+!include _style.iuml
+title STM-2 Connector status (OCPP 1.6J StatusNotification, per connectorId 1–2)\nconnectors.status · v0.2 · 24/10/2026
+state "Operational" as Op {
+  state Available
+  state Preparing
+  state Charging
+  state SuspendedEV
+  state SuspendedEVSE
+  state Finishing
+  Available --> Preparing : authorization accepted
+  Preparing --> Available : authorization refused\nor EV connect timeout
+  Preparing --> Charging : StartTransaction
+  Charging --> SuspendedEV : EV pauses
+  SuspendedEV --> Charging : EV resumes
+  Charging --> SuspendedEVSE : pillar pauses
+  SuspendedEVSE --> Charging : pillar resumes
+  Charging --> Finishing : stop condition
+  SuspendedEV --> Finishing : stop condition
+  SuspendedEVSE --> Finishing : stop condition
+  Finishing --> Available : StopTransaction sent,\ngun returned
+}
+[*] --> Unavailable
+Unavailable --> Available : BootNotification accepted
+Available --> Unavailable : Reset or reboot command
+Op --> Faulted : fault reported\n/ hide from search, raise FaultEvent
+Faulted --> Available : fault cleared\n/ show in search, resolve FaultEvent
+note bottom of Op
+  Reserved (Should) exists in the enum but is not a Must transition.
+  "Offline" is not an OCPP status: it comes from the pillar's
+  connectivity flag (ADR-0016 D-C) and is shown to drivers.
+  Transitions outside this table are logged as unexpectedTransition.
+end note
+@enduml

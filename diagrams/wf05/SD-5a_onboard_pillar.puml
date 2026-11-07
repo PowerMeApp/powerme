@@ -1,0 +1,53 @@
+@startuml SD-5a_onboard_pillar
+!include _seq.iuml
+title SD-5a (WF-05) Admin registers the serial, operator staff onboard the pillar\n<size:11>STM-3 #1 [*] → registered, #2 registered → awaiting_connection · FR-09, FR-15 · UC-ADM-03, UC-OPS-01 · HTTP controller planned (users module)</size>
+autonumber
+actor "Admin" as adm
+actor "Operator staff" as op
+box "stations" #FAFBFD
+participant "PillarOnboarding\nService" as svc
+participant "PillarLifecycle\nPolicy" as pol
+participant "pillar-credential" as cred
+end box
+database "PostgreSQL" as db
+
+== Registry (UC-ADM-03) ==
+adm -> svc : registerDevice(adminUserId, {serialNumber, model})
+svc -> db : SELECT users (role = admin, active)
+alt not an active Admin
+  svc --> adm : OnboardingError forbidden_role (403)
+else Admin
+  svc -> pol : transition(null, REGISTER)
+  pol --> svc : registered
+  svc -> db : INSERT charge_points ON CONFLICT (serial_number) DO NOTHING
+  alt serial already registered
+    svc --> adm : serial_already_registered (409)
+  else new serial
+    svc --> adm : {chargePointId, lifecycle: registered}
+  end
+end
+
+== Onboarding (UC-OPS-01) ==
+op -> svc : onboard(staffUserId, {serialNumber, siteId, connectors[1..2]})
+svc -> db : SELECT operator_staff JOIN users → operatorId
+svc -> svc : validateConnectors (1–2, no 1 = 1, only 1 or 2) → else 400
+svc -> db : SELECT sites WHERE id = siteId
+alt site missing (404) or site.operatorId ≠ operatorId (403)
+  svc --> op : OnboardingError, nothing written, warn logged
+else own site
+  svc -> cred : generatePillarPassword() + hashPillarPassword()
+  group one database transaction
+    svc -> db : SELECT charge_points WHERE serial = ? FOR UPDATE
+    alt not in registry (409) or lifecycle ≠ registered (409)
+      svc --> op : OnboardingError, rollback
+    else registered
+      svc -> pol : transition(registered, ONBOARD)
+      pol --> svc : awaiting_connection
+      svc -> db : pg_advisory_xact_lock(province) + max display-code suffix
+      svc -> db : UPDATE charge_points SET site, lifecycle,\ndisplay_code, basic_auth_password_hash
+      svc -> db : INSERT connectors 1..2 (status Unavailable)
+    end
+  end
+  svc --> op : {displayCode PM-D1-HCM-0001, ocppUrl, identity, password}\npassword shown once, only the scrypt hash is stored
+end
+@enduml

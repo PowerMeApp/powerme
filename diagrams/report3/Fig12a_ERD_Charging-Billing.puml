@@ -1,0 +1,116 @@
+@startuml fig12a_erd_charging
+hide circle
+hide empty methods
+skinparam shadowing false
+skinparam defaultFontName "DejaVu Sans"
+skinparam defaultFontSize 15
+skinparam dpi 300
+skinparam linetype polyline
+skinparam class {
+  BackgroundColor #EEF2F8
+  BorderColor #555555
+  ArrowColor #333333
+}
+
+entity User {
+  * Email
+}
+entity Driver
+entity Vehicle {
+  * PlateNumber
+}
+entity RfidCard {
+  * CardIdentifier
+}
+entity Promotion {
+  * PromotionCode
+}
+entity ChargingPillar {
+  * SerialNumber
+}
+entity Connector {
+  * ConnectorNo [within pillar]
+}
+entity "Reservation (Should)" as Reservation {
+  * ReservationNo
+}
+entity ConnectorStatusEvent {
+  * EventTime [within connector]
+}
+entity ChargingSession {
+  * TransactionNo
+}
+entity MeterReading {
+  * ReadingTime
+  * Measurand [within session]
+}
+entity TariffPeriod {
+  * Band
+  * TimeRange [within operator]
+}
+entity SessionTariffSegment {
+  * Session + TariffPeriod [pair]
+}
+entity ReconciliationRecord {
+  * RecordNo [within session]
+}
+entity CreditAccount {
+  * AccountNo [one per Driver]
+}
+entity CreditTransaction {
+  * EntryNo [within account]
+}
+entity TopUp {
+  * GatewayReference
+}
+entity VehicleModel {
+  * Brand + ModelName
+}
+entity EInvoice {
+  * InvoiceNo
+}
+entity InvoiceAdjustment {
+  * AdjustmentNo
+}
+entity LoyaltyAccount {
+  * AccountNo [one per Driver]
+}
+entity LoyaltyTransaction {
+  * TransactionNo
+}
+
+User <|-- Driver
+Driver ||--o| CreditAccount : has
+CreditAccount ||--o{ CreditTransaction : logs
+CreditAccount ||--o{ TopUp : is topped up by
+TopUp |o--o| CreditTransaction : is credited by
+TopUp ||--o| EInvoice : is invoiced by
+EInvoice ||--o{ InvoiceAdjustment : is corrected by
+ChargingSession ||--o| CreditTransaction : is settled by
+
+Driver ||--o{ Vehicle : owns
+VehicleModel ||--o{ Vehicle : classifies
+Driver |o--o{ RfidCard : holds
+Driver |o--o{ ChargingSession : starts
+Vehicle |o--o{ ChargingSession : is charged in
+RfidCard |o--o{ ChargingSession : authorises
+Promotion |o--o{ ChargingSession : applies to
+ChargingPillar ||--|{ Connector : has (max 2)
+Connector ||--o{ ChargingSession : hosts
+Connector ||--o{ ConnectorStatusEvent : records
+
+Driver ||--o{ Reservation : makes
+Connector ||--o{ Reservation : is held by
+Reservation |o--o| ChargingSession : is fulfilled by
+Reservation |o--o| CreditTransaction : incurs
+
+ChargingSession ||--o{ MeterReading : records
+ChargingSession ||--|{ SessionTariffSegment : is split into
+TariffPeriod ||--o{ SessionTariffSegment : prices
+ChargingSession ||--o{ ReconciliationRecord : is checked by
+
+Driver ||--o| LoyaltyAccount : has
+LoyaltyAccount ||--o{ LoyaltyTransaction : logs
+ChargingSession ||--o{ LoyaltyTransaction : earns
+TopUp |o--o{ LoyaltyTransaction : redeems
+@enduml

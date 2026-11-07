@@ -1,0 +1,17 @@
+@startuml STM-7_EInvoice
+!include _style.iuml
+title STM-7 EInvoice (one per credited top-up)\ne_invoices.status · v0.3 · 24/10/2026 · confirmed by Khang
+[*] --> requested : top-up credited\n/ send invoice data to provider
+requested --> issued : provider returns invoice number\n/ send invoice to driver
+requested --> failed : provider error, timeout\nor data rejected\n/ attempts + 1, record error kind
+failed --> requested : automatic retry\n[transient error, attempts < 3]\n(5 min, 30 min, 2 h)
+failed --> needs_review : [data error or attempts ≥ 3]\n/ notify Admin with the error
+needs_review --> requested : Admin retries (UC-ADM-08)\n/ one attempt, counter not reset,\ninvoice data rebuilt\nfrom current configuration
+issued --> [*]
+note right of failed
+  An invoice failure never blocks charging.
+  Invoices go to individual consumers (no buyer
+  tax data). Data error = seller configuration;
+  Admin fixes it, then retries.
+end note
+@enduml

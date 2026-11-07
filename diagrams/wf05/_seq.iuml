@@ -1,0 +1,35 @@
+skinparam defaultFontName Arial
+skinparam dpi 200
+skinparam shadowing false
+skinparam roundCorner 10
+skinparam maxMessageSize 230
+skinparam responseMessageBelowArrow true
+skinparam sequenceMessageAlign left
+skinparam ParticipantPadding 6
+skinparam BoxPadding 8
+skinparam ArrowColor #3D4B5C
+skinparam SequenceLifeLineBorderColor #8A97A6
+skinparam SequenceGroupBorderColor #8A97A6
+skinparam SequenceGroupBackgroundColor #F3F6FA
+skinparam SequenceGroupHeaderFontStyle bold
+skinparam SequenceBoxBorderColor #B8C3CF
+skinparam ParticipantBackgroundColor #EEF3F9
+skinparam ParticipantBorderColor #3D4B5C
+skinparam ParticipantFontStyle bold
+skinparam ParticipantFontSize 12
+skinparam ActorBorderColor #3D4B5C
+skinparam ActorBackgroundColor #EEF3F9
+skinparam DatabaseBackgroundColor #EEF3F9
+skinparam DatabaseBorderColor #3D4B5C
+skinparam NoteBackgroundColor #FFF8E1
+skinparam NoteBorderColor #C9A227
+skinparam ArrowFontSize 11
+skinparam TitleFontSize 15
+skinparam TitleFontStyle bold
+skinparam FooterFontSize 9
+skinparam FooterFontColor #6B7785
+skinparam participant<<external>> {
+  BackgroundColor #E8E8E8
+}
+hide footbox
+footer PowerMe · WF-05 owner Trần Đức Ân (WP1) · v1.3 · 25/10/2026 · names = code in PR #33 (apps/csms/src/stations)

@@ -4,7 +4,7 @@
   "private": true,
   "description": "PowerMe — Nền tảng CSMS OCPP 1.6J cho trạm sạc DC D1 / YJ-EU Series",
   "engines": {
-    "node": ">=22.0.0",
+    "node": ">=24.0.0",
     "npm": ">=10.0.0"
   },
   "workspaces": [
@@ -12,6 +12,8 @@
     "packages/*"
   ],
   "scripts": {
+    "prepare": "sh scripts/setup-hooks.sh",
+    "setup:hooks": "sh scripts/setup-hooks.sh",
     "csms": "npm run -w @powerme/csms",
     "dashboard": "npm run -w @powerme/dashboard",
     "mobile": "npm run -w @powerme/mobile",

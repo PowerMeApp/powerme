@@ -1,0 +1,7 @@
+legend bottom right
+  <b>Notation</b>
+  Rounded box = action · Square box = object node <i>Entity [state]</i>
+  Box with side bars = call behavior (other AD) · Pentagon = send signal
+  Notched box = accept event (incl. time event) · Diamond = decision / merge
+  Guards are on outgoing edges · Grey lanes = «external system»
+endlegend

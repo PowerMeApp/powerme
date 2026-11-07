@@ -1,0 +1,192 @@
+@startuml WF04-class
+!include _team.iuml
+skinparam class<<entity>> {
+  HeaderBackgroundColor #FFFFFF
+}
+skinparam class<<wp4>> {
+  HeaderBackgroundColor #D5E8D4
+}
+skinparam linetype polyline
+skinparam nodesep 30
+skinparam ranksep 50
+hide empty members
+hide stereotype
+title WF-04 Class diagram: pillar fault, alert and remote recovery
+footer Content: Trần Trọng Nghĩa (WP4), wf-04-class 24/10/2026 · redrawn in the Report 4 diagram style, content unchanged
+
+package "stations" {
+  class StationsService {
+    + onBootNotification(req, ctx): BootResult
+    + onStatusNotification(req, ctx): void
+    + isSearchable(connectorId): bool
+  }
+  class ConnectorStateMachine {
+    + isExpected(from, to): bool
+  }
+  class FaultService <<wp4>> {
+    + onConnectorStatus(connectorId, status, errorCode): void
+    + onStationOffline(chargePointId): void
+    + reportFromDriver(driverId, connectorId, description): FaultReport
+    + acknowledge(faultId, operatorId): void
+    + markResetting(faultId, commandId): void
+    + onResetFailed(faultId, reason): void
+    + closeAfterSiteVisit(faultId, operatorId): void
+    + openTicket(faultId, operatorId): MaintenanceTicket
+    - findOpen(connectorId): FaultEvent
+  }
+  class FaultStateMachine <<wp4>> {
+    + apply(fault, trigger): FaultEventStatus
+    + canApply(status, trigger): bool
+  }
+  enum FaultTrigger <<enumeration>> {
+    SIGNAL
+    ACKNOWLEDGE
+    RESET_SENT
+    RESET_FAILED
+    CONNECTOR_AVAILABLE
+    OPERATOR_CLOSE
+  }
+  class "ErrorCodeGuide\n<size:9>«static data»</size>" as ErrorCodeGuide <<wp4>> {
+    + severityOf(errorCode): Severity
+    + handlingOf(errorCode): string
+  }
+  class RemoteCommandService {
+    + send(chargePointId, action, params, requestedBy): commandId
+    + onResult(commandId, status): void
+  }
+  class "ReservationService\n<size:9>«Should»</size>" as ReservationService {
+    + voidForConnector(connectorId): int
+  }
+}
+
+package "ocpp-gateway" {
+  class OcppDispatchService {
+    + call(identity, action, params): Promise<Result>
+  }
+}
+package "sessions" {
+  class SessionsService {
+    + onStopTransaction(req, ctx): void
+  }
+}
+package "realtime" {
+  class RealtimeGateway {
+    + emit(event, room, payload): void
+  }
+}
+
+package "entities" {
+  class "Connector\n<size:9>«entity connectors»</size>" as Connector <<entity>> {
+    + id: bigint
+    + chargePointId: bigint
+    + connectorNo: int
+    + status: ConnectorStatus
+    + statusChangedAt: Date
+  }
+  class "FaultEvent\n<size:9>«entity fault_events»</size>" as FaultEvent <<entity>> {
+    + id: bigint
+    + eventNo: bigint
+    + chargePointId: bigint
+    + connectorId: bigint
+    + source: FaultSource
+    + errorCode: string
+    + status: FaultEventStatus
+    + raisedAt: Date
+    + acknowledgedBy: bigint
+    + acknowledgedAt: Date
+    + resolvedAt: Date
+  }
+  class "FaultReport\n<size:9>«entity fault_reports»</size>" as FaultReport <<entity>> {
+    + id: bigint
+    + reportNo: bigint
+    + driverId: bigint
+    + connectorId: bigint
+    + description: string
+    + reportedAt: Date
+    + faultEventId: bigint
+    + clearedAt: Date
+    + clearedBy: bigint
+  }
+  class "ConnectorStatusEvent\n<size:9>«entity connector_status_events»</size>" as ConnectorStatusEvent <<entity>> {
+    + chargePointId: bigint
+    + connectorNo: int
+    + status: ConnectorStatus
+    + errorCode: string
+    + vendorErrorCode: string
+    + pillarTimestamp: Date
+    + receivedAt: Date
+    + unexpectedTransition: bool
+  }
+  class "RemoteCommand\n<size:9>«entity remote_commands»</size>" as RemoteCommand <<entity>> {
+    + id: bigint
+    + chargePointId: bigint
+    + action: string
+    + status: CommandStatus
+    + requestedAt: Date
+    + completedAt: Date
+  }
+  class "MaintenanceTicket\n<size:9>«entity maintenance_tickets · Should»</size>" as MaintenanceTicket <<entity>> {
+    + id: bigint
+    + ticketNo: bigint
+    + faultEventId: bigint
+    + assignedTo: bigint
+    + status: TicketStatus
+    + openedAt: Date
+    + closedAt: Date
+  }
+  enum ConnectorStatus <<enumeration>> {
+    Available
+    Preparing
+    Charging
+    SuspendedEV
+    SuspendedEVSE
+    Finishing
+    Reserved
+    Unavailable
+    Faulted
+  }
+  enum FaultEventStatus <<enumeration>> {
+    raised
+    acknowledged
+    resetting
+    resolved
+  }
+  enum FaultSource <<enumeration>> {
+    ocpp
+    driver_report
+    operator
+  }
+}
+
+StationsService ..> FaultService
+StationsService ..> ConnectorStateMachine
+StationsService ..> Connector
+FaultService ..> FaultStateMachine
+FaultStateMachine ..> FaultTrigger
+FaultService ..> FaultEvent
+FaultService ..> ErrorCodeGuide
+FaultService ..> ReservationService
+FaultService ..> RealtimeGateway
+RemoteCommandService ..> FaultService
+RemoteCommandService ..> OcppDispatchService
+RemoteCommandService ..> RemoteCommand
+SessionsService ..> RealtimeGateway
+Connector "1" -- "0..*" FaultEvent
+FaultEvent "1" -- "0..*" FaultReport
+Connector "1" -- "0..*" ConnectorStatusEvent
+FaultEvent "1" -- "0..*" MaintenanceTicket
+Connector --> ConnectorStatus
+FaultEvent --> FaultEventStatus
+FaultEvent --> FaultSource
+note bottom of FaultEvent
+  A connector has at most one open
+  FaultEvent (status ≠ resolved).
+end note
+note bottom of RemoteCommand
+  remote_commands is not in the
+  schema yet (open question 7).
+end note
+legend bottom right
+  Green header = WP4-owned classes (Nghĩa)
+endlegend
+@enduml

@@ -1,0 +1,20 @@
+hide circle
+hide empty methods
+skinparam shadowing false
+skinparam defaultFontName Arial
+skinparam defaultFontSize 12
+skinparam dpi 200
+skinparam linetype ortho
+skinparam nodesep 40
+skinparam ranksep 60
+skinparam class {
+  BackgroundColor #FFFFFF
+  BorderColor #333333
+  ArrowColor #333333
+  HeaderBackgroundColor #EEF2F8
+}
+skinparam class<<Should>> {
+  BackgroundColor #F4F4F4
+  BorderColor #999999
+  FontColor #555555
+}

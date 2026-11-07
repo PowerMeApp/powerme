@@ -1,0 +1,30 @@
+@startuml fig02_ucd_l0
+!include style.iuml
+left to right direction
+actor Driver
+actor Operator
+actor Admin
+actor "Payment Gateway" as PG <<system>>
+actor "E-Invoice Provider" as EI <<system>>
+actor "Map & Routing Service" as MR <<system>>
+actor "Charging Pillar" as CP <<system>>
+rectangle "PowerMe Platform" {
+  usecase "Manage Driver Account\n(ACC)" as ACC
+  usecase "Pay for Charging\n(PAY)" as PAY
+  usecase "Charge Vehicle\n(CHG)" as CHG
+  usecase "Operate Charging Pillars\n(OPS)" as OPS
+  usecase "Exchange Pillar Data\n(INT)" as INT
+  usecase "Administer Platform\n(ADM)" as ADM
+}
+Driver -- ACC
+Driver -- PAY
+Driver -- CHG
+Operator -- OPS
+Admin -- ADM
+PAY -- PG
+PAY -- EI
+CHG -- MR
+CHG -- CP
+OPS -- CP
+INT -- CP
+@enduml

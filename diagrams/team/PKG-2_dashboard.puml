@@ -1,0 +1,53 @@
+@startuml PKG-2_dashboard
+!include _team.iuml
+skinparam packageStyle rectangle
+skinparam packageStyle rectangle
+title PKG-2 Package diagram: Operator Dashboard & Admin Console (apps/dashboard, React + Vite)
+footer Content: Trần Trọng Nghĩa (WP4), package-diagram-dashboard 24/10/2026 · redrawn in the Report 4 diagram style, content unchanged
+package "apps/dashboard «system»" {
+  package "Presentation" as P {
+    package routes
+    package pages
+    package layouts
+    package components
+    package hooks
+  }
+  package "Business Logic" as B {
+    package "features" as F {
+      package auth
+      package stations
+      package monitoring
+      package alerts
+      package commands
+      package tariffs
+      package analytics
+      package messages
+      package reconciliation
+    }
+  }
+  package "Core" as C {
+    package config
+    package context
+    package realtime
+    package store
+    package api
+  }
+  package "Foundation" as Fd {
+    package assets
+    package constants
+    package types
+    package utils
+    package styles
+    package lib
+  }
+}
+package "External libraries" as ext {
+  package "Redux Toolkit" as rtk
+  package "socket.io-client" as sio
+  package "@powerme/shared" as shared
+}
+P .down.> B
+B .down.> C
+C .down.> Fd
+C .right.> ext : store → Redux Toolkit\nrealtime → socket.io-client\napi, types → @powerme/shared
+@enduml

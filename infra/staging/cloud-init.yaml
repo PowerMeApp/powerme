@@ -1,0 +1,37 @@
+#cloud-config
+# Paste THIS WHOLE FILE into the "Custom data" box (Advanced tab) when creating the Ubuntu 24.04 VM on Azure.
+# Azure only accepts ASCII in that box, so comments here are written without Vietnamese diacritics.
+# On first boot (about 3-5 minutes) it:
+#   1. creates user deploy (password locked, SSH key login only),
+#   2. installs Docker Engine + Compose plugin from the official Docker repo,
+#   3. lets deploy use docker, then clones the public repo into /home/deploy/powerme.
+# No secret inside: the ssh-ed25519 line is a PUBLIC key (the private key stays on Tri machine and in the
+# GitHub secret STAGING_SSH_KEY). To use another key, replace that line before pasting.
+# Done when /var/lib/powerme-cloud-init.done exists (cloud-init status --wait).
+package_update: true
+packages:
+  - ca-certificates
+  - curl
+  - git
+  - openssl
+users:
+  - default
+  - name: deploy
+    shell: /bin/bash
+    lock_passwd: true
+    ssh_authorized_keys:
+      - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOA5OhD1I728Ht2slR3F+A4ZYzyGS7uwT7xfcyXLgoZ5 tri-powerme-staging
+runcmd:
+  - |
+    set -e
+    install -m 0755 -d /etc/apt/keyrings
+    curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+    chmod a+r /etc/apt/keyrings/docker.asc
+    . /etc/os-release
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu $VERSION_CODENAME stable" > /etc/apt/sources.list.d/docker.list
+    apt-get update
+    apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+    systemctl enable --now docker
+    usermod -aG docker deploy
+    runuser -u deploy -- git clone https://github.com/PowerMeApp/powerme.git /home/deploy/powerme
+    touch /var/lib/powerme-cloud-init.done

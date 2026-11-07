@@ -1,0 +1,37 @@
+digraph BCD {
+  graph [rankdir=TB, splines=true, nodesep=0.9, ranksep=2.2, fontname="DejaVu Sans", dpi=300];
+  node  [fontname="DejaVu Sans", fontsize=13, shape=box, penwidth=1.3];
+  edge  [fontname="DejaVu Sans", fontsize=12, arrowsize=0.8];
+  { rank=min; Operator; Driver; Admin; }
+  P [label="PowerMe\nPlatform", shape=ellipse, fontsize=18, fontname="DejaVu Sans Bold", width=2.6, height=1.7, penwidth=2, style=solid];
+  { rank=max; Pillar [label="Charging Pillar"]; Gateway [label="Payment Gateway\n(VNPay)"]; EInv [label="E-Invoice Provider"]; Map [label="Map & Routing\nService"]; }
+
+  Operator -> P [label="Pillar, Tariff\n& Promotion Settings"];
+  Operator -> P [label="Remote\nCommand"];
+  Operator -> P [label="Pillar Status, Uptime\n& Alerts", dir=back];
+  Operator -> P [label="Session\nReports", dir=back];
+
+  Driver -> P [label="Account &\nVehicle Details"];
+  Driver -> P [label="Top-Up\nRequest"];
+  Driver -> P [label="Charging\nCommand"];
+  Driver -> P [label="Fault\nReport"];
+  Driver -> P [label="Station Status\n& Suggestions", dir=back];
+  Driver -> P [label="Charging Statement,\nReceipt & E-Invoice", dir=back];
+
+  Admin -> P [label="Account &\nRegistry Entries"];
+  Admin -> P [label="System Health\nSummary", dir=back];
+
+  P -> Pillar [label="Connector\nStatus", dir=back];
+  P -> Pillar [label="Transaction\nRecord", dir=back];
+  P -> Pillar [label="Authorization\nDecision"];
+  P -> Pillar [label="Remote Command\n& Configuration"];
+
+  P -> Gateway [label="Payment\nOrder"];
+  P -> Gateway [label="Payment\nResult", dir=back];
+
+  P -> EInv [label="Invoice\nData"];
+  P -> EInv [label="Issued\nE-Invoice", dir=back];
+
+  P -> Map [label="Route\nQuery"];
+  P -> Map [label="Travel\nTime", dir=back];
+}

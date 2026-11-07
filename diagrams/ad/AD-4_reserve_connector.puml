@@ -1,0 +1,64 @@
+@startuml AD-4_reserve_connector
+!include _style.iuml
+title AD-4 — Reserve Charging Connector [Should] (hold, then fulfil / cancel / expire / void)\n<size:11>Scope: PowerMe «software system» · Trigger: driver taps Reserve on an Available connector · Level: System · v1.1 · Should — designed, not committed (ADR-0015)</size>
+
+|Driver\n«person»|
+start
+:Select an Available connector\n(from map or suggestion);
+|PowerMe Platform\n«software system»|
+:Show hold window, no-show fee\nand free-cancel cut-off; <<output>>
+|Driver\n«person»|
+:Confirm reservation;
+|PowerMe Platform\n«software system»|
+if ( ) then ([connector not Available, offline or incompatible,\nor credit < start minimum, or driver already holds one])
+  :Refuse with reason and\nsuggest alternatives (AD-5); <<output>>
+  stop
+else ([eligible])
+endif
+:Create reservation\n(one active per connector);
+if ( ) then ([connector just reserved\nby another driver])
+  :Refuse "just reserved by someone\nelse" and suggest alternatives; <<output>>
+  stop
+else ([created])
+endif
+:Reservation\n[active]; <<task>>
+if ( ) then ([pillar supports reservations])
+  :Request connector hold\nfrom pillar; <<output>>
+  |#EEEEEE|Charging Pillar\n«external system»|
+  :Answer hold request\n(show Reserved if accepted);
+  |PowerMe Platform\n«software system»|
+else ([no reservation support])
+endif
+if ( ) then ([pillar accepted hold])
+else ([no support or hold refused])
+  :Hold connector in platform\n(block other drivers' starts);
+endif
+:Show connector as Reserved until\nHH:MM to all drivers (<= 5 s); <<output>>
+:Wait for first reservation event; <<input>>
+switch ( )
+case ([holder starts a session on\nthis pillar before expiry])
+  :Reservation\n[fulfilled]; <<task>>
+  :Release the pillar's other\nconnector, if held;
+  :Continue charging flow (AD-1); <<procedure>>
+  stop
+case ([driver cancels >= 5 min\nbefore expiry])
+  :Reservation\n[cancelled_free]; <<task>>
+case ([driver cancels in the\nlast 5 min])
+  :Debit late-cancel fee\n(50% of no-show fee);
+  :Reservation\n[cancelled_late]; <<task>>
+case ([hold window elapsed])
+  :Debit no-show fee (once);
+  :Reservation\n[expired_no_show]; <<task>>
+case ([connector faulted, offline or taken,\nor operator cancelled])
+  :Reservation\n[voided]; <<task>>
+  :Notify driver with up to three\nalternatives (no fee); <<output>>
+endswitch
+:Release connector hold\n(cancel on pillar if held there);
+:Show connector as Available; <<output>>
+stop
+note right
+  Fees are CreditTransaction [reservation_fee];
+  balance may go negative → new starts blocked (BR-P20).
+end note
+!include _legend.iuml
+@enduml

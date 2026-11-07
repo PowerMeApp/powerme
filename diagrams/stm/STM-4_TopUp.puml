@@ -1,0 +1,22 @@
+@startuml STM-4_TopUp
+!include _style.iuml
+title STM-4 TopUp (Charging Credit top-up)\ntop_ups.status · v0.3 · 24/10/2026 · confirmed by Khang
+[*] --> pending : driver confirms amount\n[50,000–2,000,000 VND, balance after ≤ 5,000,000,\nno other open top-up for this account]\n/ create payment, expires in 15 min
+pending --> credited : payment success (IPN or gateway query)\n[signature valid, amount matches, not yet applied]\n/ add full amount, settle shortfall,\nredeem points, request e-invoice
+pending --> failed : payment failed\nor driver cancels
+pending --> expired : 15 min without result\n[gateway query: not paid]
+expired --> credited : late payment success\n[within 1 h of expiry, not yet applied]\n/ credit once
+credited --> refunded : Admin refunds top-up (UC-ADM-08)\n[balance ≥ top-up amount, full refund,\nto original source]\n/ refund entry, restore points,\ninvoice adjustment
+refunded --> [*]
+credited --> [*]
+failed --> [*]
+expired --> [*] : late window (1 h) ends
+note right of pending
+  A repeated result never changes the state (BR-P13).
+end note
+note bottom of expired
+  Success IPN after the late window: stored as a late
+  payment (no credit, no invoice), acknowledged,
+  listed for Admin refund (UC-ADM-08).
+end note
+@enduml

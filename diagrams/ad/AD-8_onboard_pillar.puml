@@ -1,0 +1,47 @@
+@startuml AD-8_onboard_pillar
+!include _style.iuml
+title AD-8 (WF-05) Onboard a Charging Pillar and Bring It into Service\n<size:11>Scope: PowerMe «software system» · Trigger: operator adds a new pillar at a site · Owner: Trần Đức Ân · v2.0</size>
+
+|Admin\n«person»|
+start
+:Register pillar serial in\ndevice registry (UC-ADM-03);
+|PowerMe Platform\n«software system»|
+:ChargingPillar\n[registered]; <<task>>
+|Operator\n«person»|
+:Enter serial, site and\nconnectors (UC-OPS-01);
+|PowerMe Platform\n«software system»|
+if ( ) then ([serial not in registry, already\nonboarded, or site of another operator])
+  :Show error and log attempt; <<output>>
+  stop
+else ([valid])
+endif
+:Link pillar to site,\ncreate connectors (max 2);
+:Issue pillar credential\n(shown once);
+:ChargingPillar\n[awaiting_connection]; <<task>>
+|Operator\n«person»|
+:Configure pillar with platform\naddress and credential (on site);
+|#EEEEEE|Charging Pillar\n«external system»|
+:Open TLS connection with\nidentity + credential, announce itself\n(UC-INT-01);
+|PowerMe Platform\n«software system»|
+if ( ) then ([unknown identity or\nwrong credential])
+  :Reject connection and\nlog the attempt;
+  |Operator\n«person»|
+  :Check pillar configuration;
+  stop
+else ([credential valid])
+endif
+|PowerMe Platform\n«software system»|
+:Accept pillar and send\nheartbeat interval;
+:Read pillar capabilities\n(SoC reporting, free-vend tag);
+|#EEEEEE|Charging Pillar\n«external system»|
+:Report status of each connector;
+|PowerMe Platform\n«software system»|
+:Connector\n[Available]; <<task>>
+:ChargingPillar\n[in_service]; <<task>>
+:Publish connectors on\nstation map and search;
+:Show pillar online; <<output>>
+|Operator\n«person»|
+:Confirm pillar in service\n(UC-OPS-02);
+stop
+!include _legend.iuml
+@enduml
