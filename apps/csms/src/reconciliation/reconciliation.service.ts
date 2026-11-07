@@ -314,6 +314,27 @@ export class ReconciliationService {
     });
   }
 
+  /**
+   * BE-18 / T13 #16a nhánh HARD_CAP_EXCEEDED: phiên orphaned quá SESSION_HARD_CAP_H mà không có
+   * StopTransaction. Không có số đo để so nên không có energyDifference; để operator thấy trong
+   * hàng đợi review, ghi `conflict` có tiền tố `hard_cap_exceeded` (cùng cách app_intent_reused).
+   */
+  async recordHardCap(
+    ex: DbExecutor,
+    sessionId: number,
+    orphanedSince: Date,
+    exceededAt: Date,
+    capH: number,
+  ): Promise<number | null> {
+    return this.insert(ex, sessionId, {
+      recordType: 'conflict',
+      gapStart: orphanedSince,
+      gapEnd: exceededAt,
+      energyDifferenceWh: null,
+      resolution: `hard_cap_exceeded: orphaned_since=${orphanedSince.toISOString()} cap_h=${capH} no_stop_transaction`,
+    });
+  }
+
   /** Guard của T13 #19: đã có dòng session_debit thì không đổi trạng thái, chỉ ghi record. */
   async hasSessionDebit(ex: DbExecutor, sessionId: number): Promise<boolean> {
     const rows = await ex

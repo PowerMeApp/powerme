@@ -102,10 +102,10 @@ File: `apps/csms/src/sessions/session-state-machine.spec.ts`, mỗi dòng là m�
 
 | # T13 | Từ → Đến              | Sự kiện trong code                         | Có đường kích hoạt thật ở Iteration 1?                                  |
 | ----- | --------------------- | ------------------------------------------ | ----------------------------------------------------------------------- |
-| 1     | ● → pending           | `REMOTE_START_ACCEPTED`                    | Chưa (RemoteStart)                                                      |
+| 1     | ● → pending           | `REMOTE_START_ACCEPTED`                    | Có (BE-18) — dấu vết ở intent, xem BE-18-STM1-TIMERS.md                 |
 | 2     | ● → active            | `START_TRANSACTION`                        | Có — `onStartTransaction`                                               |
 | 3     | pending → active      | `START_TRANSACTION`                        | Chưa                                                                    |
-| 4     | pending → failed      | `START_TIMEOUT`                            | Chưa (timer)                                                            |
+| 4     | pending → failed      | `START_TIMEOUT`                            | Có (BE-18) — bộ quét theo DB                                            |
 | 5     | active → paused       | `STATUS_SUSPENDED`                         | Có — StatusNotification SuspendedEV/EVSE                                |
 | 6     | paused → active       | `STATUS_CHARGING`                          | Có — StatusNotification Charging                                        |
 | 7     | active → stopping     | `STOP_REQUESTED`                           | Chưa (RemoteStop)                                                       |
@@ -120,7 +120,7 @@ File: `apps/csms/src/sessions/session-state-machine.spec.ts`, mỗi dòng là m�
 | 14    | paused → orphaned     | `STATION_OFFLINE`                          | Có                                                                      |
 | 15    | stopping → orphaned   | `STATION_OFFLINE`                          | Có                                                                      |
 | 16    | orphaned → reconciled | `RECONCILE_OK`                             | Có (Stop phát lại tới khi còn orphaned)                                 |
-| 16a   | orphaned → review     | `RECONCILE_CONFLICT` / `HARD_CAP_EXCEEDED` | Có / Chưa (timer)                                                       |
+| 16a   | orphaned → review     | `RECONCILE_CONFLICT` / `HARD_CAP_EXCEEDED` | Có / Có (BE-18) — bộ quét theo DB                                       |
 | 17    | review → reconciled   | `OPERATOR_RESOLVED`                        | Chưa (UC-OPS-05)                                                        |
 | 18    | orphaned → active     | `LIVE_MESSAGE`                             | Có — tx3 lúc MeterValues live 796 Wh                                    |
 | 19    | reconciled → review   | `LATE_SAMPLE_CONFLICT`                     | Có — `reconcileLateSample`                                              |
@@ -181,7 +181,7 @@ Từ migration 0001 đường này nằm trong `session_status_history` (test (m
 ## 7. Chỗ chưa làm
 
 - `pending`/`stopping`: không có RemoteStart/RemoteStop nên #1, #3, #4, #7, #8, #9a chỉ tồn tại trong máy trạng thái.
-- Timer: start timeout 120 s (#4), hard cap 24 h (#16a nhánh thứ hai), 900 s im lặng của STM-3 #4 — chưa có job nền (ADR-0006 nói BullMQ; Iteration 1 chưa cài).
+- Timer: start timeout 120 s (#4) và hard cap 24 h (#16a nhánh thứ hai) đã có từ BE-18 (bộ quét theo DB trong `ChargeRecoveryService`, xem BE-18-STM1-TIMERS.md); 900 s im lặng của STM-3 #4 vẫn chưa có job nền (ADR-0006 nói BullMQ; chưa cài).
 - Operator giải quyết `review` (#17, UC-OPS-05), `reviewed_by`/`reviewed_at` của record.
 - Basic Auth Security Profile 2 (ADR-0011): auth chỉ kiểm serial có trong DB.
 - BootNotification chỉ log; chưa cập nhật `model`/`firmware_version`, chưa GetConfiguration `ConnectionTimeOut`.

@@ -1,6 +1,7 @@
 import { Injectable, Logger, OnApplicationBootstrap, OnApplicationShutdown } from '@nestjs/common';
 import { ChargeSettlementService } from './charge-settlement.service.js';
 import { DriverChargingService } from './driver-charging.service.js';
+import { SessionTimersService } from './session-timers.service.js';
 
 @Injectable()
 export class ChargeRecoveryService implements OnApplicationBootstrap, OnApplicationShutdown {
@@ -11,6 +12,7 @@ export class ChargeRecoveryService implements OnApplicationBootstrap, OnApplicat
   constructor(
     private readonly settlement: ChargeSettlementService,
     private readonly driverCharging: DriverChargingService,
+    private readonly timers: SessionTimersService,
   ) {}
 
   async onApplicationBootstrap(): Promise<void> {
@@ -37,6 +39,18 @@ export class ChargeRecoveryService implements OnApplicationBootstrap, OnApplicat
       await this.driverCharging.retryUnknownStops();
     } catch {
       this.logger.error('BE-17 stop retry sweep unavailable; unknown stops will be retried');
+    }
+    try {
+      // BE-18: STM-1 #4 START_TIMEOUT (RemoteStart Accepted nhưng không có StartTransaction).
+      await this.timers.expireStaleStarts();
+    } catch {
+      this.logger.error('BE-18 start-timeout sweep unavailable; stale starts will be retried');
+    }
+    try {
+      // BE-18: STM-1 #16a HARD_CAP_EXCEEDED (orphaned quá SESSION_HARD_CAP_H → review).
+      await this.timers.expireHardCapped();
+    } catch {
+      this.logger.error('BE-18 hard-cap sweep unavailable; capped sessions will be retried');
     } finally {
       this.running = false;
     }
