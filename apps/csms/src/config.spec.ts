@@ -82,3 +82,27 @@ describe('loadConfig — RECONCILIATION_ENABLED (G6, ablation)', () => {
     );
   });
 });
+
+describe('loadConfig — SESSION_START_TIMEOUT_S / SESSION_HARD_CAP_H (BE-18)', () => {
+  it('mặc định 120 giây và 24 giờ', () => {
+    const cfg = loadConfig({ ...base });
+    expect(cfg.sessionStartTimeoutS).toBe(120);
+    expect(cfg.sessionHardCapH).toBe(24);
+  });
+
+  it('nhận giá trị hợp lệ, hard cap cho phép số giờ lẻ', () => {
+    const cfg = loadConfig({ ...base, SESSION_START_TIMEOUT_S: '90', SESSION_HARD_CAP_H: '0.5' });
+    expect(cfg.sessionStartTimeoutS).toBe(90);
+    expect(cfg.sessionHardCapH).toBe(0.5);
+  });
+
+  it.each(['0', '-1', '1.5', 'abc'])('SESSION_START_TIMEOUT_S="%s" ném lỗi', (v) => {
+    expect(() => loadConfig({ ...base, SESSION_START_TIMEOUT_S: v })).toThrow(
+      /SESSION_START_TIMEOUT_S/,
+    );
+  });
+
+  it.each(['0', '-3', 'abc'])('SESSION_HARD_CAP_H="%s" ném lỗi', (v) => {
+    expect(() => loadConfig({ ...base, SESSION_HARD_CAP_H: v })).toThrow(/SESSION_HARD_CAP_H/);
+  });
+});

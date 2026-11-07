@@ -851,6 +851,69 @@ export class DriverChargingService {
     return sent;
   }
 
+  /**
+   * BE-18 / STM-1 #4 START_TIMEOUT. `pending` = intent `accepted` chưa có session (xem recordDispatch):
+   * quá `timeoutS` giây kể từ lúc trụ trả Accepted (`remote_commands.responded_at`) mà chưa có
+   * StartTransaction thì `pending --START_TIMEOUT--> failed`: nhả connector + hoàn giữ chỗ
+   * `reserved_vnd` giống nhánh `rejected` của recordDispatch, state `released` (không phải
+   * `rejected` vì trụ không từ chối), `rejection_reason='start_timeout'` để app thấy kết quả.
+   * Chỉ `accepted`: intent `sent`/`unknown` chưa chứng minh được trụ không chạy nên KHÔNG tự nhả
+   * (cần operator fence — beginStartRecovery). StartTransaction đến muộn vẫn được nhận và gắn cờ
+   * billing_review_required nhờ connector_released_at (nhánh late_start trong onStartTransaction).
+   * Quét theo DB nên sống qua restart; khoá intent + kiểm lại điều kiện nên không nhả hai lần
+   * và không tranh với StartTransaction đang tới.
+   */
+  async expireStaleStarts(timeoutS: number, limit = 50): Promise<number> {
+    if (!Number.isFinite(timeoutS) || timeoutS <= 0) throw new Error('invalid_start_timeout');
+    const due = `i.state='accepted' AND i.session_id IS NULL AND i.connector_released_at IS NULL
+      AND r.action='RemoteStartTransaction' AND r.status='accepted' AND r.responded_at IS NOT NULL
+      AND r.responded_at<=now()-($1::float8*interval '1 second')`;
+    const candidates = (
+      await this.db.$client.query<{ id: string }>(
+        `SELECT i.id FROM driver_charge_intents i JOIN remote_commands r ON r.id=i.command_id
+         WHERE ${due} ORDER BY r.responded_at,i.id LIMIT $2`,
+        [timeoutS, limit],
+      )
+    ).rows;
+    let expired = 0;
+    for (const candidate of candidates) {
+      const done = await chargeTransaction(this.db, async (c) => {
+        const row = (
+          await c.query<{ id: string }>(
+            `SELECT i.id FROM driver_charge_intents i JOIN remote_commands r ON r.id=i.command_id
+             WHERE i.id=$2 AND ${due} FOR UPDATE OF i`,
+            [timeoutS, candidate.id],
+          )
+        ).rows[0];
+        if (!row) return false; // StartTransaction, operator hoặc lượt quét khác đã xử lý
+        const stm = new SessionStateMachine();
+        const failed = stm.apply(stm.apply(null, 'REMOTE_START_ACCEPTED'), 'START_TIMEOUT');
+        await c.query(
+          `UPDATE driver_charge_intents SET state='released',reserved_vnd=0,rejection_reason='start_timeout',
+           connector_released_at=coalesce(connector_released_at,now()),version=version+1,updated_at=now()
+           WHERE id=$1`,
+          [candidate.id],
+        );
+        await c.query(
+          `INSERT INTO driver_charge_intent_events(intent_id,event,note) VALUES($1,'START_TIMEOUT',$2)`,
+          [candidate.id, `stm1 #4 pending→${failed}; no StartTransaction within ${timeoutS}s`],
+        );
+        return true;
+      });
+      if (done) {
+        expired++;
+        this.logger.warn(
+          JSON.stringify({
+            event: 'remote_start_timeout',
+            intentId: Number(candidate.id),
+            timeoutS,
+          }),
+        );
+      }
+    }
+    return expired;
+  }
+
   // WP3/T72: recovery adds an audited attempt to the same stop intent, never a fresh business key.
   async recoverStop(
     operatorId: number,
@@ -1330,12 +1393,25 @@ export class DriverChargingService {
           ],
         );
       } else {
-        await c.query(
+        const moved = await c.query(
           `UPDATE driver_charge_intents SET state=$2,reserved_vnd=CASE WHEN $2::varchar='rejected' THEN 0 ELSE reserved_vnd END,
           connector_released_at=CASE WHEN $2::varchar='rejected' THEN coalesce(connector_released_at,now()) ELSE connector_released_at END,
           version=version+1,updated_at=now() WHERE command_id=$1 AND state='sent' AND session_id IS NULL`,
           [commandId, status === 'timeout' ? 'unknown' : status],
         );
+        // BE-18 / STM-1 #1: RemoteStart Accepted = phiên vào `pending`. `pending` sống ở intent
+        // (chưa có dòng `sessions` vì chưa có meter_start/cp_started_at), nên dấu vết nằm ở
+        // driver_charge_intent_events; đích của chuyển lấy từ bảng STM-1, không viết cứng.
+        if (status === 'accepted' && moved.rowCount) {
+          await c.query(
+            `INSERT INTO driver_charge_intent_events(intent_id,event,note)
+            SELECT id,'REMOTE_START_ACCEPTED',$2 FROM driver_charge_intents WHERE command_id=$1`,
+            [
+              commandId,
+              `stm1 #1 ●→${new SessionStateMachine().apply(null, 'REMOTE_START_ACCEPTED')}`,
+            ],
+          );
+        }
       }
       await c.query(
         `UPDATE remote_commands SET status=$2::text::remote_command_status,response=$3,responded_at=CASE WHEN $2::text='timeout' THEN NULL ELSE now() END,

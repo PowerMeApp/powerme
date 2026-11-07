@@ -120,6 +120,16 @@ function positiveSecondsEnv(env: NodeJS.ProcessEnv, key: string, fallback: numbe
   return n;
 }
 
+/**
+ * Số giờ > 0 (cho phép lẻ, vd 0.5). BE-18: 0 hoặc âm sẽ khiến bộ quét hard cap đẩy mọi phiên
+ * orphaned sang review ngay, nên từ chối khi khởi động thay vì chạy sai âm thầm.
+ */
+function positiveHoursEnv(env: NodeJS.ProcessEnv, key: string, fallback: number): number {
+  const n = intEnv(env, key, fallback);
+  if (n <= 0) throw new Error(`Biến môi trường ${key} phải là số giờ > 0: "${env[key]}"`);
+  return n;
+}
+
 /** Đọc cấu hình; ném lỗi sớm khi thiếu DATABASE_URL thay vì chết lúc query đầu tiên. */
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): CsmsConfig {
   const databaseUrl = env['DATABASE_URL'];
@@ -128,8 +138,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): CsmsConfig {
     databaseUrl,
     ocppPort: intEnv(env, 'OCPP_PORT', intEnv(env, 'CSMS_OCPP_WS_PORT', 9000)),
     heartbeatIntervalS: intEnv(env, 'OCPP_HEARTBEAT_INTERVAL_SECONDS', 300),
-    sessionStartTimeoutS: intEnv(env, 'SESSION_START_TIMEOUT_S', 120),
-    sessionHardCapH: intEnv(env, 'SESSION_HARD_CAP_H', 24),
+    sessionStartTimeoutS: positiveSecondsEnv(env, 'SESSION_START_TIMEOUT_S', 120),
+    sessionHardCapH: positiveHoursEnv(env, 'SESSION_HARD_CAP_H', 24),
     replaySkewThresholdS: intEnv(env, 'REPLAY_SKEW_THRESHOLD_S', 5),
     meterValueSampleIntervalS: intEnv(env, 'METER_VALUE_SAMPLE_INTERVAL_S', 10),
     reconcileGapFactor: intEnv(env, 'RECONCILE_GAP_FACTOR', 3),

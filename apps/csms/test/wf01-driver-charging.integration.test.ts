@@ -1700,6 +1700,115 @@ describeDb('WP3/T31 WF-01 service journey with real OCPP + Postgres', () => {
       expect(await q('SELECT 1 FROM driver_stop_intents')).toHaveLength(0);
     });
   });
+  // BE-18: STM-1 #1 REMOTE_START_ACCEPTED + #4 START_TIMEOUT. `pending` sống ở intent.
+  describe('BE-18 RemoteStart pending / START_TIMEOUT', () => {
+    const sweeper = () => service.expireStaleStarts(120);
+    const ageAccept = (seconds: number) =>
+      q(
+        `UPDATE remote_commands SET requested_at=now()-($1::int*interval '1 second')-interval '1 second',
+           sent_at=now()-($1::int*interval '1 second')-interval '1 second',
+           responded_at=now()-($1::int*interval '1 second') WHERE action='RemoteStartTransaction'`,
+        [seconds],
+      );
+    const intentRow = async () =>
+      (
+        await q(
+          `SELECT state,reserved_vnd::int AS reserved,rejection_reason,connector_released_at IS NOT NULL AS released,
+             billing_review_required FROM driver_charge_intents`,
+        )
+      )[0]!;
+    const events = async () =>
+      (await q('SELECT event FROM driver_charge_intent_events ORDER BY id')).map((r) => r.event);
+
+    it('Accepted RemoteStart enters pending (#1) and is not expired before the timeout', async () => {
+      await service.start(driver, 'k', input);
+      expect(await intentRow()).toMatchObject({ state: 'accepted', released: false });
+      expect(await events()).toEqual(['REMOTE_START_ACCEPTED']);
+      expect((await q('SELECT note FROM driver_charge_intent_events'))[0]!.note).toBe(
+        'stm1 #1 ●→pending',
+      );
+      await ageAccept(119);
+      expect(await sweeper()).toBe(0);
+      expect(await intentRow()).toMatchObject({ state: 'accepted' });
+      expect((await intentRow()).reserved).toBeGreaterThan(0);
+    });
+
+    it('releases connector and hold after the timeout, exactly once, and the driver can retry', async () => {
+      await service.start(driver, 'k', input);
+      await ageAccept(121);
+      expect(await sweeper()).toBe(1);
+      expect(await sweeper()).toBe(0);
+      expect(await intentRow()).toMatchObject({
+        state: 'released',
+        reserved: 0,
+        rejection_reason: 'start_timeout',
+        released: true,
+      });
+      expect(await events()).toEqual(['REMOTE_START_ACCEPTED', 'START_TIMEOUT']);
+      expect((await service.getStart(driver, 'k')).outcome).toBe('start_timeout');
+      expect(await q('SELECT 1 FROM sessions')).toHaveLength(0);
+      // Connector đã nhả: app mở được lệnh mới.
+      const again = await service.start(driver, 'k2', input);
+      expect(again.outcome).toBe('accepted');
+    });
+
+    it('two concurrent sweeps release once', async () => {
+      await service.start(driver, 'k', input);
+      await ageAccept(500);
+      const results = await Promise.all([sweeper(), sweeper()]);
+      expect(results.reduce((a, b) => a + b, 0)).toBe(1);
+      expect(await events()).toEqual(['REMOTE_START_ACCEPTED', 'START_TIMEOUT']);
+    });
+
+    it('does not touch an intent whose StartTransaction already arrived', async () => {
+      await observedStart();
+      await ageAccept(500);
+      expect(await sweeper()).toBe(0);
+      expect(await intentRow()).toMatchObject({ state: 'effect', released: false });
+      expect(await events()).toEqual(['REMOTE_START_ACCEPTED']);
+    });
+
+    it('does not release an uncertain (unknown) start; that needs operator fencing', async () => {
+      startResponse = 'silence';
+      await service.start(driver, 'k', input);
+      expect((await intentRow()).state).toBe('unknown');
+      await q(
+        "UPDATE remote_commands SET requested_at=now()-interval '1 hour',sent_at=now()-interval '1 hour'",
+      );
+      expect(await sweeper()).toBe(0);
+      expect(await intentRow()).toMatchObject({ state: 'unknown', released: false });
+      expect(await events()).toEqual([]);
+    });
+
+    it('a StartTransaction arriving after the timeout is kept and flagged for billing review', async () => {
+      await service.start(driver, 'k', input);
+      const saved = tag;
+      await ageAccept(300);
+      expect(await sweeper()).toBe(1);
+      await lateFrame(saved);
+      expect(await intentRow()).toMatchObject({ state: 'effect', billing_review_required: true });
+      expect((await service.getStart(driver, 'k')).sessionId).toBeGreaterThan(0);
+      expect(await events()).toEqual([
+        'REMOTE_START_ACCEPTED',
+        'START_TIMEOUT',
+        'late_start_after_release',
+      ]);
+    });
+
+    it('survives a restart: a new service instance expires the same stale start', async () => {
+      await service.start(driver, 'k', input);
+      await ageAccept(200);
+      const fresh = new DriverChargingService(db, registry, settlement, policy);
+      expect(await fresh.expireStaleStarts(120)).toBe(1);
+    });
+
+    it('rejects an invalid timeout instead of expiring everything', async () => {
+      await service.start(driver, 'k', input);
+      await expect(service.expireStaleStarts(0)).rejects.toThrow('invalid_start_timeout');
+      await expect(service.expireStaleStarts(Number.NaN)).rejects.toThrow('invalid_start_timeout');
+      expect((await intentRow()).state).toBe('accepted');
+    });
+  });
   it.each(['energy', 'credit'] as const)(
     'T72 review suspended driver still receives system %s cutoff but cannot call public actions',
     async (kind) => {
