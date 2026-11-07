@@ -13,6 +13,7 @@ import { CHARGE_POLICY, ChargeSettlementService } from '../sessions/charge-settl
 import { loadChargePolicy } from '../sessions/charge-policy.config.js';
 import { ChargeRecoveryService } from '../sessions/charge-recovery.service.js';
 import { DriverChargingService } from '../sessions/driver-charging.service.js';
+import { SessionReviewService } from '../sessions/session-review.service.js';
 import { SessionTimersService } from '../sessions/session-timers.service.js';
 import { ConnectionRegistry } from './connection-registry.js';
 import { InboundSerializer } from './inbound-serializer.js';
@@ -32,6 +33,7 @@ import { OfflineGraceService } from './offline-grace.service.js';
     ChargeRecoveryService,
     DriverChargingService,
     SessionTimersService,
+    SessionReviewService,
     OcppHandlers,
     OfflineGraceService,
     OcppServer,
@@ -42,6 +44,7 @@ import { OfflineGraceService } from './offline-grace.service.js';
     OfflineGraceService,
     DriverChargingService,
     ChargeSettlementService,
+    SessionReviewService,
   ],
 })
 export class OcppGatewayModule {}
