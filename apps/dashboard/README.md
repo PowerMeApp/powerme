@@ -8,6 +8,8 @@ Dashboard vận hành cho quản trị viên và kỹ thuật viên trạm.
 | Cột mốc | M3 — 18/10/2026, **M4 — 01/11/2026** |
 | Stack | React + Vite + TypeScript |
 
+**Quy ước code:** đọc [docs/QUY-UOC-DASHBOARD-REACT.md](../../docs/QUY-UOC-DASHBOARD-REACT.md) trước khi thêm màn hình, feature hay test.
+
 ## Phạm vi
 
 - **FE-01** Đăng nhập, phân quyền theo vai trò

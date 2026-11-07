@@ -118,6 +118,10 @@ Mỗi ADR trả lời bốn câu: bối cảnh, quyết định, hệ quả, cá
 
 Lý do: hội đồng bảo vệ sẽ hỏi "vì sao chọn cách này". Ghi lúc quyết định mất 15 phút, dựng lại sau ba tháng mất cả buổi.
 
+### Quy ước riêng từng app
+
+- Dashboard React (`apps/dashboard`): [docs/QUY-UOC-DASHBOARD-REACT.md](docs/QUY-UOC-DASHBOARD-REACT.md) — cây thư mục, luật phụ thuộc giữa tầng, đặt tên, test.
+
 ---
 
 ## 7. Bí mật và cấu hình
