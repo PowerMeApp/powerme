@@ -1,0 +1,31 @@
+@startuml SD-3b
+!include ../_style.iuml
+title SD-3b (Software level, CSMS) — Replayed StartTransaction is recorded only once (ADR-0010)\nPrecondition: Charge Point reconnected and replays a stored StartTransaction · System view: AD-3 · State: STM-1
+footer Owner: Ngô Văn Minh Trí (WP2) · v2.0 · 01/11/2026 · names = code (apps/csms/src) · left gate = Charge Point [OCPP 1.6J, WSS]
+
+participant "«component»\n<u>:OcppServer</u>" as OS
+participant "«component»\n<u>:ReplayDetector</u>" as RD
+participant "«component»\n<u>:OcppHandlers</u>" as H
+participant "«component»\n<u>:SessionsService</u>" as S
+participant "«component»\n<u>:ReconciliationService</u>" as R
+
+[-> OS ++ : StartTransaction {connectorId, idTag, meterStart, timestamp}
+OS -> RD ++ : classify(cpTimestamp, receivedAt, epochOpenedAt) : ReplayVerdict
+RD --> OS -- : replayed = true
+OS -> OS : log frame in ocpp_message_log
+OS -> H ++ : dispatch(StartTransaction, params, ctx)
+H -> S ++ : onStartTransaction(req, ctx)
+S -> S : look up session by natural key\n(Charge Point, connector, start time)
+alt no session with this key
+  S -> S : create session, new transactionId
+  hnote over S : {session.status = active}
+else session already exists
+  S -> R ++ : recordDuplicate(sessionId, frame)
+  R --> S --
+  note right : no status change
+end
+S --> H -- : transactionId
+H --> OS -- : {transactionId, idTagInfo.status = Accepted}
+[<-- OS -- : StartTransaction.conf (same transactionId)
+note over OS, R : The Charge Point always gets the same transactionId, so its later MeterValues and StopTransaction attach to the one session.
+@enduml

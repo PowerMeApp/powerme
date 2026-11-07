@@ -1,24 +1,75 @@
-# Diagram sources
+# Diagrams
 
-PlantUML (and one Graphviz) sources for every diagram in Report 3 and Report 4. All text is in English. Render with PlantUML 1.2024.7 and Graphviz:
+Every figure of **Report 3 (SRS)** and **Report 4 (SDD)**, redrawn on 30/10–02/11/2026 after Review 2 to follow the lecturer guides (overview level, one diagram per page, English only, "Charge Point" instead of "Pillar"). This replaces the earlier `ad/ arch/ erd/ report3/ stm/ team/ wf02/ wf05/` sources.
 
-```bash
-java -DPLANTUML_LIMIT_SIZE=16384 -jar plantuml-1.2024.7.jar -tpng -o ../png <folder>/*.puml
-dot -Tpng report3/Fig01_Business-Context-Diagram.dot -o png/fig01_bcd.png
-```
+Each diagram has its own folder with the **source** and a **PNG render** (open the PNG on GitHub to see it). Master copies: `H:\Class\PowerMe\Fixed diagrams\` (WP1) and the team Drive.
 
-| Folder | Diagrams | Owner | Used in |
-|---|---|---|---|
-| `report3/` | Fig 1 Business Context, Fig 2 UCD level 0, Fig 3–8 UCD level 1 (ACC, CHG, PAY, OPS, ADM incl. UC-ADM-08, INT), Fig 9–11 screen flows (Fig 11 incl. Billing Exceptions), Fig 12a/12b conceptual ERD | WP1 | Report 3 |
-| `ad/` | AD-1 … AD-8 activity diagrams (AD-4 reservation is Should) | WP1 | Report 3, Report 4 §3.1.1 |
-| `arch/` | ARCH-1 component, ARCH-2 deployment (staging) | WP1 | Report 4 §1.1 |
-| `stm/` | STM-1 … STM-8 state machines (STM-4/5/7 confirmed by Khang) | WP1, owners confirm | Report 4 §3.1.2 |
-| `erd/` | LERD-1 v0.4 (Charging & Billing), LERD-2 v0.3 (Operations & Administration), aligned with migration `0001` on 25/10 | WP1, WP5 | Report 4 §2 |
-| `wf02/` | CD-2 class, SD-2a create top-up, SD-2b IPN credit, SD-2c e-invoice issue and retry, SD-2d timeout / late payment, SD-2e Admin refund, SD-2f account closure (v2.0, 01/11/2026) | WP5 (Khang) | Report 4 §3.3 |
-| `wf05/` | CD-5 class, SD-5a onboard, SD-5b first connection | WP1 (Ân) | Report 4 §3.6 |
-| `team/` | PKG-1 CSMS and WF-03 class + 2 sequences (Trí), PKG-2 dashboard and WF-04 class + 2 sequences (Nghĩa), PKG-3 driver app and WF-01 class + sequence (Sơn): redrawn in one style, content unchanged | WP2, WP3, WP4 | Report 4 §1.2, §3.2, §3.4, §3.5 |
+## How to re-render
 
-## Known differences between the diagrams and the code
+| Source type | Diagrams | Command |
+|---|---|---|
+| PlantUML `.puml` (+ shared `_style.iuml`) | AD, PKG, CD, SD, STM | `java -DPLANTUML_LIMIT_SIZE=16384 -jar plantuml-1.2024.7.jar -tpng <file>.puml` (needs Graphviz) |
+| Python layout script `.py` | BCD, UCD, Screen Flow, ARCH-1, AD-4 | `python3 <script>.py` → SVG, then `rsvg-convert`. UCD scripts import the helper `vpuc` and screen flows import `sfdraw` (in `screen-flow/driver/`); `vpuc` is not in the repo yet, so the committed PNG is the reference |
+| draw.io `.drawio` | ARCH-2, Logical ERD v1.1 (Refund) | open in diagrams.net or the VS Code Draw.io extension |
+| ELK layout (`report4/erd-layout/`) | Conceptual, Logical, Physical ERD | `sh build_all.sh` (needs node + `elkjs@0.9.3`, Pillow, `rsvg-convert`); data in `model.py` + `pmodel.json` |
+| DBML | Physical ERD | `report4/erd-physical/powerme_physical.dbml` → paste into dbdiagram.io |
+
+## Report 3 — `report3/`
+
+| Figure | Diagram | Folder |
+|---|---|---|
+| BCD-1 | Business Context Diagram — PowerMe Platform | `bcd/` |
+| UCD | Use case diagram — Driver | `use-case/driver/` |
+| UCD | Use case diagram — Operator | `use-case/operator/` |
+| UCD | Use case diagram — Admin | `use-case/admin/` |
+| UCD | Use case diagram — Charge Point (OCPP) | `use-case/charge-point/` |
+| SF | Screen flow — Driver App | `screen-flow/driver/` |
+| SF | Screen flow — Operator Dashboard | `screen-flow/operator/` |
+| SF | Screen flow — Admin Console | `screen-flow/admin/` |
+| AD-1 | Charge a vehicle with the Driver App | `activity/AD-1/` |
+| AD-2 | Top up Charging Credit (optional points redemption) | `activity/AD-2/` |
+| AD-3 | Charge Point loses connection during a session, then reconcile | `activity/AD-3/` |
+| AD-4 | Reserve a charging connector (Should) | `activity/AD-4/` |
+| AD-5 | Get station suggestion | `activity/AD-5/` |
+| AD-6 | Session started at the Charge Point (RFID, password, free vend) | `activity/AD-6/` |
+| AD-7 | Charge Point fault: report, alert, remote reset | `activity/AD-7/` |
+| AD-8 | Onboard a Charge Point and first connection | `activity/AD-8/` |
+| AD-9 | Handle billing exceptions: refunds and e-invoice retry | `activity/AD-9/` |
+| CERD | Conceptual ERD (v1.1, incl. Refund R8) | `erd-conceptual/` |
+
+> AD numbers changed in the redraw: old AD-2 (pillar offline) is now **AD-3**, old AD-3 (top-up) is now **AD-2**; AD-9 is new.
+
+## Report 4 — `report4/`
+
+| Figure | Diagram | Folder |
+|---|---|---|
+| ARCH-1 | Component / container view of the PowerMe Platform | `architecture/ARCH-1/` |
+| ARCH-2 | System architecture (deployment, AWS-style) | `architecture/ARCH-2/` |
+| PKG-1 | Package diagram — CSMS back end (`apps/csms`) | `package/PKG-1/` |
+| PKG-2 | Package diagram — Operator Dashboard and Admin Console (`apps/dashboard`) | `package/PKG-2/` |
+| PKG-3 | Package diagram — Driver App (`apps/mobile`) | `package/PKG-3/` |
+| CD-1 | Class — WF-01 find a station and charge (Driver App) | `class/CD-1/` |
+| CD-2 | Class — WF-02 top-up, payment, e-invoice, refunds | `class/CD-2/` |
+| CD-3 | Class — WF-03 lost connection, replay, reconciliation | `class/CD-3/` |
+| CD-4 | Class — WF-04 Charge Point fault, alert, remote reset | `class/CD-4/` |
+| CD-5 | Class — WF-05 register, onboard, connect a Charge Point | `class/CD-5/` |
+| SD-1a / 1b | WF-01: find a station and charge; app-started session stops and is settled | `sequence/SD-1a/`, `SD-1b/` |
+| SD-2a … 2f | WF-02: create top-up; payment notification; e-invoice; timeout and late payment; admin refund; account closure | `sequence/SD-2a/` … `SD-2f/` |
+| SD-3a / 3b | WF-03: lost connection and reconcile; replayed StartTransaction recorded once | `sequence/SD-3a/`, `SD-3b/` |
+| SD-4a / 4b | WF-04: fault, acknowledge, remote reset; driver report, reset fails, on-site fix | `sequence/SD-4a/`, `SD-4b/` |
+| SD-5a / 5b | WF-05: register and onboard; first connection | `sequence/SD-5a/`, `SD-5b/` |
+| SD-6 | Session started at the Charge Point with an RFID card | `sequence/SD-6/` |
+| STM-1 … 10 | ChargingSession, Connector, Charge Point, TopUp, CreditAccount, FaultEvent, EInvoice, RfidCard, Reservation (Should), Refund | `state/STM-1/` … `STM-10/` |
+| LERD | Logical ERD v1.1 (one diagram) | `erd-logical/` |
+| PERD | Physical ERD v1.1 (real table names, one page) + DBML | `erd-physical/` |
+
+## Owners
+
+WP1 (Ân) redrew every diagram in one style; content owners confirm their own: WF-01 / PKG-3 Sơn, WF-02 / STM-4, 5, 7, 10 Khang, WF-03 / PKG-1 Trí, WF-04 / PKG-2 Nghĩa, WF-05 Ân. Edit the source in this folder (not only the PNG) and re-render in the same PR.
+
+## Known differences between the diagrams and the code (carried over)
+
+> Carried over unchanged from the pre-redraw README (checked against `main` up to migration `0003`). Diagram names in this table are the **old** ones: LERD-1/2 are now the single Logical ERD, WF-0x class/sequence are now CD-x / SD-xx, "pillar" is now "Charge Point". Re-check each row against the redrawn set and close or update it.
 
 Checked against `main` after migration `0001_quyet-dinh-be-11.sql` (PR #36, 25/10/2026). Rows 1–7 were first found at tag `review-2`.
 

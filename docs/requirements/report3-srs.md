@@ -1,6 +1,6 @@
 # Report 3 — Software Requirement Specification (SRS)
 
-> Markdown copy of `Report3_Software Requirement Specification - PowerMe.docx` (24/10/2026, includes UC-ADM-08). Master file: team Google Drive (Main Doc). Figures are not embedded: their PlantUML sources are in `diagrams/report3/` (Fig 1–12) and `diagrams/ad/` (activity diagrams).
+> Markdown copy of `Report3_Software Requirement Specification - PowerMe.docx` (24/10/2026, includes UC-ADM-08). Master file: team Google Drive (Main Doc). Figures are not embedded: their sources and PNG renders are in `diagrams/report3/` (BCD, use case, screen flow, activity, conceptual ERD) — see `diagrams/README.md`.
 
 *[figure — see `diagrams/`]*
 

@@ -1,0 +1,1216 @@
+// PowerMe — Physical ERD (PostgreSQL 16), 01/11/2026 (v1.1: + refunds, R8).
+// Generated from the database built with migrations 0000-0012 (gen_dbml.py). Paste into dbdiagram.io.
+// After `dbml2sql powerme_physical.dbml --postgres`, run powerme_physical_supplement.sql
+// (sequences, partitions, partial / expression indexes, triggers, report views: not expressible in DBML).
+
+Project powerme {
+  database_type: 'PostgreSQL'
+  Note: 'Physical ERD of the PowerMe EV-charging platform: 34 business tables (Logical ERD v1.1) + 10 technical tables.'
+}
+
+// ---------- Enums (values from the State Diagrams) ----------
+Enum billing_mode {
+  "full"
+  "timed"
+  "energy_kwh"
+  "amount_vnd"
+}
+Enum charge_point_lifecycle {
+  "registered"
+  "awaiting_connection"
+  "in_service"
+  "offline"
+  "disabled"
+  "decommissioned"
+}
+Enum connector_status {
+  "Available"
+  "Preparing"
+  "Charging"
+  "SuspendedEVSE"
+  "SuspendedEV"
+  "Finishing"
+  "Reserved"
+  "Unavailable"
+  "Faulted"
+}
+Enum connector_type {
+  "ccs2"
+  "chademo"
+  "gbt"
+  "type2"
+}
+Enum credit_account_status {
+  "active"
+  "in_shortfall"
+  "closed"
+}
+Enum credit_transaction_type {
+  "top_up"
+  "session_debit"
+  "refund"
+  "adjustment"
+  "reservation_fee"
+}
+Enum discount_type {
+  "percent"
+  "fixed_vnd"
+}
+Enum e_invoice_error_kind {
+  "transient"
+  "data"
+}
+Enum e_invoice_status {
+  "requested"
+  "issued"
+  "failed"
+  "needs_review"
+}
+Enum fault_event_status {
+  "raised"
+  "acknowledged"
+  "resetting"
+  "resolved"
+}
+Enum fault_source {
+  "ocpp"
+  "driver_report"
+  "operator"
+}
+Enum loyalty_transaction_type {
+  "earn"
+  "redeem"
+  "expire"
+  "adjust"
+  "restore"
+}
+Enum maintenance_ticket_status {
+  "open"
+  "in_progress"
+  "closed"
+}
+Enum ocpp_direction {
+  "in"
+  "out"
+}
+Enum operator_status {
+  "active"
+  "suspended"
+  "closed"
+}
+Enum pause_cause {
+  "ev"
+  "evse"
+}
+Enum payment_mode {
+  "csms_billed"
+  "station_wallet"
+  "free"
+  "unattributed"
+}
+Enum reconciliation_record_type {
+  "replay"
+  "duplicate"
+  "meter_gap"
+  "orphan_stop"
+  "unknown_id_tag"
+  "conflict"
+  "late_sample"
+}
+Enum refund_error_kind {
+  "transient"
+  "unknown"
+  "rejected"
+}
+Enum refund_kind {
+  "top_up"
+  "late_payment"
+  "account_closure"
+}
+Enum refund_status {
+  "requested"
+  "done"
+  "failed"
+}
+Enum remote_command_status {
+  "pending"
+  "sent"
+  "accepted"
+  "rejected"
+  "timeout"
+  "failed"
+}
+Enum reservation_hold_mode {
+  "reserve_now"
+  "csms_only"
+}
+Enum reservation_status {
+  "active"
+  "fulfilled"
+  "cancelled_free"
+  "cancelled_late"
+  "expired_no_show"
+  "voided"
+}
+Enum rfid_card_kind {
+  "online"
+  "wallet"
+  "free_vend"
+}
+Enum rfid_card_status {
+  "unlinked"
+  "active"
+  "blocked"
+}
+Enum session_origin {
+  "app_qr"
+  "rfid"
+  "hmi_password"
+  "free_vend"
+}
+Enum session_status {
+  "pending"
+  "active"
+  "paused"
+  "stopping"
+  "closed"
+  "review"
+  "reconciled"
+  "orphaned"
+  "failed"
+}
+Enum staff_role {
+  "manager"
+  "technician"
+}
+Enum tariff_band {
+  "off_peak"
+  "normal"
+  "peak"
+}
+Enum top_up_status {
+  "pending"
+  "credited"
+  "failed"
+  "expired"
+  "refunded"
+}
+Enum user_account_status {
+  "active"
+  "suspended"
+  "closed"
+}
+Enum user_role {
+  "driver"
+  "operator_staff"
+  "admin"
+}
+
+// ---------- people ----------
+Table users {
+  id bigint [pk, increment]
+  email "varchar(254)" [not null, unique]
+  full_name text [not null]
+  phone_number "varchar(16)"
+  role user_role [not null, note: 'ISA discriminator: driver / operator_staff / admin (BR-P16)']
+  account_status user_account_status [not null, default: 'active']
+  password_hash text
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+  indexes {
+    phone_number [name: 'users_phone_number_idx']
+  }
+  Note: 'Every person who signs in. `role` is the ISA discriminator (driver / operator_staff / admin).'
+}
+
+Table admins {
+  user_id bigint [pk]
+  Note: 'ISA subtype: platform administrator (PowerMe). PK = FK to users.'
+}
+
+Table operator_staff {
+  user_id bigint [pk]
+  operator_id bigint [not null, note: 'staff of exactly one operator (BR-P16)']
+  staff_role staff_role [not null]
+  indexes {
+    operator_id [name: 'operator_staff_operator_id_idx']
+  }
+  Note: 'ISA subtype: staff of one operator (Station Owner); manager or technician.'
+}
+
+Table drivers {
+  user_id bigint [pk]
+  consent_version "varchar(20)" [not null]
+  consent_given_at timestamptz [not null]
+  Note: 'ISA subtype: EV driver; keeps the privacy-consent version accepted at sign-up.'
+}
+
+Table vehicles {
+  id bigint [pk, increment]
+  plate_number "varchar(12)" [not null, unique]
+  driver_id bigint [not null]
+  vehicle_model_id bigint [not null]
+  is_default boolean [not null, default: false]
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+  indexes {
+    driver_id [name: 'vehicles_driver_id_idx']
+    vehicle_model_id [name: 'vehicles_vehicle_model_id_idx']
+  }
+  Note: 'Driver\'s vehicle (plate); one default per driver. Partial / expression indexes: vehicles_one_default_per_driver (supplement).'
+}
+
+Table vehicle_models {
+  id bigint [pk, increment]
+  brand text [not null]
+  model_name text [not null]
+  connector_type connector_type [not null, default: 'ccs2']
+  battery_capacity_kwh "numeric(6,2)"
+  rated_range_km integer
+  max_dc_kw "numeric(6,2)"
+  is_vinfast boolean [not null, default: false]
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+  indexes {
+    (brand, model_name) [unique, name: 'vehicle_models_brand_model_name_key']
+  }
+  Note: 'Catalogue of EV models (connector type, battery, range).'
+}
+
+Table rfid_cards {
+  id bigint [pk, increment]
+  card_identifier "varchar(20)" [not null, unique]
+  card_kind rfid_card_kind [not null, note: 'online / wallet / free vend (BR-P15)']
+  driver_id bigint
+  status rfid_card_status [not null, default: 'unlinked']
+  issued_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+  indexes {
+    driver_id [name: 'rfid_cards_driver_id_idx']
+  }
+  Note: 'RFID card: online (CSMS bills) / wallet (pays on the charge point) / free vend.'
+}
+
+// ---------- network ----------
+Table operators {
+  id bigint [pk, increment]
+  tax_code "varchar(14)" [not null, unique]
+  legal_name text [not null]
+  address text
+  status operator_status [not null, default: 'active']
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+  Note: 'Charging business (Station Owner) that owns sites and sets tariffs and promotions.'
+}
+
+Table sites {
+  id bigint [pk, increment]
+  site_code "varchar(20)" [not null, unique]
+  operator_id bigint [not null, note: 'BR-P11']
+  site_name text [not null]
+  address text
+  latitude "numeric(9,6)"
+  longitude "numeric(9,6)"
+  vinfast_only boolean [not null, default: false]
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+  indexes {
+    operator_id [name: 'sites_operator_id_idx']
+  }
+  Note: 'Charging station (location) owned by one operator; shown on the driver map.'
+}
+
+Table charge_points {
+  id bigint [pk, increment]
+  serial_number "varchar(25)" [not null, unique, note: 'OCPP chargePointSerialNumber']
+  display_code "varchar(100)" [unique]
+  site_id bigint [note: 'NULL until onboarded to a site (WF-05)']
+  model "varchar(20)"
+  firmware_version "varchar(50)"
+  rated_power_kw "numeric(7,2)"
+  warranty_until date
+  lifecycle charge_point_lifecycle [not null, default: 'registered', note: 'State Diagram: charge point lifecycle']
+  free_vend_tag "varchar(20)"
+  reports_soc boolean [not null, default: false]
+  supports_reservation boolean [not null, default: false]
+  current_epoch integer [not null, default: 0]
+  basic_auth_password_hash text
+  last_message_at timestamptz
+  is_online boolean [not null, default: false]
+  online_changed_at timestamptz
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+  indexes {
+    site_id [name: 'charge_points_site_id_idx']
+  }
+  Note: 'OCPP charge point (device). Site is empty until onboarding (WF-05). Lifecycle + connection state.'
+}
+
+Table connectors {
+  id bigint [pk, increment]
+  charge_point_id bigint [not null]
+  connector_no smallint [not null, note: '1 = gun A, 2 = gun B (BR-P10)']
+  connector_type connector_type [not null, default: 'ccs2']
+  max_power_kw "numeric(7,2)"
+  status connector_status [not null, default: 'Unavailable', note: 'OCPP StatusNotification status']
+  status_changed_at timestamptz
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+  indexes {
+    (charge_point_id, connector_no) [unique, name: 'connectors_charge_point_id_connector_no_key']
+    (id, charge_point_id, connector_no) [unique, name: 'connectors_id_charge_point_id_connector_no_key']
+  }
+  checks {
+    `(connector_no = ANY (ARRAY[1, 2]))` [name: 'connectors_connector_no_check']
+  }
+  Note: 'Gun of a charge point (connector_no 1 or 2). Live OCPP status.'
+}
+
+Table connector_status_events {
+  id bigint [pk, increment]
+  charge_point_id bigint [not null]
+  connector_no smallint [not null, note: '0 = whole charge point (BR-P10)']
+  status connector_status [not null]
+  error_code "varchar(30)" [not null, default: 'NoError']
+  vendor_error_code "varchar(50)"
+  info "varchar(50)"
+  cp_timestamp timestamptz
+  received_at timestamptz [not null, default: `now()`]
+  unexpected_transition boolean [not null, default: false]
+  indexes {
+    (charge_point_id, connector_no, received_at) [unique, name: 'connector_status_events_cp_no_received_key']
+  }
+  checks {
+    `(connector_no = ANY (ARRAY[0, 1, 2]))` [name: 'connector_status_events_connector_no_check']
+  }
+  Note: 'Every StatusNotification received (connector_no 0 = whole charge point). Append-only history.'
+}
+
+Table remote_commands {
+  id bigint [pk, increment]
+  charge_point_id bigint [not null]
+  connector_no smallint
+  action "varchar(40)" [not null]
+  payload jsonb
+  status remote_command_status [not null, default: 'pending']
+  requested_by bigint [note: 'operator staff who sent it; NULL = system or driver app (see intents)']
+  idempotency_key "varchar(64)"
+  requested_at timestamptz [not null, default: `now()`]
+  sent_at timestamptz
+  responded_at timestamptz
+  response jsonb
+  error text
+  updated_at timestamptz [not null, default: `now()`]
+  indexes {
+    requested_by [name: 'remote_commands_requested_by_idx']
+  }
+  checks {
+    `((connector_no IS NULL) OR (connector_no = ANY (ARRAY[0, 1, 2])))` [name: 'remote_commands_connector_no_check']
+    `((responded_at IS NULL) OR ((sent_at IS NOT NULL) AND (responded_at >= sent_at)))` [name: 'remote_commands_responded_check']
+    `((sent_at IS NULL) OR (sent_at >= requested_at))` [name: 'remote_commands_sent_check']
+  }
+  Note: 'Command sent from CSMS to a charge point (RemoteStart/Stop, Reset, ChangeAvailability, ReserveNow…). Partial / expression indexes: remote_commands_cp_requested_at_idx; remote_commands_idempotency_key_key; remote_commands_in_flight_idx (supplement).'
+}
+
+Table fault_events {
+  id bigint [pk, increment]
+  event_no bigint [not null, unique, note: 'auto number (sequence, see supplement)']
+  charge_point_id bigint [not null]
+  connector_id bigint [note: 'NULL = fault of the whole charge point']
+  source fault_source [not null]
+  error_code "varchar(50)"
+  status fault_event_status [not null, default: 'raised', note: 'State Diagram: fault event']
+  raised_at timestamptz [not null, default: `now()`]
+  acknowledged_by bigint
+  acknowledged_at timestamptz
+  resolved_at timestamptz
+  reset_command_id bigint
+  updated_at timestamptz [not null, default: `now()`]
+  indexes {
+    acknowledged_by [name: 'fault_events_acknowledged_by_idx']
+    (charge_point_id, raised_at) [name: 'fault_events_charge_point_id_raised_at_idx']
+    connector_id [name: 'fault_events_connector_id_idx']
+    reset_command_id [name: 'fault_events_reset_command_id_idx']
+  }
+  Note: 'Fault raised by a charge point (OCPP), a driver report or an operator; tracked to resolution (STM). Partial / expression indexes: fault_events_one_open_per_connector_key; fault_events_open_idx (supplement).'
+}
+
+Table fault_reports {
+  id bigint [pk, increment]
+  report_no bigint [not null, unique, note: 'auto number (sequence, see supplement)']
+  driver_id bigint [not null]
+  connector_id bigint [not null]
+  description text [not null]
+  reported_at timestamptz [not null, default: `now()`]
+  fault_event_id bigint [note: 'the fault event this report is grouped into']
+  cleared_at timestamptz
+  cleared_by bigint
+  updated_at timestamptz [not null, default: `now()`]
+  indexes {
+    cleared_by [name: 'fault_reports_cleared_by_idx']
+    connector_id [name: 'fault_reports_connector_id_idx']
+    driver_id [name: 'fault_reports_driver_id_idx']
+    fault_event_id [name: 'fault_reports_fault_event_id_idx']
+  }
+  Note: 'Driver report about one connector; grouped into a fault event and cleared by staff.'
+}
+
+Table maintenance_tickets {
+  id bigint [pk, increment]
+  ticket_no bigint [not null, unique, note: 'auto number (sequence, see supplement)']
+  fault_event_id bigint [not null]
+  assigned_to bigint
+  status maintenance_ticket_status [not null, default: 'open']
+  opened_at timestamptz [not null, default: `now()`]
+  closed_at timestamptz
+  updated_at timestamptz [not null, default: `now()`]
+  indexes {
+    assigned_to [name: 'maintenance_tickets_assigned_to_idx']
+    fault_event_id [name: 'maintenance_tickets_fault_event_id_idx']
+  }
+  checks {
+    `((status = 'closed') = (closed_at IS NOT NULL))` [name: 'maintenance_tickets_closed_check']
+  }
+  Note: '[Should] Repair work opened from a fault event, assigned to a technician.'
+}
+
+// ---------- pricing ----------
+Table tariff_periods {
+  id bigint [pk, increment]
+  operator_id bigint [not null]
+  band tariff_band [not null]
+  time_start time [not null]
+  time_end time [not null]
+  price_per_kwh_vnd bigint [not null, note: 'VND per kWh']
+  effective_from date [not null]
+  effective_to date
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+  indexes {
+    (operator_id, band, time_start, time_end, effective_from) [unique, name: 'tariff_periods_operator_band_range_key']
+  }
+  checks {
+    `((effective_to IS NULL) OR (effective_to >= effective_from))` [name: 'tariff_periods_effective_check']
+    `(price_per_kwh_vnd >= 0)` [name: 'tariff_periods_price_check']
+  }
+  Note: 'Operator price per kWh for a time band (off-peak / normal / peak) and validity period.'
+}
+
+Table promotions {
+  id bigint [pk, increment]
+  promotion_code "varchar(20)" [not null, unique]
+  operator_id bigint [not null]
+  discount_type discount_type [not null]
+  discount_value bigint [not null, note: 'percent 0-100 or VND']
+  valid_from timestamptz [not null]
+  valid_to timestamptz [not null]
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+  indexes {
+    operator_id [name: 'promotions_operator_id_idx']
+  }
+  checks {
+    `((discount_value >= 0) AND ((discount_type <> 'percent') OR (discount_value <= 100)))` [name: 'promotions_discount_value_check']
+    `(valid_to > valid_from)` [name: 'promotions_valid_check']
+  }
+  Note: 'Operator discount code (percent or fixed VND) valid for a time window.'
+}
+
+Table policy_templates {
+  id bigint [pk, increment]
+  template_code "varchar(30)" [not null, unique]
+  created_by bigint [not null]
+  template_type "varchar(30)" [not null]
+  content text [not null]
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+  indexes {
+    created_by [name: 'policy_templates_created_by_idx']
+  }
+  Note: '[Should] Reusable tariff / loyalty template maintained by the Admin (copied, not referenced).'
+}
+
+// ---------- charging ----------
+Table reservations {
+  id bigint [pk, increment]
+  reservation_no integer [not null, unique, note: 'auto number (sequence, see supplement)']
+  driver_id bigint [not null]
+  connector_id bigint [not null]
+  status reservation_status [not null, default: 'active', note: 'State Diagram: reservation; one active per driver and per connector (BR-P24)']
+  hold_mode reservation_hold_mode [not null]
+  expires_at timestamptz [not null, note: 'end of the hold window (BR-P25)']
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+  checks {
+    `(expires_at > created_at)` [name: 'reservations_expires_check']
+  }
+  Note: '[Should] Connector hold by a driver for the hold window; fee on no-show / late cancel. Partial / expression indexes: reservations_one_active_per_connector; reservations_one_active_per_driver (supplement).'
+}
+
+Table sessions {
+  id bigint [pk, increment]
+  transaction_no integer [not null, unique, note: 'auto number (sequence, see supplement)']
+  connector_id bigint [not null]
+  charge_point_id bigint [not null, note: 'copy for the OCPP key; kept consistent by the composite FK to connectors']
+  connector_no smallint [not null]
+  id_tag "varchar(20)" [not null]
+  driver_id bigint
+  vehicle_id bigint [note: 'vehicle chosen in the app (BR-P17)']
+  rfid_card_id bigint
+  promotion_id bigint
+  origin session_origin [not null]
+  payment_mode payment_mode [not null]
+  billing_mode billing_mode [not null, default: 'full']
+  limit_value bigint
+  status session_status [not null, default: 'pending', note: 'State Diagram STM-1: charging session']
+  cp_started_at timestamptz [not null]
+  received_started_at timestamptz [not null, default: `now()`]
+  cp_stopped_at timestamptz
+  received_stopped_at timestamptz
+  meter_start_wh bigint [not null]
+  meter_stop_wh bigint
+  stop_reason "varchar(20)"
+  delivered_offline boolean [not null, default: false]
+  energy_wh bigint [note: 'snapshot at close (decision D6)']
+  total_cost_vnd bigint [note: 'snapshot at close (decision D6)']
+  orphaned_at timestamptz
+  reservation_id bigint [unique, note: 'fulfilled reservation, at most one session (BR-P29)']
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+  indexes {
+    (charge_point_id, connector_no, id_tag, meter_start_wh, cp_started_at) [unique, name: 'sessions_start_tx_natural_key']
+    (connector_id, received_started_at) [name: 'sessions_connector_id_received_started_at_idx']
+    driver_id [name: 'sessions_driver_id_idx']
+    promotion_id [name: 'sessions_promotion_id_idx']
+    rfid_card_id [name: 'sessions_rfid_card_id_idx']
+    status [name: 'sessions_status_idx']
+    vehicle_id [name: 'sessions_vehicle_id_idx']
+  }
+  checks {
+    `((limit_value IS NULL) OR (limit_value > 0))` [name: 'sessions_limit_value_check']
+    `((meter_stop_wh IS NULL) OR (meter_stop_wh >= meter_start_wh))` [name: 'sessions_meter_check']
+  }
+  Note: 'Charging session (OCPP transaction). Central table: who, where, how paid, meter, status (STM-1).'
+}
+
+Table session_pauses {
+  id bigint [pk, increment]
+  session_id bigint [not null]
+  paused_at timestamptz [not null]
+  resumed_at timestamptz
+  pause_cause pause_cause [not null]
+  updated_at timestamptz [not null, default: `now()`]
+  indexes {
+    (session_id, paused_at) [unique, name: 'session_pauses_session_id_paused_at_key']
+  }
+  checks {
+    `((resumed_at IS NULL) OR (resumed_at >= paused_at))` [name: 'session_pauses_resumed_check']
+  }
+  Note: 'Pause interval in a session (SuspendedEV / SuspendedEVSE).'
+}
+
+Table session_status_history {
+  id bigint [pk, increment]
+  session_id bigint [not null]
+  from_status session_status
+  to_status session_status [not null]
+  event "varchar(50)" [not null]
+  actor "varchar(50)" [not null, default: 'system']
+  note text
+  occurred_at timestamptz [not null, default: `now()`]
+  indexes {
+    (session_id, occurred_at) [name: 'session_status_history_session_id_occurred_at_idx']
+  }
+  Note: 'Every status transition of a session (audit trail; append-only by trigger).'
+}
+
+Table meter_values {
+  id bigint [increment]
+  received_at timestamptz [default: `now()`]
+  session_id bigint [not null]
+  cp_timestamp timestamptz [not null]
+  measurand "varchar(40)" [not null]
+  value "numeric(14,3)" [not null]
+  unit "varchar(20)"
+  context "varchar(20)"
+  phase "varchar(10)"
+  replayed boolean [not null, default: false, note: 'sample re-sent after a reconnect']
+  epoch integer
+  indexes {
+    (id, received_at) [pk]
+    (session_id, cp_timestamp, measurand) [name: 'meter_values_session_id_cp_timestamp_idx']
+  }
+  Note: 'MeterValues samples of a session. Partitioned by month on received_at. Partitioned by RANGE (received_at), one partition per month (supplement).'
+}
+
+Table session_tariff_segments {
+  session_id bigint
+  tariff_period_id bigint
+  segment_start timestamptz
+  segment_end timestamptz [not null]
+  energy_wh bigint [not null]
+  amount_vnd bigint [not null]
+  exact_amount_milli_vnd "numeric(40,0)"
+  created_at timestamptz [not null, default: `now()`]
+  indexes {
+    (session_id, tariff_period_id, segment_start) [pk]
+    tariff_period_id [name: 'session_tariff_segments_tariff_period_id_idx']
+  }
+  checks {
+    `((energy_wh >= 0) AND (amount_vnd >= 0))` [name: 'session_tariff_segments_nonneg_check']
+    `(segment_end >= segment_start)` [name: 'session_tariff_segments_range_check']
+  }
+  Note: 'Energy and amount of a session per tariff period (association table; e-invoice lines).'
+}
+
+Table reconciliation_records {
+  id bigint [pk, increment]
+  session_id bigint [not null]
+  record_no smallint [not null]
+  record_type reconciliation_record_type [not null]
+  gap_start timestamptz
+  gap_end timestamptz
+  energy_difference_wh bigint
+  reviewed_by bigint
+  reviewed_at timestamptz
+  resolution text
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+  indexes {
+    (session_id, record_no) [unique, name: 'reconciliation_records_session_id_record_no_key']
+    reviewed_by [name: 'reconciliation_records_reviewed_by_idx']
+  }
+  checks {
+    `(record_no >= 1)` [name: 'reconciliation_records_record_no_check']
+    `((reviewed_by IS NULL) = (reviewed_at IS NULL))` [name: 'reconciliation_records_reviewed_check']
+  }
+  Note: 'Data problem found on a session (replay, gap, orphan stop…) and its review. Partial / expression indexes: reconciliation_records_unreviewed_idx (supplement).'
+}
+
+// ---------- billing ----------
+Table credit_accounts {
+  id bigint [pk, increment]
+  driver_id bigint [not null, unique]
+  status credit_account_status [not null, default: 'active']
+  balance_vnd bigint [not null, default: 0, note: 'snapshot of the ledger (decision D6)']
+  closed_at timestamptz
+  closure_refunded_at timestamptz [note: 'snapshot: last completed_at of the account_closure refunds (D6)']
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+  checks {
+    `((status = 'closed') = (closed_at IS NOT NULL))` [name: 'credit_accounts_closed_check']
+    `((closure_refunded_at IS NULL) OR ((closed_at IS NOT NULL) AND (closure_refunded_at >= closed_at)))` [name: 'credit_accounts_closure_refunded_check']
+  }
+  Note: 'Driver\'s prepaid Charging Credit account (1 per driver). balance_vnd is a snapshot of the ledger.'
+}
+
+Table credit_transactions {
+  id bigint [pk, increment]
+  credit_account_id bigint [not null]
+  entry_no bigint [not null]
+  transaction_type credit_transaction_type [not null]
+  amount_vnd bigint [not null, note: 'signed: debits and fees are negative']
+  balance_after_vnd bigint [not null]
+  session_id bigint [note: 'one session_debit per session (BR-P13)']
+  top_up_id bigint
+  reservation_id bigint [unique, note: 'no-show / late-cancel fee (BR-P26, BR-P27)']
+  created_at timestamptz [not null, default: `now()`]
+  indexes {
+    (credit_account_id, entry_no) [unique, name: 'credit_transactions_account_entry_no_key']
+  }
+  checks {
+    `((transaction_type = 'reservation_fee') = (reservation_id IS NOT NULL))` [name: 'credit_transactions_reservation_fee_check']
+    `((transaction_type <> 'session_debit') OR (session_id IS NOT NULL))` [name: 'credit_transactions_session_debit_check']
+    `((transaction_type <> 'top_up') OR (top_up_id IS NOT NULL))` [name: 'credit_transactions_top_up_check']
+  }
+  Note: 'Ledger entry of a credit account (top-up, session debit, refund, adjustment, reservation fee). Partial / expression indexes: credit_transactions_one_debit_per_session; credit_transactions_one_per_top_up_and_type (supplement).'
+}
+
+Table top_ups {
+  id bigint [pk, increment]
+  gateway_reference "varchar(100)" [not null, unique]
+  credit_account_id bigint [not null]
+  amount_vnd bigint [not null]
+  points_discount_vnd bigint [not null, default: 0]
+  amount_paid_vnd bigint [not null, note: '= amount_vnd - points_discount_vnd (CHECK)']
+  status top_up_status [not null, default: 'pending']
+  idempotency_key "varchar(64)" [not null, unique]
+  completed_at timestamptz
+  gateway_transaction_no "varchar(20)"
+  points_redeemed integer [not null, default: 0, note: 'BR-P35']
+  expires_at timestamptz [not null]
+  refunded_at timestamptz
+  late_gateway_ref "varchar(100)" [unique]
+  late_paid_at timestamptz
+  late_amount_vnd bigint
+  late_refunded_at timestamptz [note: 'snapshot: completed_at of the late_payment refund (D6)']
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+  indexes {
+    credit_account_id [name: 'top_ups_credit_account_id_idx']
+  }
+  checks {
+    `((amount_vnd > 0) AND (points_discount_vnd >= 0) AND (amount_paid_vnd = (amount_vnd - points_discount_vnd)))` [name: 'top_ups_amount_check']
+    `(expires_at > created_at)` [name: 'top_ups_expires_at_check']
+    `(((late_gateway_ref IS NULL) AND (late_paid_at IS NULL) AND (late_amount_vnd IS NULL)) OR ((late_gateway_ref IS NOT NULL) AND (late_paid_at IS NOT NULL) AND (late_amount_vnd IS NOT NULL) AND (late_amount_vnd >= 0)))` [name: 'top_ups_late_payment_check']
+    `((late_gateway_ref IS NULL) OR (status = 'expired'))` [name: 'top_ups_late_payment_status_check']
+    `((late_refunded_at IS NULL) OR ((late_paid_at IS NOT NULL) AND (late_refunded_at >= late_paid_at)))` [name: 'top_ups_late_refunded_check']
+    `((points_redeemed = 0) = (points_discount_vnd = 0))` [name: 'top_ups_points_check']
+    `(points_redeemed >= 0)` [name: 'top_ups_points_redeemed_check']
+    `((status = 'refunded') = (refunded_at IS NOT NULL))` [name: 'top_ups_refunded_check']
+  }
+  Note: 'Payment of credit through the gateway; late payment and refund fields. Partial / expression indexes: top_ups_gateway_transaction_no_key (supplement).'
+}
+
+Table e_invoices {
+  id bigint [pk, increment]
+  invoice_no "varchar(20)" [unique, note: 'set when issued; issued invoices are never edited (BR-P14)']
+  top_up_id bigint [not null, unique]
+  status e_invoice_status [not null, default: 'requested']
+  amount_vnd bigint [not null]
+  vat_amount_vnd bigint [not null]
+  issued_at timestamptz
+  attempt_count integer [not null, default: 0]
+  last_error_kind e_invoice_error_kind
+  last_error_message text
+  last_attempt_at timestamptz
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+  checks {
+    `((status <> 'issued') OR ((invoice_no IS NOT NULL) AND (issued_at IS NOT NULL)))` [name: 'e_invoices_issued_check']
+    `((last_error_kind IS NULL) OR (last_attempt_at IS NOT NULL))` [name: 'e_invoices_last_error_check']
+  }
+  Note: 'E-invoice for a top-up, with provider retry state.'
+}
+
+Table invoice_adjustments {
+  id bigint [pk, increment]
+  e_invoice_id bigint [not null]
+  adjustment_no smallint [not null]
+  reason text [not null]
+  amount_vnd bigint [not null]
+  issued_at timestamptz
+  refund_id bigint [not null, unique, note: 'issued only after this refund is done (BR-P45)']
+  provider_adjustment_no "varchar(20)" [unique]
+  status e_invoice_status [not null, default: 'requested', note: 'same provider flow as e_invoices (BR-P44)']
+  attempt_count integer [not null, default: 0]
+  last_error_kind e_invoice_error_kind
+  last_error_message text
+  last_attempt_at timestamptz
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+  indexes {
+    (e_invoice_id, adjustment_no) [unique, name: 'invoice_adjustments_invoice_adjustment_no_key']
+  }
+  checks {
+    `(adjustment_no >= 1)` [name: 'invoice_adjustments_adjustment_no_check']
+    `(attempt_count >= 0)` [name: 'invoice_adjustments_attempt_count_check']
+    `((status <> 'issued') OR ((provider_adjustment_no IS NOT NULL) AND (issued_at IS NOT NULL)))` [name: 'invoice_adjustments_issued_check']
+    `((last_error_kind IS NULL) OR (last_attempt_at IS NOT NULL))` [name: 'invoice_adjustments_last_error_check']
+  }
+  Note: 'Adjustment invoice correcting an issued e-invoice (issued invoices are never edited).'
+}
+
+Table refunds {
+  id bigint [pk, increment]
+  top_up_id bigint [not null]
+  kind refund_kind [not null, note: 'top-up refund / late payment / account closure; one of each per top-up (BR-P21, BR-P44)']
+  amount_vnd bigint [not null]
+  status refund_status [not null, default: 'requested', note: 'requested -> done | failed; never sent twice, gateway queried first on an unknown result (BR-P45)']
+  attempt_count integer [not null, default: 0]
+  last_error_kind refund_error_kind
+  last_error_message text
+  last_attempt_at timestamptz
+  gateway_refund_no "varchar(20)" [unique]
+  requested_by bigint [note: 'Admin who refunded; NULL = created by the system at account closure']
+  completed_at timestamptz [note: 'gateway confirmed (set together with status done)']
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+  indexes {
+    (top_up_id, kind) [unique, name: 'refunds_top_up_kind_key']
+    requested_by [name: 'refunds_requested_by_idx']
+  }
+  checks {
+    `(amount_vnd > 0)` [name: 'refunds_amount_check']
+    `(attempt_count >= 0)` [name: 'refunds_attempt_count_check']
+    `((completed_at IS NULL) OR (completed_at >= created_at))` [name: 'refunds_completed_check']
+    `((status = 'done') = (completed_at IS NOT NULL))` [name: 'refunds_done_check']
+    `((status <> 'done') OR (gateway_refund_no IS NOT NULL))` [name: 'refunds_done_no_check']
+    `((last_error_kind IS NULL) OR (last_attempt_at IS NOT NULL))` [name: 'refunds_last_error_check']
+  }
+  Note: 'Refund request (R8): money sent back to the payment source of a top-up by a background job; requested -> done / failed (BR-P45). Partial / expression indexes: refunds_open_idx (supplement).'
+}
+
+Table loyalty_accounts {
+  id bigint [pk, increment]
+  driver_id bigint [not null, unique]
+  points_balance bigint [not null, default: 0]
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+  Note: 'Driver\'s loyalty points account (1 per driver). points_balance is a snapshot of the ledger.'
+}
+
+Table loyalty_transactions {
+  id bigint [pk, increment]
+  loyalty_account_id bigint [not null]
+  entry_no bigint [not null]
+  transaction_type loyalty_transaction_type [not null]
+  points bigint [not null]
+  expires_at timestamptz [note: '12 months after earning (BR-P36)']
+  session_id bigint [note: 'one earn per session (BR-P34)']
+  top_up_id bigint
+  created_at timestamptz [not null, default: `now()`]
+  indexes {
+    (loyalty_account_id, entry_no) [unique, name: 'loyalty_transactions_account_entry_no_key']
+    session_id [name: 'loyalty_transactions_session_id_idx']
+    top_up_id [name: 'loyalty_transactions_top_up_id_idx']
+  }
+  Note: 'Ledger entry of loyalty points (earn, redeem, expire, adjust, restore). Partial / expression indexes: loyalty_transactions_one_earn_per_session (supplement).'
+}
+
+// ---------- technical ----------
+Table charge_point_connections {
+  id bigint [pk, increment]
+  charge_point_id bigint [not null]
+  epoch integer [not null]
+  opened_at timestamptz [not null, default: `now()`]
+  closed_at timestamptz
+  close_reason text
+  remote_address "varchar(64)"
+  indexes {
+    (charge_point_id, epoch) [unique, name: 'charge_point_connections_charge_point_id_epoch_key']
+    (charge_point_id, opened_at) [name: 'charge_point_connections_opened_at_idx']
+  }
+  Note: 'Technical: one row per WebSocket connection of a charge point (epoch fencing).'
+}
+
+Table ocpp_message_log {
+  id bigint [increment]
+  received_at timestamptz [default: `now()`]
+  charge_point_id bigint [not null]
+  epoch integer [not null]
+  direction ocpp_direction [not null]
+  message_type smallint [not null]
+  unique_id "varchar(36)" [not null]
+  action "varchar(40)"
+  cp_timestamp timestamptz
+  raw jsonb [not null]
+  replayed boolean
+  indexes {
+    (id, received_at) [pk]
+    (action, received_at) [name: 'ocpp_message_log_action_idx']
+    (charge_point_id, received_at) [name: 'ocpp_message_log_cp_received_at_idx']
+    (charge_point_id, unique_id) [name: 'ocpp_message_log_cp_unique_id_idx']
+  }
+  checks {
+    `((message_type = 2) = (action IS NOT NULL))` [name: 'ocpp_message_log_action_check']
+    `(message_type = ANY (ARRAY[2, 3, 4]))` [name: 'ocpp_message_log_message_type_check']
+  }
+  Note: 'Technical: raw OCPP frames in/out, append-only, partitioned by month. Partitioned by RANGE (received_at), one partition per month (supplement).'
+}
+
+Table driver_charge_intents {
+  id bigint [pk, increment]
+  driver_id bigint [not null]
+  connector_id bigint [not null]
+  vehicle_id bigint [not null]
+  idempotency_key "varchar(64)" [not null]
+  request_hash "varchar(64)" [not null]
+  id_tag "varchar(20)" [not null, unique]
+  energy_limit_wh bigint [not null]
+  reserved_vnd bigint [not null]
+  command_id bigint [unique]
+  session_id bigint [unique]
+  state "varchar(20)" [not null]
+  rejection_reason text
+  max_energy_wh bigint
+  version integer [not null, default: 1]
+  connector_released_at timestamptz
+  billing_review_required boolean [not null, default: false]
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+  indexes {
+    (driver_id, idempotency_key) [unique, name: 'driver_charge_intents_driver_id_idempotency_key_key']
+    driver_id [name: 'driver_charge_intents_driver']
+    vehicle_id [name: 'driver_charge_intents_vehicle_id_idx']
+  }
+  checks {
+    `(energy_limit_wh > 0)` [name: 'driver_charge_intents_energy_limit_wh_check']
+    `(reserved_vnd >= 0)` [name: 'driver_charge_intents_reserved_vnd_check']
+    `((state) = ANY (ARRAY['sent', 'accepted', 'rejected', 'unknown', 'effect', 'settled', 'released']))` [name: 'driver_charge_intents_state_check']
+    `(version > 0)` [name: 'driver_charge_intents_version_check']
+  }
+  Note: 'Technical (WP3): driver\'s start request from the app; idempotency, credit hold, state. Partial / expression indexes: driver_charge_intents_open_connector (supplement).'
+}
+
+Table driver_charge_intent_events {
+  id bigint [pk, increment]
+  intent_id bigint [not null]
+  actor_id bigint
+  event "varchar(50)" [not null]
+  note text
+  created_at timestamptz [not null, default: `now()`]
+  indexes {
+    actor_id [name: 'driver_charge_intent_events_actor_id_idx']
+    intent_id [name: 'driver_charge_intent_events_intent_id_idx']
+  }
+  Note: 'Technical (WP3): event trail of a charge intent.'
+}
+
+Table driver_stop_intents {
+  id bigint [pk, increment]
+  driver_id bigint [not null]
+  session_id bigint [not null]
+  idempotency_key "varchar(64)" [not null]
+  command_id bigint [not null, unique]
+  state "varchar(20)" [not null]
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+  indexes {
+    (driver_id, idempotency_key) [unique, name: 'driver_stop_intents_driver_id_idempotency_key_key']
+  }
+  checks {
+    `((state) = ANY (ARRAY['sent', 'accepted', 'rejected', 'unknown', 'effect']))` [name: 'driver_stop_intents_state_check']
+  }
+  Note: 'Technical (WP3): driver\'s stop request from the app. Partial / expression indexes: driver_stop_intents_open_session (supplement).'
+}
+
+Table driver_stop_attempts {
+  command_id bigint [pk]
+  intent_id bigint [not null]
+  attempt_no integer [not null]
+  kind "varchar(20)" [not null]
+  previous_command_id bigint [unique]
+  connection_epoch integer
+  evidence_meter_id bigint
+  evidence_received_at timestamptz
+  operator_user_id bigint
+  note text
+  created_at timestamptz [not null, default: `now()`]
+  indexes {
+    (intent_id, attempt_no) [unique, name: 'driver_stop_attempts_intent_id_attempt_no_key']
+    (intent_id, evidence_meter_id, evidence_received_at) [unique, name: 'driver_stop_attempts_intent_id_evidence_meter_id_evidence_r_key']
+    operator_user_id [name: 'driver_stop_attempts_operator_user_id_idx']
+  }
+  checks {
+    `(attempt_no > 0)` [name: 'driver_stop_attempts_attempt_no_check']
+    `(((kind) <> 'operator_recovery') OR ((previous_command_id IS NOT NULL) AND (connection_epoch IS NOT NULL) AND (evidence_meter_id IS NOT NULL) AND (evidence_received_at IS NOT NULL) AND (operator_user_id IS NOT NULL) AND (note IS NOT NULL)))` [name: 'driver_stop_attempts_check']
+    `((kind) = ANY (ARRAY['initial', 'auto_retry', 'operator_recovery']))` [name: 'driver_stop_attempts_kind_check']
+    `((char_length(note) >= 1) AND (char_length(note) <= 500))` [name: 'driver_stop_attempts_note_check']
+  }
+  Note: 'Technical (WP3): each RemoteStop attempt for a stop intent (append-only).'
+}
+
+Table driver_start_recoveries {
+  intent_id bigint [pk]
+  operator_user_id bigint [not null]
+  connection_epoch integer [not null]
+  fence_command_id bigint [not null, unique]
+  restore_command_id bigint [unique]
+  evidence_note text [not null]
+  released_vnd bigint [not null]
+  released_at timestamptz
+  fence_attempt integer [not null, default: 1]
+  restore_attempt integer [not null, default: 0]
+  created_at timestamptz [not null, default: `now()`]
+  indexes {
+    operator_user_id [name: 'driver_start_recoveries_operator_user_id_idx']
+  }
+  checks {
+    `((char_length(evidence_note) >= 1) AND (char_length(evidence_note) <= 500))` [name: 'driver_start_recoveries_evidence_note_check']
+    `(released_vnd >= 0)` [name: 'driver_start_recoveries_released_vnd_check']
+  }
+  Note: 'Technical (WP3): operator recovery of a start with unknown result.'
+}
+
+Table charge_settlement_jobs {
+  session_id bigint [pk]
+  state "varchar(20)" [not null, default: 'pending']
+  reason "varchar(30)" [not null, default: 'stop_observed']
+  attempts integer [not null, default: 0]
+  last_error_code "varchar(50)"
+  next_attempt_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+  created_at timestamptz [not null, default: `now()`]
+  checks {
+    `((state) = ANY (ARRAY['pending', 'posted', 'ineligible']))` [name: 'charge_settlement_jobs_state_check']
+  }
+  Note: 'Technical (WP3): outbox job that settles a closed session (debit + points). Partial / expression indexes: charge_settlement_jobs_due (supplement).'
+}
+
+Table charge_tariff_boundary_evidence {
+  session_id bigint
+  boundary_at timestamptz
+  meter_wh bigint [not null]
+  recorded_by bigint [not null]
+  evidence_note text [not null]
+  created_at timestamptz [not null, default: `now()`]
+  indexes {
+    (session_id, boundary_at) [pk]
+    recorded_by [name: 'charge_tariff_boundary_evidence_recorded_by_idx']
+  }
+  checks {
+    `((char_length(evidence_note) >= 1) AND (char_length(evidence_note) <= 500))` [name: 'charge_tariff_boundary_evidence_evidence_note_check']
+    `(meter_wh >= 0)` [name: 'charge_tariff_boundary_evidence_meter_wh_check']
+  }
+  Note: 'Technical (WP3): meter evidence at a tariff band boundary recorded by staff.'
+}
+
+Table charging_statements {
+  session_id bigint [pk]
+  driver_id bigint [not null]
+  energy_wh bigint [not null]
+  amount_vnd bigint [not null]
+  earned_points bigint [not null]
+  debit_id bigint [not null, unique]
+  loyalty_entry_id bigint [not null, unique]
+  created_at timestamptz [not null, default: `now()`]
+  checks {
+    `(amount_vnd >= 0)` [name: 'charging_statements_amount_vnd_check']
+    `(earned_points >= 0)` [name: 'charging_statements_earned_points_check']
+    `(energy_wh >= 0)` [name: 'charging_statements_energy_wh_check']
+  }
+  Note: 'Derived read model: one statement per settled session (debit + earned points). Drop proposed.'
+}
+
+// ---------- References: child.fk > parent.pk = many-to-one; parent.pk - child.fk = one-to-one ----------
+Ref admins_user_id_fkey: users.id - admins.user_id [delete: cascade]
+Ref charge_point_connections_charge_point_id_fkey: charge_point_connections.charge_point_id > charge_points.id
+Ref charge_points_site_id_fkey: charge_points.site_id > sites.id
+Ref charge_settlement_jobs_session_id_fkey: sessions.id - charge_settlement_jobs.session_id
+Ref charge_tariff_boundary_evidence_recorded_by_fkey: charge_tariff_boundary_evidence.recorded_by > users.id
+Ref charge_tariff_boundary_evidence_session_id_fkey: charge_tariff_boundary_evidence.session_id > sessions.id
+Ref charging_statements_debit_id_fkey: credit_transactions.id - charging_statements.debit_id
+Ref charging_statements_driver_id_fkey: charging_statements.driver_id > drivers.user_id
+Ref charging_statements_loyalty_entry_id_fkey: loyalty_transactions.id - charging_statements.loyalty_entry_id
+Ref charging_statements_session_id_fkey: sessions.id - charging_statements.session_id
+Ref connector_status_events_charge_point_id_fkey: connector_status_events.charge_point_id > charge_points.id [delete: cascade]
+Ref connectors_charge_point_id_fkey: connectors.charge_point_id > charge_points.id [delete: cascade]
+Ref credit_accounts_driver_id_fkey: drivers.user_id - credit_accounts.driver_id
+Ref credit_transactions_credit_account_id_fkey: credit_transactions.credit_account_id > credit_accounts.id [delete: restrict]
+Ref credit_transactions_reservation_id_fkey: reservations.id - credit_transactions.reservation_id
+Ref credit_transactions_session_id_fkey: credit_transactions.session_id > sessions.id
+Ref credit_transactions_top_up_id_fkey: credit_transactions.top_up_id > top_ups.id
+Ref driver_charge_intent_events_actor_id_fkey: driver_charge_intent_events.actor_id > users.id
+Ref driver_charge_intent_events_intent_id_fkey: driver_charge_intent_events.intent_id > driver_charge_intents.id
+Ref driver_charge_intents_command_id_fkey: remote_commands.id - driver_charge_intents.command_id
+Ref driver_charge_intents_connector_id_fkey: driver_charge_intents.connector_id > connectors.id
+Ref driver_charge_intents_driver_id_fkey: driver_charge_intents.driver_id > drivers.user_id
+Ref driver_charge_intents_session_id_fkey: sessions.id - driver_charge_intents.session_id
+Ref driver_charge_intents_vehicle_id_fkey: driver_charge_intents.vehicle_id > vehicles.id
+Ref driver_start_recoveries_fence_command_id_fkey: remote_commands.id - driver_start_recoveries.fence_command_id
+Ref driver_start_recoveries_intent_id_fkey: driver_charge_intents.id - driver_start_recoveries.intent_id
+Ref driver_start_recoveries_operator_user_id_fkey: driver_start_recoveries.operator_user_id > users.id
+Ref driver_start_recoveries_restore_command_id_fkey: remote_commands.id - driver_start_recoveries.restore_command_id
+Ref driver_stop_attempts_command_id_fkey: remote_commands.id - driver_stop_attempts.command_id
+Ref driver_stop_attempts_intent_id_fkey: driver_stop_attempts.intent_id > driver_stop_intents.id
+Ref driver_stop_attempts_operator_user_id_fkey: driver_stop_attempts.operator_user_id > users.id
+Ref driver_stop_attempts_previous_command_id_fkey: remote_commands.id - driver_stop_attempts.previous_command_id
+Ref driver_stop_intents_command_id_fkey: remote_commands.id - driver_stop_intents.command_id
+Ref driver_stop_intents_driver_id_fkey: driver_stop_intents.driver_id > drivers.user_id
+Ref driver_stop_intents_session_id_fkey: driver_stop_intents.session_id > sessions.id
+Ref drivers_user_id_fkey: users.id - drivers.user_id [delete: cascade]
+Ref e_invoices_top_up_id_fkey: top_ups.id - e_invoices.top_up_id
+Ref fault_events_acknowledged_by_fkey: fault_events.acknowledged_by > operator_staff.user_id
+Ref fault_events_charge_point_id_fkey: fault_events.charge_point_id > charge_points.id
+Ref fault_events_connector_id_fkey: fault_events.connector_id > connectors.id
+Ref fault_events_reset_command_id_fkey: fault_events.reset_command_id > remote_commands.id
+Ref fault_reports_cleared_by_fkey: fault_reports.cleared_by > operator_staff.user_id
+Ref fault_reports_connector_id_fkey: fault_reports.connector_id > connectors.id
+Ref fault_reports_driver_id_fkey: fault_reports.driver_id > drivers.user_id
+Ref fault_reports_fault_event_id_fkey: fault_reports.fault_event_id > fault_events.id
+Ref invoice_adjustments_e_invoice_id_fkey: invoice_adjustments.e_invoice_id > e_invoices.id [delete: restrict]
+Ref invoice_adjustments_refund_id_fkey: refunds.id - invoice_adjustments.refund_id [delete: restrict]
+Ref loyalty_accounts_driver_id_fkey: drivers.user_id - loyalty_accounts.driver_id
+Ref loyalty_transactions_loyalty_account_id_fkey: loyalty_transactions.loyalty_account_id > loyalty_accounts.id [delete: restrict]
+Ref loyalty_transactions_session_id_fkey: loyalty_transactions.session_id > sessions.id
+Ref loyalty_transactions_top_up_id_fkey: loyalty_transactions.top_up_id > top_ups.id
+Ref maintenance_tickets_assigned_to_fkey: maintenance_tickets.assigned_to > operator_staff.user_id
+Ref maintenance_tickets_fault_event_id_fkey: maintenance_tickets.fault_event_id > fault_events.id
+Ref meter_values_session_id_fkey: meter_values.session_id > sessions.id [delete: restrict]
+Ref ocpp_message_log_charge_point_id_fkey: ocpp_message_log.charge_point_id > charge_points.id
+Ref operator_staff_operator_id_fkey: operator_staff.operator_id > operators.id
+Ref operator_staff_user_id_fkey: users.id - operator_staff.user_id [delete: cascade]
+Ref policy_templates_created_by_fkey: policy_templates.created_by > admins.user_id
+Ref promotions_operator_id_fkey: promotions.operator_id > operators.id
+Ref reconciliation_records_reviewed_by_fkey: reconciliation_records.reviewed_by > operator_staff.user_id
+Ref reconciliation_records_session_id_fkey: reconciliation_records.session_id > sessions.id [delete: restrict]
+Ref refunds_requested_by_fkey: refunds.requested_by > admins.user_id
+Ref refunds_top_up_id_fkey: refunds.top_up_id > top_ups.id [delete: restrict]
+Ref remote_commands_charge_point_id_fkey: remote_commands.charge_point_id > charge_points.id
+Ref remote_commands_requested_by_fkey: remote_commands.requested_by > operator_staff.user_id
+Ref reservations_connector_id_fkey: reservations.connector_id > connectors.id
+Ref reservations_driver_id_fkey: reservations.driver_id > drivers.user_id
+Ref rfid_cards_driver_id_fkey: rfid_cards.driver_id > drivers.user_id
+Ref session_pauses_session_id_fkey: session_pauses.session_id > sessions.id [delete: cascade]
+Ref session_status_history_session_id_fkey: session_status_history.session_id > sessions.id [delete: restrict]
+Ref session_tariff_segments_session_id_fkey: session_tariff_segments.session_id > sessions.id [delete: restrict]
+Ref session_tariff_segments_tariff_period_id_fkey: session_tariff_segments.tariff_period_id > tariff_periods.id
+Ref sessions_connector_fk: sessions.(connector_id, charge_point_id, connector_no) > connectors.(id, charge_point_id, connector_no)
+Ref sessions_driver_id_fkey: sessions.driver_id > drivers.user_id
+Ref sessions_promotion_id_fkey: sessions.promotion_id > promotions.id
+Ref sessions_reservation_id_fkey: reservations.id - sessions.reservation_id
+Ref sessions_rfid_card_id_fkey: sessions.rfid_card_id > rfid_cards.id
+Ref sessions_vehicle_id_fkey: sessions.vehicle_id > vehicles.id
+Ref sites_operator_id_fkey: sites.operator_id > operators.id
+Ref tariff_periods_operator_id_fkey: tariff_periods.operator_id > operators.id [delete: cascade]
+Ref top_ups_credit_account_id_fkey: top_ups.credit_account_id > credit_accounts.id
+Ref vehicles_driver_id_fkey: vehicles.driver_id > drivers.user_id
+Ref vehicles_vehicle_model_id_fkey: vehicles.vehicle_model_id > vehicle_models.id
+
+TableGroup people [color: #3498DB] {
+  users
+  admins
+  operator_staff
+  drivers
+  vehicles
+  vehicle_models
+  rfid_cards
+}
+TableGroup network [color: #27AE60] {
+  operators
+  sites
+  charge_points
+  connectors
+  connector_status_events
+  remote_commands
+  fault_events
+  fault_reports
+  maintenance_tickets
+}
+TableGroup pricing [color: #16A085] {
+  tariff_periods
+  promotions
+  policy_templates
+}
+TableGroup charging [color: #F59E0B] {
+  reservations
+  sessions
+  session_pauses
+  session_status_history
+  meter_values
+  session_tariff_segments
+  reconciliation_records
+}
+TableGroup billing [color: #8E44AD] {
+  credit_accounts
+  credit_transactions
+  top_ups
+  e_invoices
+  invoice_adjustments
+  refunds
+  loyalty_accounts
+  loyalty_transactions
+}
+TableGroup technical [color: #7F8C8D] {
+  charge_point_connections
+  ocpp_message_log
+  driver_charge_intents
+  driver_charge_intent_events
+  driver_stop_intents
+  driver_stop_attempts
+  driver_start_recoveries
+  charge_settlement_jobs
+  charge_tariff_boundary_evidence
+  charging_statements
+}

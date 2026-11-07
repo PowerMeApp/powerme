@@ -2,7 +2,7 @@
 
 > Đặt tại `docs/tasks/WF-02_plan.md`. Claude Code cập nhật cột Trạng thái và mục Ghi chú sau mỗi phần.
 > Mỗi phiên làm một phần. Plan mode → duyệt → test trước → code → chạy test.
-> Nguồn chính: diagram `diagrams/wf02/` (CD-2, SD-2a…2f v2.0); tóm tắt và bổ sung ở `docs/spec/WF-02_decisions.md`.
+> Nguồn chính: diagram `diagrams/report4/class/CD-2/` + `diagrams/report4/sequence/SD-2a…2f/` (CD-2, SD-2a…2f v2.0); tóm tắt và bổ sung ở `docs/spec/WF-02_decisions.md`.
 
 ## Phần 0 – Khảo sát repo (đã làm sơ bộ 03/11, commit `ce3902c`)
 
@@ -108,7 +108,7 @@ Việc nền viết theo D7 (quét DB). API admin bám D10. Đường dẫn theo
   - STM-10: event `GATEWAY_CONFIRMED`, `ATTEMPT_FAILED` (`errorKind`, `attemptCount` sau lượt vừa thử), `ADMIN_RETRY`; `RETRY_LIMIT = 4` export để Phần 12 dùng. Số chuyển theo thứ tự mũi tên của file: #1 tạo, #2 tự vòng, #3 done, #4 failed, #5 Admin retry.
   - Lệch CD-2: CD-2 không vẽ `TopUpEvent` / `RefundEvent`; tên event do code đặt. `canApply(from, event)` không nhận guard (chỉ cho biết event có được nhận ở trạng thái đó).
   - Quyết định cùng Khang (ghi ở D3, D4 ⊕): kết quả thanh toán lặp là no-op, kết quả mâu thuẫn (lỗi sau khi đã cộng, thành công khác `transactionNo`) là `conflicting_result`, timeout muộn là `stale`; chỉ `ADMIN_REFUND` sai trạng thái mới ném; thành công sau `failed` là khoản trễ; khoản trễ trùng `transactionNo` là no-op, khác là `conflicting_result`. Mâu thuẫn với CHECK 0003 → migration ở Phần 6.
-  - Commit `diagrams/stm/STM-10_Refund.puml` (trước đó chưa có trong repo).
+  - Commit `diagrams/report4/state/STM-10/STM-10.puml` (trước đó chưa có trong repo).
 - 06/11 (tài liệu, cùng Khang):
   - Điểm đã dùng hết hạn trước lúc cộng tiền: vẫn cộng đủ, ghi loyalty `adjust` `points = 0` cho phần thiếu (D2/D3/D4 ⊕).
   - `restoreForTopUp` trả theo tổng dòng `redeem`.

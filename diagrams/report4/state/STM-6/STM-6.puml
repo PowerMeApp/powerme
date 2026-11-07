@@ -1,0 +1,31 @@
+@startuml STM-6
+!include _style.iuml
+title STM-6 (System level) — Lifecycle of a FaultEvent (Operator alert)\nfault_events.status · v1.0 · 01/11/2026
+
+[*] -down-> Open
+note left of Open
+  created by a fault signal on a connector
+  with no open fault: Charge Point reports
+  Faulted, 2nd Driver report within 2 h,
+  or Charge Point offline past the alert
+  delay (≤ 900 s)
+end note
+
+state "Open" as Open {
+  [*] -down-> raised : / hide connector, void\nreservations, alert Operator
+  raised -down-> acknowledged : Operator acknowledges
+  acknowledged -down-> resetting : Operator sends\nremote reset
+  resetting -up-> acknowledged : reset refused\nor after(120 s)
+}
+Open : fault signal / attach to this fault
+
+Open -right-> resolved : connector reports Available\nor Charge Point back online
+acknowledged -right-> resolved : Operator closes\nafter site visit
+resolved : entry / show connector, clear label
+resolved -down-> [*]
+note bottom of Open
+  Open groups raised, acknowledged, resetting;
+  it is not a status value.
+  Maintenance ticket (Should): open → in_progress → closed.
+end note
+@enduml

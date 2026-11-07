@@ -1,0 +1,63 @@
+@startuml SD-3a
+!include ../_style.iuml
+title SD-3a (Software level, CSMS) — Charge Point loses connection mid-session, reconnects and the session is reconciled\nPrecondition: session is active on the Charge Point · System view: AD-3 · State: STM-1
+footer Owner: Ngô Văn Minh Trí (WP2) · v2.0 · 01/11/2026 · names = code (apps/csms/src) · left gate = Charge Point [OCPP 1.6J, WSS]
+
+participant "«component»\n<u>:OcppServer</u>" as OS
+participant "«component»\n<u>:ConnectionRegistry</u>" as REG
+participant "«component»\n<u>:OfflineGraceService</u>" as OG
+participant "«component»\n<u>:ReplayDetector</u>" as RD
+participant "«component»\n<u>:SessionsService</u>" as S
+participant "«component»\n<u>:ReconciliationService</u>" as R
+
+== Connection lost ==
+[-> OS ++ : socket closed
+OS -> REG ++ : close(client, closedAt) : Connection
+REG -> REG : is_online = false, close epoch
+REG --> OS -- : connection {chargePointId, epoch}
+OS -> OG ++ : onSocketClosed(chargePointId, epoch, closedAt)
+OG -> OG : schedule check after 120 s (grace)
+OG --> OS --
+deactivate OS
+
+... offline grace period: 120 s ...
+[o-> OG ++ : check(chargePointId, epoch)
+alt reconnected within grace (newer epoch)
+  OG -> OG : nothing to do, session stays active
+else still offline
+  OG -> S ++ : onStationOffline(chargePointId, at) : count
+  S -> S : active / paused / stopping → orphaned\n(STATION_OFFLINE), void reservations
+  S --> OG -- : orphaned sessions
+  note right : Operator is alerted\nwithin 900 s (NFR-OCPP-07)
+end
+deactivate OG
+
+== Charge Point reconnects and sends its stored messages ==
+[-> OS ++ : reconnect [WSS, credential]
+OS -> REG ++ : open(identity, client) : Connection
+REG -> REG : new epoch, is_online = true
+REG --> OS --
+[<-- OS -- : connection accepted
+[-> OS ++ : StopTransaction {transactionId, meterStop, timestamp, transactionData}
+OS -> RD ++ : classify(cpTimestamp, receivedAt, epochOpenedAt) : ReplayVerdict
+RD --> OS -- : replayed = true
+OS -> S ++ : onStopTransaction(req, ctx)  (via OcppHandlers)
+S -> R ++ : recordReplay(sessionId, frame)
+R --> S --
+S -> R ++ : evaluate(series, meterStop) : ReconciliationVerdict
+R --> S -- : verdict
+alt consistent, or gap explained by the offline window
+  S -> S : orphaned → reconciled (RECONCILE_OK)
+  note right : then settled as in SD-1b
+else energy conflict
+  S -> S : orphaned → review (RECONCILE_CONFLICT),\nbilling held until the Operator resolves it
+end
+S --> OS --
+[<-- OS -- : StopTransaction.conf {Accepted}
+
+... no reconnection 24 h after the session start ...
+[o-> S ++ : at(start + 24 h)
+S -> S : orphaned → review (HARD_CAP_EXCEEDED), billing held
+deactivate S
+note over OS, R : If live MeterValues arrive after reconnecting (the session is still running), the session goes orphaned → active (LIVE_MESSAGE) instead.\nThe 24 h trigger is in the state table but no job fires it yet (Trí).
+@enduml

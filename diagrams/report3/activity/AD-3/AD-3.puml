@@ -1,0 +1,63 @@
+@startuml AD-3
+!include _style.iuml
+title AD-3 (System level) — Charge Point loses connection during a session, then reconcile\nTrigger: Charge Point stops answering while a session is active · Use cases: UC-INT-03, UC-OPS-03, UC-OPS-05, UC-CHG-04
+
+|«person»\nDriver|
+|«software system»\nPowerMe Platform|
+|«external system»\nCharge Point|
+|«person»\nOperator|
+|«software system»\nPowerMe Platform|
+start
+:Detect lost connection and\nshow Charge Point offline;
+fork
+  |«external system»\nCharge Point|
+  :Keep charging and store\nmeter data locally;
+fork again
+  |«software system»\nPowerMe Platform|
+  :Tell Driver live data\nis delayed;
+  |«person»\nDriver|
+  :See "Charge Point offline,\ndata delayed" notice;
+end fork
+|«software system»\nPowerMe Platform|
+if ( ) then ([still offline after\n120 s grace period])
+  :Mark session orphaned, void\nreservations (no fee) and\nraise offline alert (AD-7)>
+  :ChargingSession\n&#91;orphaned&#93;]
+  :Reservation\n&#91;voided&#93;]
+else ([reconnected within\n120 s grace period])
+endif
+if ( ) then ([Charge Point reconnects])
+  |«external system»\nCharge Point|
+  :Reconnect and send\nqueued meter data>
+  |«software system»\nPowerMe Platform|
+  :Discard duplicates and\nrebuild session timeline;
+  if ( ) then ([session still running])
+    :ChargingSession\n&#91;active&#93;]
+    :Continue charging ⋔ (AD-1);
+    stop
+  else ([session stopped\nwhile offline])
+    :Cross-check energy: start and\nstop totals against readings;
+  endif
+else ([no reconnection within\n24 h session time limit])
+endif
+if ( ) then ([energy conflict over tolerance\nor no reconnection])
+  :Hold billing and flag\nsession for review;
+  :ChargingSession\n&#91;review&#93;]
+  |«person»\nOperator|
+  :Resolve: accept Charge Point\ntotal, accept readings or void;
+  |«software system»\nPowerMe Platform|
+else ([consistent, or gap\nwithin tolerance])
+endif
+:Record reconciliation result;
+:ReconciliationRecord]
+:Price per tariff period and\ndebit cost (void = no charge);
+:ChargingSession\n&#91;reconciled&#93;]
+:CreditTransaction\n&#91;session_debit&#93;]
+if ( ) then ([cost > credit balance:\nnew starts blocked\nuntil top-up])
+  :CreditAccount\n&#91;in_shortfall&#93;]
+else ([else])
+endif
+:Send charging statement;
+|«person»\nDriver|
+:View charging statement;
+stop
+@enduml

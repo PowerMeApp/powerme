@@ -1,0 +1,20 @@
+@startuml STM-5
+!include _style.iuml
+title STM-5 (System level) — Status of a CreditAccount\ncredit_accounts.status · v1.0 · 01/11/2026
+
+[*] --> active
+note left of active
+  created with the Driver
+  account (UC-ACC-01),
+  balance 0
+end note
+active --> in_shortfall : session debited [balance < 0]\n/ block new app-billed sessions
+in_shortfall : top-up credited [balance < 0]\n/ reduce shortfall
+in_shortfall --> active : top-up credited\n[balance ≥ 0]
+active --> closed : Driver closes the account\n[no open top-up, no running session]\n/ debit unused credit, create closure\nrefunds (STM-10), disable login
+closed --> [*]
+note right of in_shortfall
+  Closing is refused
+  while in_shortfall.
+end note
+@enduml

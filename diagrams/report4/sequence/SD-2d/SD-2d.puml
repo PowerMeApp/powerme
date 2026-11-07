@@ -1,0 +1,39 @@
+@startuml SD-2d
+!include ../_style.iuml
+title SD-2d (Software level, CSMS billing) — No payment result after 15 min, and a late payment\nPrecondition: top-up is pending · System view: AD-2 · State: STM-4
+footer Owner: Lê Bảo Khang (WP5) · v2.0 · 01/11/2026 · names = CD-2 class diagram · right gate = Payment Gateway
+
+participant "«component»\n<u>:TopUpService</u>" as TS
+participant "«component»\n<u>:CreditLedgerService</u>" as CL
+participant "«port»\n<u>:VnpayAdapter</u>" as VA
+
+== 15 minutes after creation, no notification ==
+[o-> TS ++ : onPendingTimeout(topUpId)
+opt top-up still pending
+  TS -> VA ++ : queryTransaction(ref) : status
+  VA ->] : querydr [HTTPS]
+  note right : {d ≤ 10 s}
+  VA <--] : transaction status
+  VA --> TS -- : status
+  alt paid
+    TS -> TS : pending → credited
+    TS -> CL ++ : post(accountId, top_up, +amountVnd, topUpId)
+    CL --> TS --
+  else not paid
+    TS -> TS : pending → expired
+  end
+end
+deactivate TS
+
+== Notification arrives for an expired top-up ==
+[-> TS ++ : applyPaymentResult(ipn)  (from VnpayIpnController, SD-2b)
+alt paid within 1 h of expiry and not yet applied
+  TS -> TS : expired → credited
+  TS -> CL ++ : post(accountId, top_up, +amountVnd, topUpId)
+  CL --> TS --
+else paid more than 1 h after expiry
+  TS -> TS : record late payment, top-up stays expired
+  TS ->>] : list on Billing Exceptions for an Admin refund (SD-2e)
+end
+[<-- TS -- : 00
+@enduml

@@ -31,7 +31,7 @@ Form v1.3 lists UC-ADM-08 as the Admin part of FR-07 and the account-closure req
 
 ## STM-1 ChargingSession: transition → UC / FR
 
-The 22 transitions of `apps/csms/src/sessions/session-state-machine.ts` (diagram `diagrams/stm/STM-1_ChargingSession.puml`, v0.5).
+The 22 transitions of `apps/csms/src/sessions/session-state-machine.ts` (diagram `diagrams/report4/state/STM-1/STM-1.puml`, v0.5).
 
 | # | From → To | Event | Use case | FR |
 |---|---|---|---|---|

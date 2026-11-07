@@ -2,7 +2,7 @@
  * RefundStateMachine — STM-10 Refund (`refunds.status`), lớp THUẦN (không DB, không Nest).
  *
  * Vì sao tồn tại: RefundService (Phần 9, 11) và worker refund (Phần 12) chỉ gọi `apply()` rồi ghi
- * kết quả; bảng chuyển nằm ở một chỗ, theo `diagrams/stm/STM-10_Refund.puml` (v1.0, 01/11/2026)
+ * kết quả; bảng chuyển nằm ở một chỗ, theo `diagrams/report4/state/STM-10/STM-10.puml` (v1.0, 01/11/2026)
  * và decisions D1.
  *
  * Số `no` theo thứ tự mũi tên trong STM-10:

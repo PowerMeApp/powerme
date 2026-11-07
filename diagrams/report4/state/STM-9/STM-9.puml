@@ -1,0 +1,28 @@
+@startuml STM-9
+!include _style.iuml
+title STM-9 (System level) — Lifecycle of a Reservation (Should)\nreservations.status · v1.0 · 01/11/2026
+
+state c1 <<choice>>
+[*] --> active : / hold connector for 15 min
+note left of active
+  created when the Driver confirms a
+  reservation that passes the
+  eligibility check (UC-CHG-06)
+end note
+active : exit / release hold
+active --> fulfilled : reserving Driver\nstarts a session
+active --> c1 : Driver cancels
+c1 --> cancelled_free : [≥ 5 min before expiry]
+c1 --> cancelled_late : [else]\n/ charge late-cancel fee
+active --> voided : connector faulted, offline\nor taken, or Operator cancels\n/ offer alternatives, no fee
+active --> expired_no_show : after(15 min)\n/ charge no-show fee
+fulfilled --> [*]
+cancelled_free --> [*]
+cancelled_late --> [*]
+voided --> [*]
+expired_no_show --> [*]
+note bottom of c1
+  No-show fee 20,000 VND;
+  late-cancel fee 50% of it.
+end note
+@enduml

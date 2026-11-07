@@ -21,7 +21,7 @@
 
 ## Đọc trước khi làm bất cứ task nào
 
-1. Diagram của luồng đang làm trong `diagrams/wf02/` (bảng tra bên dưới) – **nguồn chính**, bản đã chia sẻ vào tài liệu chung của nhóm.
+1. Diagram của luồng đang làm trong `diagrams/report4/class/CD-2/` + `diagrams/report4/sequence/SD-2a…2f/` (bảng tra bên dưới) – **nguồn chính**, bản đã chia sẻ vào tài liệu chung của nhóm.
 2. `docs/spec/WF-02_decisions.md` – tóm tắt diagram, cách khớp với repo, và các bổ sung ⊕ chưa có trong diagram.
 3. `docs/tasks/WF-02_plan.md` – thứ tự các phần và tiêu chí xong.
 
@@ -73,7 +73,7 @@ Decisions khác diagram thì theo diagram và sửa decisions. Diagram mâu thu�
 | Đóng tài khoản (tài xế đóng, Admin hoàn) | SD-2f (vẽ sai, theo D6) | D6 | STM-5, STM-10 | (theo test case của nhóm) |
 | Worker quét DB | (không vẽ) | D7 | | |
 
-Diagram: `diagrams/wf02/` (CD-2, SD-2a…2f v2.0, 01/11/2026) và `diagrams/erd/LERD-1_Charging-Billing.puml`. STM-10 Refund: `diagrams/stm/STM-10_Refund.puml` (STM-8 là RfidCard). State machine trong code: `top-up-state-machine.ts`, `refund-state-machine.ts`, lỗi chung `invalid-transition.ts`. Tên class/method theo CD-2; nguồn sự thật cho tên cột là `src/db/schema/billing.ts` (vd. cột là `status`, không phải `topUpStatus`).
+Diagram: `diagrams/report4/class/CD-2/` + `diagrams/report4/sequence/SD-2a…2f/` (CD-2, SD-2a…2f v2.0, 01/11/2026) và `diagrams/report4/erd-logical/erd-logical-clean.svg`. STM-10 Refund: `diagrams/report4/state/STM-10/STM-10.puml` (STM-8 là RfidCard). State machine trong code: `top-up-state-machine.ts`, `refund-state-machine.ts`, lỗi chung `invalid-transition.ts`. Tên class/method theo CD-2; nguồn sự thật cho tên cột là `src/db/schema/billing.ts` (vd. cột là `status`, không phải `topUpStatus`).
 
 ## Cách làm việc
 
