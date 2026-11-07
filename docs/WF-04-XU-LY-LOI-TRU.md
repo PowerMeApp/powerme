@@ -1,7 +1,7 @@
 # WF-04 — Xử lý lỗi trụ (charge point fault, alert and remote recovery): sequence diagram + class diagram
 
 **Date:** 24/10/2026
-**Diagrams:** three draw.io files in `diagrams/` (`wf-04-seq-1.drawio`, `wf-04-seq-2.drawio`, `wf-04-class.drawio`); the PNGs below are previews of them.
+**Diagrams:** SD-4a, SD-4b and CD-4 (WP1 redraw v1.0, 01/11/2026), PlantUML sources in [`diagrams/report4/`](../diagrams/report4/). They replace the first draw.io drafts of 24/10.
 **Iteration 1 (code + tests, FE-04):** [`ITERATION-1-WF04.md`](ITERATION-1-WF04.md).
 **Status:** **DRAFT.** Built from AD-7 v1.0 and the T12 state machines (v0.2). Where AD-7 and STM-6 disagree, both are shown and the point is listed in section 6. If WP1 changes AD-7 or STM-6, those documents take precedence and these diagrams follow.
 
@@ -46,19 +46,19 @@
 
 The scenario matches the simulator test (`smoke.mjs`): connector 1 reports `GroundFailure`. Phases A–E are marked with notes, and section 5 maps each phase to state transitions and DB tables.
 
-> **Message order.** The diagram shows `StatusNotification Faulted` before `StopTransaction`. The simulator sends them the other way round (`StopTransaction reason Other` first). Both orders are valid and both are tested (IT-1a / IT-1b in `ITERATION-1-WF04.md`).
+> **Session close.** SD-4a starts from a connector with no active session, so it does not draw phase B (section 5). When a connector faults mid-session, the Charge Point also sends `StopTransaction`, before or after `StatusNotification Faulted`. Both orders are valid and both are tested (IT-1a / IT-1b in `ITERATION-1-WF04.md`).
 
-![Sequence diagram 1 — main flow](diagrams/wf-04-seq-1.png)
+![SD-4a — main flow](../diagrams/report4/sequence/SD-4a/SD-4a.png)
 
-Editable source: [`diagrams/wf-04-seq-1.drawio`](diagrams/wf-04-seq-1.drawio).
+Source: [`diagrams/report4/sequence/SD-4a/SD-4a.puml`](../diagrams/report4/sequence/SD-4a/SD-4a.puml).
 
 ---
 
 ## 3. Sequence diagram 2 — alternative paths: driver report, failed reset, site visit
 
-![Sequence diagram 2 — alternative paths](diagrams/wf-04-seq-2.png)
+![SD-4b — alternative paths](../diagrams/report4/sequence/SD-4b/SD-4b.png)
 
-Editable source: [`diagrams/wf-04-seq-2.drawio`](diagrams/wf-04-seq-2.drawio).
+Source: [`diagrams/report4/sequence/SD-4b/SD-4b.puml`](../diagrams/report4/sequence/SD-4b/SD-4b.puml).
 
 ---
 
@@ -66,13 +66,15 @@ Editable source: [`diagrams/wf-04-seq-2.drawio`](diagrams/wf-04-seq-2.drawio).
 
 The diagram shows only the attributes and methods that matter for WF-04. `<<...>>` names the owning module or the DB table. Fault tables belong to `stations` (`ops.ts` header, package diagram rule "one owner per table").
 
-![Class diagram](diagrams/wf-04-class.png)
+![CD-4 — class diagram](../diagrams/report4/class/CD-4/CD-4.png)
 
-Editable source: [`diagrams/wf-04-class.drawio`](diagrams/wf-04-class.drawio).
+Source: [`diagrams/report4/class/CD-4/CD-4.puml`](../diagrams/report4/class/CD-4/CD-4.puml).
 
 ---
 
 ## 5. Mapping table — sequence step → AD-7 node → state transition → DB table
+
+Diagram 1 = SD-4a, diagram 2 = SD-4b. Phase B is not drawn in SD-4a (see the note in section 2).
 
 | Diagram / phase | Step | AD-7 node | STM-6 (fault) | STM-2 (connector) | STM-1 (session) | Tables written | UC |
 |---|---|---|---|---|---|---|---|
