@@ -54,8 +54,10 @@ export const creditAccounts = pgTable(
     /** Lúc ví đóng (UC-ACC-02). Có giá trị ⇔ status = closed (migration 0003). */
     closedAt: timestamp('closed_at', { withTimezone: true }),
     /**
-     * Lúc mọi refund `account_closure` của ví đã `done` (BR-P21, SD-2f; nghĩa mới từ 0015 — hệ
-     * thống tự hoàn, Admin không thao tác); không trước closed_at.
+     * Lúc ví closed không còn refund `account_closure` nào chưa `done` (D1, D6): refund cuối `done`;
+     * hoặc Admin hoàn mà không tạo refund nào (toàn bộ là phần dư); hoặc = closed_at khi số dư 0
+     * lúc đóng. Không trước closed_at. (COMMENT ON COLUMN của 0015 còn ghi nghĩa cũ — sửa ở
+     * migration Phần 6.)
      */
     closureRefundedAt: timestamp('closure_refunded_at', { withTimezone: true }),
   },
@@ -408,5 +410,9 @@ export const loyaltyTransactions = pgTable(
     unique('loyalty_transactions_account_entry_no_key').on(t.loyaltyAccountId, t.entryNo),
     index('loyalty_transactions_session_id_idx').on(t.sessionId),
     index('loyalty_transactions_top_up_id_idx').on(t.topUpId),
+    // Một phiên tối đa một dòng earn (migration 0004 của WP3; khớp vào schema TS ở T32 Phần 3).
+    uniqueIndex('loyalty_transactions_one_earn_per_session')
+      .on(t.sessionId)
+      .where(sql`${t.transactionType} = 'earn' AND ${t.sessionId} IS NOT NULL`),
   ],
 );
