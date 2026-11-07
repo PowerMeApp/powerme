@@ -24,9 +24,12 @@
  *   - Hẹn giờ chờ Reset nằm trong RAM ({@link Scheduler}); khởi động lại thì quét DB dựng lại
  *     (cùng cách OfflineGraceService của T61).
  *
- * Chưa làm ở Iteration 1 (docs/ITERATION-1-WF04.md mục 7): báo lỗi từ app tài xế (chưa có API),
- * phiếu bảo trì (Should), ẩn súng + huỷ đặt chỗ (Should), cảnh báo trụ im lặng quá 900 s (G19),
- * sự kiện realtime `alert.*`.
+ * Trụ im lặng quá OFFLINE_ALERT_S (G10, NFR-OCPP-07): {@link FaultService.raiseOffline} /
+ * {@link FaultService.resolveOffline}, do OfflineAlertService gọi theo nhịp quét — sự cố cả trụ
+ * (connector 0) với error_code `Offline`.
+ *
+ * Chưa làm (docs/ITERATION-1-WF04.md mục 7): báo lỗi từ app tài xế (chưa có API), phiếu bảo trì
+ * (Should), ẩn súng + huỷ đặt chỗ (Should), sự kiện realtime `alert.*`.
  */
 import {
   Inject,
@@ -46,6 +49,8 @@ import {
   ERROR_CODE_GUIDE,
   FaultSeverity,
   guideFor,
+  OFFLINE_ERROR_CODE,
+  OFFLINE_GUIDE,
   severityRank,
 } from './error-code-guide.js';
 import {
@@ -145,6 +150,7 @@ function severityRankSql(column: SQLWrapper): SQL {
   const whens = CHARGE_POINT_ERROR_CODES.map((code) =>
     sql.raw(`WHEN '${code}' THEN ${severityRank(ERROR_CODE_GUIDE[code].severity)}`),
   );
+  whens.push(sql.raw(`WHEN '${OFFLINE_ERROR_CODE}' THEN ${severityRank(OFFLINE_GUIDE.severity)}`));
   return sql`CASE ${column} ${sql.join(whens, sql` `)} ELSE ${sql.raw(String(severityRank(guideFor(null).severity)))} END`;
 }
 
@@ -287,6 +293,74 @@ export class FaultService implements OnApplicationBootstrap, OnApplicationShutdo
       );
     }
     return outcome;
+  }
+
+  // ---------------------------------------------------------------------------------------------
+  // Trụ im lặng (G10, NFR-OCPP-07) — OfflineAlertService gọi theo nhịp quét
+  // ---------------------------------------------------------------------------------------------
+
+  /**
+   * t1 cho trụ im lặng quá OFFLINE_ALERT_S: sự cố cả trụ (connector 0, `connector_id` null),
+   * `error_code` = {@link OFFLINE_ERROR_CODE}. Đã có sự cố connector 0 đang mở (Faulted cả trụ, hoặc
+   * Offline từ lần quét trước) → `SIGNAL` là no-op, trả `attached` — bất biến "một sự cố mở mỗi
+   * connector" giữ nguyên.
+   *
+   * `source = 'ocpp'`: enum `fault_source` chưa có giá trị riêng cho tín hiệu do CSMS tự phát hiện;
+   * thêm giá trị mới cần migration + ERD (Ân), nên tạm phân biệt bằng `error_code`.
+   */
+  async raiseOffline(chargePointId: number, at: Date = new Date()): Promise<StatusOutcome> {
+    const outcome = await this.db.transaction(async (tx) => {
+      const open = await this.findOpenForUpdate(tx, chargePointId, null);
+      if (open) {
+        this.sm.apply(open.status, 'SIGNAL'); // no-op, ném nếu bảng đổi
+        return { kind: 'attached', faultId: open.id } as const;
+      }
+      const [row] = await tx
+        .insert(faultEvents)
+        .values({
+          chargePointId,
+          connectorId: null,
+          source: 'ocpp',
+          errorCode: OFFLINE_ERROR_CODE,
+          status: this.sm.initial(),
+          raisedAt: at,
+        })
+        .returning({ id: faultEvents.id });
+      if (!row) throw new Error('INSERT fault_events không trả id');
+      return { kind: 'raised', faultId: row.id } as const;
+    });
+    if (outcome.kind === 'raised') {
+      this.logger.warn(`sự cố #${outcome.faultId} raised: trụ ${chargePointId} im lặng (Offline)`);
+    }
+    return outcome;
+  }
+
+  /**
+   * Trụ đã nói lại: đóng sự cố `Offline` đang mở bằng `CONNECTOR_AVAILABLE` (t3/t5/t7). Chỉ đụng sự
+   * cố còn mở và đúng mã `Offline` — sự cố Faulted cả trụ vẫn chờ StatusNotification hồi phục.
+   */
+  async resolveOffline(faultId: number, at: Date = new Date()): Promise<'resolved' | 'noop'> {
+    const res = await this.db.transaction(async (tx) => {
+      const [fault] = await tx
+        .select({ status: faultEvents.status, errorCode: faultEvents.errorCode })
+        .from(faultEvents)
+        .where(eq(faultEvents.id, faultId))
+        .for('update');
+      if (!fault || fault.status === 'resolved' || fault.errorCode !== OFFLINE_ERROR_CODE) {
+        return 'noop' as const;
+      }
+      const step = this.sm.apply(fault.status, 'CONNECTOR_AVAILABLE');
+      await tx
+        .update(faultEvents)
+        .set({ status: step.to, resolvedAt: at })
+        .where(eq(faultEvents.id, faultId));
+      return 'resolved' as const;
+    });
+    if (res === 'resolved') {
+      this.clearTimer(faultId);
+      this.logger.log(`sự cố #${faultId} resolved: trụ đã kết nối lại`);
+    }
+    return res;
   }
 
   // ---------------------------------------------------------------------------------------------

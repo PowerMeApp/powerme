@@ -68,6 +68,13 @@ export interface CsmsConfig {
    * Không khai báo = {@link DEFAULT_FAULT_RESET_TIMEOUT_S}.
    */
   faultResetTimeoutS?: number;
+  /**
+   * G10 / NFR-OCPP-07 (FE-10): số giây trụ `in_service` im lặng (không frame nào) trước khi mở một
+   * FaultEvent `Offline` cho cả trụ. Không khai báo = {@link DEFAULT_OFFLINE_ALERT_S}.
+   */
+  offlineAlertS?: number;
+  /** G10: nhịp quét trụ im lặng (giây). Không khai báo = {@link DEFAULT_OFFLINE_ALERT_SWEEP_S}. */
+  offlineAlertSweepS?: number;
 }
 
 /**
@@ -82,6 +89,15 @@ export const DEFAULT_OFFLINE_GRACE_S = 120;
  * StatusNotification (WF-04 câu hỏi mở 3, đề xuất của FE-04; simulator D1 khởi động lại ~3 s).
  */
 export const DEFAULT_FAULT_RESET_TIMEOUT_S = 120;
+
+/**
+ * Mặc định của OFFLINE_ALERT_S: 900 s = ngưỡng của NFR-OCPP-07 (SRS §3.1.4 dòng 13, Commitment
+ * NFR-06), tức 3 nhịp Heartbeat 300 s. Khác OFFLINE_GRACE_S (120 s, chỉ quyết định phiên orphan).
+ */
+export const DEFAULT_OFFLINE_ALERT_S = 900;
+
+/** Mặc định của OFFLINE_ALERT_SWEEP_S: 60 s → cảnh báo chậm nhất 900 + 60 s sau frame cuối. */
+export const DEFAULT_OFFLINE_ALERT_SWEEP_S = 60;
 
 /** Token DI cho CsmsConfig (dùng `@Inject(CONFIG)`). */
 export const CONFIG = Symbol('CSMS_CONFIG');
@@ -156,6 +172,12 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): CsmsConfig {
       env,
       'FAULT_RESET_TIMEOUT_S',
       DEFAULT_FAULT_RESET_TIMEOUT_S,
+    ),
+    offlineAlertS: positiveSecondsEnv(env, 'OFFLINE_ALERT_S', DEFAULT_OFFLINE_ALERT_S),
+    offlineAlertSweepS: positiveSecondsEnv(
+      env,
+      'OFFLINE_ALERT_SWEEP_S',
+      DEFAULT_OFFLINE_ALERT_SWEEP_S,
     ),
   };
 }

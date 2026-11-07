@@ -66,6 +66,27 @@ describe('loadConfig — FAULT_RESET_TIMEOUT_S (WF-04, STM-6 t6)', () => {
   });
 });
 
+describe('loadConfig — OFFLINE_ALERT_S / OFFLINE_ALERT_SWEEP_S (G10, NFR-OCPP-07)', () => {
+  it('mặc định 900 s và quét mỗi 60 s khi không khai báo hoặc rỗng', () => {
+    expect(loadConfig({ ...base }).offlineAlertS).toBe(900);
+    expect(loadConfig({ ...base }).offlineAlertSweepS).toBe(60);
+    expect(loadConfig({ ...base, OFFLINE_ALERT_S: '' }).offlineAlertS).toBe(900);
+  });
+
+  it('đọc số nguyên dương', () => {
+    const c = loadConfig({ ...base, OFFLINE_ALERT_S: '30', OFFLINE_ALERT_SWEEP_S: '5' });
+    expect(c.offlineAlertS).toBe(30);
+    expect(c.offlineAlertSweepS).toBe(5);
+  });
+
+  it.each(['0', '-1', '1.5', 'abc'])('"%s" ném lỗi rõ ràng (phải > 0)', (v) => {
+    expect(() => loadConfig({ ...base, OFFLINE_ALERT_S: v })).toThrow(/OFFLINE_ALERT_S/);
+    expect(() => loadConfig({ ...base, OFFLINE_ALERT_SWEEP_S: v })).toThrow(
+      /OFFLINE_ALERT_SWEEP_S/,
+    );
+  });
+});
+
 describe('loadConfig — RECONCILIATION_ENABLED (G6, ablation)', () => {
   it('mặc định true khi không khai báo hoặc rỗng', () => {
     expect(loadConfig({ ...base }).reconciliationEnabled).toBe(true);

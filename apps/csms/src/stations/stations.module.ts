@@ -9,6 +9,7 @@
 import { Module } from '@nestjs/common';
 import { DbModule } from '../db/db.module.js';
 import { FaultService } from './faults/fault.service.js';
+import { OfflineAlertService } from './faults/offline-alert.service.js';
 import { ChargePointAuthService } from './charge-point-auth.service.js';
 import { ChargePointLoginLimiter } from './charge-point-login-limiter.js';
 import { ChargePointOnboardingService } from './charge-point-onboarding.service.js';
@@ -20,6 +21,8 @@ import { ChargePointOnboardingService } from './charge-point-onboarding.service.
     ChargePointAuthService,
     { provide: ChargePointLoginLimiter, useFactory: () => new ChargePointLoginLimiter() },
     FaultService,
+    // G10: quét trụ im lặng quá OFFLINE_ALERT_S → sự cố Offline (NFR-OCPP-07).
+    OfflineAlertService,
   ],
   exports: [ChargePointOnboardingService, ChargePointAuthService, FaultService],
 })

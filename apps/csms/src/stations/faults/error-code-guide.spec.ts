@@ -8,6 +8,8 @@ import {
   ERROR_CODE_GUIDE,
   guideFor,
   isChargePointErrorCode,
+  OFFLINE_ERROR_CODE,
+  OFFLINE_GUIDE,
 } from './error-code-guide.js';
 
 describe('ErrorCodeGuide', () => {
@@ -34,6 +36,12 @@ describe('ErrorCodeGuide', () => {
     expect(guideFor('RH-E42')).toBe(ERROR_CODE_GUIDE.OtherError);
     expect(guideFor(null)).toBe(ERROR_CODE_GUIDE.OtherError);
     expect(guideFor('GroundFailure')).toBe(ERROR_CODE_GUIDE.GroundFailure);
+  });
+
+  it('G10: mã Offline do CSMS đặt có mục riêng, không lẫn vào 16 mã OCPP', () => {
+    expect(isChargePointErrorCode(OFFLINE_ERROR_CODE)).toBe(false);
+    expect(guideFor(OFFLINE_ERROR_CODE)).toBe(OFFLINE_GUIDE);
+    expect(OFFLINE_GUIDE.severity).toBe('major');
   });
 
   it('bốn mã có hướng xử lý riêng trong SRS phần cứng đang chờ WP1 (WF-04 câu hỏi 1)', () => {
