@@ -8,11 +8,17 @@ import { Module } from '@nestjs/common';
 import { DbModule } from '../db/db.module.js';
 import { ReconciliationModule } from '../reconciliation/reconciliation.module.js';
 import { SessionStateMachine } from './session-state-machine.js';
+import { CHARGE_POLICY } from './charge-settlement.service.js';
+import { loadChargePolicy } from './charge-policy.config.js';
 import { SessionsService } from './sessions.service.js';
 
 @Module({
   imports: [DbModule, ReconciliationModule],
-  providers: [SessionStateMachine, SessionsService],
+  providers: [
+    SessionStateMachine,
+    SessionsService,
+    { provide: CHARGE_POLICY, useFactory: () => loadChargePolicy() },
+  ],
   exports: [SessionsService, SessionStateMachine],
 })
 export class SessionsModule {}
