@@ -145,8 +145,27 @@ describeDb(
         { chargePointId, connectorNo: 1 },
         { chargePointId, connectorNo: 2 },
       ]);
+      // BE-19 (G8): thẻ online active chỉ được Accepted / csms_billed khi gắn tài xế có ví đủ mức
+      // tối thiểu (BR-P23, BR-P18). Trước BE-19 thẻ này không gắn ai mà vẫn Accepted — sai BR.
+      const { rows: onlineUser } = await db.$client.query<{ id: string }>(
+        `INSERT INTO users (email, full_name, role) VALUES ('online-card@test.local', 'Online Card', 'driver') RETURNING id`,
+      );
+      const onlineDriverId = Number(onlineUser[0]?.id);
+      await db.$client.query(
+        `INSERT INTO drivers (user_id, consent_version, consent_given_at) VALUES ($1, 'v1', now())`,
+        [onlineDriverId],
+      );
+      await db.$client.query(
+        `INSERT INTO credit_accounts (driver_id, balance_vnd) VALUES ($1, 500000)`,
+        [onlineDriverId],
+      );
       await db.insert(rfidCards).values([
-        { cardIdentifier: 'CARD-ONLINE', cardKind: 'online', status: 'active' },
+        {
+          cardIdentifier: 'CARD-ONLINE',
+          cardKind: 'online',
+          status: 'active',
+          driverId: onlineDriverId,
+        },
         { cardIdentifier: 'CARD-WALLET', cardKind: 'wallet', status: 'active' },
         { cardIdentifier: 'CARD-BLOCKED', cardKind: 'online', status: 'blocked' },
         { cardIdentifier: 'CARD-UNLINKED', cardKind: 'online', status: 'unlinked' },
