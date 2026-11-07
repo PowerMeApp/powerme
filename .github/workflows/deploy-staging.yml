@@ -63,7 +63,7 @@ jobs:
           - { name: powerme-csms, dockerfile: apps/csms/Dockerfile }
           - { name: powerme-simulator, dockerfile: simulator/d1-hmi/Dockerfile }
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           # Khi chạy tay, build đúng tag được chọn (không phải nhánh đang đứng).
           ref: ${{ needs.prepare.outputs.tag }}

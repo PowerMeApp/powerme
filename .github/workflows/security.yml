@@ -20,7 +20,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           # Quét cả lịch sử, không chỉ commit mới nhất — bí mật lỡ commit rồi
           # xoá ở commit sau vẫn nằm nguyên trong lịch sử và vẫn coi như đã lộ.
