@@ -6,7 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 void main() {
   test(
-    'Two geolocated Dong Hoa pillars retain canonical connectors and metadata',
+    'Two geolocated Dong Hoa charge points retain canonical connectors and metadata',
     () async {
       final store = DemoStore();
       final repo = MockStationRepository(store);

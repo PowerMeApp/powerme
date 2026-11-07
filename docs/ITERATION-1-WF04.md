@@ -1,4 +1,4 @@
-# Iteration 1 — WF-04 "xử lý lỗi trụ" (pillar fault, alert and remote recovery) — FE-04
+# Iteration 1 — WF-04 "xử lý lỗi trụ" (charge point fault, alert and remote recovery) — FE-04
 
 **Date:** 27/10/2026 (updated after review of PR #61, see §10) · **Owner:** Trần Trọng Nghĩa (WP4) · **Branch:** `wp4/fe-04-iteration-1-wf04` (from `main` @ `34ec95a`, merged with `main` @ `c107c94`)
 
@@ -13,19 +13,19 @@
 
 ## 1. Goal of this iteration
 
-This is the first product code for WF-04. A pillar fault becomes an operator alert with the STM-6 lifecycle, and the operator can acknowledge it, reset the pillar remotely, or close it after a site visit.
+This is the first product code for WF-04. A charge point fault becomes an operator alert with the STM-6 lifecycle, and the operator can acknowledge it, reset the charge point remotely, or close it after a site visit.
 
 | In | Out (later) |
 |---|---|
 | **STM-6 FaultEvent**: a pure class with 7 transitions (t2–t7) and creation t1. Every transition and the full 4 × 6 sweep are tested | **Driver fault report** (UC-CHG-05): no app API yet |
-| **Fault raised** from `StatusNotification Faulted`, including **connector 0** (whole pillar, `connector_id` null) | **Maintenance tickets** (UC-OPS-08, «Should») |
+| **Fault raised** from `StatusNotification Faulted`, including **connector 0** (whole charge point, `connector_id` null) | **Maintenance tickets** (UC-OPS-08, «Should») |
 | **One open fault per connector**: a repeated `Faulted` attaches to the open fault (the first `error_code` is kept), enforced in code (`SELECT … FOR UPDATE`) and in the DB (unique index, migration `0007`) | **Hide connector + void reservations** (AD-4, «Should») |
 | **Auto-resolve** when the connector works again: `Available`, or straight to `Preparing` / `Charging` / `SuspendedEV(SE)` / `Finishing` / `Reserved` (t3 from `raised`, t5 from `resetting`, t7 from `acknowledged`). `Unavailable` after a reboot does **not** resolve | **Offline > 900 s → fault** (G19, ADR-0016): the timer location is to be agreed with Trí |
 | **Acknowledge** (t2), **remote Reset** (t4) with a `remote_commands` row and a timeout timer, refused with 409 while another connector is charging unless the operator forces it, **Reset failed / rejected / timeout** (t6), **manual close** (t7 `OPERATOR_CLOSE`) | **Realtime** `alert.*` events (BE-08), **dashboard alerts page** (WP4 UI) |
 | **Error-code guide**: all 16 OCPP 1.6 `ChargePointErrorCode` values with severity and an operator hint | Final hints for the four SRS hardware codes (waiting on WP1) |
 | **Console API + "Faults" table**: list, acknowledge, reset, close | Login / `RolesGuard` (ADR-0011): `acknowledged_by` stays null from the console |
 
-The session on the faulted connector needs **no new code**. The pillar sends `StopTransaction(reason Other)`, and the existing STM-1 #10 → #12 path closes and reconciles it. IT-1a and IT-1b prove this in both message orders.
+The session on the faulted connector needs **no new code**. The charge point sends `StopTransaction(reason Other)`, and the existing STM-1 #10 → #12 path closes and reconciles it. IT-1a and IT-1b prove this in both message orders.
 
 ---
 
@@ -72,11 +72,11 @@ infra/.env.example                            + FAULT_RESET_TIMEOUT_S
 
 ### 3.2 `FaultService` (`stations/faults/fault.service.ts`)
 
-- **`onConnectorStatus(...)`** is called by `OcppHandlers` **after** `SessionsService.onStatusNotification`. Frames of one pillar are serialized, so the order is safe.
+- **`onConnectorStatus(...)`** is called by `OcppHandlers` **after** `SessionsService.onStatusNotification`. Frames of one charge point are serialized, so the order is safe.
   - `Faulted`: t1, or attach to the open fault.
   - A working status (`RECOVERED_STATUSES`: `Available`, `Preparing`, `Charging`, `SuspendedEV`, `SuspendedEVSE`, `Finishing`, `Reserved`): t3 / t5 / t7. OCPP 1.6 lets a connector leave `Faulted` for any status (table I1–I8, `valid-transitions.ts`), so a fault that clears while a driver is already plugged in goes Faulted → Preparing → Charging and must close too. The STM-6 trigger keeps its name `CONNECTOR_AVAILABLE`.
   - `Unavailable` (reboot in progress) or an unknown status: nothing.
-  - `raised_at` / `resolved_at` use the pillar's `timestamp` when the frame is **replayed** (`ctx.replay.replayed`), otherwise `received_at`. A pillar offline for 30 min that replays `Faulted` at 10:05 and `Available` at 10:07 gets those times, not the 10:35 reconnect. The pillar time is never later than `received_at` and never more than 30 days older (`eventTime`, `MAX_REPLAY_AGE_MS`); otherwise the pillar clock is wrong and `received_at` is used.
+  - `raised_at` / `resolved_at` use the charge point's `timestamp` when the frame is **replayed** (`ctx.replay.replayed`), otherwise `received_at`. A charge point offline for 30 min that replays `Faulted` at 10:05 and `Available` at 10:07 gets those times, not the 10:35 reconnect. The charge point time is never later than `received_at` and never more than 30 days older (`eventTime`, `MAX_REPLAY_AGE_MS`); otherwise the charge point clock is wrong and `received_at` is used.
   - **Stale replays are ignored** (outcome `stale`, logged, frame still in `ocpp_message_log`): a working status older than the open fault's `raised_at` does not close it, and a `Faulted` older than the connector's last `resolved_at` does not reopen anything. Without this, queued `Charging` frames from before a cut would close a live fault now that every working status resolves.
   - An error here is logged and never turns a `StatusNotification` into a CALLERROR. CSMS mirrors status and never rejects one (T13).
 - **`acknowledge`** → t2.
@@ -91,14 +91,14 @@ infra/.env.example                            + FAULT_RESET_TIMEOUT_S
 - **`list`**: open faults first, then by severity, then newest — ordered **in SQL before `LIMIT`** (`CASE error_code …` built from `ERROR_CODE_GUIDE`), so newer minor faults never push an older critical one off the console's 20 rows.
 - **`recoverAfterRestart`** runs at bootstrap. Timers are in RAM, as in T61. Each `resetting` fault is timed out if its command is older than the timeout, or re-armed for the remaining time.
 
-**Who sends the Reset CALL.** `stations` must not import `ocpp-gateway` (ADR-0016 D-F), so the console sends it through `ConnectionRegistry`, the same way `remoteStop` does. The order is: check (409 if not `acknowledged`, the pillar is offline, another fault on the same pillar is already `resetting`, or another connector has a `pending` / `active` / `paused` / `stopping` / `orphaned` session; nothing is written) → `beginReset` → `markSent` → `client.call('Reset', {type})` → `onResetResult`.
+**Who sends the Reset CALL.** `stations` must not import `ocpp-gateway` (ADR-0016 D-F), so the console sends it through `ConnectionRegistry`, the same way `remoteStop` does. The order is: check (409 if not `acknowledged`, the charge point is offline, another fault on the same charge point is already `resetting`, or another connector has a `pending` / `active` / `paused` / `stopping` / `orphaned` session; nothing is written) → `beginReset` → `markSent` → `client.call('Reset', {type})` → `onResetResult`.
 
-**Reset on a busy pillar.** OCPP `Reset` reboots the whole pillar, so a driver charging on the other connector would be cut off without notice (BR-P07 asks for communicated downtime). The console answers 409 `sessions_active` with the connectors and session ids; the page asks a second confirmation and resends with `force=true`. The command is then stored with `payload = {type, force: true}` and the response carries `forced: true`. A session on the faulted connector itself does not block: WF-04 step 1 closes it. `pending` (remote start accepted, driver about to plug in) and `orphaned` (pillar reconnected but no live frame yet, so it may still be charging, STM-1 #18) count as well; a stale orphaned session therefore needs `force` until the 24 h hard cap moves it to `review`. The check runs before the reset transaction, so a session that starts in between is not caught — the pillar can start one at any moment anyway.
+**Reset on a busy charge point.** OCPP `Reset` reboots the whole charge point, so a driver charging on the other connector would be cut off without notice (BR-P07 asks for communicated downtime). The console answers 409 `sessions_active` with the connectors and session ids; the page asks a second confirmation and resends with `force=true`. The command is then stored with `payload = {type, force: true}` and the response carries `forced: true`. A session on the faulted connector itself does not block: WF-04 step 1 closes it. `pending` (remote start accepted, driver about to plug in) and `orphaned` (charge point reconnected but no live frame yet, so it may still be charging, STM-1 #18) count as well; a stale orphaned session therefore needs `force` until the 24 h hard cap moves it to `review`. The check runs before the reset transaction, so a session that starts in between is not caught — the charge point can start one at any moment anyway.
 
 ### 3.3 `ErrorCodeGuide`
 
 - 16 codes, each with severity (critical / major / minor / none) and a hint. `NoError` = none. Unknown vendor codes fall back to `OtherError`.
-- Severity **only orders the list**. It never disables a pillar (WF-04 Q11).
+- Severity **only orders the list**. It never disables a charge point (WF-04 Q11).
 - The four codes with dedicated SRS handling are flagged `pendingWp1`: `GroundFailure`, `HighTemperature`, `OverCurrentFailure`, `PowerMeterFailure`. Which four they are is an assumption until WP1 confirms; a test fails when the list changes.
 
 ### 3.4 Console
@@ -158,7 +158,7 @@ File: `apps/csms/src/stations/faults/fault-state-machine.spec.ts`. Names look li
 | IT-6 | acknowledge → reset Hard (Accepted) → Boot → `Unavailable` → `Available` | CALL `Reset {type: Hard}` sent; command `accepted` with `sent_at` / `responded_at`; timer 120 s armed, then cancelled; t4 → t5 |
 | IT-7 | Reset → `Rejected` | `acknowledged` (t6); command `rejected`; a second reset works |
 | IT-7b | Reset CALL fails | 502; command `failed`; fault `acknowledged` |
-| IT-8 | Reset Accepted, pillar comes back still `Faulted`, timer fires | `acknowledged`; command stays `accepted`; a repeated timeout is a no-op |
+| IT-8 | Reset Accepted, charge point comes back still `Faulted`, timer fires | `acknowledged`; command stays `accepted`; a repeated timeout is a no-op |
 | IT-8b | timeout before any reply | command `timeout` |
 | IT-9 | close before acknowledge → 409; acknowledge → close → close again | `resolved`, then 409 `invalid_transition`; connector stays `Faulted` |
 | IT-10 | `Faulted` on connector 0 | `connector_id` null; c1 `Available` doesn't resolve it; c0 `Available` does |
@@ -168,9 +168,9 @@ File: `apps/csms/src/stations/faults/fault-state-machine.spec.ts`. Names look li
 | IT-14 | replayed `Faulted` (cp 10:05) and `Available` (cp 10:07) received ~30 min later; then a live `Faulted` | `raised_at` 10:05, `resolved_at` 10:07; live frame uses `received_at` |
 | IT-15 | 26 open faults: one old `GroundFailure`, 25 newer `WeakSignal`; `GET …?limit=20` | 20 rows, the critical one first |
 | IT-16 | live `Faulted`, then a replayed `Charging` from before it; then live `Available` and a replayed `Faulted` from before that | fault stays `raised`; then exactly one fault, `resolved` (no reopen) |
-| IT-17 | pillar time 1970 / 3 h in the future | `raised_at` / `resolved_at` = `received_at` |
+| IT-17 | charge point time 1970 / 3 h in the future | `raised_at` / `resolved_at` = `received_at` |
 | IT-18 | session on c2 set to `orphaned`, then `pending`; then two faults, reset c1 then c2 | 409 `sessions_active` both times; 409 `reset_in_progress`, one Reset CALL only |
-| console 409 / 404 | reset when not acknowledged, unknown id, pillar offline | correct codes; **no** `remote_commands` row and **no** CALL sent |
+| console 409 / 404 | reset when not acknowledged, unknown id, charge point offline | correct codes; **no** `remote_commands` row and **no** CALL sent |
 | console list | open-only by default, severity first; `?status=all` | ordering |
 | restart sweep | two `resetting` faults, one past the timeout and one not | `{timedOut: 1, scheduled: 1}`, remaining delay = 90 s |
 | message log | every `StatusNotification` is in `ocpp_message_log` | — |
@@ -180,7 +180,7 @@ File: `apps/csms/src/stations/faults/fault-state-machine.spec.ts`. Names look li
 `npm run demo -- --reset --port-offset 200` with `FAULT_RESET_TIMEOUT_S=20` (27/10/2026):
 
 1. HMI `fault` c1 `GroundFailure` → console shows fault #1 `raised`, severity `critical`.
-2. Acknowledge, then Reset → pillar answers `Accepted`, fault `resetting`, and the pillar reboots (Boot + StatusNotification). The D1 simulator keeps the fault across a reboot, so the connector is still `Faulted`.
+2. Acknowledge, then Reset → charge point answers `Accepted`, fault `resetting`, and the charge point reboots (Boot + StatusNotification). The D1 simulator keeps the fault across a reboot, so the connector is still `Faulted`.
 3. After 20 s → fault back to `acknowledged` (t6), command stays `accepted`.
 4. Reset again, plus HMI `clearfault` during the reboot → connector `Available` → fault `resolved` (t5).
 
@@ -234,7 +234,7 @@ The WF-04 §6 questions still apply. New ones from this iteration:
 
 | # | Question | This iteration assumes | Who |
 |---|---|---|---|
-| 1 | Does the Ruihua pillar send `StopTransaction` before or after `Faulted`? | Both orders are handled (IT-1a / IT-1b) | Trí + vendor |
+| 1 | Does the Ruihua charge point send `StopTransaction` before or after `Faulted`? | Both orders are handled (IT-1a / IT-1b) | Trí + vendor |
 | 2 | A repeated `Faulted` with a **different** code: keep the first or update? | Keep the first; later codes are visible in `connector_status_events` | Nghĩa |
 | 3 | Does a real fault survive a Reset like in the simulator? | Yes; the timeout path covers it | WP5 + vendor |
 | 4 | Is 120 s the right Reset timeout for D1/YJ-EU hardware? | 120 s, configurable | WP1 / Trí |
@@ -251,13 +251,13 @@ The WF-04 §6 questions still apply. New ones from this iteration:
 
 | Finding | Level | Change | Test |
 |---|---|---|---|
-| Reset does not check charging sessions, but Reset hits the whole pillar | blocking | 409 `sessions_active` unless `force=true`; second confirmation in the console; `payload.force` recorded | IT-13, router / http specs |
+| Reset does not check charging sessions, but Reset hits the whole charge point | blocking | 409 `sessions_active` unless `force=true`; second confirmation in the console; `payload.force` recorded | IT-13, router / http specs |
 | Migration `0007` collides with PR #58 | blocking | Renamed to `0008`; merged `main` (#62 makes the migration tests list-independent and refuses duplicate numbers) | migration-0001 "each number once" |
 | A fault only closes on `Available` | should fix | Any working status resolves (`RECOVERED_STATUSES`) | IT-12 |
-| Replay flag ignored for `raised_at` | should fix | Replayed frames use the pillar's `timestamp` | IT-14 |
+| Replay flag ignored for `raised_at` | should fix | Replayed frames use the charge point's `timestamp` | IT-14 |
 | List limited before sorting by severity | should fix | Order in SQL, then `LIMIT` | IT-15 |
-| *(self-review)* replayed old frames could close a live fault; pillar clock trusted blindly; `orphaned` / `pending` sessions not checked; two Resets on one pillar | — | stale guard, `eventTime` clamp, wider session check, 409 `reset_in_progress` | IT-16, IT-17, IT-18 |
+| *(self-review)* replayed old frames could close a live fault; charge point clock trusted blindly; `orphaned` / `pending` sessions not checked; two Resets on one charge point | — | stale guard, `eventTime` clamp, wider session check, 409 `reset_in_progress` | IT-16, IT-17, IT-18 |
 | PR also carried UC-ADM-08 and the dashboard package diagram; empty description | minor | Kept in this PR at the owner's choice (they are WP4 dashboard design docs for Iteration 1); listed separately in the PR description with Khang tagged for the billing part. A copy is also on `wp4/fe-09-billing-exceptions-uc-adm-08`. PR description written by Trí at merge time | — |
 | FaultService error is only logged (no retry or sweep): a `Faulted` that fails to write never raises an alert | should fix | **Deferred** to after Review 2 — sweep `connector_status_events` for `Faulted` rows without a `fault_events` row | — |
-| Hard reset recorded `failed` (HTTP 502) when the pillar reboots before sending CALLRESULT | minor | **Deferred** — the fault still closes through t7 when the connector reports a working status | — |
-| *(re-review)* stale guard compares pillar time with server time: a pillar clock 10 min slow makes the replayed recovery look older than the live `Faulted`, so the fault stays `raised` | should fix | **Deferred** — fix before Review 2 if time allows (allow a skew window or compare receive order) | — |
+| Hard reset recorded `failed` (HTTP 502) when the charge point reboots before sending CALLRESULT | minor | **Deferred** — the fault still closes through t7 when the connector reports a working status | — |
+| *(re-review)* stale guard compares charge point time with server time: a charge point clock 10 min slow makes the replayed recovery look older than the live `Faulted`, so the fault stays `raised` | should fix | **Deferred** — fix before Review 2 if time allows (allow a skew window or compare receive order) | — |

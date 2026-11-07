@@ -55,22 +55,30 @@ check_env() {
   [[ "$(env_get POSTGRES_DB)" =~ ^[a-z_][a-z0-9_]*$ ]] || die "POSTGRES_DB chỉ gồm a-z 0-9 _"
   [[ "$(env_get POSTGRES_PASSWORD)" =~ ^[A-Za-z0-9._~-]{16,}$ ]] \
     || die "POSTGRES_PASSWORD phải >= 16 ký tự, chỉ chữ/số và . _ ~ - (sinh: openssl rand -hex 24)"
-  v="$(env_get DEMO_PILLAR_PASSWORD)"
+  v="$(demo_cp_password)"
   if [ -n "$v" ] && ! [[ "$v" =~ ^[A-Za-z0-9._~:/@+=,-]{16,}$ ]]; then
-    die "DEMO_PILLAR_PASSWORD phải >= 16 ký tự, không có khoảng trắng/nháy/\$/# (sinh: openssl rand -base64 24)"
+    die "DEMO_CHARGE_POINT_PASSWORD phải >= 16 ký tự, không có khoảng trắng/nháy/\$/# (sinh: openssl rand -base64 24)"
   fi
+}
+
+# Mật khẩu trụ demo trong .env; tên cũ DEMO_PILLAR_PASSWORD (trước T92) vẫn được đọc khi tên mới trống.
+demo_cp_password() {
+  local v
+  v="$(env_get DEMO_CHARGE_POINT_PASSWORD)"
+  [ -n "$v" ] || v="$(env_get DEMO_PILLAR_PASSWORD)"
+  printf '%s' "$v"
 }
 
 # Dùng khi seed hoặc chạy simulator: mật khẩu trụ demo là bắt buộc, không có mặc định.
 require_demo_password() {
-  [ -n "$(env_get DEMO_PILLAR_PASSWORD)" ] \
-    || die "DEMO_PILLAR_PASSWORD trống trong .env (>= 16 ký tự; sinh: openssl rand -base64 24)"
+  [ -n "$(demo_cp_password)" ] \
+    || die "DEMO_CHARGE_POINT_PASSWORD trống trong .env (>= 16 ký tự; sinh: openssl rand -base64 24)"
 }
 
 # Chạy tập lệnh Node trong image csms. Mật khẩu đi qua biến môi trường (không lên argv).
 run_csms_script() {
-  DEMO_PILLAR_PASSWORD="$(env_get DEMO_PILLAR_PASSWORD)" \
-    docker compose run --rm -T -e DEMO_PILLAR_PASSWORD csms node "$@"
+  DEMO_CHARGE_POINT_PASSWORD="$(demo_cp_password)" \
+    docker compose run --rm -T -e DEMO_CHARGE_POINT_PASSWORD csms node "$@"
 }
 
 # Simulator đang chạy? (profile sim không hiện trong `ps` thường).

@@ -36,7 +36,7 @@ Security Profile 2 là **mục tiêu**, chưa phải trạng thái hiện tại:
 
 **Mất:**
 
-- Basic Auth không tự giới hạn số lần thử sai: cần giới hạn tốc độ theo serial/IP trước khi mở staging (issue riêng, xem `docs/WF-05-PILLAR-ONBOARDING.md`).
+- Basic Auth không tự giới hạn số lần thử sai: cần giới hạn tốc độ theo serial/IP trước khi mở staging (issue riêng, xem `docs/WF-05-CHARGE-POINT-ONBOARDING.md`).
 - Mật khẩu chỉ hiện một lần: mất là phải cấp lại (luồng cấp lại chưa có, iteration sau).
 
 ## Các phương án đã cân nhắc và loại bỏ

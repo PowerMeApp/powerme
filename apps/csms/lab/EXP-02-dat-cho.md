@@ -58,7 +58,7 @@ Nghĩa là tính duy nhất ở đây do **hai thứ ngoài CSMS** bảo đảm:
 | Hai tài xế bấm đặt chỗ gần như cùng lúc | **Không** — cả hai có thể qua được bước kiểm "còn trống?" phía CSMS trước khi lệnh nào chạm tới trụ |
 | **Trụ không hỗ trợ Reservation** (platform hold theo FR-16) | **Không có trụ nào để xếp hàng** — CSMS là lớp bảo vệ duy nhất |
 
-Dòng cuối là tình huống FR-16 đã cam kết: *"connector reservation **with a platform hold when a pillar does not support it**"*. Trong đường đi đó, toàn bộ tính duy nhất nằm ở CSMS.
+Dòng cuối là tình huống FR-16 đã cam kết: *"connector reservation **with a platform hold when a charge point does not support it**"*. Trong đường đi đó, toàn bộ tính duy nhất nằm ở CSMS.
 
 **Hệ quả thiết kế:** tính duy nhất của đặt chỗ phải nằm ở **ràng buộc UNIQUE trong CSDL**, cùng hình dạng với khoá chống trùng `StartTransaction` của **ADR-0010**. Không được phó mặc cho trụ. Cần một ADR riêng.
 

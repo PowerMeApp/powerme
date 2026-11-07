@@ -1,4 +1,4 @@
-# WF-05 Pillar onboarding — Iteration 1 (T35)
+# WF-05 Charge Point onboarding — Iteration 1 (T35)
 
 Owner: Trần Đức Ân (WP1) · Reviewer: Ngô Văn Minh Trí (WP2) · 25/10/2026
 Design: Report 4 §3.6 (CD-5, SD-5a, SD-5b), AD-8 v2.0, STM-3 v0.3 (ADR-0016) · FR-09, FR-15 (registry), FR-16 · UC-ADM-03, UC-OPS-01, UC-INT-01
@@ -19,19 +19,19 @@ Error → HTTP status for the future controller: `ONBOARDING_ERROR_STATUS` (403 
 
 - `src/stations/charge-point-lifecycle-policy.spec.ts` — TC-STM3-01..06 (one per transition) + 6 refused moves + `mayConnect` (15 cases).
 - `src/stations/charge-point-credential.spec.ts` — generation, salted hash, verify string/Buffer, wrong/missing/malformed (4).
-- `test/wf05-onboarding.integration.test.ts` — the whole workflow on Postgres and a real OCPP-J WebSocket (`ocpp-rpc` client with Basic auth): Admin-only registry, not-onboarded pillar refused (403), 5 onboarding rejections with nothing written, success, double onboarding (409), 6 concurrent onboardings in one province get distinct display codes, wrong / missing credential (401), right credential → Boot Accepted, `in_service`, both connectors `Available` (8).
+- `test/wf05-onboarding.integration.test.ts` — the whole workflow on Postgres and a real OCPP-J WebSocket (`ocpp-rpc` client with Basic auth): Admin-only registry, not-onboarded charge point refused (403), 5 onboarding rejections with nothing written, success, double onboarding (409), 6 concurrent onboardings in one province get distinct display codes, wrong / missing credential (401), right credential → Boot Accepted, `in_service`, both connectors `Available` (8).
 
 Run: `npm run demo:db -w @powerme/csms` in one terminal, then `DATABASE_URL=postgresql://powerme:powerme@127.0.0.1:54330/powerme_test npm test -w @powerme/csms`.
 
 ## Decisions taken in the review of PR #33 (Trí, 25/10)
 
-1. **scrypt instead of argon2** for the pillar credential: `node:crypto`, no native add-on on Windows dev machines. The stored format `scrypt$N$r$p$salt$hash` is self-describing, so argon2 can be added later under its own prefix. **Accepted**; ADR-0011 amended.
-2. **Pillars without a credential are refused (401) by default** (PR #35): accepted with a warning only when `ALLOW_LEGACY_NO_CREDENTIAL=true`, for `demo/seed.sql` and the WF-03 trace pillar, which were created before WF-05.
+1. **scrypt instead of argon2** for the charge point credential: `node:crypto`, no native add-on on Windows dev machines. The stored format `scrypt$N$r$p$salt$hash` is self-describing, so argon2 can be added later under its own prefix. **Accepted**; ADR-0011 amended.
+2. **Charge Points without a credential are refused (401) by default** (PR #35): accepted with a warning only when `ALLOW_LEGACY_NO_CREDENTIAL=true`, for `demo/seed.sql` and the WF-03 trace charge point, which were created before WF-05.
 3. `ChargePointAuthService` is injected into `OcppServer` as `@Optional()`, so the WF-03 and console tests build the server unchanged.
 
 ## Not in this slice (Known gaps, Design Brief §5)
 
-- HTTP endpoints `POST /api/admin/registry/pillars`, `POST /api/v1/operator/pillars`: wait for the `users` module (JWT + RolesGuard). The service already takes the caller's user id and resolves role and operator from the DB.
+- HTTP endpoints `POST /api/admin/registry/charge-points`, `POST /api/v1/operator/charge-points`: wait for the `users` module (JWT + RolesGuard). The service already takes the caller's user id and resolves role and operator from the DB.
 - Audit-log table: rejections are logged with `Logger.warn` only.
 - GetConfiguration after Boot (SoC reporting, free-vend tag) and saving model / firmware from BootNotification.
 - Disable / enable / decommission endpoints (STM-3 #4–#6 are in the policy and unit-tested).
@@ -39,5 +39,5 @@ Run: `npm run demo:db -w @powerme/csms` in one terminal, then `DATABASE_URL=post
 
 ## Security limits today (follow-up of the PR #33 review)
 
-- **No TLS yet.** The CSMS listens on `ws://`, so the Basic-auth password travels in clear text. Security Profile 2 (ADR-0011) is the target; it is reached when Caddy terminates TLS on staging (T04). Until then, connect pillars and the simulator on the dev network only.
-- **No rate limit on failed pillar logins.** Anyone who knows a serial can try passwords without delay. The password has ~144 bits of entropy, so guessing is not practical, but repeated failures still cost a scrypt hash each (CPU). Tracked as an issue to close before staging opens: limit failures per serial and per IP (e.g. 5 per minute, then 429 for 15 minutes) and log them for the audit log.
+- **No TLS yet.** The CSMS listens on `ws://`, so the Basic-auth password travels in clear text. Security Profile 2 (ADR-0011) is the target; it is reached when Caddy terminates TLS on staging (T04). Until then, connect charge points and the simulator on the dev network only.
+- **No rate limit on failed charge point logins.** Anyone who knows a serial can try passwords without delay. The password has ~144 bits of entropy, so guessing is not practical, but repeated failures still cost a scrypt hash each (CPU). Tracked as an issue to close before staging opens: limit failures per serial and per IP (e.g. 5 per minute, then 429 for 15 minutes) and log them for the audit log.

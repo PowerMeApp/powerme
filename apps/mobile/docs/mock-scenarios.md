@@ -24,8 +24,8 @@ Widget không có timer tự tăng kWh/SOC/cost. Clock kích hoạt timeline/sna
 | Start/stop lặp | Cùng intent/key, không tạo đôi phiên/tài chính |
 | Stop rejected/unknown | Hiện đúng nhánh, kiểm tra lại, không key mới khi chưa rõ kết quả |
 | System stop | Mode limit/credit cutoff fixture → stopping → closed khi effect xác nhận |
-| Pillar offline ≤120 giây | Giữ lifecycle trước đó; active vẫn đang sạc, metrics cuối + “Dữ liệu có thể chưa cập nhật” |
-| Pillar offline >120 giây | Store phát orphaned → “Mất kết nối với trụ, dữ liệu đang chờ” |
+| Charge Point offline ≤120 giây | Giữ lifecycle trước đó; active vẫn đang sạc, metrics cuối + “Dữ liệu có thể chưa cập nhật” |
+| Charge Point offline >120 giây | Store phát orphaned → “Mất kết nối với trụ, dữ liệu đang chờ” |
 | Handset offline | App stale, không tự orphaned |
 | Reconnect/gap | Snapshot mới, bỏ event cũ/trùng, subscribe đúng scope |
 | Paused/review/unknown | Nhãn riêng, không suy active/success hoặc null thành 0 |
