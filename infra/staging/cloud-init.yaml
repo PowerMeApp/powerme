@@ -1,12 +1,13 @@
 #cloud-config
-# Dán NGUYÊN FILE này vào ô "Custom data" (tab Advanced) khi tạo VM Ubuntu 24.04 trên Azure.
-# Việc nó làm lúc VM khởi động lần đầu (khoảng 3-5 phút):
-#   1. tạo user 'deploy' (khoá mật khẩu; chỉ đăng nhập bằng khoá SSH bên dưới),
-#   2. cài Docker Engine + Compose plugin từ kho chính thức của Docker,
-#   3. cho 'deploy' dùng docker, rồi clone repo public vào /home/deploy/powerme.
-# KHÔNG chứa secret: dòng ssh-ed25519 là khoá CÔNG KHAI (khoá riêng nằm ở máy Trí và ở GitHub secret
-# STAGING_SSH_KEY). Muốn dùng khoá khác thì thay dòng đó trước khi dán.
-# Kiểm xong khi có file /var/lib/powerme-cloud-init.done (cloud-init status --wait).
+# Paste THIS WHOLE FILE into the "Custom data" box (Advanced tab) when creating the Ubuntu 24.04 VM on Azure.
+# Azure only accepts ASCII in that box, so comments here are written without Vietnamese diacritics.
+# On first boot (about 3-5 minutes) it:
+#   1. creates user deploy (password locked, SSH key login only),
+#   2. installs Docker Engine + Compose plugin from the official Docker repo,
+#   3. lets deploy use docker, then clones the public repo into /home/deploy/powerme.
+# No secret inside: the ssh-ed25519 line is a PUBLIC key (the private key stays on Tri machine and in the
+# GitHub secret STAGING_SSH_KEY). To use another key, replace that line before pasting.
+# Done when /var/lib/powerme-cloud-init.done exists (cloud-init status --wait).
 package_update: true
 packages:
   - ca-certificates

@@ -2,7 +2,14 @@
 
 Mục tiêu: một máy chủ Ubuntu 24.04 chạy `infra/staging/` (Caddy + CSMS + Postgres), có HTTPS thật tại một tên miền **miễn phí của Azure** (không cần mua domain), để demo Defense 1.1 chạy trên staging chứ không phải máy cá nhân.
 
-> **Trạng thái thật (04/11/2026):** toàn bộ phần dưới được viết từ tài liệu và kiểm bằng mô phỏng (script `init-env.sh` đã chạy thử cục bộ; `cloud-init.yaml` đã kiểm cú pháp YAML). **Chưa chạy trên Azure thật.** Tên mục, tên nút và danh sách size/vùng trong Azure Portal có thể khác chút so với mô tả; chỗ nào không chắc có ghi "kiểm trên giao diện".
+> **Trạng thái thật (04/11/2026):** đã chạy trên Azure thật: VM Japan East, `B2als_v2`, cloud-init xong, deploy `review-4`, kiểm bảo mật và OCPP `wss://` đạt. Tên mục/nút trong Portal có thể khác chút; chỗ nào không chắc có ghi "kiểm trên giao diện".
+>
+> **Bài học khi tạo VM (subscription Azure for Students):**
+> - Policy chỉ cho 5 vùng: `eastasia`, `indiasouthcentral`, `koreacentral`, `japaneast`, `indonesiacentral` (xem bằng `az policy assignment list --query "[].{ten:displayName, vung:parameters.listOfAllowedLocations.value}"`). Southeast Asia và Central India bị chặn (`RequestDisallowedByAzure`).
+> - Japan East: `Standard_B2als_v2` (2 vCPU / 4 GiB, ~36 USD/tháng) chỉ có ở **Availability zone 3**.
+> - Ô Custom data của Azure chỉ nhận ký tự ASCII: `cloud-init.yaml` không được có tiếng Việt có dấu.
+> - Chọn image **Ubuntu Server 24.04 LTS** (không phải Ubuntu Pro, có phí bản quyền).
+> - FQDN thật: `powerme-staging.japaneast.cloudapp.azure.com` (mã vùng trong FQDN đổi theo vùng).
 
 ## Vì sao làm theo cách này
 
@@ -28,7 +35,7 @@ Mục tiêu: một máy chủ Ubuntu 24.04 chạy `infra/staging/` (Caddy + CSMS
 | Subscription | Azure for Students |
 | Resource group | tạo mới `powerme-staging` |
 | Virtual machine name | `powerme-staging` |
-| Region | **Southeast Asia (Singapore)** nếu có trong danh sách. Subscription sinh viên đôi khi chỉ cho một số vùng (kiểm trên giao diện); nếu Singapore bị chặn, chọn vùng châu Á gần nhất còn hiện. Lưu ý PDPL: vùng nào cũng là dữ liệu ngoài Việt Nam; dữ liệu staging là **dữ liệu giả lập**, không có dữ liệu thật |
+| Region | **Japan East** (đã kiểm; Singapore bị policy chặn trên subscription này). Chỉ 5 vùng được phép, xem ghi chú đầu file. Lưu ý PDPL: vùng nào cũng là dữ liệu ngoài Việt Nam; dữ liệu staging là **dữ liệu giả lập**, không có dữ liệu thật |
 | Image | **Ubuntu Server 24.04 LTS – x64 Gen2** |
 | Size | **2 vCPU / 4 GB RAM trở lên** (dòng B2s hoặc tương đương còn khả dụng; kiểm trên giao diện). 2 GB chạy được nhưng `docker compose pull` và build chậm, nên thêm swap |
 | Authentication | **SSH public key**, Username `azureuser`, dán nội dung `~/.ssh/powerme_staging.pub` |
@@ -59,7 +66,7 @@ Kỳ vọng: `status: done`, file `.done` tồn tại, Docker và Compose in phi
 ```bash
 ssh -i ~/.ssh/powerme_staging deploy@<FQDN>
 cd ~/powerme/infra/staging
-./init-env.sh <FQDN> <TAG>        # ví dụ: ./init-env.sh powerme-staging.southeastasia.cloudapp.azure.com review-4
+./init-env.sh <FQDN> <TAG>        # ví dụ: ./init-env.sh powerme-staging.japaneast.cloudapp.azure.com review-4
 ```
 
 Script sinh `POSTGRES_PASSWORD` và `DEMO_PILLAR_PASSWORD`, ghi vào `.env` (chmod 600), **không in ra**. Chạy lại sẽ bị từ chối (tránh làm lệch mật khẩu DB đã tạo); chỉ dùng `--force` khi chấp nhận mất mật khẩu cũ.
