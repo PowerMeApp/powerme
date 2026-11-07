@@ -42,7 +42,7 @@ VPS 127.0.0.1:8100 ──▶ HMI simulator   (profile sim; cũng chỉ qua SSH t
 | `pnpm db:migrate`, `pnpm db:seed:demo` | `node scripts/migrate.mjs`, `node scripts/seed-demo.mjs` | Repo dùng npm; hai script này là mới |
 | `HEALTH_PATH=/api/v1/health` | `GET /health` (mới) trên console, kiểm trong container; thêm kiểm công khai `/ocpp/HEALTHCHECK` | Endpoint cũ không tồn tại |
 | `postgres:16.4` | `postgres:16.4-alpine` | Khớp `infra/docker-compose.yml` và CI |
-| Seed không có credential | `DEMO_PILLAR_PASSWORD` bắt buộc | `ALLOW_LEGACY_NO_CREDENTIAL=false` ⇒ trụ không credential bị 401 |
+| Seed không có credential | `DEMO_CHARGE_POINT_PASSWORD` bắt buộc | `ALLOW_LEGACY_NO_CREDENTIAL=false` ⇒ trụ không credential bị 401 |
 
 ## Việc phải làm BẰNG TAY (không có gì trong repo tự làm được)
 
@@ -71,7 +71,7 @@ Phân công dưới đây là **đề xuất**; nhóm điều chỉnh. Cột "Ai
 1. Xong các việc 2–8 ở trên. Điền `.env`:
    - `DOMAIN` — tên miền thật; `REGISTRY=ghcr.io/powermeapp` (viết thường).
    - `POSTGRES_PASSWORD` — `openssl rand -hex 24` (chỉ chữ/số; nằm trong `DATABASE_URL`).
-   - `DEMO_PILLAR_PASSWORD` — `openssl rand -base64 24` (>= 16 ký tự; bắt buộc để seed và chạy simulator).
+   - `DEMO_CHARGE_POINT_PASSWORD` — `openssl rand -base64 24` (>= 16 ký tự; bắt buộc để seed và chạy simulator).
    - `TAG` để nguyên; `deploy.sh` tự ghi.
 2. **Tag phải được tạo SAU khi PR này vào `main`.** Các tag cũ (`review-2`, `review-2-v0`) không có Dockerfile nên build sẽ lỗi. Đẩy một tag mới (ví dụ `review-3`) — việc này kích hoạt workflow build ảnh (deploy vẫn bị bỏ qua vì `STAGING_ENABLED` chưa đặt). Tag là hành động của người có quyền; tài liệu này không tự đẩy tag.
 3. Làm việc 9 (gói GHCR công khai) hoặc 9b. Kiểm: `docker pull ghcr.io/powermeapp/powerme-csms:review-3` chạy được trên VPS.
@@ -94,7 +94,7 @@ Chạy trong `infra/staging` trên VPS.
 | Deploy một tag (CI làm khi có `STAGING_ENABLED`) | `./deploy.sh review-3` |
 | Deploy kèm nạp dữ liệu mẫu | `./deploy.sh review-3 --seed` |
 | Deploy kèm simulator | `./deploy.sh review-3 --sim` (tự bật nếu simulator đang chạy) |
-| Áp lại dữ liệu mẫu, xoay mật khẩu trụ demo (đổi `DEMO_PILLAR_PASSWORD` rồi chạy) | `./seed.sh` |
+| Áp lại dữ liệu mẫu, xoay mật khẩu trụ demo (đổi `DEMO_CHARGE_POINT_PASSWORD` rồi chạy) | `./seed.sh` |
 | Về trạng thái đầu cho kịch bản DS-01..DS-10 (**xoá toàn bộ DB**) | `./seed.sh --reset` |
 | Lùi ảnh (chỉ khi an toàn, xem dưới) | `./rollback.sh` |
 | Khôi phục DB rồi lùi ảnh | `./rollback.sh --restore-db backups/pre-<tag>-<giờ>.dump` |
@@ -118,14 +118,14 @@ ssh -L 3000:127.0.0.1:3000 <user>@<DOMAIN>
 
 ## Chạy simulator (profile `sim`)
 
-Simulator là trụ D1 giả lập có HMI, nối `wss://<DOMAIN>/ocpp` với Basic Auth (`CP_ID=RH24D1-00001`, mật khẩu = `DEMO_PILLAR_PASSWORD`).
+Simulator là trụ D1 giả lập có HMI, nối `wss://<DOMAIN>/ocpp` với Basic Auth (`CP_ID=RH24D1-00001`, mật khẩu = `DEMO_CHARGE_POINT_PASSWORD`).
 
 ```bash
 docker compose --profile sim up -d simulator      # hoặc ./deploy.sh <tag> --sim
 ssh -L 8100:127.0.0.1:8100 <user>@<DOMAIN>        # rồi mở http://127.0.0.1:8100
 ```
 
-Yêu cầu: đã `--seed` (để trụ tồn tại và có credential), `DEMO_PILLAR_PASSWORD` đúng. Nếu VPS không tự nối được IP công khai của chính nó (hairpin NAT), đặt `SIM_CSMS_URL=ws://csms:9000/ocpp` trong `.env` (đường trong mạng compose, không qua TLS — chỉ để demo). HMI cũng chưa có xác thực nên chỉ publish ra loopback như console.
+Yêu cầu: đã `--seed` (để trụ tồn tại và có credential), `DEMO_CHARGE_POINT_PASSWORD` đúng. Nếu VPS không tự nối được IP công khai của chính nó (hairpin NAT), đặt `SIM_CSMS_URL=ws://csms:9000/ocpp` trong `.env` (đường trong mạng compose, không qua TLS — chỉ để demo). HMI cũng chưa có xác thực nên chỉ publish ra loopback như console.
 
 ## Rollback
 

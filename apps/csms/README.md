@@ -23,7 +23,7 @@ DATABASE_URL=postgresql://powerme:powerme@localhost:5432/powerme OCPP_PORT=9000 
 
 Migration: `DATABASE_URL=... node apps/csms/scripts/migrate.mjs` (áp tuần tự `drizzle/0000_…` rồi `0001_…`, ghi bảng `_migrations`; không dùng `psql -f` rời từng file vì sẽ lệch bảng theo dõi). Trụ nối tới `ws://host:9000/ocpp/{serialNumber}`; serial phải có trong `charge_points`.
 
-Staging: `apps/csms/Dockerfile` (build từ gốc repo, image chạy `node dist/main.js`, kèm `scripts/migrate.mjs` và `scripts/seed-demo.mjs`). Seed staging cần `DEMO_PILLAR_PASSWORD` (>= 16 ký tự) vì `ALLOW_LEGACY_NO_CREDENTIAL=false`.
+Staging: `apps/csms/Dockerfile` (build từ gốc repo, image chạy `node dist/main.js`, kèm `scripts/migrate.mjs` và `scripts/seed-demo.mjs`). Seed staging cần `DEMO_CHARGE_POINT_PASSWORD` (>= 16 ký tự) vì `ALLOW_LEGACY_NO_CREDENTIAL=false`.
 
 Cấu trúc `src/`: `ocpp-gateway/` (socket, registry epoch, log frame, tuần tự hoá, handler) · `sessions/` (state machine STM-1, phiên, chuỗi đo, trạng thái connector) · `reconciliation/` (phát hiện phát lại, đối soát) · `db/` (Drizzle schema + module). Test tích hợp: `test/wf03-exp01.integration.test.ts` với fixture `test/fixtures/exp1-disconnect-81s.jsonl`.
 

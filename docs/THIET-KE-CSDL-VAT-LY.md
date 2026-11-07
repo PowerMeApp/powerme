@@ -86,7 +86,7 @@ Trả lời T10 §2: tên bảng thật, module chủ theo `PACKAGE-DIAGRAM-CSMS
 | Quản trị viên | Admin | `admins` | users | bảng mở rộng của `users` (ISA, một bảng mỗi subtype) từ 0011 — trước đó **không tạo bảng**, chỉ `users.role = 'admin'` |
 | Đơn vị vận hành | Operator | `operators` | stations | |
 | Trạm | Site | `sites` | stations | |
-| Trụ sạc | ChargingPillar | `charge_points` | stations | |
+| Trụ sạc | ChargePoint    | `charge_points` | stations | |
 | Sự kiện trạng thái súng | ConnectorStatusEvent | `connector_status_events` | stations | |
 | Sự cố | FaultEvent | `fault_events` | stations | |
 | Báo lỗi của tài xế | FaultReport | `fault_reports` | stations | |
@@ -132,7 +132,7 @@ Các FK "người xử lý" (`fault_events.acknowledged_by`, `fault_reports.clea
 
 **`sites`** — trạm/địa điểm của operator. Cột: `site_code` (BK), `operator_id` (FK), `site_name`, `address`, `latitude`/`longitude` `numeric(9,6)`. UNIQUE `site_code`.
 
-**`charge_points`** — trụ sạc (ChargingPillar).
+**`charge_points`** — trụ sạc (ChargePoint).
 Cột: `serial_number` (BK, định danh kỹ thuật, đuôi URL `/ocpp/{serialNumber}` — ADR-0009), `display_code` (mã người vận hành đọc, `PM-D1-HCM-0001`, null tới khi onboard — ADR-0009), `site_id` (FK, null tới khi gắn trạm), `model`, `firmware_version`, `rated_power_kw numeric(7,2)`, `warranty_until date`, `lifecycle` (vòng đời **hành chính**, STM-3 v0.3: `registered` → `awaiting_connection` → `in_service` ⇄ `disabled` → `decommissioned`; giá trị `offline` còn trong enum nhưng là **legacy**, không còn được ghi — T61), `free_vend_tag` (idTag của chế độ free vend, ADR-0012), `reports_soc`, `supports_reservation`, `current_epoch` (lần kết nối hiện tại), `basic_auth_password_hash` (scrypt, dạng `scrypt$N$r$p$salt$hash`, Security Profile 2 — ADR-0011 sửa 25/10), `last_message_at` (lần cuối nhận tin, CSMS clock = `last_seen_at` của ADR-0016), `is_online` (socket OCPP đang mở; **độc lập với `lifecycle`**: trụ `disabled` vẫn có thể online, `in_service` có thể offline; do `ocpp-gateway` đặt khi mở/đóng socket và khi quét khởi động lại), `online_changed_at` (lần cuối `is_online` đổi; null nếu chưa từng kết nối).
 Khoá: UNIQUE `serial_number`, UNIQUE `display_code`; index `site_id`.
 
@@ -371,7 +371,7 @@ FK **không** nằm trong bảng giữ nguyên thường — kể cả `credit_t
 1. **User / Driver / OperatorStaff / Admin là một bảng hay nhiều bảng?** Một bảng `users` có cột `role`, cộng hai bảng mở rộng **chỉ khi subtype có thuộc tính riêng**: `drivers` (`user_id` PK/FK, `consent_version`, `consent_given_at`) và `operator_staff` (`user_id` PK/FK, `operator_id`, `staff_role`). **Không tạo `admins`** — Admin không có thuộc tính riêng, `role = 'admin'` là đủ; `policy_templates.created_by` trỏ `users.id`. *(Đã thay đổi 04/11/2026: Ân duyệt "ERD Alignment Decisions" 31/10 — có bảng `admins` (0011) cho đủ ba subtype; `policy_templates.created_by` → `admins` là B1, Nghĩa, chưa làm.)*
 2. **Bảng thẻ tên gì?** `rfid_cards`, không phải `id_tags`. Cột `card_identifier` chứa giá trị idTag trên dây. ADR-0012 vẫn gọi khái niệm là "sổ đăng ký thẻ `id_tags`" — cần cập nhật ADR (mục 7).
 3. **SessionPause có cần bảng riêng không?** Có — `session_pauses` là bảng thật với `paused_at`, `resumed_at`, `pause_cause`, không lưu JSON trong `sessions`. Lý do: cần truy vấn "tổng thời gian tạm dừng" cho `billing_mode = timed` và cần UNIQUE `(session_id, paused_at)`.
-4. **Tên bảng thật là gì?** Bảng ở mục 2. Tóm tắt khác tên so với ERD: ChargingPillar → `charge_points`; ChargingSession → `sessions`; MeterReading → `meter_values`; RfidCard → `rfid_cards`.
+4. **Tên bảng thật là gì?** Bảng ở mục 2. Tóm tắt khác tên so với ERD: ChargePoint → `charge_points`; ChargingSession → `sessions`; MeterReading → `meter_values`; RfidCard → `rfid_cards`.
 
 ---
 
@@ -383,7 +383,7 @@ FK **không** nằm trong bảng giữ nguyên thường — kể cả `credit_t
 | ChargingSession chỉ có `StartedAt`/`EndedAt` | tách thành `cp_started_at`/`received_started_at`, `cp_stopped_at`/`received_stopped_at` |
 | ChargingSession không có `id_tag` nhưng khoá ADR-0010 cần nó | thêm `sessions.id_tag text NOT NULL` (idTag nguyên văn); `rfid_card_id` vẫn là FK tuỳ chọn cho thẻ tra được |
 | ChargingSession BK = `TransactionNo`; ADR-0010 cần khoá tự nhiên | giữ cả hai: UNIQUE `transaction_no` + UNIQUE khoá tự nhiên 5 cột |
-| ChargingPillar thiếu `display_code` (ADR-0009), `current_epoch`, `basic_auth_password_hash` (ADR-0011) | thêm cả ba vào `charge_points` |
+| ChargePoint thiếu `display_code` (ADR-0009), `current_epoch`, `basic_auth_password_hash` (ADR-0011)    | thêm cả ba vào `charge_points` |
 | ERD không có `ocpp_message_log`, `charge_point_connections` (ADR-0005, EXP-01) | tạo ở mức vật lý, ghi rõ "bảng kỹ thuật" |
 | MeterReading BK `(ChargingSession, ReadingTime, Measurand)` không thể UNIQUE trên bảng partition | chỉ index thường; dedupe giao cho engine đối soát (mục 3.3) |
 | ConnectorStatusEvent gắn `Connector(FK)` nhưng OCPP có `connectorId = 0` (toàn trụ) | thêm `charge_point_id` + `connector_no` (0/1/2), `connector_id` null khi 0 |
@@ -419,7 +419,7 @@ Những chỗ tôi phải chọn một giá trị để schema biên dịch đư
 
 **Cho Nghĩa (WP1 — ERD/SDD):**
 
-14. Cập nhật ERD T10 theo mục 6: thêm `received_at` cho MeterReading, cặp `cp_*/received_*` cho ChargingSession, `id_tag` cho ChargingSession, ba cột mới của ChargingPillar, và ghi hai bảng kỹ thuật ở phụ lục.
+14. Cập nhật ERD T10 theo mục 6: thêm `received_at` cho MeterReading, cặp `cp_*/received_*` cho ChargingSession, `id_tag` cho ChargingSession, ba cột mới của ChargePoint, và ghi hai bảng kỹ thuật ở phụ lục.
 15. ~~`Admin` không có bảng — ERD nên vẽ là role, không vẽ entity.~~ **Thay đổi 04/11/2026:** Ân duyệt ISA đủ ba subtype; DB có bảng `admins` (0011), Logical/Physical ERD vẽ `Admin` là entity. Mục này không còn hiệu lực.
 
 ---

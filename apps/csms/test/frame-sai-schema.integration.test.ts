@@ -74,7 +74,7 @@ describeDb('G12 — frame sai schema được ghi vào ocpp_message_log', () => 
     await resetAndMigrate(db.$client);
     const [cp] = await db
       .insert(chargePoints)
-      .values({ serialNumber: 'G12-PILLAR', model: 'D1-120', lifecycle: 'awaiting_connection' })
+      .values({ serialNumber: 'G12-CP', model: 'D1-120', lifecycle: 'awaiting_connection' })
       .returning({ id: chargePoints.id });
     if (!cp) throw new Error('không tạo được charge_point');
     chargePointId = cp.id;
@@ -112,7 +112,7 @@ describeDb('G12 — frame sai schema được ghi vào ocpp_message_log', () => 
     await server.start();
     client = new RPCClient({
       endpoint: `ws://127.0.0.1:${config.ocppPort}/ocpp`,
-      identity: 'G12-PILLAR',
+      identity: 'G12-CP',
       protocols: ['ocpp1.6'],
       // Client KHÔNG strict: nếu strict thì chính nó chặn frame sai trước khi gửi.
       strictMode: false,

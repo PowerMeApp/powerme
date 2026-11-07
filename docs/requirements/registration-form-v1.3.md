@@ -18,7 +18,7 @@
 |-------------|-------------------------------------------|---------------|---------------------------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | 1.0         | 04/08/2026                                | A             | GVHD - Lâm Hữu Khánh Phương                             | Original registration approved by the University.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           | Topic assignment decision                                                                                                                                                                                        |
 | 1.1         | 30/09/2026                                | M, D, A       | Ngô Văn Minh Trí (team leader); prepared by Trần Đức Ân | \(1\) §3.2c rewritten as a coded Must-have list FR-01 to FR-16 grouped by actor; reservation, MoMo/ZaloPay, loyalty, analytics, maintenance tickets, policy templates and the system-health dashboard moved out of the commitment (Should/Could). (2) §3.2d NFRs rewritten with measurable thresholds. (3) New §3.2h Out of scope. (4) OCPP scope fixed to 1.6J; 2.0.1 deferred. (5) §3.3 research baseline changed from the vendor cloud platform (not accessible) to the SteVe reference CSMS on an OCPP simulator. (6) Class code added. (7) Payment model changed to a prepaid Charging Credit (30/09): §3.2b, FR-04/05/07/08, §3.2e, §3.2f, §3.2h and §4 updated. (8) Should-level items (revenue analytics, system-health monitoring) marked as not committed in §3.2b, §3.2e and §3.2f; Admin Console product wording aligned with FR-14/FR-15.                                                                                                                                                                                                                                                                                                                                                                      | GVHD meeting 17/09/2026; Team Check-In 18/09/2026; supervisor guides 23-25/09/2026; payment-model decision 30/09/2026 (Report 3 §3.4)                                                                            |
-| 1.2         | 06/10/2026 (revised 09/10 and 15/10/2026) | M, A          | Ngô Văn Minh Trí (team leader); prepared by Trần Đức Ân | \(1\) §3.2a-b reframed after Review 1: PowerMe is one shared, Vietnamese-localized platform that independent operators of imported OCPP pillars join. (2) Scope deepened rather than widened (supervisor's advice): live connector status with time left (FR-03), station suggestion (FR-21, new) and loyalty points (FR-17) are Must; uptime and utilisation added to FR-10, repeated fault reports to FR-06; FR-04, FR-08, FR-16 extended. (3) 09/10: on-demand reservation (FR-20) moved from Must to Should. (4) §3.2d: suggestion, status and time-left targets added. (5) §3.2e-g: map and routing service added; navigation and telematics out of scope. (6) 15/10: aligned with the Capstone Review Standardization Checklist (Out of scope moved into §3.2b; FRs grouped by actor; five NFR groups; stack named; tasks with outputs and milestones). (7) 15/10, §3.3: v1.0 compared with the vendor cloud, v1.1 with SteVe, v1.2 (06/10) made SteVe optional. Final: SteVe and a no-reconciliation baseline are committed in RQ1; RQ2 added for the already committed suggestion evaluation. Impact: Must 298 to about 309 of 325 man-days; actors, features and timeline unchanged. Approval: pending supervisor. | Review 1 feedback 01/10/2026; ADR-0014; Positioning decisions D1-D4; team meeting 09/10/2026 and ADR-0015; supervisor comment on the SteVe comparison and Capstone Review Standardization Checklist (15/10/2026) |
+| 1.2         | 06/10/2026 (revised 09/10 and 15/10/2026) | M, A          | Ngô Văn Minh Trí (team leader); prepared by Trần Đức Ân | \(1\) §3.2a-b reframed after Review 1: PowerMe is one shared, Vietnamese-localized platform that independent operators of imported OCPP charge points join. (2) Scope deepened rather than widened (supervisor's advice): live connector status with time left (FR-03), station suggestion (FR-21, new) and loyalty points (FR-17) are Must; uptime and utilisation added to FR-10, repeated fault reports to FR-06; FR-04, FR-08, FR-16 extended. (3) 09/10: on-demand reservation (FR-20) moved from Must to Should. (4) §3.2d: suggestion, status and time-left targets added. (5) §3.2e-g: map and routing service added; navigation and telematics out of scope. (6) 15/10: aligned with the Capstone Review Standardization Checklist (Out of scope moved into §3.2b; FRs grouped by actor; five NFR groups; stack named; tasks with outputs and milestones). (7) 15/10, §3.3: v1.0 compared with the vendor cloud, v1.1 with SteVe, v1.2 (06/10) made SteVe optional. Final: SteVe and a no-reconciliation baseline are committed in RQ1; RQ2 added for the already committed suggestion evaluation. Impact: Must 298 to about 309 of 325 man-days; actors, features and timeline unchanged. Approval: pending supervisor. | Review 1 feedback 01/10/2026; ADR-0014; Positioning decisions D1-D4; team meeting 09/10/2026 and ADR-0015; supervisor comment on the SteVe comparison and Capstone Review Standardization Checklist (15/10/2026) |
 | 1.3         | 26/10/2026                                | A, M          | Ngô Văn Minh Trí (team leader); prepared by Trần Đức Ân | Proposed final version for Review 2 (details in BM03 rows 1-4). (1) §3.2c Admin: billing exceptions added as the Admin part of FR-07 (UC-ADM-08: refunds to the original source, late payments, e-invoice retry); §3.2b Admin Console wording follows. (2) §3.2c FR-01, FR-02: the driver requests account closure in the app (UC-ACC-02); the closure refund is no longer an Admin account action. (3) §3.2g: connector status and time-left estimation services moved from WP4 to WP2; WP4 keeps the station suggestion service and RQ2 runs. (4) §3.2g milestones: form finalised at Review 2. Impact: no FR added or removed; about 1.5 man-days added (one Admin screen, one app action), absorbed in the buffer; actors and timeline unchanged. Approval: pending Review 2 council. | WF-02 design 24/10/2026 (Report 3 Record of Changes 24/10; Report 4 STM-4, STM-5, STM-7); ADR-0013; team decision 26/10/2026; BM02 self-review run 2 F01, F28 |
 
 *\*A - Added · M - Modified · D - Deleted*
@@ -53,7 +53,7 @@
 
 **a) Context:**
 
-Independent charging operators in Vietnam often import OCPP-compliant DC pillars from Chinese manufacturers (here called ChargeLink). The pillars come with the vendor's generic cloud and app. Three problems follow:
+Independent charging operators in Vietnam often import OCPP-compliant DC charge points from Chinese manufacturers (here called ChargeLink). The charge points come with the vendor's generic cloud and app. Three problems follow:
 
 \- **P1. Vendor software does not fit Vietnamese operations:** no Vietnamese interface, local payment, VAT e-invoicing, operator tariffs or local fault monitoring.
 
@@ -65,7 +65,7 @@ Evidence: ChargeLink manuals and a review of seven Vietnamese charging apps (09/
 
 **b) Proposed Solutions:**
 
-PowerMe is one shared platform with its own OCPP 1.6J CSMS: each operator manages only its own pillars and tariffs, and drivers use one app across all operators, paying from a prepaid Charging Credit.
+PowerMe is one shared platform with its own OCPP 1.6J CSMS: each operator manages only its own charge points and tariffs, and drivers use one app across all operators, paying from a prepaid Charging Credit.
 
 \- **OCPP CSMS backend (P1, P2):** replaces the vendor cloud for status, transactions, metering and remote commands; reconciles session data after a disconnect.
 
@@ -73,11 +73,11 @@ PowerMe is one shared platform with its own OCPP 1.6J CSMS: each operator manage
 
 \- **Driver App (P3):** find, start, stop and pay for charging in Vietnamese; loyalty points.
 
-\- **Operator Dashboard and Admin Console (P1, P2):** pillar onboarding, monitoring, uptime, tariffs; users, roles, registries and billing exceptions.
+\- **Operator Dashboard and Admin Console (P1, P2):** charge point onboarding, monitoring, uptime, tariffs; users, roles, registries and billing exceptions.
 
 \- **Billing, Credit and Loyalty module (P1):** credit ledger, VNPay top-ups, VAT e-invoices, cross-operator points ledger.
 
-**Main flows:** (1) find or get a suggested station, charge and pay from credit; (2) top up via VNPay and receive an e-invoice; (3) operator onboards a pillar that appears to drivers live; (4) a pillar disconnects and the CSMS reconciles the session.
+**Main flows:** (1) find or get a suggested station, charge and pay from credit; (2) top up via VNPay and receive an e-invoice; (3) operator onboards a charge point that appears to drivers live; (4) a charge point disconnects and the CSMS reconciles the session.
 
 **Out of scope:** hardware work (all tests use an OCPP 1.6J simulator); OCPP 2.0.1, ISO 15118; building a payment gateway, e-invoice provider or routing engine; an e-wallet (credit cannot be withdrawn or transferred, Decree 52/2024/ND-CP); RFID wallet-card top-up; VinFast network; in-app navigation; telematics.
 
@@ -91,15 +91,15 @@ Must-have functions by actor; codes trace to the Report 3 Use Case List, and an 
 >
 > • **FR-03, FR-21** Find stations with each connector's live status (Available, In use with time left as a range, Freeing soon, Unavailable, Offline) and last update; incompatible stations hidden by default. Get up to three suggestions ranked by time until charged (travel, wait, charging) or by arrival-tariff cost, within the entered battery range; unreliable stations ranked lower; hand-off to the phone's map (UC-CHG-01, 07).
 >
-> • **FR-04 to FR-06** Start and stop a session in one of four billing modes; it starts only if the credit covers the minimum and stops before credit runs out; view live energy, cost and credit; report a faulty pillar (repeated reports label it) (UC-CHG-02 to 05).
+> • **FR-04 to FR-06** Start and stop a session in one of four billing modes; it starts only if the credit covers the minimum and stops before credit runs out; view live energy, cost and credit; report a faulty charge point (repeated reports label it) (UC-CHG-02 to 05).
 >
 > • **FR-07, FR-08** Top up via VNPay with a VAT e-invoice per top-up; view history, balance and e-invoices (UC-PAY-01, 02).
 >
 > • **FR-17** Earn points on charging and redeem them at top-up; 12-month expiry, no cash value (UC-PAY-03, 04).
 
-\- **Operator (business user; own pillars, sites, tariffs and data only):**
+\- **Operator (business user; own charge points, sites, tariffs and data only):**
 
-> • **FR-09** Onboard a pillar and receive its credential (UC-OPS-01).
+> • **FR-09** Onboard a charge point and receive its credential (UC-OPS-01).
 >
 > • **FR-10, FR-11** Monitor status, uptime, utilisation and faults with alerts; send remote start, stop, reset (UC-OPS-02 to 04).
 >
@@ -111,9 +111,9 @@ Must-have functions by actor; codes trace to the Report 3 Use Case List, and an 
 >
 > • **FR-07 (Admin part)** Handle billing exceptions: refund a top-up made in error or a closed account's unused credit to its original source, refund a payment confirmed after the top-up expired, retry a failed e-invoice; every refund issues an adjustment invoice (UC-ADM-08).
 
-\- **Charging pillar (external device, served by the CSMS module):**
+\- **Charge point (external device, served by the CSMS module):**
 
-> • **FR-16** OCPP 1.6J central-system role; record every session however started, never double-bill a pillar-paid session, reconcile data after a connection loss (UC-INT-01 to 04).
+> • **FR-16** OCPP 1.6J central-system role; record every session however started, never double-bill a charge-point-paid session, reconcile data after a connection loss (UC-INT-01 to 04).
 
 \- **Should / Could (not committed):**
 
@@ -123,11 +123,11 @@ Must-have functions by actor; codes trace to the Report 3 Use Case List, and an 
 
 \- **Interoperability:** OCPP 1.6J; 100% of the FR-16 message set passes the end-to-end suite on the simulator.
 
-\- **Performance and capacity:** pillar message answered within 1 s; status change on dashboard within 3 s, on the map within 5 s; QR scan to session start within 10 s; suggestion within 2 s for 50 stations (all p95); 100 concurrent simulated pillars on 1 vCPU / 2 GB (k6).
+\- **Performance and capacity:** charge point message answered within 1 s; status change on dashboard within 3 s, on the map within 5 s; QR scan to session start within 10 s; suggestion within 2 s for 50 stations (all p95); 100 concurrent simulated charge points on 1 vCPU / 2 GB (k6).
 
 \- **Reliability and accuracy:** 0 acknowledged transaction messages lost in the three disconnect scenarios; offline alert within 900 s; a connector silent for two heartbeat intervals shown as out of date; the mid-session time-left range contains the actual end in at least 70% of simulated sessions.
 
-\- **Security and data protection:** TLS with per-pillar credentials (Security Profile 2); every endpoint enforces role-based access, tested per role; operators see only their own data; processing only after consent; billing records kept 10 years.
+\- **Security and data protection:** TLS with per-charge-point credentials (Security Profile 2); every endpoint enforces role-based access, tested per role; operators see only their own data; processing only after consent; billing records kept 10 years.
 
 \- **Localization, compliance and usability:** all app screens in Vietnamese, VND; e-invoice fields per Decree 123/2020/ND-CP, Circular 78/2021/TT-BTC, Decree 70/2025/ND-CP; registration in at most 3 screens.
 
@@ -137,7 +137,7 @@ Must-have functions by actor; codes trace to the Report 3 Use Case List, and an 
 
 \- **OCPP 1.6J and CSMS architecture:** charge-point state machine, transaction lifecycle, idempotent handling, duplicate and gap detection over unreliable links.
 
-\- **Wait-time estimation and ranking:** remaining time from session limits, a DC charging-curve model or pillar history; ranking by time, cost and reliability.
+\- **Wait-time estimation and ranking:** remaining time from session limits, a DC charging-curve model or charge point history; ranking by time, cost and reliability.
 
 \- **Multi-tenant platforms and ledgers:** per-operator data isolation, role-based access, Vietnamese e-invoicing, points expiry and reversal.
 
@@ -145,7 +145,7 @@ Must-have functions by actor; codes trace to the Report 3 Use Case List, and an 
 
 \- **Stack:** NestJS (TypeScript) with ocpp-rpc; PostgreSQL with Drizzle ORM; Redis; Flutter app; React dashboard; Docker Compose on a staging VPS.
 
-\- **Dependencies and fallback:** no physical pillar is available, so an OCPP 1.6J simulator stands in; VNPay, e-invoice and routing (Goong or Google Distance Matrix) run in sandbox or free tier.
+\- **Dependencies and fallback:** no physical charge point is available, so an OCPP 1.6J simulator stands in; VNPay, e-invoice and routing (Goong or Google Distance Matrix) run in sandbox or free tier.
 
 \- **Testing:** unit and integration tests, OCPP end-to-end suite, disconnect harness, k6 load tests, per-role authorisation tests.
 
@@ -179,7 +179,7 @@ One owner per work package (WBS and effort in Report 2). Order: WP1 specificatio
 
 **a. Research Problem / Research Question**
 
-A CSMS bills from transaction and meter messages sent over WebSocket. After a disconnect the pillar resends queued messages, so the server may see duplicates, late data or sessions it never saw start. OCPP 1.6J does not define how the server reconciles them, and the OCPP studies found so far address security and station integration, not measured billing-data integrity.
+A CSMS bills from transaction and meter messages sent over WebSocket. After a disconnect the charge point resends queued messages, so the server may see duplicates, late data or sessions it never saw start. OCPP 1.6J does not define how the server reconciles them, and the OCPP studies found so far address security and station integration, not measured billing-data integrity.
 
 **RQ1:** How do energy error, duplicate and lost transactions, and gap-detection precision and recall differ between PowerMe's CSMS, the same CSMS without reconciliation, and SteVe, under three controlled disconnect scenarios?
 

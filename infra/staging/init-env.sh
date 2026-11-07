@@ -57,7 +57,7 @@ if [ -n "$TAG_NEW" ]; then
 fi
 # Hex: chỉ 0-9a-f, an toàn trong DATABASE_URL. Base64 24 byte: 32 ký tự, không có dấu '=' đệm.
 set_env POSTGRES_PASSWORD "$(openssl rand -hex 24)"
-set_env DEMO_PILLAR_PASSWORD "$(openssl rand -base64 24 | tr -d '\n')"
+set_env DEMO_CHARGE_POINT_PASSWORD "$(openssl rand -base64 24 | tr -d '\n')"
 
 check_env
 log ".env đã tạo (chmod 600) cho DOMAIN=$(env_get DOMAIN), TAG=$(env_get TAG)"

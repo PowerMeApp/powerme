@@ -2,7 +2,7 @@
 # Nạp lại dữ liệu mẫu mà không deploy lại. Chạy trên VPS, trong infra/staging.
 #
 #   ./seed.sh                nạp/áp lại dữ liệu mẫu, đặt lại credential trụ demo từ
-#                            DEMO_PILLAR_PASSWORD (đổi mật khẩu trong .env rồi chạy = xoay mật khẩu).
+#                            DEMO_CHARGE_POINT_PASSWORD (đổi mật khẩu trong .env rồi chạy = xoay mật khẩu).
 #                            Idempotent; KHÔNG xoá phiên/meter đã phát sinh.
 #   ./seed.sh --reset [--yes]  XOÁ TOÀN BỘ DB, migrate lại, seed — về trạng thái đầu cho kịch bản
 #                            DS-01..DS-10. Mất mọi dữ liệu, cả backup tự động không có.

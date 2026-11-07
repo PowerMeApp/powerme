@@ -99,7 +99,8 @@ services:
       # của nó (hairpin NAT), đặt SIM_CSMS_URL=ws://csms:9000/ocpp trong .env (README.md).
       CSMS_URL: ${SIM_CSMS_URL:-wss://${DOMAIN}/ocpp}
       CP_ID: RH24D1-00001
-      CP_PASSWORD: ${DEMO_PILLAR_PASSWORD:-}
+      # Tên cũ DEMO_PILLAR_PASSWORD (trước T92) vẫn dùng được khi tên mới trống.
+      CP_PASSWORD: ${DEMO_CHARGE_POINT_PASSWORD:-${DEMO_PILLAR_PASSWORD:-}}
       # HMI chưa có xác thực — cùng nguyên tắc với console: bind 0.0.0.0 trong container,
       # chỉ publish ra 127.0.0.1 của máy chủ, truy cập bằng SSH tunnel.
       HMI_HOST: 0.0.0.0
