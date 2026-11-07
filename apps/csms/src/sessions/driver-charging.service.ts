@@ -1,4 +1,4 @@
-import { Inject, Injectable, Optional } from '@nestjs/common';
+import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { createHash, randomBytes } from 'node:crypto';
 import type { PoolClient } from 'pg';
 import { DB, Db } from '../db/db.module.js';
@@ -42,6 +42,7 @@ interface Intent {
 
 @Injectable()
 export class DriverChargingService {
+  private readonly logger = new Logger(DriverChargingService.name);
   constructor(
     @Inject(DB) private readonly db: Db,
     private readonly registry: ConnectionRegistry,
@@ -736,6 +737,118 @@ export class DriverChargingService {
         { transactionId: prepared.session.transaction_no },
       );
     return this.commandSnapshot(driverId, prepared.commandId);
+  }
+
+  // BE-17: RemoteStop timeout để intent 'unknown' + phiên 'stopping'. Quét theo DB (sống qua restart):
+  // gửi lại có giới hạn bằng attempt kind 'auto_retry' trên cùng intent; hết lượt thì đánh dấu
+  // remote_commands.error='stop_retry_exhausted' + log để vận hành dùng operator_recovery. Không đổi STM-1.
+  // RemoteStopTransaction lên giao dịch đã dừng thì trụ trả Rejected (không tác dụng phụ) nên gửi lại an toàn.
+  async retryUnknownStops(): Promise<number> {
+    const policy = this.requirePolicy();
+    const max = policy.remoteStopRetryMax ?? 3;
+    const intervalMs = policy.remoteStopRetryIntervalMs ?? 30000;
+    // Một điều kiện dùng cho cả lúc chọn ứng viên lẫn lúc kiểm lại dưới khoá phiên.
+    const due = `i.state='unknown' AND r.status='timeout' AND r.error='outcome_unknown'
+      AND s.status='stopping' AND s.received_stopped_at IS NULL`;
+    const retriesSql = `(SELECT count(*) FROM driver_stop_attempts a2 JOIN remote_commands p
+      ON p.id=a2.previous_command_id WHERE a2.intent_id=i.id AND a2.kind='auto_retry' AND p.status='timeout')`;
+    const candidates = (
+      await this.db.$client.query<{ intent_id: string; command_id: string }>(
+        `SELECT i.id AS intent_id,i.command_id FROM driver_stop_intents i
+         JOIN remote_commands r ON r.id=i.command_id JOIN sessions s ON s.id=i.session_id
+         WHERE ${due} AND (${retriesSql}>=$1 OR r.updated_at<=now()-($2::bigint*interval '1 millisecond'))
+         ORDER BY r.updated_at LIMIT 20`,
+        [max, intervalMs],
+      )
+    ).rows;
+    let sent = 0;
+    for (const candidate of candidates) {
+      const prepared = await chargeTransaction(this.db, async (c) => {
+        await c.query(
+          `SELECT s.id FROM sessions s JOIN driver_stop_intents i ON i.session_id=s.id
+           WHERE i.id=$1 FOR UPDATE OF s`,
+          [candidate.intent_id],
+        );
+        const row = (
+          await c.query<{
+            session_id: string;
+            serial_number: string;
+            transaction_no: number;
+            charge_point_id: string;
+            connector_no: number;
+            current_epoch: number;
+            is_online: boolean;
+            retries: string;
+            fresh: boolean;
+          }>(
+            `SELECT i.session_id,cp.serial_number,s.transaction_no,s.charge_point_id,s.connector_no,
+               cp.current_epoch,cp.is_online,${retriesSql} AS retries,
+               r.updated_at>now()-($3::bigint*interval '1 millisecond') AS fresh
+             FROM driver_stop_intents i JOIN remote_commands r ON r.id=i.command_id
+             JOIN sessions s ON s.id=i.session_id JOIN charge_points cp ON cp.id=s.charge_point_id
+             WHERE i.id=$1 AND i.command_id=$2 AND ${due}`,
+            [candidate.intent_id, candidate.command_id, intervalMs],
+          )
+        ).rows[0];
+        if (!row) return null; // đã bị lượt quét khác, operator hoặc StopTransaction xử lý
+        if (Number(row.retries) >= max) {
+          await c.query(
+            "UPDATE remote_commands SET error='stop_retry_exhausted',updated_at=now() WHERE id=$1 AND error='outcome_unknown'",
+            [candidate.command_id],
+          );
+          this.logger.error(
+            JSON.stringify({
+              event: 'remote_stop_retry_exhausted',
+              sessionId: Number(row.session_id),
+              intentId: Number(candidate.intent_id),
+              commandId: Number(candidate.command_id),
+              retries: Number(row.retries),
+            }),
+          );
+          return null;
+        }
+        if (row.fresh) return null;
+        const conn = this.registry.get(row.serial_number);
+        if (!row.is_online || !conn || conn.epoch !== row.current_epoch) return null;
+        const command = (
+          await c.query<{ id: string }>(
+            `INSERT INTO remote_commands(charge_point_id,connector_no,action,payload,status,requested_by,idempotency_key,sent_at)
+             VALUES($1,$2,'RemoteStopTransaction',$3,'sent',NULL,$4,now()) RETURNING id`,
+            [
+              row.charge_point_id,
+              row.connector_no,
+              JSON.stringify({ transactionId: row.transaction_no }),
+              `wp3:stop-attempt:${candidate.intent_id}:${candidate.command_id}`,
+            ],
+          )
+        ).rows[0]!;
+        await c.query(
+          `INSERT INTO driver_stop_attempts(command_id,intent_id,attempt_no,kind,previous_command_id,connection_epoch)
+           SELECT $1,$2,coalesce(max(attempt_no),0)+1,'auto_retry',$3,$4 FROM driver_stop_attempts WHERE intent_id=$2`,
+          [command.id, candidate.intent_id, candidate.command_id, conn.epoch],
+        );
+        await c.query(
+          "UPDATE driver_stop_intents SET command_id=$2,state='sent',updated_at=now() WHERE id=$1",
+          [candidate.intent_id, command.id],
+        );
+        return {
+          commandId: Number(command.id),
+          identity: row.serial_number,
+          transactionNo: row.transaction_no,
+          epoch: conn.epoch,
+        };
+      });
+      if (!prepared) continue;
+      sent++;
+      await this.dispatch(
+        prepared.commandId,
+        prepared.identity,
+        'RemoteStopTransaction',
+        { transactionId: prepared.transactionNo },
+        prepared.epoch,
+      );
+    }
+    return sent;
   }
 
   // WP3/T72: recovery adds an audited attempt to the same stop intent, never a fresh business key.

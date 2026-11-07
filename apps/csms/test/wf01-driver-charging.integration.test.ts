@@ -1563,6 +1563,143 @@ describeDb('WP3/T31 WF-01 service journey with real OCPP + Postgres', () => {
     expect(stopCount).toBe(1);
     expect(await q('SELECT 1 FROM charging_statements')).toHaveLength(0);
   });
+  // BE-17: RemoteStop timeout → gửi lại có giới hạn qua quét DB.
+  describe('BE-17 RemoteStop timeout retry', () => {
+    const retrier = () =>
+      new DriverChargingService(db, registry, settlement, {
+        ...policy,
+        remoteStopRetryMax: 2,
+        remoteStopRetryIntervalMs: 60000,
+      });
+    const age = () =>
+      q(
+        "UPDATE remote_commands SET updated_at=now()-interval '1 hour' WHERE action='RemoteStopTransaction' AND status='timeout'",
+      );
+    const stopState = async () =>
+      (
+        await q(
+          `SELECT i.state,s.status AS session_status,
+            (SELECT count(*)::int FROM driver_stop_attempts WHERE intent_id=i.id) AS attempts
+           FROM driver_stop_intents i JOIN sessions s ON s.id=i.session_id`,
+        )
+      )[0]!;
+    async function timedOutStop() {
+      const sid = await observedStart();
+      stopResponse = 'silence';
+      await service.stop(driver, 'stop', sid);
+      expect(await stopState()).toMatchObject({ state: 'unknown', session_status: 'stopping' });
+      return sid;
+    }
+
+    it('keeps retrying at the configured interval up to the limit, then leaves an operator trace', async () => {
+      const errors = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+      const sid = await timedOutStop();
+      const sweeper = retrier();
+      expect(await sweeper.retryUnknownStops()).toBe(0); // chưa đến khoảng cách
+      expect(stopCount).toBe(1);
+      for (const expected of [2, 3]) {
+        await age();
+        expect(await sweeper.retryUnknownStops()).toBe(1);
+        expect(stopCount).toBe(expected);
+        expect(await sweeper.retryUnknownStops()).toBe(0); // chưa đến khoảng cách tiếp theo
+      }
+      await age();
+      expect(await sweeper.retryUnknownStops()).toBe(0); // hết lượt: không gửi nữa
+      expect(await sweeper.retryUnknownStops()).toBe(0);
+      expect(stopCount).toBe(3);
+      expect(await stopState()).toMatchObject({
+        state: 'unknown',
+        session_status: 'stopping',
+        attempts: 3,
+      });
+      expect(
+        await q('SELECT attempt_no,kind FROM driver_stop_attempts ORDER BY attempt_no'),
+      ).toEqual([
+        { attempt_no: 1, kind: 'initial' },
+        { attempt_no: 2, kind: 'auto_retry' },
+        { attempt_no: 3, kind: 'auto_retry' },
+      ]);
+      const commands = await q(
+        "SELECT status,error FROM remote_commands WHERE action='RemoteStopTransaction' ORDER BY id",
+      );
+      expect(commands.map((c) => c.error)).toEqual([
+        'outcome_unknown',
+        'outcome_unknown',
+        'stop_retry_exhausted',
+      ]);
+      expect(errors).toHaveBeenCalledTimes(1);
+      expect(String(errors.mock.calls[0]![0])).toContain(
+        `"event":"remote_stop_retry_exhausted","sessionId":${sid}`,
+      );
+      errors.mockRestore();
+    });
+
+    it('stops retrying once a retry is Accepted and the station stops the transaction', async () => {
+      await timedOutStop();
+      stopResponse = 'Accepted';
+      await age();
+      expect(await retrier().retryUnknownStops()).toBe(1);
+      await until(async () => (await q('SELECT 1 FROM charging_statements')).length === 1);
+      expect(await stopState()).toMatchObject({ state: 'effect', session_status: 'reconciled' });
+      await age();
+      expect(await retrier().retryUnknownStops()).toBe(0);
+      expect(stopCount).toBe(2);
+    });
+
+    it('does not resend when StopTransaction arrives before the next retry', async () => {
+      await timedOutStop();
+      await sendStop();
+      await until(async () => (await stopState()).session_status === 'reconciled');
+      await age();
+      expect(await retrier().retryUnknownStops()).toBe(0);
+      expect(stopCount).toBe(1);
+    });
+
+    it('follows STM-1 when a retry is Rejected and stops retrying', async () => {
+      await timedOutStop();
+      stopResponse = 'Rejected';
+      await age();
+      expect(await retrier().retryUnknownStops()).toBe(1);
+      expect(await stopState()).toMatchObject({ state: 'rejected', session_status: 'active' });
+      await age();
+      expect(await retrier().retryUnknownStops()).toBe(0);
+      expect(stopCount).toBe(2);
+    });
+
+    it('does not send to an offline station', async () => {
+      await timedOutStop();
+      await client.close({ force: true });
+      await until(
+        async () =>
+          (await q("SELECT 1 FROM charge_points WHERE serial_number='T31-CP' AND NOT is_online"))
+            .length === 1,
+      );
+      await age();
+      expect(await retrier().retryUnknownStops()).toBe(0);
+      expect(stopCount).toBe(1);
+      expect((await stopState()).session_status).toBe('stopping');
+    });
+
+    it('two concurrent sweeps (two service instances) send exactly one retry', async () => {
+      await timedOutStop();
+      await age();
+      const sent = await Promise.all([
+        retrier().retryUnknownStops(),
+        retrier().retryUnknownStops(),
+      ]);
+      expect(sent.reduce((a, b) => a + b, 0)).toBe(1);
+      expect(stopCount).toBe(2);
+      expect((await stopState()).attempts).toBe(2);
+    });
+
+    it('ignores sessions that are not stopping', async () => {
+      await observedStart();
+      await q("UPDATE remote_commands SET updated_at=now()-interval '1 hour'");
+      expect(await retrier().retryUnknownStops()).toBe(0);
+      expect(stopCount).toBe(0);
+      expect(await q('SELECT 1 FROM driver_stop_intents')).toHaveLength(0);
+    });
+  });
   it.each(['energy', 'credit'] as const)(
     'T72 review suspended driver still receives system %s cutoff but cannot call public actions',
     async (kind) => {

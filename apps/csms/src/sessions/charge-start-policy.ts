@@ -6,6 +6,9 @@ export interface ChargePolicy {
   commandTimeoutMs: number;
   stationStaleAfterMs: number;
   stationOfflineAfterMs?: number;
+  // BE-17: gửi lại RemoteStop khi timeout (mặc định 3 lần, cách nhau 30 s nếu không cấu hình).
+  remoteStopRetryMax?: number;
+  remoteStopRetryIntervalMs?: number;
 }
 
 export function validateChargePolicy(policy: ChargePolicy): void {
@@ -16,6 +19,7 @@ export function validateChargePolicy(policy: ChargePolicy): void {
     policy.pointsExpiryMonths < 1 ||
     policy.commandTimeoutMs < 1 ||
     (policy.stationOfflineAfterMs !== undefined && policy.stationOfflineAfterMs < 1) ||
+    (policy.remoteStopRetryIntervalMs !== undefined && policy.remoteStopRetryIntervalMs < 1) ||
     policy.stationStaleAfterMs < 1
   )
     throw new Error('invalid_charge_policy');
