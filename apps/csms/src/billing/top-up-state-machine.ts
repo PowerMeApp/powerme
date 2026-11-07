@@ -2,7 +2,8 @@
  * TopUpStateMachine — STM-4 TopUp (`top_ups.status`), lớp THUẦN (không DB, không Nest, không đồng hồ).
  *
  * Vì sao tồn tại: bất biến của billing "mọi chuyển trạng thái top-up đi qua TopUpStateMachine".
- * Đây là nơi DUY NHẤT biết bảng chuyển của `diagrams/report4/state/STM-4/STM-4.puml` (v0.3); TopUpService
+ * Đây là nơi DUY NHẤT biết bảng chuyển của STM-4 (`diagrams/report4/state/STM-4/STM-4.puml`, v1.0
+ * 01/11/2026; số chuyển `#n` bên dưới theo bản v0.3 trước đó, xem lịch sử git); TopUpService
  * (Phần 5–9 của WF-02) chỉ gọi `apply()` rồi ghi kết quả xuống DB. Cùng mẫu với FaultStateMachine
  * (STM-6) và SessionStateMachine (STM-1).
  *

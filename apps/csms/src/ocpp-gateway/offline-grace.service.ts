@@ -1,6 +1,6 @@
 /**
  * OfflineGraceService — thời gian ân hạn trước khi phiên bị kéo sang `orphaned` (ADR-0016 D-A,
- * STM-1 v0.5).
+ * STM-1 v0.5; bản vẽ lại v1.0 tại `diagrams/report4/state/STM-1/STM-1.puml`).
  *
  * Quy tắc: socket của trụ đóng KHÔNG orphan ngay. Service hẹn giờ `OFFLINE_GRACE_S`; đến hạn mà
  * trụ vẫn CHƯA có epoch mới thì mới gọi `SessionsService.onStationOffline` (#13–#15: active /

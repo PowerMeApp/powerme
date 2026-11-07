@@ -57,7 +57,7 @@ export interface CsmsConfig {
    */
   ocppTrustProxy?: boolean;
   /**
-   * ADR-0016 D-A (STM-1 v0.5): thời gian ân hạn (giây) kể từ khi socket đóng trước khi các phiên
+   * ADR-0016 D-A (STM-1 v0.5; bản vẽ lại v1.0): thời gian ân hạn (giây) kể từ khi socket đóng trước khi các phiên
    * active/paused/stopping bị kéo sang `orphaned` (#13–#15). Nối lại trong ân hạn thì phiên giữ
    * nguyên. `0` = orphan ngay (hành vi cũ). Không khai báo = {@link DEFAULT_OFFLINE_GRACE_S}.
    */
