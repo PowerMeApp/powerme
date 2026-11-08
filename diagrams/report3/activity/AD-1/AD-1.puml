@@ -1,0 +1,86 @@
+@startuml AD-1
+!include _style.iuml
+title AD-1 (System level) — Charge a vehicle with the Driver App\nTrigger: Driver arrives at a station found in the app (UC-CHG-01) · Use cases: UC-CHG-02, 03, 04, UC-INT-03
+
+|«person»\nDriver|
+start
+:Plug in, scan connector QR code\nand choose billing mode and limit;
+|«software system»\nPowerMe Platform|
+:Check connector status\nand vehicle compatibility;
+if ( ) then ([busy, faulted, offline,\nreserved by another Driver\nor incompatible])
+  :Refuse with reason and\nnearby available connectors;
+  stop
+else ([Available, or Reserved by\nthis Driver, and compatible])
+endif
+|«software system»\nPowerMe Platform|
+:Check Charging Credit\nagainst start minimum;
+while ( ) is ([credit < start minimum])
+  |«person»\nDriver|
+  if ( ) then ([Driver cancels])
+    stop
+  else ([Driver tops up])
+    :Top Up Charging Credit ⋔;
+  endif
+  |«software system»\nPowerMe Platform|
+endwhile ([credit ≥ start minimum])
+if ( ) then ([Driver holds a reservation\non this connector])
+  :Reservation\n&#91;fulfilled&#93;]
+else ([else])
+endif
+:Create session with limit\ncapped to what credit can pay;
+:ChargingSession\n&#91;pending&#93;]
+:Send start request>
+|«external system»\nCharge Point|
+if ( ) then ([start rejected or\nno reply within 60 s])
+  |«software system»\nPowerMe Platform|
+  :Close session without\ncharge and notify Driver;
+  :ChargingSession\n&#91;failed&#93;]
+  stop
+else ([start accepted])
+  |«external system»\nCharge Point|
+  :Lock connector and\nstart energy delivery;
+endif
+|«software system»\nPowerMe Platform|
+:ChargingSession\n&#91;active&#93;]
+while ( ) is ([no stop condition])
+  |«external system»\nCharge Point|
+  :Send meter reading>
+  |«software system»\nPowerMe Platform|
+  :Update energy, cost and\ncredit left; push progress;
+  |«person»\nDriver|
+  :View battery level, energy,\ntime and running cost;
+  |«software system»\nPowerMe Platform|
+endwhile ([stop condition met])
+if ( ) then ([Driver stops, limit reached\nor credit at cutoff reserve])
+  if ( ) then ([Driver chose to stop])
+    |«person»\nDriver|
+    :Tap Stop;
+  else ([else])
+  endif
+  |«software system»\nPowerMe Platform|
+  :Send stop request>
+  :ChargingSession\n&#91;stopping&#93;]
+else ([vehicle battery full])
+endif
+|«external system»\nCharge Point|
+:Stop delivery, unlock connector\nand send final meter reading>
+|«software system»\nPowerMe Platform|
+:ChargingSession\n&#91;closed&#93;]
+:Price per tariff period and\ndebit cost from Charging Credit;
+:ChargingSession\n&#91;reconciled&#93;]
+:CreditTransaction\n&#91;session_debit&#93;]
+if ( ) then ([cost > credit balance:\nnew starts blocked\nuntil top-up])
+  :CreditAccount\n&#91;in_shortfall&#93;]
+else ([else])
+endif
+fork
+  :Split charge into platform\nfee and Operator share;
+fork again
+  :Award loyalty points;
+  :LoyaltyTransaction\n&#91;earn&#93;]
+end fork
+:Send charging statement;
+|«person»\nDriver|
+:View statement and\nunplug the connector;
+stop
+@enduml

@@ -1,0 +1,53 @@
+@startuml AD-8
+!include _style.iuml
+title AD-8 (System level) — Onboard a Charge Point and first connection\nTrigger: Admin registers a new Charge Point serial\nUse cases: UC-ADM-03, UC-OPS-01, UC-INT-01, UC-INT-04, UC-OPS-02
+
+|«person»\nAdmin|
+|«person»\nOperator|
+|«software system»\nPowerMe Platform|
+|«external system»\nCharge Point|
+|«person»\nAdmin|
+start
+:Register the Charge Point\nserial in the registry;
+|«software system»\nPowerMe Platform|
+if ( ) then ([serial already\nin the registry])
+  :Reject duplicate serial;
+  stop
+else ([new serial])
+  :Save serial;
+endif
+:ChargePoint\n&#91;registered&#93;]
+|«person»\nOperator|
+:Enter serial, choose own\nsite and connectors;
+|«software system»\nPowerMe Platform|
+:Check site ownership\nand serial status;
+if ( ) then ([site of another Operator, or serial\nnot registered or already onboarded])
+  :Refuse with reason;
+  stop
+else ([valid])
+endif
+:Assign to site, create connectors,\nissue credential and show it once;
+:ChargePoint\n&#91;awaiting_connection&#93;]
+:Connector\n&#91;Unavailable&#93;]
+|«person»\nOperator|
+:Configure the Charge Point with\nplatform address and credential;
+|«external system»\nCharge Point|
+:Connect with credential\nand send boot report>
+|«software system»\nPowerMe Platform|
+if ( ) then ([wrong credential])
+  :Reject connection and log it\n(Charge Point stays awaiting);
+  stop
+else ([credential valid])
+endif
+:Accept boot and set\nheartbeat interval;
+:ChargePoint\n&#91;in_service&#93;]
+:Read capabilities (reservation\nsupport, battery-level reporting,\nfree-vend tag);
+|«external system»\nCharge Point|
+:Report each\nconnector's status>
+|«software system»\nPowerMe Platform|
+:Show connectors on the\nDriver map and dashboard;
+:Connector\n&#91;Available&#93;]
+|«person»\nOperator|
+:See the Charge Point\nin service on the dashboard;
+stop
+@enduml

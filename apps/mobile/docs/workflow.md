@@ -20,7 +20,7 @@ Tên nhánh: `wp3/<ma-mb-viet-thuong>-<mo-ta-khong-dau>`, chọn **mã MB thật
 
 ## Nguồn và phân công
 
-Đọc [SRS](../../../docs/requirements/report3-srs.md), [package](../../../diagrams/team/PKG-3_mobile.puml), [class](../../../diagrams/team/WF01-class.puml), [sequence](../../../diagrams/team/WF01-seq.puml). [README](../README.md) ghi mức duyệt và baseline drift.
+Đọc [SRS](../../../docs/requirements/report3-srs.md), [package](../../../diagrams/report4/package/PKG-3/PKG-3.puml), [class](../../../diagrams/report4/class/CD-1/CD-1.puml), [sequence](../../../diagrams/report4/sequence/SD-1a/SD-1a.puml). [README](../README.md) ghi mức duyệt và baseline drift.
 
 Phiếu v1.3 chưa có trong working tree; đọc [bản GitHub bất biến](https://github.com/PowerMeApp/powerme/blob/91d8ec072f004ded56c6584bcf6a96284e8a9cdf/docs/requirements/registration-form-v1.3.md), hoặc từ root repo:
 

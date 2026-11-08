@@ -1,0 +1,76 @@
+@startuml PKG-2
+!include ../_style.iuml
+skinparam nodesep 40
+skinparam ranksep 45
+skinparam folder {
+  BackgroundColor white
+  BorderColor black
+}
+title PKG-2 (Software level) — Package diagram of the Operator Dashboard and Admin Console (apps/dashboard, React + Vite)\nDesign only: apps/dashboard has no source code yet at origin/main ce3902c · sub-packages listed inside each package
+footer Owner: Trần Trọng Nghĩa (WP4) · v2.0 · 01/11/2026 · layers from Nghĩa's 24/10 design · features renamed to the post-Review-2 terms (Charge Point, revenue share, Admin)
+
+package "apps/dashboard" {
+  folder P [
+    <b>presentation</b>
+    ----
+    routes
+    pages
+    layouts
+    components
+  ]
+  folder FO [
+    <b>features (Operator)</b>
+    ----
+    charge-points (onboard, list)
+    monitoring (live connector status)
+    faults (alerts, acknowledge)
+    remote-commands (reset, stop, unlock)
+    tariffs-promotions
+    unattributed-sessions
+    revenue-share (D3)
+    ocpp-messages (raw log viewer)
+  ]
+  folder FA [
+    <b>features (Admin)</b>
+    ----
+    users-roles
+    charge-point-registry
+    rfid-cards
+    network-monitor
+    billing-exceptions (refunds, invoices)
+    platform-fee (D3)
+    platform-revenue (D3)
+  ]
+  folder C [
+    <b>core</b>
+    ----
+    api
+    auth
+    realtime
+    store
+    config
+  ]
+  folder F [
+    <b>foundation</b>
+    ----
+    types
+    utils
+    styles
+    assets
+  ]
+}
+folder SH [
+  <b>packages/shared</b>
+  ----
+  shared types
+]
+rectangle "CSMS operator-api\n«planned»" as BE
+
+P ..> FO : <<import>>
+P ..> FA : <<import>>
+FO ..> C : <<import>>
+FA ..> C : <<import>>
+C ..> F : <<import>>
+C ..> SH : <<import>> types
+C ..> BE : HTTPS / JSON (api)\nSSE week 10 (realtime)
+@enduml

@@ -1,0 +1,33 @@
+@startuml SD-5a
+!include ../_style.iuml
+title SD-5a (Software level, CSMS) — Admin registers a Charge Point, the Operator onboards it to a station\nPrecondition: Admin / Operator staff logged in · System view: AD-8 · State: STM-3
+footer Owner: Trần Đức Ân (WP1) · v2.0 · 01/11/2026 · names = code after the Charge Point rename (T90) · left gate = Admin console / Operator Dashboard
+
+participant "«component»\n<u>:ChargePointOnboardingService</u>" as POS
+participant "«component»\n<u>:ChargePointLifecyclePolicy</u>" as PLP
+
+== Admin registers the serial ==
+[-> POS ++ : registerDevice(adminId, {serial, model})\n(POST /admin/charge-points [HTTPS, JWT admin])
+POS -> POS : requireRole(admin), check serial is new
+break serial already registered
+  [<-- POS : 409 "duplicate serial"
+end
+POS -> PLP ++ : transition(null, REGISTER) : ChargePointLifecycle
+PLP --> POS -- : registered
+POS -> POS : save Charge Point
+hnote over POS : {chargePoint.lifecycle = registered}
+[<-- POS -- : 201 {chargePointId}
+
+== Operator onboards it to one of its stations ==
+[-> POS ++ : onboard(staffId, {serial, siteId, connectors})\n(POST /operator/charge-points [HTTPS, JWT operator])
+POS -> POS : operatorOf(staffId), check site belongs to that Operator,\nserial registered, 1–2 connectors
+break site of another Operator, serial not registered or already onboarded
+  [<-- POS : 403 / 404 / 409, nothing saved
+end
+POS -> PLP ++ : transition(registered, ONBOARD) : ChargePointLifecycle
+PLP --> POS -- : awaiting_connection
+POS -> POS : link site, create connectors (Unavailable),\ngenerate credential, store its hash
+hnote over POS : {chargePoint.lifecycle = awaiting_connection}
+[<-- POS -- : 201 {ocppUrl, credential}
+note right of POS : the credential is shown once;\nthe Operator enters it on the\nCharge Point (SD-5b)
+@enduml

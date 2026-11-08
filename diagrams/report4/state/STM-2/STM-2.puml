@@ -1,0 +1,47 @@
+@startuml STM-2
+!include _style.iuml
+title STM-2 (System level) — Status of a Connector\nconnectors.status · v1.0 · 01/11/2026
+
+[*] -down-> Unavailable
+note left of Unavailable
+  created when the Operator
+  onboards the Charge Point (AD-8)
+end note
+
+state Operational {
+  [*] -down-> Available
+  state "Energy transfer" as ET {
+    [*] -down-> Charging
+    Charging -left-> SuspendedEV : vehicle pauses
+    SuspendedEV -right-> Charging : vehicle resumes
+    Charging -right-> SuspendedEVSE : Charge Point pauses
+    SuspendedEVSE -left-> Charging : Charge Point resumes
+  }
+  Available -down-> Preparing : Driver authorized\nor plugs in
+  Preparing -up-> Available : authorization refused\nor plug-in timeout
+  Preparing -down-> ET : charging starts
+  ET -down-> Finishing : charging stops
+  Finishing -up-> Available : Driver unplugs
+  Available -right-> Reserved : Charge Point holds it\nfor a reservation
+  Reserved -left-> Available : hold released
+  Reserved -down-> Preparing : reserving Driver\nauthorized
+}
+
+Unavailable -right-> Operational : Charge Point reports it ready\n(after connecting or back in service)
+Operational -left-> Unavailable : taken out of service\nor Charge Point restarts
+Operational -down-> Faulted : fault reported\n/ hide from search
+Faulted -up-> Operational : fault cleared\n/ show in search
+Faulted -left-> Unavailable : Charge Point restarts\nor taken out of service
+
+note right of Operational
+  The Charge Point owns these states;
+  the platform records each report.
+  A report outside these transitions is
+  still recorded and flagged, never refused.
+  Reserved only with reservations (Should).
+  "Offline" is not a connector status: it
+  comes from the Charge Point connection
+  (STM-3). Operational and Energy transfer
+  group states; they are not status values.
+end note
+@enduml

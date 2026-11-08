@@ -1,0 +1,61 @@
+@startuml SD-1b
+!include ../_style.iuml
+title SD-1b (Software level, CSMS) — App-started session stops and is settled\nPrecondition: session started from the Driver App is active (payment_mode = csms_billed) · System view: AD-1 · State: STM-1, STM-5
+footer Owner: Lý Hoàng Sơn (WP3) with Ngô Văn Minh Trí (WP2) · v2.0 · 01/11/2026 · names = code (apps/csms/src) · left gate = Driver App / Charge Point, right gate = Charge Point
+
+participant "«component»\n<u>:DriverChargingService</u>" as D
+participant "«component»\n<u>:ConnectionRegistry</u>" as REG
+participant "«component»\n<u>:OcppHandlers</u>" as H
+participant "«component»\n<u>:SessionsService</u>" as S
+participant "«component»\n<u>:ReconciliationService</u>" as R
+participant "«component»\n<u>:ChargeSettlementService</u>" as CS
+
+== Driver stops from the app ==
+[-> D ++ : stop(driverId, key, sessionId)\n(POST /api/driver/v1/sessions/{id}/stop [HTTPS])
+D -> D : save stop intent,\nsession active → stopping (STOP_REQUESTED)
+D -> REG ++ : call(identity, RemoteStopTransaction {transactionId})
+REG ->] : RemoteStopTransaction [OCPP 1.6J, WSS]
+note right : {d ≤ 30 s}
+REG <--] : RemoteStopTransaction.conf {status}
+REG --> D -- : status
+alt status = Accepted
+  [<-- D : 202 {status = stopping}
+else status = Rejected
+  D -> D : session stopping → active (REMOTE_STOP_REJECTED)
+  [<-- D : 409 "Charge Point refused to stop"
+end
+deactivate D
+
+== Charge Point ends the transaction ==
+[-> H ++ : StopTransaction {transactionId, meterStop, timestamp, transactionData}\n[OCPP 1.6J, WSS]
+H -> S ++ : onStopTransaction(req, ctx)
+S -> S : store final readings,\nsession Running → closed (STOP_TRANSACTION)
+S -> R ++ : evaluate(series, meterStop) : ReconciliationVerdict
+R --> S -- : verdict
+S -> R ++ : recordVerdict(sessionId, verdict)
+R --> S --
+alt verdict = consistent
+  S -> S : closed → reconciled (RECONCILE_OK)
+else verdict = conflict
+  S -> S : closed → review (RECONCILE_CONFLICT), billing held
+end
+S --> H --
+H -> D ++ : onStopped(transactionId)
+D -> CS ++ : settle(sessionId)
+alt status = reconciled and not yet posted
+  CS -> CS : price per tariff period (session_tariff_segments)
+  CS -> CS : post session_debit, award points (earn), write statement
+  note right : statement is then read by the app\n(GET /sessions/{id}/statement, SD-1a);\nbalance < 0 → credit account\nactive → in_shortfall (STM-5);\nsplit platform fee / Operator share:\ndata design pending (T81)
+  CS --> D : posted
+else review, or not app-billed
+  CS --> D : pending | ineligible (job stays queued)
+end
+deactivate CS
+D --> H --
+[<-- H -- : StopTransaction.conf {idTagInfo.status = Accepted}
+
+... every 30 s ...
+[o-> CS ++ : retryPending(limit)
+CS -> CS : settle(sessionId) for each pending job\n(e.g. after an Operator resolves a review)
+deactivate CS
+@enduml

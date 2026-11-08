@@ -1,0 +1,26 @@
+' Shared black & white style (same look as AD / STM / SD / CD sets, lecturer guide B.1)
+skinparam style strictuml
+skinparam shadowing false
+skinparam dpi 150
+skinparam defaultFontName Arial
+skinparam defaultFontSize 12
+skinparam backgroundColor white
+skinparam ArrowColor black
+skinparam ArrowThickness 1
+skinparam packageStyle folder
+skinparam package {
+  BackgroundColor white
+  BorderColor black
+}
+skinparam database {
+  BackgroundColor white
+  BorderColor black
+}
+skinparam note {
+  BackgroundColor white
+  BorderColor black
+}
+skinparam rectangle {
+  BackgroundColor white
+  BorderColor black
+}

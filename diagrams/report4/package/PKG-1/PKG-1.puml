@@ -1,0 +1,66 @@
+@startuml PKG-1
+!include ../_style.iuml
+skinparam nodesep 35
+skinparam ranksep 45
+title PKG-1 (Software level) — Package diagram of the CSMS back end (apps/csms, one NestJS process)\nPlain packages = in code at origin/main ce3902c · dashed «planned» = designed, not in code yet
+footer Owner: Ngô Văn Minh Trí (WP2) · v2.0 · 01/11/2026 · module names = code folders · «import» = NestJS module import · «use» = planned dependency
+
+package "apps/csms" {
+  package "ocpp-gateway" {
+  }
+  package "sessions" {
+  }
+  package "reconciliation" {
+  }
+  package "stations" {
+  }
+  package "console" {
+  }
+  package "db" {
+  }
+  package "config" {
+  }
+  package "driver-api" <<planned>> #line.dashed {
+  }
+  package "operator-api" <<planned>> #line.dashed {
+  }
+  package "billing" <<planned>> #line.dashed {
+  }
+  package "tariffs" <<planned>> #line.dashed {
+  }
+  package "users" <<planned>> #line.dashed {
+  }
+  package "realtime" <<planned>> #line.dashed {
+  }
+}
+package "packages/shared" {
+}
+database "PostgreSQL 16" as PG
+
+"ocpp-gateway" ..> "sessions" : <<import>>
+"ocpp-gateway" ..> "reconciliation" : <<import>>
+"ocpp-gateway" ..> "stations" : <<import>>
+"sessions" ..> "reconciliation" : <<import>>
+"console" ..> "ocpp-gateway" : <<import>>
+"console" ..> "stations" : <<import>>
+"ocpp-gateway" ..> "db"
+"sessions" ..> "db"
+"reconciliation" ..> "db"
+"stations" ..> "db"
+"console" ..> "db"
+"db" ..> PG : SQL
+"db" ..> "config"
+
+"driver-api" .[dashed].> "sessions" : <<use>>
+"operator-api" .[dashed].> "stations" : <<use>>
+"operator-api" .[dashed].> "reconciliation" : <<use>>
+"sessions" .[dashed].> "billing" : session settled
+"billing" .[dashed].> "tariffs" : <<use>>
+"driver-api" .[dashed].> "billing" : <<use>>
+"driver-api" .[dashed].> "users" : <<use>>
+"operator-api" .[dashed].> "users" : <<use>>
+"sessions" .[dashed].> "realtime" : <<use>>
+"stations" .[dashed].> "realtime" : <<use>>
+"ocpp-gateway" ..> "packages/shared"
+
+@enduml

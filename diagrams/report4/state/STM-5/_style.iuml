@@ -1,0 +1,19 @@
+' Shared style, copied from the lecturer guide (Appendix B.1), state part
+skinparam shadowing false
+skinparam dpi 150
+skinparam defaultFontName Arial
+skinparam defaultFontSize 12
+skinparam backgroundColor white
+skinparam ArrowColor black
+skinparam ArrowThickness 1
+skinparam state {
+  BackgroundColor white
+  BorderColor black
+  StartColor black
+  EndColor black
+}
+skinparam note {
+  BackgroundColor white
+  BorderColor black
+}
+hide empty description

@@ -1,0 +1,131 @@
+@startuml CD-2
+!include ../_style.iuml
+skinparam nodesep 35
+skinparam ranksep 50
+title CD-2 (Software level, CSMS billing) — Class diagram of WF-02: top-up, payment, e-invoice, refunds\nDesign (module billing «planned», tables in migrations 0003 / 0012) · Behaviour: SD-2a…2f · State: STM-4, 5, 7, 10
+footer Owner: Lê Bảo Khang (WP5) · v2.0 · 01/11/2026 · v0.3 (28/10) + RefundService, Refund, InvoiceAdjustment, EInvoiceProviderAdapter (ERD v1.1, R8) · main members only
+
+package "controllers" {
+  class TopUpController <<controller>> {
+    + create(dto : CreateTopUpDto, key : string) : TopUpView
+    + get(topUpId : number) : TopUpView
+  }
+  class VnpayIpnController <<controller>> {
+    + handleIpn(query : VnpayIpn) : IpnResponse
+  }
+  class AdminBillingController <<controller>> {
+    + refundTopUp(topUpId : number) : RefundView
+    + refundLatePayment(topUpId : number) : RefundView
+    + retryRefund(refundId : number) : RefundView
+    + retryInvoice(invoiceId : number) : void
+  }
+  class AccountClosureController <<controller>> {
+    + requestClosure() : ClosureView
+  }
+}
+
+package "services" {
+  class TopUpService <<component>> {
+    + create(driverId : number, dto : CreateTopUpDto, key : string) : TopUp
+    + applyPaymentResult(ipn : VnpayIpn) : IpnCode
+    + onPendingTimeout(topUpId : number) : void
+    + refund(topUpId : number, adminId : number) : Refund
+    + refundLatePayment(topUpId : number, adminId : number) : Refund
+  }
+  class CreditLedgerService <<component>> {
+    + post(accountId : number, type : CreditTransactionType, amountVnd : number, ref : LedgerRef) : CreditTransaction
+  }
+  class LoyaltyService <<component>> {
+    + redeemForTopUp(topUp : TopUp) : void
+    + restoreForTopUp(topUp : TopUp) : void
+  }
+  class RefundService <<component>> {
+    + create(topUpId : number, kind : RefundKind, amountVnd : number, requestedBy : number [0..1]) : Refund
+    + send(refundId : number) : void
+    + retry(refundId : number, adminId : number) : void
+  }
+  class EInvoiceService <<component>> {
+    + requestForTopUp(topUp : TopUp) : EInvoice
+    + issue(invoiceId : number) : void
+    + adjustForRefund(refund : Refund) : InvoiceAdjustment
+  }
+  class AccountClosureService <<component>> {
+    + requestClosure(driverId : number) : CreditAccount
+  }
+}
+
+package "adapters" {
+  class VnpayAdapter <<port>> {
+    + buildPaymentUrl(topUp : TopUp, amountVnd : number) : string
+    + queryTransaction(ref : string) : GatewayStatus
+    + refund(ref : string, amountVnd : number) : GatewayRefundResult
+  }
+  class EInvoiceProviderAdapter <<port>> {
+    + createInvoice(data : InvoiceData) : string
+    + createAdjustment(data : AdjustmentData) : string
+  }
+}
+
+package "entities (tables)" {
+  class CreditAccount <<entity>> {
+    + balanceVnd : number
+    + status : active | in_shortfall | closed
+  }
+  class CreditTransaction <<entity>> {
+    + entryNo : number
+    + transactionType : top_up | session_debit | refund | adjustment | reservation_fee
+    + amountVnd : number
+    + balanceAfterVnd : number
+  }
+  class TopUp <<entity>> {
+    + amountVnd : number
+    + amountPaidVnd : number
+    + status : pending | credited | failed | expired | refunded
+    + expiresAt : Date
+  }
+  class Refund <<entity>> {
+    + kind : top_up | late_payment | account_closure
+    + amountVnd : number
+    + status : requested | done | failed
+    + attemptCount : number
+  }
+  class EInvoice <<entity>> {
+    + status : requested | issued | failed | needs_review
+    + attemptCount : number
+  }
+  class InvoiceAdjustment <<entity>> {
+    + amountVnd : number
+    + status : requested | issued | failed | needs_review
+  }
+}
+
+TopUpController --> TopUpService
+VnpayIpnController --> TopUpService
+AdminBillingController --> TopUpService
+AdminBillingController --> RefundService
+AdminBillingController --> EInvoiceService
+AccountClosureController --> AccountClosureService
+TopUpService --> CreditLedgerService
+TopUpService --> LoyaltyService
+TopUpService --> RefundService
+TopUpService --> VnpayAdapter
+TopUpService ..> EInvoiceService : <<async>>
+AccountClosureService --> CreditLedgerService
+AccountClosureService --> RefundService
+RefundService --> VnpayAdapter
+RefundService ..> EInvoiceService : <<async>>
+EInvoiceService --> EInvoiceProviderAdapter
+
+CreditAccount "1" *-- "0..*" CreditTransaction
+CreditAccount "1" -- "0..*" TopUp : funded by >
+TopUp "1" -- "0..*" Refund : refunded by >
+TopUp "1" -- "0..1" EInvoice : invoiced as >
+EInvoice "1" -- "0..*" InvoiceAdjustment
+Refund "1" -- "0..1" InvoiceAdjustment : invoiced as >
+
+note bottom of RefundService
+  4 attempts (5 min, 30 min, 2 h);
+  closure refunds created by the system
+  (requestedBy = null, R8 Q1)
+end note
+@enduml

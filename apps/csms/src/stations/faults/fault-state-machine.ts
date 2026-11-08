@@ -1,8 +1,9 @@
 /**
  * FaultStateMachine — STM-6 FaultEvent (cảnh báo cho operator), lớp THUẦN (không DB, không Nest).
  *
- * Vì sao tồn tại: STM-6 v0.2 (`diagrams/stm/STM-6_FaultEvent.puml`, 24/10/2026) chốt 4 trạng thái
- * của `fault_events.status` và 7 chuyển; tên trigger lấy đúng từ sơ đồ. Đây là nơi DUY NHẤT biết
+ * Vì sao tồn tại: STM-6 v0.2 (24/10/2026) chốt 4 trạng thái của `fault_events.status` và 7 chuyển;
+ * tên trigger lấy đúng từ bản đó. Bản vẽ lại v1.0 (`diagrams/report4/state/STM-6/STM-6.puml`,
+ * 01/11/2026) giữ 4 trạng thái nhưng ghi trigger bằng lời. Đây là nơi DUY NHẤT biết
  * bảng chuyển; `FaultService` chỉ gọi `apply()` rồi ghi xuống DB — giống SessionStateMachine của
  * STM-1, để test từng chuyển mà không cần Postgres (fault-state-machine.spec.ts).
  *

@@ -1,0 +1,52 @@
+@startuml STM-1
+!include _style.iuml
+title STM-1 (System level) — Lifecycle of a ChargingSession\nsessions.status · v1.0 · 01/11/2026
+
+state c0 <<choice>>
+[*] -down-> c0
+note right of c0
+  created when the Charge Point accepts
+  a start request from the Driver App,
+  or reports a session it started itself
+  (card, password, free vend)
+end note
+c0 -down-> pending : [start request\nfrom the Driver App]
+c0 -down-> Running : [started at the\nCharge Point]\n/ classify card,\nset payment mode
+
+state "Running" as Running {
+  [*] -down-> active
+  active -right-> paused : vehicle or Charge Point\npauses charging
+  paused -left-> active : charging resumes
+  active -down-> stopping : Driver stops, limit reached\nor credit at cutoff\n/ ask Charge Point to stop
+  paused -down-> stopping : Driver stops\n/ ask Charge Point to stop
+  stopping -up-> active : Charge Point refuses\nto stop / tell Driver
+}
+
+pending -right-> Running : Charge Point\nconfirms start
+pending -down-> failed : after(120 s)\n/ tell Driver, no charge
+failed -down-> [*]
+
+Running -down-> closed : Charge Point reports stop\n(Driver, limit, battery full\nor at the Charge Point)
+Running --> orphaned : Charge Point\noffline for 120 s\n/ void reservations
+orphaned --> Running : live data of\nthe session resumes
+
+closed -down-> reconciled : energy check consistent
+closed -down-> review : energy check conflict\n/ hold billing
+orphaned -down-> reconciled : stop data replayed,\nenergy check consistent
+orphaned -down-> review : stop data replayed, energy\ncheck conflict, or at(start + 24 h)\n/ hold billing
+review -left-> reconciled : Operator resolves\n/ record decision
+reconciled -right-> review : late data changes the result\n[credit not yet debited]
+reconciled -down-> [*] : charge settled\n/ price per tariff period,\ndebit credit, award points,\nsend statement
+note left of reconciled
+  Only app-billed sessions are
+  settled; station_wallet and
+  unattributed sessions stay
+  reconciled (no debit).
+end note
+
+note bottom of Running
+  Running groups active, paused, stopping;
+  it is not a status value. Entering Running
+  starts in active.
+end note
+@enduml

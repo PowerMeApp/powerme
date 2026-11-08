@@ -1,7 +1,7 @@
 # WF-02 – Quyết định thiết kế
 
 > Đặt tại `docs/spec/WF-02_decisions.md`. Cập nhật: 06/11/2026.
-> **Nguồn chính là diagram trong `diagrams/wf02/`** (CD-2, SD-2a…2f v2.0, 01/11/2026, bản đã chia sẻ vào tài liệu chung của nhóm). File này chỉ ghi lại:
+> **Nguồn chính là diagram trong `diagrams/report4/class/CD-2/` + `diagrams/report4/sequence/SD-2a…2f/`** (CD-2, SD-2a…2f v2.0, 01/11/2026, bản đã chia sẻ vào tài liệu chung của nhóm). File này chỉ ghi lại:
 > (1) những điểm trong diagram mà code phải bám, viết ra cho dễ tra;
 > (2) cách khớp diagram với repo hiện tại;
 > (3) các **bổ sung chưa có trong diagram** (đánh dấu ⊕). Khi vẽ lại diagram, đưa các mục ⊕ vào rồi ghi "đã vào diagram".
@@ -19,7 +19,7 @@
 | SD-2e `SD-2e_admin_refund.puml` | Admin hoàn top-up; gửi refund về nguồn thanh toán | STM-4, STM-10, STM-7 |
 | SD-2f `SD-2f_close_account.puml` | Tài xế đóng tài khoản; Admin hoàn số dư (**diagram vẽ sai**, theo D6) | STM-5, STM-10 |
 
-STM-4 TopUp, STM-5 CreditAccount, STM-7 EInvoice (cũng dùng cho InvoiceAdjustment), **STM-10 Refund** (STM-8 đã là RfidCard; file `diagrams/stm/STM-10_Refund.puml` v1.0, 01/11). Code: `TopUpStateMachine`, `RefundStateMachine` trong `apps/csms/src/billing/` (T32 Phần 2).
+STM-4 TopUp, STM-5 CreditAccount, STM-7 EInvoice (cũng dùng cho InvoiceAdjustment), **STM-10 Refund** (STM-8 đã là RfidCard; file `diagrams/report4/state/STM-10/STM-10.puml` v1.0, 01/11). Code: `TopUpStateMachine`, `RefundStateMachine` trong `apps/csms/src/billing/` (T32 Phần 2).
 
 ## D1. Hoàn tiền: ghi quyết định trước, chuyển tiền sau (SD-2e, STM-10)
 

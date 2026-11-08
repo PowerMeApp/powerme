@@ -10,7 +10,7 @@
 - The dashboard package diagram (`package-diagram-dashboard.drawio` / `.svg`) now has a `billing` feature package.
 
 **Sources:**
-- WP5 billing designs, v2.0, 01/11 (`diagrams/wf02/`; this page was first written against v0.1 of 24/10, references below are updated to v2.0):
+- WP5 billing designs, v2.0, 01/11 (`diagrams/report4/class/CD-2/` + `diagrams/report4/sequence/SD-2a…2f/`; this page was first written against v0.1 of 24/10, references below are updated to v2.0):
   - `CD-2_topup_classes.puml`
   - `SD-2a_create_topup.puml`
   - `SD-2c_einvoice_issue.puml` (was v0.1 SD-2b phase B)
