@@ -3,6 +3,7 @@ import type { Db } from '../db/db.module.js';
 import type { DriverChargingService } from '../sessions/driver-charging.service.js';
 import { ChargingError } from '../sessions/charging-error.js';
 import type { StationSearchInput } from '../sessions/station-search.js';
+import { DriverAccounts, DriverRateLimited } from './driver-account.js';
 import { authenticateDriver, databaseId, DriverApiConfig, DriverApiError } from './driver-auth.js';
 import { handleRoad, isRoadPath } from './road.http.js';
 import { RoadDiscovery } from './road-discovery.js';
@@ -10,12 +11,16 @@ import { ProviderUnavailable, VietmapAdapter } from './vietmap.js';
 
 const BASE = '/api/driver/v1';
 const LOCAL_ORIGIN = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/;
+/** BE-21: body JSON của /auth/* tối đa 16 KiB — đủ cho refresh token (≤ 8192 ký tự) và form đăng ký. */
+const AUTH_BODY_LIMIT = 16 * 1024;
+const AUTH_ROUTES = ['register', 'login', 'refresh'] as const;
 
 export function createDriverListener(
   db: Db,
   service: DriverChargingService,
   config: DriverApiConfig,
   road = new RoadDiscovery(db, new VietmapAdapter(config.searchKey), undefined),
+  accounts = new DriverAccounts(db, config),
 ): RequestListener {
   return (req, res) => {
     void handle(req, res).catch(() => {
@@ -32,6 +37,13 @@ export function createDriverListener(
     }
     try {
       if (origin && !LOCAL_ORIGIN.test(origin)) throw new DriverApiError(403, 'forbidden_origin');
+      const authMatch = /^\/api\/driver\/v1\/auth\/([^/]*)$/.exec(
+        new URL(req.url ?? '', 'http://driver.local').pathname,
+      );
+      if (authMatch) {
+        await handleAuth(req, res, authMatch[1]!);
+        return;
+      }
       if (req.method === 'OPTIONS') {
         res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
         res.setHeader(
@@ -175,7 +187,11 @@ export function createDriverListener(
       });
     } catch (error) {
       if (error instanceof DriverApiError) {
-        if (error.status === 429) res.setHeader('Retry-After', '60');
+        if (error.status === 429)
+          res.setHeader(
+            'Retry-After',
+            String(error instanceof DriverRateLimited ? error.retryAfterS : 60),
+          );
         if (error.status === 401) res.setHeader('WWW-Authenticate', 'Bearer');
         send(res, error.status, { error: error.code, detail: error.code });
         return;
@@ -204,6 +220,68 @@ export function createDriverListener(
       throw error;
     }
   }
+
+  /**
+   * BE-21: POST /auth/register | /auth/login | /auth/refresh — không cần bearer. Chỉ nhận
+   * `application/json`, body tối đa AUTH_BODY_LIMIT, object JSON phẳng; lỗi theo mẫu DriverApiError.
+   */
+  async function handleAuth(req: IncomingMessage, res: ServerResponse, route: string) {
+    if (!(AUTH_ROUTES as readonly string[]).includes(route))
+      throw new DriverApiError(404, 'not_found');
+    if (req.method === 'OPTIONS') {
+      res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+      res.writeHead(204);
+      res.end();
+      return;
+    }
+    if (req.method !== 'POST') {
+      res.setHeader('Allow', 'POST, OPTIONS');
+      throw new DriverApiError(405, 'method_not_allowed');
+    }
+    if (new URL(req.url ?? '', 'http://driver.local').search)
+      throw new DriverApiError(400, 'invalid_input');
+    accounts.assertConfigured();
+    const body = await readJsonObject(req, res);
+    const ip = req.socket.remoteAddress ?? 'unknown';
+    if (route === 'register') send(res, 201, await accounts.register(body, ip));
+    else if (route === 'login') send(res, 200, await accounts.login(body, ip));
+    else send(res, 200, await accounts.refresh(body));
+  }
+}
+
+async function readJsonObject(
+  req: IncomingMessage,
+  res: ServerResponse,
+): Promise<Record<string, unknown>> {
+  const type = req.headers['content-type'] ?? '';
+  if (!/^application\/json\s*(;\s*charset=utf-8\s*)?$/i.test(type))
+    throw new DriverApiError(415, 'unsupported_media_type');
+  const declared = req.headers['content-length'];
+  if (declared !== undefined && !(Number(declared) <= AUTH_BODY_LIMIT)) {
+    // Không đọc phần thân quá cỡ; đóng kết nối sau khi trả lỗi.
+    res.setHeader('Connection', 'close');
+    throw new DriverApiError(413, 'payload_too_large');
+  }
+  const chunks: Buffer[] = [];
+  let size = 0;
+  for await (const chunk of req as AsyncIterable<Buffer>) {
+    size += chunk.length;
+    if (size > AUTH_BODY_LIMIT) {
+      res.setHeader('Connection', 'close');
+      throw new DriverApiError(413, 'payload_too_large');
+    }
+    chunks.push(chunk);
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(Buffer.concat(chunks)));
+  } catch {
+    throw new DriverApiError(400, 'invalid_input');
+  }
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed))
+    throw new DriverApiError(400, 'invalid_input');
+  return parsed as Record<string, unknown>;
 }
 
 function only(q: URLSearchParams, allowed: string[]) {

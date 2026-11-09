@@ -28,6 +28,15 @@ it('requires complete JWT config with a strong base64 key', () => {
   expect(() => loadDriverApiConfig({ ...env, DRIVER_API_JWT_SECRET_BASE64: 'short' })).toThrow();
 });
 
+it('defaults the refresh token life to 30 days and bounds DRIVER_API_REFRESH_TTL_S', () => {
+  expect(loadDriverApiConfig({}).refreshTtlS).toBe(2592000);
+  expect(loadDriverApiConfig({ DRIVER_API_REFRESH_TTL_S: '' }).refreshTtlS).toBe(2592000);
+  expect(loadDriverApiConfig({ DRIVER_API_REFRESH_TTL_S: '3600' }).refreshTtlS).toBe(3600);
+  expect(loadDriverApiConfig({ DRIVER_API_REFRESH_TTL_S: '7776000' }).refreshTtlS).toBe(7776000);
+  for (const value of ['900', '3599', '7776001', '1e5', '-3600', '86400.5', 'abc'])
+    expect(() => loadDriverApiConfig({ DRIVER_API_REFRESH_TTL_S: value })).toThrow();
+});
+
 it('keeps bigint IDs lossless and rejects malformed/overflow IDs', () => {
   expect(databaseId('9223372036854775807')).toBe('9223372036854775807');
   for (const id of ['0', '01', '-1', '1.0', '1e3', '9223372036854775808', 1, null])

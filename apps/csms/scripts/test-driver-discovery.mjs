@@ -15,6 +15,7 @@ if (!['127.0.0.1', '[::1]'].includes(adminUrl.hostname) || adminUrl.pathname !==
 const suites = [
   'test/driver-discovery.integration.test.ts',
   'test/driver-smart.integration.test.ts',
+  'test/driver-auth.integration.test.ts',
 ];
 for (const suite of suites) {
   const name = `powerme_mb03_driver_test_${Date.now()}_${randomBytes(4).toString('hex')}`;
