@@ -70,8 +70,9 @@ Decisions khác diagram thì theo diagram và sửa decisions. Diagram mâu thu�
 | Xuất hoá đơn, retry | SD-2c | D5 | STM-7 | TC-STM7-* |
 | Timeout, thanh toán trễ | SD-2d | D4 | STM-4 #4–#6 | TC-STM4-04/05/06/07/15 |
 | Admin hoàn, gửi refund, retry | SD-2e | D1 | STM-4 #7, STM-10 | TC-STM4-12/13/14, TC-STM10-* |
-| Đóng tài khoản (tài xế đóng, Admin hoàn) | SD-2f (vẽ sai, theo D6) | D6 | STM-5, STM-10 | (theo test case của nhóm) |
+| Đóng tài khoản (tài xế đóng, hệ thống tự hoàn) | SD-2f | D6 | STM-5, STM-10 | (theo test case của nhóm) |
 | Worker quét DB | (không vẽ) | D7 | | |
+| Hết hạn điểm | (không vẽ) | D11 | | |
 
 Diagram: `diagrams/report4/class/CD-2/` + `diagrams/report4/sequence/SD-2a…2f/` (CD-2, SD-2a…2f v2.0, 01/11/2026) và `diagrams/report4/erd-logical/erd-logical-clean.svg`. STM-10 Refund: `diagrams/report4/state/STM-10/STM-10.puml` (STM-8 là RfidCard). State machine trong code: `top-up-state-machine.ts`, `refund-state-machine.ts`, lỗi chung `invalid-transition.ts`. Tên class/method theo CD-2; nguồn sự thật cho tên cột là `src/db/schema/billing.ts` (vd. cột là `status`, không phải `topUpStatus`).
 

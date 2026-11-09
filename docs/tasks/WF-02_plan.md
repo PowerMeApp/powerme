@@ -15,19 +15,20 @@ Kết quả đã ghi vào mục "Bối cảnh repo" của `apps/csms/src/billing
 | 1 | Schema bổ sung | Các bảng billing đã có (0003). Viết migration `0015` (D8; 0010–0012 và 0014 đã dùng cho BE-16, 0013 cho BE-07): enum `refund_kind`, `refund_status` + bảng `refunds` (D1), cột mới cho `invoice_adjustments` (D5), `next_attempt_at` + index quét cho `e_invoices`, `invoice_adjustments`, `refunds`, index `top_ups (status, expires_at)` (D7). Cập nhật `billing.ts`, `enums.ts`, `relations.ts`; thêm `NHAT-KY-MIGRATION-0015.md`, cập nhật `THIET-KE-CSDL-VAT-LY.md` | `migrate.mjs` áp được trên DB sạch và trên DB đã có các migration trước; `test/migration-0015.integration.test.ts` kiểm từng ràng buộc mới (cả nhánh vi phạm) | ☑ 04/11 (nhánh `wp5/t32-migration-refunds-0013`, PR #85; thay PR #83) |
 | 2 | State machine | `TopUpStateMachine` + `TopUpEvent` (STM-4), `RefundStateMachine` (STM-10). Thuần logic | Unit test mọi chuyển hợp lệ và không hợp lệ | ☑ 04/11 (nhánh `wp5/t32-state-machine-billing`) |
 | 3 | Sổ cái | `CreditLedgerService.post` / `getBalance`: entryNo, `balanceAfterVnd`, snapshot, `active ↔ in_shortfall`; `ensureAccounts(driverId)`; `LoyaltyService.earnForSession` để WP3 thay SQL thô (D9). Báo Sơn khi merge | Test bất biến số dư = Σ sổ cái; test unique `(top_up_id, transaction_type)` | ☑ 06/11 (nhánh `wp5/t32-so-cai-credit`) |
-| 4 | Loyalty (phần nạp) | `quoteRedemption` (≥ 500 điểm, ≤ 50% số tiền, 100 điểm = 1.000 VND), `redeemForTopUp` (lúc cộng tiền; điểm đã hết hạn thì `redeem` phần còn lại và ghi `adjust` `points = 0` cho phần thiếu, D3 ⊕), `restoreForTopUp` (giữ hạn cũ; trả −Σ `redeem` của top-up, không theo `points_redeemed`) | Unit test các giới hạn; test điểm hết hạn trước lúc cộng tiền (`pointsBalance` không âm, không trừ hai lần); hoàn một top-up có điểm hết hạn → không trả dư điểm | ☐ |
+| 4 | Loyalty (phần nạp) | `quoteRedemption` (≥ 500 điểm, ≤ 50% số tiền, 100 điểm = 1.000 VND), `redeemForTopUp` (lúc cộng tiền; điểm đã hết hạn thì `redeem` phần còn lại và ghi `adjust` `points = 0` cho phần thiếu, D3 ⊕), `restoreForTopUp` (giữ hạn cũ; trả −Σ `redeem` của top-up, không theo `points_redeemed`); hàm thuần tính điểm còn sống theo lô earn (FIFO) + `expireDue(now)` (D11) | Unit test các giới hạn; test điểm hết hạn trước lúc cộng tiền (`pointsBalance` không âm, không trừ hai lần); hoàn một top-up có điểm hết hạn → không trả dư điểm; test FIFO: redeem tiêu lô cũ nhất, restore về đúng hạn cũ, `expireDue` chỉ trừ phần còn sống | ☐ |
 | 5 | SD-2a tạo top-up | `TopUpController.create/get`, `TopUpService.create`, Idempotency-Key, khoá `credit_accounts`, BR-P22 theo ADR-0013, chỉ `pending` chặn (409 kèm `paymentUrl` ⊕), hẹn timeout, `VnpayAdapter.buildPaymentUrl` (D2) | TC-STM4-01/11/16/18 pass; test idempotency và race hai request song song | ☐ |
-| 6 | SD-2b IPN | `VnpayIpnController.handleIpn`, `TopUpService.applyPaymentResult`, verify chữ ký, mã 97/01/04/02/00, `requestForTopUp` và realtime sau commit (D3). **Migration mới** (số kế tiếp lúc làm): nới `top_ups_late_payment_status_check` thành `status IN ('expired','failed')`, sửa COMMENT `late_gateway_ref`, sửa COMMENT `credit_accounts.closure_refunded_at` theo D6 (0015 còn ghi "hệ thống tự hoàn"; schema TS đã sửa ở Phần 3), test hợp lệ/bị chặn, Trí review (D4 ⊕). Log warn khi máy trả `conflicting_result` | TC-STM4-02/03/08/09/10, TC-STM5-03/05 pass; IPN gửi lặp không cộng hai lần | ☐ |
+| 6 | SD-2b IPN | `VnpayIpnController.handleIpn`, `TopUpService.applyPaymentResult`, verify chữ ký, mã 97/01/04/02/00, `requestForTopUp` và realtime sau commit (D3). **Migration mới** (số kế tiếp lúc làm): nới `top_ups_late_payment_status_check` thành `status IN ('expired','failed')`, sửa COMMENT `late_gateway_ref`, sửa COMMENT `credit_accounts.closure_refunded_at` theo D1 chốt 09/11 (0015 còn ghi "NULL = … không có gì để hoàn"; nay không tạo refund nào → `= closed_at`), test hợp lệ/bị chặn, Trí review (D4 ⊕). Log warn khi máy trả `conflicting_result` | TC-STM4-02/03/08/09/10, TC-STM5-03/05 pass; IPN gửi lặp không cộng hai lần | ☐ |
 | 7 | SD-2c hoá đơn | `EInvoiceService.requestForTopUp/issue`, `EInvoiceProviderAdapter` stub, retry 4 lượt qua `failed`, `needs_review` (D5) | TC-STM7-* pass; lỗi hoá đơn không ảnh hưởng top-up | ☐ |
 | 8 | SD-2d timeout và trễ | `TopUpService.onPendingTimeout`, `VnpayAdapter.queryTransaction`, `expired`, cửa sổ trễ 1 giờ, ghi khoản trễ; ⊕ kiểm tra lại hạn mức, ⊕ querydr lỗi thì hẹn lại (D4) | TC-STM4-04/05/06/07/15 pass | ☐ |
-| 9 | SD-2e hoàn tiền | `TopUpService.refund/refundLatePayment`, `RefundService.create/send/retry`, `VnpayAdapter.refund`, truy vấn trước khi gửi lại, `EInvoiceService.adjustForRefund` sau `done` (D1, D5) | TC-STM4-12/13/14, TC-STM10-* pass | ☐ |
-| 10 | Admin | `AdminBillingController.refundTopUp/refundLatePayment/retryRefund/retryInvoice`, `BillingExceptionsQuery` (khoản trễ, hoá đơn `needs_review`, refund `failed`, tài khoản đóng chờ hoàn) (D10). Route `closure-refund` làm ở Phần 11 | Test phân quyền Admin + từng hành động | ☐ |
-| 11 | Đóng tài khoản (D6; SD-2f vẽ sai) | Bước 1 `AccountClosureService.requestClosure`: điều kiện đóng (không có phiên đang chạy **và** không có phiên đã dừng mà `charge_settlement_jobs.state = 'pending'`, decisions "Còn mở"), `closed` + `closed_at` + khoá đăng nhập (stub), không ghi sổ, không tạo refund. Bước 2 `refundClosedAccount(accountId, adminId)` + route admin `closure-refund`: chia newest-first, ghi sổ `refund −tổng` + `adjustment −phần dư`, refund `account_closure` (`requestedBy = adminId`), trả 202; guard `FOR UPDATE` + `closed` + `balance > 0`; `post` trên tài khoản `closed` chỉ nhận `refund` / `adjustment`; `closureRefundedAt` khi không còn refund `account_closure` nào chưa `done` | Test:<br>• điều kiện chặn đóng, kể cả phiên đã dừng chưa quyết toán; bước 1 không ghi sổ<br>• số dư 0 lúc đóng → `closure_refunded_at = closed_at`<br>• phân bổ newest-first; có phần dư thì số dư vẫn về 0<br>• toàn bộ là phần dư → không tạo refund, `closure_refunded_at` ghi ngay<br>• hai request `closure-refund` song song → đúng một lần, request kia nhận 409<br>• `post` loại khác trên tài khoản `closed` bị từ chối<br>• `closure_refunded_at` ghi khi refund cuối `done` | ☐ |
+| 9 | SD-2e hoàn tiền | `TopUpService.refund/refundLatePayment`, `RefundService.create/send/retry`, `VnpayAdapter.refund`, truy vấn trước khi gửi lại, `EInvoiceService.adjustForRefund` sau `done` (D1, D5). Guard hoàn top-up theo **số dư khả dụng** (`balance_vnd` − Σ `reserved_vnd` intent chưa kết thúc, như `card-eligibility.ts`) → `insufficient_available_balance`; tài khoản `closed` → `account_closed` 409; `refundLatePayment` vẫn cho phép trên `closed` (D1 ⊕) | TC-STM4-12/13/14, TC-STM10-* pass; test có intent đang giữ chỗ làm số dư khả dụng < số tiền → từ chối; tài khoản `closed` → `account_closed`; hoàn khoản trễ trên `closed` → được | ☐ |
+| 10 | Admin | `AdminBillingController.refundTopUp/refundLatePayment/retryRefund/retryInvoice`, `BillingExceptionsQuery` (khoản trễ, hoá đơn `needs_review`, refund `failed` gồm cả `account_closure`) (D10); danh sách "top-up có thể hoàn" loại top-up của tài khoản `closed` (⊕, D10) | Test phân quyền Admin + từng hành động; top-up `credited` của tài khoản `closed` không xuất hiện trong danh sách có thể hoàn | ☐ |
+| 11 | Đóng tài khoản (D6, theo SD-2f, chốt 09/11) | Một bước, một transaction: `AccountClosureService.requestClosure(driverId)` + route `POST /api/driver/v1/me/account/close`. Khoá `credit_accounts FOR UPDATE` trước mọi kiểm tra; đã `closed` → 200 kết quả cũ dựng từ dữ liệu đã ghi; điều kiện `active`, không top-up `pending`, `hasUnsettledSession = false` (stub, định nghĩa D6 (c)); hàm thuần chia newest-first (mỗi phần ≤ `amountPaidVnd`); `post(refund, −tổng)` + `post(adjustment, −phần dư)` khi còn `active`; refund `account_closure` (`requestedBy = null`); `LoyaltyService.forfeitOnClosure` (một dòng `expire`); `active → closed` + `closed_at` + `disableLogin` (stub); không có refund → `closure_refunded_at = closed_at`; trả 200 `{closed, refundIds, refundTotalVnd, nonRefundableVnd, pointsForfeited}`. `previewClosure` + route `GET …/me/account/close-preview` (chỉ đọc, cùng hàm chia). `earnForSession` từ chối tài khoản `closed`. `closureRefundedAt` khi refund `account_closure` cuối `done` | Test:<br>• điều kiện chặn: intent `pending`, phiên thẻ RFID chưa xong, phiên `review`, job settlement `pending`, top-up `pending`, `in_shortfall`<br>• khoá trước kiểm (đóng song song với start sạc xếp hàng đúng)<br>• chia newest-first; có phần dư thì số dư vẫn về 0<br>• số dư 0 → `closure_refunded_at = closed_at`<br>• điểm về 0 bằng một dòng `expire`<br>• gửi lại request → 200 cùng kết quả<br>• hai request đóng song song → ghi sổ đúng một lần, request kia nhận 200 cùng kết quả<br>• preview khớp kết quả đóng<br>• `earnForSession` từ chối tài khoản `closed`<br>• `closure_refunded_at` ghi khi refund cuối `done` | ☐ |
 | 12 | Worker quét DB dùng chung (D7) | Interface `BackgroundWork`, vòng quét `next_attempt_at … FOR UPDATE SKIP LOCKED`, chạy sớm qua `Scheduler`, quét lúc khởi động. **Làm trước Phần 7** (Phần 5 có thể dùng tạm `Scheduler` cho timeout) | Test: dòng đến hạn được xử lý đúng một lần kể cả khi hai worker chạy song song; khởi động lại vẫn bắt được việc còn tồn | ☐ |
+| 13 | Job hết hạn điểm (D11; BR-P36, SRS job #18) | Job hằng ngày gọi `LoyaltyService.expireDue(now)` (Phần 4): ghi `expire` cho phần còn sống của lô đã hết hạn; chống chạy chồng; bỏ qua tài khoản `closed` | Test: hai lượt chạy song song / chạy lại không trừ hai lần; tài khoản `closed` không bị đụng; chỉ trừ phần còn sống (lô đã redeem một phần) | ☐ |
 
 ### Tên nhánh cho từng phần
 
-Thứ tự làm đề xuất: tài liệu → 1 → 2 → 3 → 4 → 12 → 5 → 6 → 7 → 8 → 9 → 10 → 11.
+Thứ tự làm đề xuất: tài liệu → 1 → 2 → 3 → 4 → 12 → 5 → 6 → 7 → 8 → 9 → 10 → 11 → 13.
 
 | Phần | Nhánh |
 |---|---|
@@ -44,6 +45,7 @@ Thứ tự làm đề xuất: tài liệu → 1 → 2 → 3 → 4 → 12 → 5 �
 | 10 | `wp5/t32-api-admin-billing` |
 | 11 | `wp5/t32-dong-tai-khoan` |
 | 12 | `wp5/t32-worker-quet-db` |
+| 13 | `wp5/t32-het-han-diem` |
 
 Một phần quá 400 dòng thay đổi thì tách thành `…-a`, `…-b`.
 
@@ -57,7 +59,7 @@ Việc nền viết theo D7 (quét DB). API admin bám D10. Đường dẫn theo
 | Màn hình admin billing (dùng hợp đồng D10) | WP4 (nhánh dashboard chưa merge) | | |
 | `UserAccountService.disableLogin` | WF-05 | | |
 | `RealtimeGateway.emit` | realtime | | |
-| `SessionQuery.hasRunningSession` (+ `hasUnsettledSession`, chờ thống nhất với Sơn) | WF-01/03 | | |
+| `SessionQuery.hasUnsettledSession` (định nghĩa ở decisions D6 (c), chờ thống nhất với Sơn / Trí) | WF-01/03 | | |
 | Tạo `CreditAccount` (+ `LoyaltyAccount`; settlement WP3 đã tự tạo loyalty khi thiếu) | chưa có module `users` | | |
 | Ghi `session_debit` + loyalty `earn` | WP3 (`charge-settlement.service.ts`, đang ghi thẳng) | | |
 | VNPay sandbox (TMN code, hash secret, URL IPN public) | Khang / nhóm | | |
@@ -67,10 +69,14 @@ Việc nền viết theo D7 (quét DB). API admin bám D10. Đường dẫn theo
 - Sơn (WP3): đồng ý D9 (sau Phần 3, `charge-settlement` gọi `CreditLedgerService.post` / `earnForSession`); không mở rộng thêm SQL ghi bảng billing trong lúc chờ.
 - ~~Nhóm: báo đã giữ số migration `0012` cho billing.~~ 0012 đã dùng cho BE-16; billing dùng `0015`.
 - Người làm đăng ký tài xế: gọi `ensureAccounts(driverId)`.
-- WP4: thống nhất bảng D10 (dạng trả về 202 của refund và `closure-refund`), thêm mục refund `failed` + retry.
-- WP4 (dashboard, hộp thoại hoàn tài khoản đóng): hiện số **không hoàn được** (phần số dư vượt tổng `amountPaidVnd` của các top-up `credited` chưa hoàn; ghi `adjustment` −phần dư, D6) trước khi Admin xác nhận. Mock đang có `uncoveredVnd`; theo D6 trường này tên là `nonRefundableVnd`.
-- Khang (SRS): sửa BR-P21 cho phần dư không hoàn được khi đóng tài khoản (D6); báo người vẽ SD-2f vẽ lại theo D6.
-- Trí (chủ DB): migration Phần 6 có thể siết thêm `refunds_requested_by_check` thành `requested_by IS NOT NULL` (D6, mục "Còn mở" của decisions).
+- WP4: thống nhất bảng D10 (dạng trả về 202 của refund), thêm mục refund `failed` + retry.
+- WP4 (Nghĩa, dashboard): bỏ nút hoàn tài khoản đóng và bộ lọc `closed_unrefunded` (hệ thống tự hoàn, D6 chốt 09/11); tab refund `failed` gồm cả `account_closure`, retry một lượt, không reset bộ đếm; hoàn top-up có thể bị từ chối với `insufficient_available_balance` hoặc `account_closed` (D1, D10).
+- Khang + Ân (SRS): danh sách sửa ở mục "Còn mở" của decisions (BR-P21, BR-P22, BR-P44, UC-ADM-08 / §3.4.1, màn hình 31, Figure 14).
+- Ân (diagram): vẽ lại SD-2a, SD-2f, CD-2 theo danh sách ở mục "Còn mở" của decisions (Khang đã gửi 09/11).
+- Sơn (app Flutter): gọi `GET /api/driver/v1/me/account/close-preview` rồi hiện màn hình xác nhận đóng (số được hoàn, số **không hoàn được**, số điểm bị huỷ, các lý do chặn) trước khi gọi `POST …/me/account/close` (D6).
+- Sơn / Trí: thống nhất định nghĩa `SessionQuery.hasUnsettledSession(driverId)` theo D6 (c) (intent chưa kết thúc, phiên kể cả phiên thẻ chưa ở trạng thái cuối về tiền, job settlement `pending`).
+- Trí / Sơn: G5 (tính tiền phiên thẻ RFID) dùng `CreditLedgerService.post` / `earnForSession`, không mở rộng SQL thô ghi bảng billing (D9).
+- Ân (WF-05): đồng ý cài `UserAccountService.disableLogin` bằng `users.account_status = 'closed'` (D6 (h)).
 - Người lo Caddy staging / app Flutter: đường dẫn `/billing/vnpay/ipn`, `/billing/vnpay/return`, `/api/driver/v1/billing/top-ups`, `/api/driver/v1/me/account/close`.
 - Trí (chủ DB): review migration 0015 — dùng lại `e_invoice_status` / `e_invoice_error_kind`, `invoice_adjustments.issued_at` thành nullable, B5 (bỏ `top_ups.refunded_by`), `refunds.requested_by` → `admins`, và hai chỗ sửa trong `erd-alignment.integration.test.ts` (`docs/NHAT-KY-MIGRATION-0015.md` mục 4). Cập nhật B5 "đã làm" ở `NHAT-KY-ERD-ALIGNMENT.md` mục 4 và `DESIGN-BRIEF-WP2-INPUT.md` G19.
 - Nhóm: nơi nào tạo user Admin phải chèn thêm dòng `admins` (0011), nếu không thì Admin đó không ghi được `refunds.requested_by`.
@@ -87,7 +93,7 @@ Việc nền viết theo D7 (quét DB). API admin bám D10. Đường dẫn theo
   - Phiên không thuộc tài xế của tài khoản: cả hai hàm ném `LedgerPostRejected('reference_mismatch')`.
   - Khác SQL hiện tại: `post` đưa `in_shortfall → active` khi số dư về ≥ 0, và từ chối `session_debit` trên tài khoản `closed` (`account_closed`).
   - `post` không đụng `charge_settlement_jobs.reason`; ánh xạ lỗi sang `reason` vẫn do WP3 làm.
-  - Đóng tài khoản (Phần 11, D6 bước 1): cần thống nhất `SessionQuery.hasUnsettledSession(driverId)` (hoặc mở rộng `hasRunningSession`), trả true khi còn phiên đang chạy **hoặc** phiên đã dừng mà `charge_settlement_jobs.state = 'pending'`. Không chặn thì job quyết toán chạy sau khi đóng bị `post` từ chối (`account_closed`) và kẹt `pending`.
+  - Đóng tài khoản (Phần 11, D6 (c)): cần thống nhất `SessionQuery.hasUnsettledSession(driverId)` theo định nghĩa ở D6 (c). Không chặn thì job quyết toán chạy sau khi đóng bị `post` từ chối (`account_closed`) và kẹt `pending`.
 - (Claude Code ghi thêm vào đây khi phát hiện cần gì từ module khác.)
 
 ## Ghi chú
@@ -112,10 +118,10 @@ Việc nền viết theo D7 (quét DB). API admin bám D10. Đường dẫn theo
 - 06/11 (tài liệu, cùng Khang):
   - Điểm đã dùng hết hạn trước lúc cộng tiền: vẫn cộng đủ, ghi loyalty `adjust` `points = 0` cho phần thiếu (D2/D3/D4 ⊕).
   - `restoreForTopUp` trả theo tổng dòng `redeem`.
-  - `closure_refunded_at` chốt cho cả ba trường hợp (D1, D6).
-  - Đóng tài khoản theo SRS UC-ADM-08, không theo SD-2f: tài xế chỉ đóng, Admin hoàn (D6 viết lại, D10 sửa).
+  - ~~`closure_refunded_at` chốt cho cả ba trường hợp (D1, D6).~~ → thay bởi Q2 09/11.
+  - ~~Đóng tài khoản theo SRS UC-ADM-08, không theo SD-2f: tài xế chỉ đóng, Admin hoàn (D6 viết lại, D10 sửa).~~ → thay bởi Q2 09/11.
   - Phần số dư vượt tổng `amountPaidVnd` thì không hoàn, ghi `adjustment` −phần dư.
-  - Refund `account_closure` có `requestedBy = adminId`. Code không còn dựa vào ngoại lệ null của `refunds_requested_by_check`.
+  - ~~Refund `account_closure` có `requestedBy = adminId`. Code không còn dựa vào ngoại lệ null của `refunds_requested_by_check`.~~ → thay bởi Q2 09/11.
 - 06/11 (Phần 3): `CreditLedgerService` (`post`, `getBalance`, `ensureAccounts`), `LoyaltyService.earnForSession`, `BillingModule` (đăng ký trong `app.module.ts`).
   - `credit_transactions` **không có CHECK dấu tiền** (chỉ có CHECK tham chiếu `session_debit`/`top_up`/`reservation_fee`), nên `post` kiểm ở app: `top_up` > 0, `session_debit` ≤ 0 (cho phép 0 như WP3), `refund` < 0, `reservation_fee` < 0, `adjustment` ≠ 0.
   - Lệch chữ ký: `ref` có thêm `reservationId?` (CHECK `reservation_fee` ⇔ `reservation_id`). Trùng `reservation_id` kiểm trước INSERT → `LedgerEntryExists` (`credit_transactions_reservation_id_key`). Chưa kiểm reservation thuộc tài khoản (chưa có bên gọi); vì unique `reservation_id` là toàn bảng, hai ví khác nhau ghi phí cho cùng một reservation chỉ bị unique của DB chặn (23505).
@@ -126,3 +132,13 @@ Việc nền viết theo D7 (quét DB). API admin bám D10. Đường dẫn theo
   - Hạn điểm earn: `LOYALTY_POLICY` đọc cùng biến `CHARGE_POINTS_EXPIRY_MONTHS` (mặc định 12) với WP3, không import `sessions/`.
   - `billing.ts`: thêm `loyalty_transactions_one_earn_per_session` (đã có từ 0004). Sửa JSDoc `closureRefundedAt` theo D6; `COMMENT ON COLUMN` của 0015 sửa ở migration Phần 6.
   - Test song song ép hai transaction chồng nhau (chờ `pg_stat_activity.wait_event_type = 'Lock'`). Đã thử bỏ `FOR UPDATE`: cả hai test fail.
+- 09/11 (tài liệu, Khang chốt với Ân; thay phần đóng tài khoản của ghi chú 06/11):
+  - Q1: BR-P22 "top-up đang mở" chỉ là `pending` (giữ D2 ⊕); SRS sửa theo.
+  - Q2: đóng tài khoản theo SD-2f — hệ thống tự hoàn ngay khi tài xế đóng, Admin không bấm hoàn. Bỏ bước 2 / `refundClosedAccount` / route `closure-refund`; refund `account_closure` có `requestedBy = null` (đúng CHECK 0015). D6 viết lại, D10 bỏ dòng tài khoản đóng chờ hoàn.
+  - Q3: phần dư không hoàn được vẫn ghi `adjustment` −phần dư trong transaction đóng; thêm `close-preview`.
+  - Q4: huỷ điểm khi đóng (BR-P36) bằng một dòng loyalty `expire` = −`points_balance`, cùng transaction đóng.
+  - Q5: gửi lại request đóng → 200 với kết quả cũ, dựng lại từ dữ liệu đã ghi (không bảng/cột mới).
+  - Q6: guard Admin hoàn top-up dùng số dư khả dụng (như `card-eligibility.ts`, BE-19); thêm lý do `insufficient_available_balance`, `account_closed`.
+  - Q7: job hết hạn điểm hằng ngày (SRS job #18) do WP5 làm → D11, Phần 4 (hàm thuần) + Phần 13 (job).
+  - `closure_refunded_at` còn hai trường hợp (D1). COMMENT của 0015 vẫn phải sửa ở migration Phần 6 (NULL chỉ = "chưa hoàn xong"); bỏ việc siết `refunds_requested_by_check`.
+  - Diagram: Ân vẽ lại SD-2a, SD-2f, CD-2 (danh sách ở "Còn mở" của decisions); PR này không sửa diagram.
