@@ -121,7 +121,7 @@ File: `apps/csms/src/sessions/session-state-machine.spec.ts`, mỗi dòng là m�
 | 15    | stopping → orphaned   | `STATION_OFFLINE`                          | Có                                                                      |
 | 16    | orphaned → reconciled | `RECONCILE_OK`                             | Có (Stop phát lại tới khi còn orphaned)                                 |
 | 16a   | orphaned → review     | `RECONCILE_CONFLICT` / `HARD_CAP_EXCEEDED` | Có / Có (BE-18) — bộ quét theo DB                                       |
-| 17    | review → reconciled   | `OPERATOR_RESOLVED`                        | Chưa (UC-OPS-05)                                                        |
+| 17    | review → reconciled   | `OPERATOR_RESOLVED`                        | Có (BE-18) — `SessionReviewService.resolveReview`, chưa có endpoint      |
 | 18    | orphaned → active     | `LIVE_MESSAGE`                             | Có — tx3 lúc MeterValues live 796 Wh                                    |
 | 19    | reconciled → review   | `LATE_SAMPLE_CONFLICT`                     | Có — `reconcileLateSample`                                              |
 
@@ -182,7 +182,7 @@ Từ migration 0001 đường này nằm trong `session_status_history` (test (m
 
 - `pending`/`stopping`: không có RemoteStart/RemoteStop nên #1, #3, #4, #7, #8, #9a chỉ tồn tại trong máy trạng thái.
 - Timer: start timeout 120 s (#4) và hard cap 24 h (#16a nhánh thứ hai) đã có từ BE-18 (bộ quét theo DB trong `ChargeRecoveryService`, xem BE-18-STM1-TIMERS.md); 900 s im lặng của STM-3 #4 vẫn chưa có job nền (ADR-0006 nói BullMQ; chưa cài).
-- Operator giải quyết `review` (#17, UC-OPS-05), `reviewed_by`/`reviewed_at` của record.
+- Operator giải quyết `review` (#17, UC-OPS-05): service đã có từ BE-18; endpoint HTTP chờ xác thực console (ADR-0011).
 - Basic Auth Security Profile 2 (ADR-0011): auth chỉ kiểm serial có trong DB.
 - BootNotification chỉ log; chưa cập nhật `model`/`firmware_version`, chưa GetConfiguration `ConnectionTimeOut`.
 - `last_message_at` UPDATE mỗi frame — đủ cho Iteration 1, cần gộp khi tải lớn.

@@ -2,7 +2,7 @@
 
 Đóng G2 của `DESIGN-BRIEF-WP2-INPUT.md`: ba chuyển STM-1 trước đây chưa có nơi kích hoạt. **Không đổi bảng chuyển** (`session-state-machine.ts`), không migration.
 
-PR 1 (tài liệu này, phần 1–2): `REMOTE_START_ACCEPTED` (#1), `START_TIMEOUT` (#4), `HARD_CAP_EXCEEDED` (#16a).
+PR 1 (phần 1–2): `REMOTE_START_ACCEPTED` (#1), `START_TIMEOUT` (#4), `HARD_CAP_EXCEEDED` (#16a).
 PR 2 xếp tầng (phần 3): `OPERATOR_RESOLVED` (#17).
 
 ## 1. REMOTE_START_ACCEPTED / START_TIMEOUT (`pending`)
@@ -29,6 +29,16 @@ PR 2 xếp tầng (phần 3): `OPERATOR_RESOLVED` (#17).
 | `started_at + 24 h` (đúng chữ T13 mục 1.3: "24 h kể từ `started_at`") | Phiên hợp lệ dài (không orphaned) cũng không bị ảnh hưởng, nhưng phiên mới orphaned 1 phút sau 23 h 59 sẽ bị đẩy sang review gần như ngay. Khác bảng STM-1 ("orphaned quá…"). |
 
 Sau khi sang `review`, StopTransaction đến muộn của phiên đó đi `orphan_stop` (đường có sẵn cho phiên không còn mở) — operator xử lý bằng #17.
+
+## 3. OPERATOR_RESOLVED (#17, review → reconciled)
+
+`SessionReviewService.resolveReview(sessionId, operatorUserId, resolution, note)`. Không có endpoint HTTP.
+
+- **Quyền**: `operator_staff` đang `active` của operator `active` **sở hữu trụ của phiên** (cùng cách kiểm với `beginStartRecovery`/`recordBoundaryEvidence`). Tài xế, admin, user lạ, nhân viên bị khoá → `forbidden`. Nhân viên operator khác → `not_found` (không lộ phiên liên-operator). Phiên không ở `review` → `not_in_review` (nên gọi lại hoặc đua nhau chỉ có một lượt thắng, một dấu vết). `resolution` là mã ngắn `[a-z0-9_]{1,40}`, `note` 1–500 ký tự, sai → `invalid_input`.
+- **Một transaction**: khoá phiên `FOR UPDATE` → `apply('review','OPERATOR_RESOLVED')` → UPDATE `sessions` → `session_status_history` (`actor` = users.id của operator, note `<resolution>: <note>`) → các `reconciliation_records` chưa duyệt của phiên thuộc loại có kết luận (`meter_gap`, `conflict`, `late_sample`) được đặt `reviewed_by` (operator_staff, B2/D14), `reviewed_at`, và `resolution` được nối thêm ` | operator_resolved(<mã>): <note>` (tiền tố cũ giữ nguyên để console còn phân loại được). Bản ghi `replay`/`duplicate`/… (thông tin) không bị đóng.
+- **Quyết toán**: sau commit, nếu phiên đã có StopTransaction (`received_stopped_at`) thì gọi `ChargeSettlementService.settle()` có sẵn (chỉ phiên `reconciled` mới được trừ tiền; job bền cũng tự thử lại). Phiên hard cap chưa có StopTransaction thì không có gì để trừ → `settlement: null`.
+- **Endpoint**: console (BE-08) chưa có xác thực (ADR-0011) và không biết ai đang gọi, trong khi lệnh này cần `operatorUserId` thật để ghi `reviewed_by`. Mở endpoint không xác thực sẽ cho bất kỳ ai trên mạng nội bộ tự nhận là operator → **không thêm endpoint**; khi có RolesGuard chỉ cần gọi service này.
+- **Phương án bỏ**: endpoint console với `reviewed_by = null` (như acknowledge sự cố) — trái B2 (reviewed_by phải là operator_staff) và ràng buộc `reconciliation_records_reviewed_check` (reviewed_by/at cùng null hoặc cùng có).
 
 ## Biến môi trường
 
@@ -58,4 +68,5 @@ Sau khi sang `review`, StopTransaction đến muộn của phiên đó đi `orph
 DATABASE_URL=…/powerme_test npm test -w @powerme/csms -- be18-hard-cap
 DATABASE_URL=…/powerme_test npm test -w @powerme/csms -- wf01-driver-charging -t BE-18
 npm test -w @powerme/csms -- config.spec
+DATABASE_URL=…/powerme_test npm test -w @powerme/csms -- be18-operator-resolve
 ```
