@@ -25,6 +25,11 @@ export function validateChargePolicy(policy: ChargePolicy): void {
     throw new Error('invalid_charge_policy');
 }
 
+// BR-P18: số dư khả dụng phải đạt mức tối thiểu; dùng chung cho app (startCreditPolicy) và thẻ RFID (BE-19).
+export function meetsStartMinimum(availableVnd: number, policy: ChargePolicy): boolean {
+  return availableVnd >= policy.minimumStartVnd;
+}
+
 export function startCreditPolicy(
   availableVnd: number,
   energyLimitWh: number,
@@ -41,7 +46,7 @@ export function startCreditPolicy(
     maxPricePerKwhVnd < 0
   )
     throw new Error('invalid_start_input');
-  if (availableVnd < policy.minimumStartVnd) return { outcome: 'topuprequired' };
+  if (!meetsStartMinimum(availableVnd, policy)) return { outcome: 'topuprequired' };
   const reserve = (BigInt(energyLimitWh) * BigInt(maxPricePerKwhVnd) + 999n) / 1000n;
   if (reserve > BigInt(availableVnd))
     return {

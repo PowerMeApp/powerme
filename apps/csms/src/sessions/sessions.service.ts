@@ -22,7 +22,7 @@
  * Chưa làm ở Iteration 1 (ghi trong docs/ITERATION-1-WF03.md): pending/RemoteStart (#1, #3, #4),
  * stopping/RemoteStop (#7, #8, #9a), hard cap (#16a nhánh timer), operator resolve (#17).
  */
-import { Inject, Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { and, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
 import { CONFIG, CsmsConfig } from '../config.js';
 import { DB, Db, DbExecutor, Tx } from '../db/db.module.js';
@@ -37,6 +37,10 @@ import {
   sessions,
 } from '../db/schema/index.js';
 import type { InboundContext } from '../ocpp-gateway/inbound-context.js';
+import { CHARGE_POLICY } from './charge-settlement.service.js';
+import { loadChargePolicy } from './charge-policy.config.js';
+import { CardDenyReason, evaluateOnlineCard, isBillableWhenDenied } from './card-eligibility.js';
+import type { ChargePolicy } from './charge-start-policy.js';
 import type {
   MeterValue,
   StartTransactionRequest,
@@ -101,7 +105,13 @@ export class SessionsService {
     private readonly stateMachine: SessionStateMachine,
     private readonly reconciliation: ReconciliationService,
     @Inject(CONFIG) private readonly config: CsmsConfig,
-  ) {}
+    @Optional() @Inject(CHARGE_POLICY) policy?: ChargePolicy,
+  ) {
+    // BE-19: không có policy được tiêm (test dựng tay) thì dùng mặc định cấu hình — không bao giờ bỏ kiểm.
+    this.policy = policy ?? loadChargePolicy();
+  }
+
+  private readonly policy: ChargePolicy;
 
   // ---------------------------------------------------------------------------
   // Authorize
@@ -113,16 +123,25 @@ export class SessionsService {
    *   - `blocked` → Blocked;
    *   - `unlinked` (đã đăng ký, chưa gắn/kích hoạt — STM-8, AD-6 "unlinked → refuse") → Invalid.
    *     OCPP 1.6 không có trạng thái riêng cho "chưa gắn"; Invalid = "không được phép dùng".
-   * Chưa xét số dư Charging Credit (BR-P23) — chưa có module billing.
+   * BE-19 (G8): thẻ `online` đang `active` còn phải gắn tài xế đang hoạt động có Charging Credit
+   * còn hoạt động và số dư khả dụng ≥ mức tối thiểu (BR-P23, BR-P18) — xem card-eligibility.ts.
+   * Thẻ `wallet` (trả tại trụ) và `free_vend` không cần tài xế.
    */
   async authorize(idTag: string): Promise<AuthorizeStatus> {
     const [card] = await this.db
-      .select({ status: rfidCards.status })
+      .select({
+        status: rfidCards.status,
+        cardKind: rfidCards.cardKind,
+        driverId: rfidCards.driverId,
+      })
       .from(rfidCards)
       .where(eq(rfidCards.cardIdentifier, idTag))
       .limit(1);
     if (!card) return 'Invalid';
-    return authorizeStatusFor(card.status);
+    const byStatus = authorizeStatusFor(card.status);
+    if (byStatus !== 'Accepted' || card.cardKind !== 'online') return byStatus;
+    const eligibility = await evaluateOnlineCard(this.db, card.driverId, this.policy);
+    return eligibility.eligible ? 'Accepted' : eligibility.status;
   }
 
   // ---------------------------------------------------------------------------
@@ -281,6 +300,11 @@ export class SessionsService {
           req.idTag,
           tag.cardNotAccepted,
         );
+      } else if (tag.cardDenied) {
+        this.logger.warn(
+          `thẻ "${req.idTag}" active nhưng không đạt BR-P23/P18 (${tag.cardDenied}) vẫn mở phiên trên ${ctx.identity} c${req.connectorId}`,
+        );
+        await this.reconciliation.recordCardDenied(tx, created.id, req.idTag, tag.cardDenied);
       }
       if (ctx.replay.replayed) {
         await this.reconciliation.recordReplay(tx, created.id, frame, ctx.replay);
@@ -796,6 +820,8 @@ export class SessionsService {
     unknown: boolean;
     /** Trạng thái thẻ khi thẻ có trong sổ nhưng không `active`; null nếu không phải trường hợp đó. */
     cardNotAccepted: Exclude<RfidCardStatus, 'active'> | null;
+    /** BE-19: thẻ `online` active nhưng không đạt BR-P23/BR-P18 lúc phiên bắt đầu; null nếu đạt/không áp dụng. */
+    cardDenied: CardDenyReason | null;
   }> {
     const [card] = await this.db
       .select()
@@ -810,11 +836,26 @@ export class SessionsService {
         driverId: null,
         unknown: false,
         cardNotAccepted: card.status,
+        cardDenied: null,
       };
     }
     if (card) {
-      const paymentMode =
-        card.cardKind === 'online'
+      // BE-19 (G8): StartTransaction không bao giờ bị từ chối (phiên đã diễn ra, BR-P06) nhưng
+      // không gán cho tài xế một khoản không thu được: thẻ online thiếu tài xế/ví hợp lệ thì
+      // unattributed; riêng "dưới mức tối thiểu" vẫn csms_billed vì BR-P18..P23 cho số dư âm
+      // sau phiên offline. Cả hai đều có record đối soát card_denied.
+      let cardDenied: CardDenyReason | null = null;
+      let billable = true;
+      if (card.cardKind === 'online') {
+        const e = await evaluateOnlineCard(this.db, card.driverId, this.policy);
+        if (!e.eligible) {
+          cardDenied = e.reason;
+          billable = isBillableWhenDenied(e.reason);
+        }
+      }
+      const paymentMode = !billable
+        ? 'unattributed'
+        : card.cardKind === 'online'
           ? 'csms_billed'
           : card.cardKind === 'wallet'
             ? 'station_wallet'
@@ -823,9 +864,10 @@ export class SessionsService {
         origin: card.cardKind === 'free_vend' ? 'free_vend' : 'rfid',
         paymentMode,
         rfidCardId: card.id,
-        driverId: card.driverId,
+        driverId: billable ? card.driverId : null,
         unknown: false,
         cardNotAccepted: null,
+        cardDenied,
       };
     }
     const [cp] = await this.db
@@ -841,6 +883,7 @@ export class SessionsService {
         driverId: null,
         unknown: false,
         cardNotAccepted: null,
+        cardDenied: null,
       };
     }
     return {
@@ -850,6 +893,7 @@ export class SessionsService {
       driverId: null,
       unknown: true,
       cardNotAccepted: null,
+      cardDenied: null,
     };
   }
 
