@@ -405,4 +405,21 @@ describeDb('MB03 authenticated Driver discovery over HTTP and dedicated Postgres
     );
     await expect(unsafe.start()).rejects.toThrow(/loopback/);
   });
+
+  it('starts on a non-loopback host only with the explicit staging acknowledgement', async () => {
+    const registry = new ConnectionRegistry(db);
+    const staging = new ConsoleServer(
+      { ...config, consoleHost: '0.0.0.0', consolePort: 0, consoleAllowNonLoopback: true },
+      new ConsoleQueries(db, config, registry),
+      new ConsoleCommands(db, registry),
+      db,
+      service,
+    );
+    try {
+      await staging.start();
+      expect(staging.port).not.toBeNull();
+    } finally {
+      await staging.stop();
+    }
+  });
 });

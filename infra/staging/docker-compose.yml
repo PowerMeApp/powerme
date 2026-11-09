@@ -45,6 +45,10 @@ services:
       # Xem bằng SSH tunnel (README.md). Đừng đổi hai điều kiện đó khi chưa có xác thực.
       CONSOLE_ENABLED: 'true'
       CONSOLE_HOST: 0.0.0.0
+      # Bắt buộc từ MB-03: console và Driver API dùng chung một listener và CSMS từ chối bind khác
+      # loopback trừ khi có xác nhận này. An toàn vì hai điều kiện ở trên (publish chỉ ra 127.0.0.1,
+      # Caddy không proxy console). Gỡ xác nhận này sẽ làm CSMS không khởi động được trong container.
+      CONSOLE_ALLOW_NON_LOOPBACK: 'true'
       CONSOLE_PORT: '3000'
       # PHẢI false trên staging: trụ không có credential bị 401 (Security Profile 2). Cố định ở
       # đây, không đọc từ .env, để không bật nhầm.

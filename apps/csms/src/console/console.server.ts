@@ -59,8 +59,13 @@ export class ConsoleServer implements OnModuleInit, OnModuleDestroy {
   /** Public để test tích hợp bật console trên cổng ngẫu nhiên. Lỗi nghe cổng → log, không ném. */
   async start(): Promise<void> {
     // WP3: the shared port still hosts unauthenticated admin operations.
-    if (!['127.0.0.1', '::1'].includes(this.config.consoleHost))
-      throw new Error('Console and Driver shared listener requires a loopback bind');
+    if (
+      !['127.0.0.1', '::1'].includes(this.config.consoleHost) &&
+      !this.config.consoleAllowNonLoopback
+    )
+      throw new Error(
+        'Console and Driver shared listener requires a loopback bind (or CONSOLE_ALLOW_NON_LOOPBACK=true behind a closed network)',
+      );
     const admin = createConsoleListener({
       health: () => this.queries.health(),
       stations: () => this.queries.stations(),
