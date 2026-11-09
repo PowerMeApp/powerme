@@ -54,10 +54,10 @@ export const creditAccounts = pgTable(
     /** Lúc ví đóng (UC-ACC-02). Có giá trị ⇔ status = closed (migration 0003). */
     closedAt: timestamp('closed_at', { withTimezone: true }),
     /**
-     * Lúc ví closed không còn refund `account_closure` nào chưa `done` (D1, D6): refund cuối `done`;
-     * hoặc Admin hoàn mà không tạo refund nào (toàn bộ là phần dư); hoặc = closed_at khi số dư 0
-     * lúc đóng. Không trước closed_at. (COMMENT ON COLUMN của 0015 còn ghi nghĩa cũ — sửa ở
-     * migration Phần 6.)
+     * Lúc ví closed không còn refund `account_closure` nào chưa `done` (D1, D6): refund
+     * `account_closure` cuối cùng chuyển `done`; hoặc = closed_at khi lúc đóng không tạo refund nào
+     * (số dư 0, hoặc toàn bộ là phần dư). NULL = chưa hoàn xong. Không trước closed_at.
+     * (COMMENT ON COLUMN của 0015 còn ghi "NULL = … không có gì để hoàn" — sửa ở migration Phần 6.)
      */
     closureRefundedAt: timestamp('closure_refunded_at', { withTimezone: true }),
   },
