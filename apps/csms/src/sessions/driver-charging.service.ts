@@ -2,6 +2,7 @@ import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { createHash, randomBytes } from 'node:crypto';
 import type { PoolClient } from 'pg';
 import { DB, Db } from '../db/db.module.js';
+import { CONFIG, CsmsConfig } from '../config.js';
 import { ConnectionRegistry } from '../ocpp-gateway/connection-registry.js';
 import type { InboundContext } from '../ocpp-gateway/inbound-context.js';
 import { CHARGE_POLICY, ChargeSettlementService } from './charge-settlement.service.js';
@@ -48,6 +49,7 @@ export class DriverChargingService {
     private readonly registry: ConnectionRegistry,
     private readonly settlement: ChargeSettlementService,
     @Optional() @Inject(CHARGE_POLICY) private readonly policy?: ChargePolicy,
+    @Optional() @Inject(CONFIG) private readonly config?: CsmsConfig,
   ) {
     if (policy) validateChargePolicy(policy);
   }
@@ -1224,8 +1226,12 @@ export class DriverChargingService {
     });
   }
 
-  async findStations(driverId: number, vehicleId: number, input: StationSearchInput = {}) {
-    this.validateIds(driverId, vehicleId);
+  async findStations(
+    driverId: number | string,
+    vehicleId: number | string,
+    input: StationSearchInput = {},
+  ) {
+    this.validateDiscoveryIds(driverId, vehicleId);
     const policy = this.requirePolicy();
     return chargeTransaction(this.db, async (c) => {
       await this.driver(c, driverId);
@@ -1236,18 +1242,19 @@ export class DriverChargingService {
         input,
         policy.stationStaleAfterMs,
         policy.stationOfflineAfterMs ?? 900000,
+        this.config?.smartSearch,
       );
     });
   }
 
   // WP3/T72: QR resolves an exact canonical connector independently of search pagination.
   async resolveConnector(
-    driverId: number,
-    vehicleId: number,
+    driverId: number | string,
+    vehicleId: number | string,
     displayCode: string,
     connectorNo: number,
   ) {
-    this.validateIds(driverId, vehicleId);
+    this.validateDiscoveryIds(driverId, vehicleId);
     if (
       typeof displayCode !== 'string' ||
       !displayCode ||
@@ -1455,7 +1462,18 @@ export class DriverChargingService {
     if (!intent) throw new ChargingError('not_found');
     return this.snapshot(intent);
   }
-  private async driver(c: PoolClient, driverId: number) {
+  private validateDiscoveryIds(...ids: (number | string)[]) {
+    for (const id of ids) {
+      const value = String(id);
+      if (
+        (typeof id === 'number' && !Number.isSafeInteger(id)) ||
+        !/^[1-9][0-9]{0,18}$/.test(value) ||
+        BigInt(value) > 9223372036854775807n
+      )
+        throw new ChargingError('invalid_input');
+    }
+  }
+  private async driver(c: PoolClient, driverId: number | string) {
     if (
       !(
         await c.query(

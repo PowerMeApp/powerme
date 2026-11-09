@@ -8,8 +8,12 @@
  * ADR-0009 (ngưỡng skew là tín hiệu phụ phát hiện phát lại), ADR-0008 (DATABASE_URL cho Drizzle).
  */
 import { Global, Module } from '@nestjs/common';
+import { SmartSearchConfig, loadSmartSearchConfig } from './sessions/smart-search.js';
+import { DriverApiConfig, loadDriverApiConfig } from './driver/driver-auth.js';
 
 export interface CsmsConfig {
+  driverApi?: DriverApiConfig;
+  smartSearch?: SmartSearchConfig;
   /** Chuỗi kết nối Postgres. Bắt buộc khi chạy app; test unit không cần. */
   databaseUrl: string;
   /** Cổng WebSocket OCPP-J. Lab dùng 9000 (`ws://localhost:9000/ocpp/{serialNumber}`). */
@@ -151,6 +155,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): CsmsConfig {
   const databaseUrl = env['DATABASE_URL'];
   if (!databaseUrl) throw new Error('Thiếu DATABASE_URL (xem infra/.env.example)');
   return {
+    driverApi: loadDriverApiConfig(env),
+    smartSearch: loadSmartSearchConfig(env),
     databaseUrl,
     ocppPort: intEnv(env, 'OCPP_PORT', intEnv(env, 'CSMS_OCPP_WS_PORT', 9000)),
     heartbeatIntervalS: intEnv(env, 'OCPP_HEARTBEAT_INTERVAL_SECONDS', 300),

@@ -74,6 +74,12 @@ jobs:
       - name: Test
         run: npm test
 
+      - name: MB03 isolated Driver HTTP integration
+        run: npm run test:driver-discovery -w @powerme/csms
+        env:
+          MB03_TEST_ADMIN_DATABASE_URL: postgresql://powerme:powerme@127.0.0.1:5432/postgres
+          MB03_ALLOW_CREATE_TEST_DATABASE: 'true'
+
       - name: Build
         run: npm run build
 

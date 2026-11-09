@@ -29,6 +29,12 @@ Cấu trúc `src/`: `ocpp-gateway/` (socket, registry epoch, log frame, tuần t
 
 ## Bảng điều khiển vận hành (demo)
 
+MB03 branch: authenticated read-only Driver discovery now shares this HTTP port. See the
+[backend integration guide](../../docs/api/MB03-BACKEND-DISCOVERY.md) and
+[OpenAPI](../../docs/api/driver-api.openapi.yaml). Only stations, connector resolution and own
+bootstrap are implemented; login/OTP and charge HTTP routes are pending. The shared server
+refuses non-loopback binds because the admin console still has no authentication.
+
 `src/console/` — trang web một file + vài endpoint JSON để xem hệ thống đang chạy (demo Review 2). Mở `http://127.0.0.1:3000/` sau khi chạy CSMS. Cấu hình: `CONSOLE_ENABLED` (mặc định `true`), `CONSOLE_HOST` (mặc định `127.0.0.1`), `CONSOLE_PORT` (mặc định `3000`).
 
 - Chỉ đọc: `GET /api/admin/{stations,sessions,sessions/:id,reconciliation,messages,summary}`. Ngoài ra `GET /health` → `{"ok":true,"db":true}` (sau `select 1`), 503 `{"ok":false,"db":false}` nếu DB lỗi; không lộ phiên bản/chi tiết. Image Docker và staging dùng nó: xem `infra/staging/README.md`. Hai lệnh: `POST /api/admin/stations/:serial/disconnect` (đóng socket phía CSMS), `POST /api/admin/sessions/:id/remote-stop` (RemoteStopTransaction).
@@ -133,3 +139,13 @@ reset only its schema. Run `npm test -w @powerme/csms -- --runInBand` with that 
 
 Migration 0006 backfills existing stop intents into immutable attempt history. These are still backend
 service contracts: operator/Driver HTTP endpoints and Flutter integration remain outside this slice.
+
+## MB03 read-only discovery and brief smart search
+
+Authenticated discovery, address autocomplete/place and canonical station road routes share the
+loopback HTTP listener. `/stations?sort=smart` implements the user-prioritized brief 07/11;
+`/stations/suggestions` is retired. See [MB03 integration guide](../../docs/api/MB03-BACKEND-DISCOVERY.md),
+[OpenAPI 0.4](../../docs/api/driver-api.openapi.yaml) and [edge-case evidence](../../docs/api/MB03-EDGE-CASE-MATRIX.md).
+Smart ranking uses disclosed range/road/wait/charge assumptions, not live Vietmap travel or billing.
+`npm run test:driver-discovery` runs discovery and smart HTTP suites in separate new databases;
+CI invokes that runner explicitly. Full charging HTTP, OTP and mobile remain deferred.

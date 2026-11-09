@@ -7,13 +7,23 @@
  * (mặc định 127.0.0.1). Tắt hẳn bằng CONSOLE_ENABLED=false. Nếu cổng bận, CSMS vẫn chạy và
  * chỉ log lỗi (console là phần phụ, không được kéo sập gateway OCPP).
  */
-import { Inject, Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
+import {
+  Inject,
+  Injectable,
+  Logger,
+  OnModuleDestroy,
+  OnModuleInit,
+  Optional,
+} from '@nestjs/common';
 import { createServer, Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { CONFIG, CsmsConfig } from '../config.js';
 import { ConsoleCommands } from './console.commands.js';
 import { createConsoleListener } from './console.http.js';
 import { ConsoleQueries } from './console.queries.js';
+import { createDriverListener } from '../driver/driver.http.js';
+import { DB, Db } from '../db/db.module.js';
+import { DriverChargingService } from '../sessions/driver-charging.service.js';
 
 @Injectable()
 export class ConsoleServer implements OnModuleInit, OnModuleDestroy {
@@ -24,6 +34,8 @@ export class ConsoleServer implements OnModuleInit, OnModuleDestroy {
     @Inject(CONFIG) private readonly config: CsmsConfig,
     private readonly queries: ConsoleQueries,
     private readonly commands: ConsoleCommands,
+    @Optional() @Inject(DB) private readonly db?: Db,
+    @Optional() private readonly driver?: DriverChargingService,
   ) {}
 
   /** Cổng thực tế đang nghe (khác config khi consolePort = 0); null nếu chưa mở. */
@@ -46,23 +58,37 @@ export class ConsoleServer implements OnModuleInit, OnModuleDestroy {
 
   /** Public để test tích hợp bật console trên cổng ngẫu nhiên. Lỗi nghe cổng → log, không ném. */
   async start(): Promise<void> {
-    const server = createServer(
-      createConsoleListener({
-        health: () => this.queries.health(),
-        stations: () => this.queries.stations(),
-        sessions: (limit) => this.queries.sessions(limit),
-        session: (id) => this.queries.session(id),
-        reconciliation: (limit) => this.queries.reconciliation(limit),
-        messages: (limit, after) => this.queries.messages(limit, after),
-        summary: () => this.queries.summary(),
-        disconnect: (serial) => this.commands.disconnect(serial),
-        remoteStop: (id) => this.commands.remoteStop(id),
-        faults: (filter, limit) => this.commands.faults(filter, limit),
-        acknowledgeFault: (id) => this.commands.acknowledgeFault(id),
-        resetFault: (id, type, force) => this.commands.resetFault(id, type, force),
-        closeFault: (id) => this.commands.closeFault(id),
-      }),
-    );
+    // WP3: the shared port still hosts unauthenticated admin operations.
+    if (!['127.0.0.1', '::1'].includes(this.config.consoleHost))
+      throw new Error('Console and Driver shared listener requires a loopback bind');
+    const admin = createConsoleListener({
+      health: () => this.queries.health(),
+      stations: () => this.queries.stations(),
+      sessions: (limit) => this.queries.sessions(limit),
+      session: (id) => this.queries.session(id),
+      reconciliation: (limit) => this.queries.reconciliation(limit),
+      messages: (limit, after) => this.queries.messages(limit, after),
+      summary: () => this.queries.summary(),
+      disconnect: (serial) => this.commands.disconnect(serial),
+      remoteStop: (id) => this.commands.remoteStop(id),
+      faults: (filter, limit) => this.commands.faults(filter, limit),
+      acknowledgeFault: (id) => this.commands.acknowledgeFault(id),
+      resetFault: (id, type, force) => this.commands.resetFault(id, type, force),
+      closeFault: (id) => this.commands.closeFault(id),
+    });
+    const driver =
+      this.db && this.driver
+        ? createDriverListener(this.db, this.driver, this.config.driverApi ?? { devAuth: false })
+        : null;
+    const server = createServer((req, res) => {
+      if (/^\/api\/driver(?:\/|\?|$)/.test(req.url ?? '')) {
+        if (driver) driver(req, res);
+        else {
+          res.writeHead(503, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+          res.end(JSON.stringify({ error: 'auth_unavailable', detail: 'Driver API unavailable' }));
+        }
+      } else admin(req, res);
+    });
     try {
       await new Promise<void>((resolve, reject) => {
         server.once('error', reject);
