@@ -4,7 +4,14 @@
 **Task:** T77 — hợp đồng REST trạng thái và ETA, chuyển từ WP4 sang WP2 ở phiếu v1.3 §3.2g; gap G1 trong Design Brief WP2
 **Người chịu trách nhiệm:** Ngô Văn Minh Trí (WP2) — hợp đồng; Lý Hoàng Sơn (WP3) — route HTTP (Tuần 9) và client Dart
 **File hợp đồng:** [`driver-api.openapi.yaml`](driver-api.openapi.yaml) (OpenAPI 3.1, `redocly lint` sạch lỗi 30/10)
-**Trạng thái:** **chỉ hợp đồng**. Trên `main` chưa có route HTTP nào cho tài xế; tầng dịch vụ đã có từ #58 (`DriverChargingService`, `station-search.ts`).
+**Trạng thái local 09/11/2026 trên nhánh MB03:** có route JWT `GET /stations`, connector resolution,
+`GET /me`, `/places/autocomplete`, `/places/resolve`, `/stations/{site_id}/route`.
+[Brief 07/11](../requirements/smart-station-search-brief-20261107.md) được người dùng ưu tiên cho search/gợi ý:
+`/stations` thêm SoC/target/smart, tính reach và tổng phút trước phân trang; `/stations/suggestions`
+thử nghiệm cũ đã bỏ (404). OpenAPI 0.4 có consent/ownership, GeoJSON lon/lat, nullable estimates và lỗi provider.
+Charge/session/time-left HTTP vẫn chỉ là hợp đồng. Route Vietmap thật tách khỏi xếp hạng theo công thức brief.
+Xem [hướng dẫn MB03](MB03-BACKEND-DISCOVERY.md) cho trạng thái, token local, checks và giới hạn;
+không suy ra OTP/login đã hoàn thành. Thay đổi chưa merge/commit/push khi bàn giao review.
 
 ---
 
@@ -27,7 +34,10 @@ Tình huống chuỗi phải chạy được ở Review 3: HMI trụ đổi sún
 | `POST /sessions/{id}/stop` | `stop` → `commandSnapshot` | UC-CHG-03; BR-P01 | hàm có, route chưa |
 | `GET /sessions/{id}/statement` | `statement` | BR-P45, P34 | hàm có, route chưa |
 
-Route sẽ nằm **cùng tiến trình HTTP** với console `/api/admin/*` (`console.http.ts`, cổng 3000), thêm nhánh `/api/driver/v1/*` vào `console.router.ts` theo đúng kiểu thuần đang có (router không đụng DB, test được từng mã lỗi). Không mở cổng mới, không thêm Nest controller cho đến khi có RolesGuard (ADR-0011).
+Route discovery MB03 nằm **cùng tiến trình/cổng HTTP** với console `/api/admin/*` (mặc định 3000),
+qua handler riêng `driver/driver.http.ts` do `ConsoleServer` chọn trước handler admin. Không mở cổng
+mới hoặc Nest controller. Admin chưa có auth nên shared listener bắt buộc loopback. Các route khác
+trong bảng vẫn chưa được nối HTTP.
 
 ## 3. Trạng thái súng và thời gian còn lại: luật nghiệp vụ thành trường JSON
 
@@ -62,7 +72,11 @@ Câu trả lời một dòng cho hội đồng về RFID: **thẻ online** để
 
 ## 6. Xác thực
 
-Hợp đồng chỉ yêu cầu CSMS lấy được `driver_id` từ `Authorization: Bearer <JWT>`; đăng nhập OTP và phát hành token là MB-02 của WP3. Cho demo cục bộ: header `X-Driver-Id` khi `DRIVER_API_DEV_AUTH=true`, mặc định tắt, cấm trên staging (cùng tinh thần `ALLOW_LEGACY_NO_CREDENTIAL`). Console `/api/admin` hiện cũng chưa có xác thực (ghi ở đầu `console.http.ts`); RolesGuard là việc chung sau Review 3.
+MB03 xác minh HS256 JWT bằng jose 6.2.15: typ JWT, issuer/audience cấu hình, sub bigint chuỗi,
+role driver, iat/exp, tối đa 900 giây; DB xác nhận active Driver/subtype mỗi request. Xe phải thuộc
+Driver từ token. OTP/login/refresh chưa làm. `X-Driver-Id` chỉ khi flag bật và môi trường được
+khai báo local/development hoặc test/test; bearer sai không fallback. Console admin vẫn chưa có
+auth nên server dùng chung bắt buộc loopback. Chi tiết và script token local ở hướng dẫn MB03.
 
 ## 7. Lỗi: từ `ChargingError.code` sang HTTP
 
@@ -93,7 +107,9 @@ npx -y @redocly/cli@1.34.3 preview-docs docs/api/driver-api.openapi.yaml
 npx -y @openapitools/openapi-generator-cli generate -i docs/api/driver-api.openapi.yaml -g dart-dio -o apps/mobile/lib/api
 ```
 
-Khi route có thật (Tuần 9), CI sẽ chạy `redocly lint` và một test khớp hợp đồng với response thật (`console.http.spec.ts` đã có mẫu dựng server với backend giả).
+MB03 có [runner HTTP/Postgres riêng](../../apps/csms/scripts/test-driver-discovery.mjs) và
+[hướng dẫn tái lập](MB03-BACKEND-DISCOVERY.md). Local response đã kiểm schema; chưa chạy Redocly
+hoặc generated Dart client trong slice này. Không tự tải thêm công cụ khi dependency chưa được duyệt.
 
 ## 11. Chưa chốt, ai chốt
 
@@ -102,4 +118,4 @@ Khi route có thật (Tuần 9), CI sẽ chạy `redocly lint` và một test kh
 | 1 | Đường cong sạc DC theo mẫu xe lấy từ đâu cho `soc_curve` | bảng `vehicle_models` thêm 3 điểm (kW tại 20/50/80 % SoC), Admin nhập | Trí + Khang |
 | 2 | `estimated_cost_vnd` khi đang sạc tính theo biểu giá lúc nào | giá của đoạn hiện tại × Wh đã sạc, ghi rõ "ước tính" (BR-P02) | Trí + Khang |
 | 3 | Chế độ sạc ngoài `energy_kwh` (tiền, thời gian) | giữ ngoài hợp đồng đến khi OCPP có lệnh đặt hạn mức; app làm hạn mức mềm | Sơn |
-| 4 | Token tài xế là JWT tự ký hay phiên server | JWT HS256, 24 h, refresh khi mở app | Sơn + Trí |
+| 4 | Login/OTP/refresh cho tài xế | MB03 chỉ verification HS256 tối đa 15 phút + token synthetic local; login/refresh vẫn pending | Sơn + Trí |

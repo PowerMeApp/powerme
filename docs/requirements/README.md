@@ -1,5 +1,10 @@
 # Requirements in the repository
 
+Search/suggestion MVP override (09/11/2026): the user prioritizes the
+[07/11 brief and implementation mapping](smart-station-search-brief-20261107.md) over the earlier
+SRS §3.7/AD-5 algorithm. Other requirements still use the repo baseline. The original source is
+preserved with its SHA-256; implemented/deferred scope and test evidence are linked there.
+
 Markdown copies of the requirement documents, so code reviews, the BM02 self-review and the Review 2 council can check the code against what was promised. The Word files on the team Google Drive (Main Doc) stay the masters; these copies are refreshed when a master changes.
 
 | File | Source | Date |

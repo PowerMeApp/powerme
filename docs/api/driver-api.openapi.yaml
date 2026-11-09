@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: PowerMe CSMS — Driver API
-  version: 0.1.0
+  version: 0.4.0
   summary: Hợp đồng REST cho app tài xế (T77, phiếu v1.3 §3.2g)
   description: |
     Hợp đồng giữa CSMS (WP2) và app tài xế Flutter (WP3) cho trạng thái súng sạc, thời gian còn lại,
@@ -19,7 +19,7 @@ info:
       đường `sessions/*` trả cả phiên đó nếu `driver_id` khớp; `charges/*` chỉ có với phiên bắt đầu
       từ app.
   x-owner: Trí (WP2) — hợp đồng; Sơn (WP3) — route và client Dart
-  x-status: contract-only — chưa có route HTTP nào trên `main` tính đến 30/10/2026 (G1)
+  x-status: MB03 — brief 07/11 smart station search, address search and canonical road routes implemented locally; charge/time-left HTTP routes remain planned
 servers:
   - url: http://localhost:3000/api/driver/v1
     description: CSMS cục bộ (cùng tiến trình với console /api/admin)
@@ -37,17 +37,155 @@ security:
   - bearerAuth: []
 
 paths:
+  /places/autocomplete:
+    get:
+      tags: [stations]
+      operationId: autocompleteDriverAddress
+      x-status: implemented — MB03 road slice
+      summary: Server-side Vietmap address candidates, separate from PowerMe inventory
+      description: |
+        Requires an owned vehicle and explicit consent. Coordinates are optional together.
+        Cache is principal-scoped, in memory for 120 seconds; all HTTP responses are no-store.
+        Unknown or repeated parameters are rejected. No provider key, URL or raw body is returned.
+      parameters:
+        - $ref: '#/components/parameters/vehicleId'
+        - $ref: '#/components/parameters/locationConsent'
+        - $ref: '#/components/parameters/originLatitude'
+        - $ref: '#/components/parameters/originLongitude'
+        - name: q
+          in: query
+          required: true
+          schema: { type: string, minLength: 2, maxLength: 120 }
+      responses:
+        '200':
+          description: Address candidates, not station IDs
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AddressSearchResult' }
+        '400': { $ref: '#/components/responses/RoadBadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+        '429': { $ref: '#/components/responses/ProviderBusy' }
+        '503': { $ref: '#/components/responses/RoadUnavailable' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /places/resolve:
+    get:
+      tags: [stations]
+      operationId: resolveDriverAddress
+      x-status: implemented — MB03 road slice
+      summary: Resolve a provider ref_id to address coordinates
+      parameters:
+        - $ref: '#/components/parameters/vehicleId'
+        - $ref: '#/components/parameters/locationConsent'
+        - name: ref_id
+          in: query
+          required: true
+          schema: { type: string, pattern: '^(auto|geocode):[A-Za-z0-9_-]{1,2048}$' }
+      responses:
+        '200':
+          description: Resolved address; cannot substitute for a canonical station destination
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PlaceSearchResult' }
+        '400': { $ref: '#/components/responses/RoadBadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+        '429': { $ref: '#/components/responses/ProviderBusy' }
+        '503': { $ref: '#/components/responses/RoadUnavailable' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /stations/{site_id}/route:
+    get:
+      tags: [stations]
+      operationId: getDriverStationRoadRoute
+      x-status: implemented — MB03 road slice
+      summary: Road route to a compatible canonical DB station
+      description: |
+        Requires owned vehicle and consented origin coordinates. Destination is read from DB;
+        arbitrary coordinates/URLs are rejected. Geometry is GeoJSON longitude/latitude, never
+        an encoded polyline or straight-line fallback. Traffic quality remains unknown.
+        Provider failure returns sanitized 503. Disconnect only cancels that caller's wait;
+        shared provider work remains bounded by its 5-second timeout.
+      parameters:
+        - name: site_id
+          in: path
+          required: true
+          schema: { $ref: '#/components/schemas/Id' }
+        - $ref: '#/components/parameters/vehicleId'
+        - $ref: '#/components/parameters/locationConsent'
+        - name: latitude
+          in: query
+          required: true
+          schema: { type: number, minimum: -90, maximum: 90 }
+        - name: longitude
+          in: query
+          required: true
+          schema: { type: number, minimum: -180, maximum: 180 }
+        - $ref: '#/components/parameters/roadVinfastOverride'
+      responses:
+        '200':
+          description: Provider road estimate
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StationRoadRoute' }
+        '400': { $ref: '#/components/responses/RoadBadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+        '429': { $ref: '#/components/responses/ProviderBusy' }
+        '503': { $ref: '#/components/responses/RoadUnavailable' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /me:
+    get:
+      tags: [stations]
+      operationId: getOwnDriverBootstrap
+      summary: Hồ sơ tối thiểu và xe thuộc tài xế đang đăng nhập
+      x-status: implemented — MB03 backend discovery slice
+      description: |
+        Chỉ đọc tài xế từ JWT và DB, không nhận identity từ query. Không có login/OTP,
+        refresh, cập nhật profile/xe hoặc truy vấn phiên trong slice này.
+      responses:
+        '200':
+          description: Own driver and vehicles
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DriverBootstrap' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+        '503': { $ref: '#/components/responses/AuthUnavailable' }
+        '500': { $ref: '#/components/responses/InternalError' }
   /stations:
     get:
       tags: [stations]
       operationId: searchStations
-      summary: Tìm trạm theo tên hoặc vị trí, kèm trạng thái từng súng
+      x-status: implemented — MB03 backend discovery slice
+      summary: Tìm và gợi ý trạm theo pin, loại xe và tổng thời gian sạc xong
       description: |
         Ánh xạ `DriverChargingService.findStations` → `searchStations` (station-search.ts).
         Chỉ trả súng cùng chuẩn đầu cắm với xe `vehicle_id`. Trạm chỉ dành VinFast bị ẩn khi
         xe không phải VinFast, trừ khi `include_vinfast_only=true` (BR-P03).
         `driver_status` theo BR-P38; `status_quality` theo BR-P39 (quá 2 chu kỳ heartbeat là
         `stale`, mặc định 600 s; quá ngưỡng offline 900 s là `offline`).
+        Brief 07/11 được người dùng ưu tiên cho MVP, thay thuật toán SRS §3.7/AD-5 cũ.
+        Có SoC và vị trí thì mặc định smart: reach ok → tight → risky, tổng phút, khoảng cách,
+        site_id. Chọn súng tương thích có tổng phút thấp nhất, tính toàn bộ ứng viên trong bán kính
+        trước khi cắt trang. Không có SoC/vị trí/thông số xe thì estimate=null và nêu lý do fallback.
+        distance_m là haversine; đường ước tính = distance_m × road_factor, không gọi Vietmap để
+        xếp hạng. Route Vietmap thật nằm ở /stations/{site_id}/route, traffic vẫn unknown.
+        Bán kính rõ ràng giữ nguyên; smart không truyền bán kính dùng est_range_km × radius_factor.
+        Nếu bán kính ngầm không có trạm, lấy tối đa fallback_limit trạm gần nhất (ưu tiên có thể
+        tính thời gian); không mở rộng bán kính người dùng đã nhập. Smart không bảo đảm top ba
+        toàn mạng ngoài bán kính. UI lấy page_size=3 nếu muốn ba gợi ý.
+        Tham số lạ/trùng, chuỗi điều khiển, SoC không hữu hạn hoặc không thỏa 0≤soc<target≤80 trả 400.
       parameters:
         - $ref: '#/components/parameters/vehicleId'
         - name: q
@@ -72,8 +210,16 @@ paths:
             default: all
         - name: sort
           in: query
-          description: Mặc định `distance` khi có toạ độ, `name` khi không
-          schema: { type: string, enum: [name, distance] }
+          description: Mặc định smart khi có SoC và toạ độ; nếu không thì distance khi có toạ độ, name khi không
+          schema: { type: string, enum: [name, distance, smart] }
+        - name: soc_percent
+          in: query
+          description: Pin do tài xế nhập; hữu hạn, 0 ≤ soc < target. Không tự đọc SoC phiên cũ.
+          schema: { type: number, minimum: 0, exclusiveMaximum: 80 }
+        - name: target_soc_percent
+          in: query
+          description: Hữu hạn, phải lớn hơn soc_percent nếu có; tối đa 80 ở MVP.
+          schema: { type: number, exclusiveMinimum: 0, maximum: 80, default: 80 }
         - name: page
           in: query
           schema: { type: integer, minimum: 1, maximum: 100000, default: 1 }
@@ -91,6 +237,10 @@ paths:
               schema: { $ref: '#/components/schemas/StationSearchResult' }
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+        '503': { $ref: '#/components/responses/AuthUnavailable' }
+        '500': { $ref: '#/components/responses/InternalError' }
         '404':
           description: Xe không thuộc tài xế (`not_found`)
           content:
@@ -101,6 +251,7 @@ paths:
     get:
       tags: [stations]
       operationId: resolveConnectorByCode
+      x-status: implemented — MB03 backend discovery slice
       summary: Đổi mã in trên trụ (QR) thành súng cụ thể
       description: |
         Ánh xạ `DriverChargingService.resolveConnector`. Mã QR trên màn hình trụ chứa
@@ -124,6 +275,10 @@ paths:
               schema: { $ref: '#/components/schemas/ResolvedConnector' }
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+        '503': { $ref: '#/components/responses/AuthUnavailable' }
+        '500': { $ref: '#/components/responses/InternalError' }
         '404': { $ref: '#/components/responses/NotFound' }
 
   /connectors/{connectorId}/time-left:
@@ -155,6 +310,7 @@ paths:
     post:
       tags: [charges]
       operationId: startCharge
+      x-status: planned — not implemented by MB03
       summary: Yêu cầu bắt đầu phiên từ app
       description: |
         Ánh xạ `DriverChargingService.start(driverId, key, input)`. Tạo **start intent** bền
@@ -192,6 +348,7 @@ paths:
     get:
       tags: [charges]
       operationId: getChargeStart
+      x-status: planned — not implemented by MB03
       summary: Xem lại kết quả một yêu cầu bắt đầu
       description: |
         Ánh xạ `DriverChargingService.getStart`. App gọi khi mất mạng giữa chừng hoặc mở lại
@@ -214,6 +371,7 @@ paths:
     get:
       tags: [sessions]
       operationId: getSessionProgress
+      x-status: planned — not implemented by MB03
       summary: Tiến trình phiên đang chạy hoặc vừa dừng
       description: |
         Ánh xạ `DriverChargingService.progress`. Trả cho mọi phiên có `driver_id` là tài xế gọi,
@@ -237,6 +395,7 @@ paths:
     post:
       tags: [sessions]
       operationId: stopCharge
+      x-status: planned — not implemented by MB03
       summary: Yêu cầu dừng phiên từ app
       description: |
         Ánh xạ `DriverChargingService.stop(driverId, key, sessionId)`. Ghi **stop intent** rồi
@@ -266,6 +425,7 @@ paths:
     get:
       tags: [sessions]
       operationId: getChargingStatement
+      x-status: planned — not implemented by MB03
       summary: Bảng kê sau phiên (một lần trừ tiền, BR-P45)
       description: |
         Ánh xạ `DriverChargingService.statement`. Chỉ có sau khi quyết toán xong; trước đó 404
@@ -289,12 +449,33 @@ components:
       scheme: bearer
       bearerFormat: JWT
       description: |
-        Token của tài xế sau đăng nhập OTP (WP3 MB-02). CSMS chỉ cần lấy được `driver_id`
-        (= `users.id` với role `driver`) từ token. Cơ chế phát hành token không thuộc hợp đồng này.
-        Khi chạy demo cục bộ, cho phép header `X-Driver-Id` thay token nếu bật
-        `DRIVER_API_DEV_AUTH=true` (mặc định tắt; cấm trên staging).
+        HS256 JWT có typ=JWT, sub=users.id dạng chuỗi, role=driver, iss, aud, iat và exp.
+        Issuer/audience/key do server cấu hình; tuổi token và exp-iat tối đa 900 giây,
+        không chấp nhận future iat, expired hoặc thuật toán khác. DB xác nhận role driver,
+        account active và subtype drivers mỗi request. Không nhận identity trong query.
+        OTP/login/refresh chưa triển khai. Local token script chỉ dành tài khoản synthetic.
+        X-Driver-Id chỉ khi DRIVER_API_DEV_AUTH=true cùng NODE_ENV=development và
+        DRIVER_API_ENV=local (hoặc test/test). Mặc định tắt; bearer sai không fallback.
 
   parameters:
+    locationConsent:
+      name: location_consent
+      in: query
+      required: true
+      schema: { type: boolean, const: true }
+      description: Explicit consent for this address/location request; not inferred from onboarding
+    originLatitude:
+      name: latitude
+      in: query
+      schema: { type: number, minimum: -90, maximum: 90 }
+    originLongitude:
+      name: longitude
+      in: query
+      schema: { type: number, minimum: -180, maximum: 180 }
+    roadVinfastOverride:
+      name: include_vinfast_only
+      in: query
+      schema: { type: boolean, default: false }
     vehicleId:
       name: vehicle_id
       in: query
@@ -314,6 +495,29 @@ components:
       schema: { $ref: '#/components/schemas/IdempotencyKey' }
 
   responses:
+    RoadBadRequest:
+      description: |
+        Invalid, duplicate or unknown query; location_consent_required, origin_coordinates_required,
+        invalid_input or invalid_search. Partial coordinates and invalid provider references are rejected.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    ProviderBusy:
+      description: provider_busy or provider_rate_limited; Retry-After 60 seconds
+      headers:
+        Retry-After:
+          schema: { type: string, const: '60' }
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    RoadUnavailable:
+      description: |
+        auth_unavailable, policy_unconfigured, station_location_unavailable, or provider_unavailable.
+        Provider detail is one of unconfigured, credentials, restricted_or_quota, rate_limited,
+        timeout, network, invalid_response, no_route. No raw provider body or URL is exposed.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
     BadRequest:
       description: |
         `invalid_input`, `invalid_search`, `invalid_connector_reference`, `invalid_idempotency_key`,
@@ -322,7 +526,27 @@ components:
         application/json:
           schema: { $ref: '#/components/schemas/Error' }
     Unauthorized:
-      description: Thiếu hoặc sai token (`unauthorized`); `forbidden` khi token hợp lệ nhưng không phải tài xế
+      description: Thiếu, sai hoặc hết hạn token (`unauthorized`), kèm WWW-Authenticate Bearer
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Forbidden:
+      description: '`forbidden` — role/state/subtype không được phép; `forbidden_origin` — Origin ngoài local'
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    MethodNotAllowed:
+      description: '`method_not_allowed`, Allow GET, OPTIONS'
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    AuthUnavailable:
+      description: '`auth_unavailable` khi JWT chưa cấu hình; `policy_unconfigured` khi discovery policy chưa nạp'
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    InternalError:
+      description: '`internal_error` — chi tiết nội bộ và secrets không trả cho client'
       content:
         application/json:
           schema: { $ref: '#/components/schemas/Error' }
@@ -338,10 +562,79 @@ components:
           schema: { $ref: '#/components/schemas/Error' }
 
   schemas:
+    AddressCandidate:
+      type: object
+      additionalProperties: false
+      required: [ref_id, display, name, address]
+      properties:
+        ref_id: { type: string, maxLength: 4096 }
+        display: { type: string, maxLength: 4096 }
+        name: { type: string, maxLength: 4096 }
+        address: { type: string, maxLength: 4096 }
+    AddressSearchResult:
+      type: object
+      additionalProperties: false
+      required: [value, computed_at, cached]
+      properties:
+        value:
+          type: array
+          maxItems: 10
+          items: { $ref: '#/components/schemas/AddressCandidate' }
+        computed_at: { $ref: '#/components/schemas/Timestamp' }
+        cached: { type: boolean }
+    PlaceSearchResult:
+      type: object
+      additionalProperties: false
+      required: [value, computed_at, cached]
+      properties:
+        value:
+          type: object
+          additionalProperties: false
+          required: [ref_id, display, name, address, latitude, longitude]
+          properties:
+            ref_id: { type: string, maxLength: 4096 }
+            display: { type: string, maxLength: 4096 }
+            name: { type: string, maxLength: 4096 }
+            address: { type: string, maxLength: 4096 }
+            latitude: { type: number, minimum: -90, maximum: 90 }
+            longitude: { type: number, minimum: -180, maximum: 180 }
+        computed_at: { $ref: '#/components/schemas/Timestamp' }
+        cached: { type: boolean }
+    RoadGeometry:
+      type: object
+      additionalProperties: false
+      required: [type, coordinates]
+      properties:
+        type: { type: string, const: LineString }
+        coordinates:
+          type: array
+          minItems: 2
+          maxItems: 10000
+          items:
+            type: array
+            minItems: 2
+            maxItems: 2
+            prefixItems:
+              - { type: number, minimum: -180, maximum: 180 }
+              - { type: number, minimum: -90, maximum: 90 }
+            items: false
+    StationRoadRoute:
+      type: object
+      additionalProperties: false
+      required: [site_id, distance_m, duration_s, geometry, traffic_quality, computed_at, cached, quality]
+      properties:
+        site_id: { $ref: '#/components/schemas/Id' }
+        distance_m: { type: number, minimum: 0 }
+        duration_s: { type: integer, minimum: 0 }
+        geometry: { $ref: '#/components/schemas/RoadGeometry' }
+        traffic_quality: { type: string, const: unknown }
+        computed_at: { $ref: '#/components/schemas/Timestamp' }
+        cached: { type: boolean }
+        quality: { type: string, const: provider_estimate }
     Id:
       type: string
       pattern: '^[1-9][0-9]{0,18}$'
-      description: bigint dạng chuỗi số
+      description: bigint dạng chuỗi số, tối đa 9223372036854775807; giữ nguyên cả khi vượt MAX_SAFE_INTEGER
       examples: ['12']
     IdempotencyKey:
       type: string
@@ -361,6 +654,34 @@ components:
         detail: { type: string, description: Lời giải thích để hiển thị }
       examples:
         - { error: credit_unavailable, detail: 'Số dư 15.000 ₫ thấp hơn mức khởi đầu 50.000 ₫' }
+
+    DriverBootstrap:
+      type: object
+      required: [user_id, full_name, role, account_status, vehicles]
+      properties:
+        user_id: { $ref: '#/components/schemas/Id' }
+        full_name: { type: string }
+        role: { type: string, const: driver }
+        account_status: { type: string, const: active }
+        vehicles:
+          type: array
+          items: { $ref: '#/components/schemas/OwnVehicle' }
+
+    OwnVehicle:
+      type: object
+      required: [vehicle_id, plate_number, is_default, vehicle_model_id, brand, model_name, connector_type, is_vinfast, battery_capacity_kwh, rated_range_km, max_dc_kw]
+      properties:
+        vehicle_id: { $ref: '#/components/schemas/Id' }
+        plate_number: { type: string }
+        is_default: { type: boolean }
+        vehicle_model_id: { $ref: '#/components/schemas/Id' }
+        brand: { type: string }
+        model_name: { type: string }
+        connector_type: { $ref: '#/components/schemas/ConnectorType' }
+        is_vinfast: { type: boolean }
+        battery_capacity_kwh: { type: [number, 'null'] }
+        rated_range_km: { type: [integer, 'null'] }
+        max_dc_kw: { type: [number, 'null'] }
 
     DriverConnectorStatus:
       type: string
@@ -391,6 +712,7 @@ components:
         display_code: { type: [string, 'null'], description: 'Mã in trên trụ, dùng trong QR' }
         connector_type: { $ref: '#/components/schemas/ConnectorType' }
         max_power_kw: { type: [number, 'null'] }
+        rated_power_kw: { type: [number, 'null'], description: Công suất trụ dùng khi công suất súng null }
         status: { $ref: '#/components/schemas/OcppConnectorStatus' }
         driver_status: { $ref: '#/components/schemas/DriverConnectorStatus' }
         status_quality: { $ref: '#/components/schemas/StatusQuality' }
@@ -403,7 +725,7 @@ components:
           enum: [registered, awaiting_connection, in_service, disabled, decommissioned]
         available_now:
           type: boolean
-          description: '`driver_status = available` và trụ online và `in_service`'
+          description: '`driver_status = available`, fresh, online, in_service và không có bằng chứng đang bị chiếm; không bảo đảm lệnh Start sẽ thành công'
         time_left:
           description: Có khi `driver_status` là `in_use` hoặc `freeing_soon`; Tuần 9
           oneOf: [{ $ref: '#/components/schemas/TimeLeftEstimate' }, { type: 'null' }]
@@ -421,21 +743,58 @@ components:
         vinfast_only: { type: boolean }
         latitude: { type: [number, 'null'] }
         longitude: { type: [number, 'null'] }
-        distance_m: { type: [integer, 'null'], description: 'Đường chim bay, chỉ khi có toạ độ' }
+        distance_m: { type: [integer, 'null'], description: 'Đường chim bay làm tròn mét, chỉ khi có toạ độ' }
+        reach: { type: [string, 'null'], enum: [ok, tight, risky, null] }
+        best_connector_id: { oneOf: [{ $ref: '#/components/schemas/Id' }, { type: 'null' }] }
+        est_drive_min: { type: [number, 'null'], minimum: 0 }
+        est_wait_min: { type: [number, 'null'], minimum: 0 }
+        est_charge_min: { type: [number, 'null'], minimum: 0 }
+        est_total_min: { type: [number, 'null'], minimum: 0 }
+        est_energy_kwh: { type: [number, 'null'], minimum: 0 }
+        est_cost_vnd_max:
+          type: [integer, 'null']
+          minimum: 0
+          maximum: 9007199254740991
+          description: Ceil(kWh × giá cao nhất hiện hành của operator); null nếu thiếu/không an toàn số. Không là quyết toán.
         connectors:
           type: array
           items: { $ref: '#/components/schemas/Connector' }
 
+    SmartSearchAssumptions:
+      type: object
+      additionalProperties: false
+      required: [range_factor, road_factor, reserve_km, avg_speed_kmh, charge_efficiency, available_wait_min, freeing_soon_wait_min, in_use_wait_min, radius_factor, fallback_limit]
+      properties:
+        range_factor: { type: number, minimum: 0.001, maximum: 1, default: 0.75 }
+        road_factor: { type: number, minimum: 1, maximum: 10, default: 1.3 }
+        reserve_km: { type: number, minimum: 0, maximum: 20040, default: 10 }
+        avg_speed_kmh: { type: number, minimum: 0.1, maximum: 300, default: 30 }
+        charge_efficiency: { type: number, minimum: 0.001, maximum: 1, default: 0.85 }
+        available_wait_min: { type: number, minimum: 0, maximum: 10080, default: 0 }
+        freeing_soon_wait_min: { type: number, minimum: 0, maximum: 10080, default: 5 }
+        in_use_wait_min: { type: number, minimum: 0, maximum: 10080, default: 30 }
+        radius_factor: { type: number, minimum: 0.1, maximum: 10, default: 1.5 }
+        fallback_limit: { type: integer, minimum: 1, maximum: 100, default: 3 }
+    SmartSearchEstimate:
+      type: object
+      additionalProperties: false
+      required: [soc_percent, est_range_km, assumptions]
+      properties:
+        soc_percent: { type: number, minimum: 0, exclusiveMaximum: 80 }
+        est_range_km: { type: number, minimum: 0 }
+        assumptions: { $ref: '#/components/schemas/SmartSearchAssumptions' }
     StationSearchResult:
       type: object
-      required: [items, total, page, pageSize]
+      required: [items, total, page, page_size, estimate]
       properties:
+        estimate: { oneOf: [{ $ref: '#/components/schemas/SmartSearchEstimate' }, { type: 'null' }] }
+        smart_unavailable_reason: { type: string, enum: [no_soc, no_location, missing_vehicle_specs] }
         items:
           type: array
           items: { $ref: '#/components/schemas/Station' }
         total: { type: integer, minimum: 0 }
         page: { type: integer, minimum: 1 }
-        pageSize: { type: integer, minimum: 1 }
+        page_size: { type: integer, minimum: 1, maximum: 100 }
 
     ResolvedConnector:
       type: object

@@ -8,8 +8,12 @@
  * ADR-0009 (ngưỡng skew là tín hiệu phụ phát hiện phát lại), ADR-0008 (DATABASE_URL cho Drizzle).
  */
 import { Global, Module } from '@nestjs/common';
+import { SmartSearchConfig, loadSmartSearchConfig } from './sessions/smart-search.js';
+import { DriverApiConfig, loadDriverApiConfig } from './driver/driver-auth.js';
 
 export interface CsmsConfig {
+  driverApi?: DriverApiConfig;
+  smartSearch?: SmartSearchConfig;
   /** Chuỗi kết nối Postgres. Bắt buộc khi chạy app; test unit không cần. */
   databaseUrl: string;
   /** Cổng WebSocket OCPP-J. Lab dùng 9000 (`ws://localhost:9000/ocpp/{serialNumber}`). */
@@ -32,6 +36,12 @@ export interface CsmsConfig {
   consoleEnabled: boolean;
   /** Host bind của console. Mặc định 127.0.0.1 vì CHƯA có xác thực — không bind 0.0.0.0. */
   consoleHost: string;
+  /**
+   * Cho phép console/Driver API bind host không phải loopback (vd `0.0.0.0` trong container Docker).
+   * Mặc định false: `ConsoleServer.start()` từ chối. Chỉ đặt true khi mạng bên ngoài đã chặn (cổng
+   * publish chỉ ra 127.0.0.1, reverse proxy không chuyển tiếp console) — xem infra/staging/docker-compose.yml.
+   */
+  consoleAllowNonLoopback?: boolean;
   /** Cổng HTTP của console (0 = cổng ngẫu nhiên, dùng trong test). */
   consolePort: number;
   /**
@@ -151,6 +161,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): CsmsConfig {
   const databaseUrl = env['DATABASE_URL'];
   if (!databaseUrl) throw new Error('Thiếu DATABASE_URL (xem infra/.env.example)');
   return {
+    driverApi: loadDriverApiConfig(env),
+    smartSearch: loadSmartSearchConfig(env),
     databaseUrl,
     ocppPort: intEnv(env, 'OCPP_PORT', intEnv(env, 'CSMS_OCPP_WS_PORT', 9000)),
     heartbeatIntervalS: intEnv(env, 'OCPP_HEARTBEAT_INTERVAL_SECONDS', 300),
@@ -162,6 +174,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): CsmsConfig {
     reconcileEnergyToleranceWh: intEnv(env, 'RECONCILE_ENERGY_TOLERANCE_WH', 1),
     consoleEnabled: boolEnv(env, 'CONSOLE_ENABLED', true),
     consoleHost: env['CONSOLE_HOST'] || '127.0.0.1',
+    consoleAllowNonLoopback: boolEnv(env, 'CONSOLE_ALLOW_NON_LOOPBACK', false),
     consolePort: intEnv(env, 'CONSOLE_PORT', 3000),
     ...(env['OCPP_PUBLIC_URL'] ? { ocppPublicUrl: env['OCPP_PUBLIC_URL'] } : {}),
     allowLegacyNoCredential: boolEnv(env, 'ALLOW_LEGACY_NO_CREDENTIAL', false),

@@ -9,6 +9,7 @@
     "start": "node dist/main.js",
     "typecheck": "tsc --noEmit",
     "test": "node scripts/run-jest.cjs",
+    "test:driver-discovery": "node scripts/test-driver-discovery.mjs",
     "demo": "node demo/run-demo.mjs",
     "demo:reset": "node demo/run-demo.mjs --reset",
     "demo:db": "node demo/db-embedded.mjs"
@@ -17,6 +18,7 @@
     "@nestjs/common": "12.3.2",
     "@nestjs/core": "12.3.2",
     "drizzle-orm": "0.45.4",
+    "jose": "6.2.15",
     "ocpp-rpc": "2.2.1",
     "pg": "8.23.1",
     "reflect-metadata": "0.2.2",
