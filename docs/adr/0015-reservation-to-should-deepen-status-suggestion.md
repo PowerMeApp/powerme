@@ -9,15 +9,15 @@
 
 ## Context
 
-Reservation needs hold enforcement, fees, concurrency and fairness rules. The pillar manuals do not document the OCPP Reservation profile, so a platform-side hold would be needed. The supervisor advised growing scope by going deeper into existing functions rather than adding new ones. Live connector status only needs `StatusNotification` and `Heartbeat`, which are mandatory in OCPP 1.6J Core.
+Reservation needs hold enforcement, fees, concurrency and fairness rules. The charge point manuals do not document the OCPP Reservation profile, so a platform-side hold would be needed. The supervisor advised growing scope by going deeper into existing functions rather than adding new ones. Live connector status only needs `StatusNotification` and `Heartbeat`, which are mandatory in OCPP 1.6J Core.
 
 ## Decision
 
 - **Reservation** (UC-CHG-06, FR-20, BR-P24–BR-P31) moves from Must to **Should**; its design stays in the SRS.
 - **Live status deepened** (FR-03): driver-facing mapping Available / In use / Freeing soon / Unavailable / Offline (BR-P38); freshness, with "may be out of date" after two heartbeat intervals (BR-P39); append-only status history (`connector_status_events`).
-- **Time left v2** (BR-P40): first level with data wins — session limit, SoC with a DC charging curve, pillar history, otherwise "unknown"; measured against the linear baseline (NFR-RES-03).
+- **Time left v2** (BR-P40): first level with data wins — session limit, SoC with a DC charging curve, charge point history, otherwise "unknown"; measured against the linear baseline (NFR-RES-03).
 - **Suggestion v2** (FR-21, BR-P41): Fastest = travel + wait + charging time; Cheapest = estimated cost at the tariff band on arrival; reliability penalty from uptime and driver reports (BR-P42); evaluated against nearest-station in a simulator experiment (NFR-RES-04, RQ2).
-- **Uptime and utilisation** per pillar for operators (FR-10, BR-P43).
+- **Uptime and utilisation** per charge point for operators (FR-10, BR-P43).
 - Loyalty stays Must (ADR-0014).
 
 ## Consequences
@@ -36,6 +36,6 @@ Reservation needs hold enforcement, fees, concurrency and fairness rules. The pi
 
 | Option | Why rejected |
 |---|---|
-| Keep reservation in Must | Design not ready; pillar support for `ReserveNow` not documented |
+| Keep reservation in Must | Design not ready; charge point support for `ReserveNow` not documented |
 | Drop status and suggestion as well | Removes the features that differentiate the platform |
 | "Notify me when free" instead of reservation, in Must | Needs push notifications (FCM), which are out of Review 2 scope; kept as Could |

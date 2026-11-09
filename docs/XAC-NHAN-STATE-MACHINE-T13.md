@@ -1,6 +1,6 @@
 # Xác nhận state machine — T13 (trả lời T12 v0.2 của WP1)
 
-**Ngày:** 23/10/2026 · **Người xác nhận:** Ngô Văn Minh Trí (WP2) · **Phạm vi:** STM-1 ChargingSession, STM-2 Connector, STM-3 ChargingPillar, STM-8 RfidCard, và 5 câu hỏi Ân gửi Trí.
+**Ngày:** 23/10/2026 · **Người xác nhận:** Ngô Văn Minh Trí (WP2) · **Phạm vi:** STM-1 ChargingSession, STM-2 Connector, STM-3 ChargePoint, STM-8 RfidCard, và 5 câu hỏi Ân gửi Trí.
 **Nguyên tắc dùng để xác nhận:** giá trị trạng thái trong DB = giá trị trong STM = (với Connector) giá trị trên dây OCPP, **không có tầng ánh xạ**. Mọi chỗ sửa đều có bằng chứng từ EXP-01 (`apps/csms/lab/EXP-01-ngat-ket-noi-81s.md`, nhánh #9) hoặc từ spec OCPP 1.6.
 
 ---
@@ -11,7 +11,7 @@
 |---|---|---|
 | STM-1 Session | **Xác nhận, có bổ sung** | +1 trạng thái `review`; +5 chuyển (`stopping → active` khi RemoteStop bị Rejected; `closed → review`; `review → reconciled`; **`orphaned → active`** khi bản tin live tới sau nối lại; `reconciled → review` khi mẫu muộn đổi kết luận và chưa trừ tiền); `orphaned → reconciled` tách thành [nhất quán] / `orphaned → review` [conflict]. Tổng 9 trạng thái, 22 chuyển |
 | STM-2 Connector | **Xác nhận, sửa cách diễn đạt trigger** | Giữ đủ **9** giá trị OCPP trong enum DB (thêm `Reserved`) — CSMS *phản chiếu* StatusNotification, không bao giờ từ chối. Sửa #1, #2; thêm `Unavailable → Available` qua ChangeAvailability |
-| STM-3 Pillar | **Xác nhận giá trị, sửa 2 trigger** | #5 `offline → in_service` kích hoạt bởi **socket nối lại (epoch mới)**, không phải BootNotification — EXP-01 chứng minh trụ nối lại không gửi Boot. #4 `offline` khi **socket đóng HOẶC 900 s im lặng**, không chỉ 900 s |
+| STM-3 Charge Point | **Xác nhận giá trị, sửa 2 trigger** | #5 `offline → in_service` kích hoạt bởi **socket nối lại (epoch mới)**, không phải BootNotification — EXP-01 chứng minh trụ nối lại không gửi Boot. #4 `offline` khi **socket đóng HOẶC 900 s im lặng**, không chỉ 900 s |
 | STM-8 RfidCard | **Xác nhận** | Must: Operator/Admin gắn thẻ cho driver; driver tự gắn = Should. Bổ sung ghi chú về `card_kind` ↔ `payment_mode` |
 | Mục tiêu test | **Đồng ý 5 thực thể chính** (STM-1, 2, 3, 4, 6) | STM-1 test ở mức lớp state machine + integration trên **trace thật EXP-01** làm fixture; STM-2 test qua simulator |
 
@@ -102,7 +102,7 @@ Lab chưa có enum (mini-CSMS chỉ ghi log). Enum sẽ được định nghĩa 
 
 ---
 
-## 3. STM-3 ChargingPillar — `charge_points.lifecycle`
+## 3. STM-3 ChargePoint — `charge_points.lifecycle`
 
 ### 3.1 Giá trị
 

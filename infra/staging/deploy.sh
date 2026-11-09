@@ -3,7 +3,7 @@
 #
 #   ./deploy.sh <tag> [--seed] [--sim]
 #
-#   --seed  nạp dữ liệu mẫu (trụ RH24D1-00001 có credential từ DEMO_PILLAR_PASSWORD)
+#   --seed  nạp dữ liệu mẫu (trụ RH24D1-00001 có credential từ DEMO_CHARGE_POINT_PASSWORD)
 #   --sim   cập nhật/bật cả simulator (tự bật nếu nó đang chạy sẵn)
 #
 # Các bước: kiểm .env -> sao lưu DB -> pull ảnh -> migrate -> (seed) -> khởi động -> kiểm sức khoẻ

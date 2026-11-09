@@ -468,7 +468,7 @@ components:
         computed_at: { $ref: '#/components/schemas/Timestamp' }
         reason:
           type: [string, 'null']
-          description: Khi `unknown` — `not_in_use`, `no_soc`, `no_history`, `pillar_offline`
+          description: Khi `unknown` — `not_in_use`, `no_soc`, `no_history`, `charge_point_offline`
         basis:
           type: [string, 'null']
           description: Dữ liệu dùng để tính, ví dụ "SoC 42 % → 80 %, đường cong 60 kW"
@@ -534,7 +534,7 @@ components:
 
     SessionProgress:
       type: object
-      required: [session_id, status, updated_at, meter_start_wh, consumed_wh, telemetry_quality, pillar]
+      required: [session_id, status, updated_at, meter_start_wh, consumed_wh, telemetry_quality, charge_point]
       properties:
         session_id: { $ref: '#/components/schemas/Id' }
         status:
@@ -564,7 +564,7 @@ components:
         settlement_retry_at: { oneOf: [{ $ref: '#/components/schemas/Timestamp' }, { type: 'null' }] }
         time_left:
           oneOf: [{ $ref: '#/components/schemas/TimeLeftEstimate' }, { type: 'null' }]
-        pillar:
+        charge_point:
           type: object
           required: [lifecycle, is_online]
           properties:

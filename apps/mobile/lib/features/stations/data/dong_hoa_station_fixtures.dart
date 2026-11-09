@@ -1,7 +1,7 @@
 import '../domain/map_location.dart';
 import '../domain/station.dart';
 
-// WP3: owner-approved area; these coordinates represent simulated pillars only.
+// WP3: owner-approved area; these coordinates represent simulated charge points only.
 final dongHoaStations = List<Station>.unmodifiable([
   for (final site in [
     (

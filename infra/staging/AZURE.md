@@ -69,7 +69,7 @@ cd ~/powerme/infra/staging
 ./init-env.sh <FQDN> <TAG>        # ví dụ: ./init-env.sh powerme-staging.japaneast.cloudapp.azure.com review-4
 ```
 
-Script sinh `POSTGRES_PASSWORD` và `DEMO_PILLAR_PASSWORD`, ghi vào `.env` (chmod 600), **không in ra**. Chạy lại sẽ bị từ chối (tránh làm lệch mật khẩu DB đã tạo); chỉ dùng `--force` khi chấp nhận mất mật khẩu cũ.
+Script sinh `POSTGRES_PASSWORD` và `DEMO_CHARGE_POINT_PASSWORD`, ghi vào `.env` (chmod 600), **không in ra**. Chạy lại sẽ bị từ chối (tránh làm lệch mật khẩu DB đã tạo); chỉ dùng `--force` khi chấp nhận mất mật khẩu cũ.
 
 ## 5. Deploy lần đầu (tay)
 
@@ -94,8 +94,8 @@ Dòng thứ ba là kiểm **bảo mật**. Caddy trả `HTTP 200` kèm một dò
 Kiểm đường OCPP thật từ máy Trí (trụ giả lập nối qua `wss://`, có Basic Auth):
 
 ```powershell
-# trên máy Trí, trong D:\CAPSTONE; lấy DEMO_PILLAR_PASSWORD từ .env trên VPS (đừng dán lên chat)
-$env:CSMS_URL="wss://<FQDN>/ocpp"; $env:CP_PASSWORD="<DEMO_PILLAR_PASSWORD>"; node simulator/d1-hmi/server.mjs
+# trên máy Trí, trong D:\CAPSTONE; lấy DEMO_CHARGE_POINT_PASSWORD từ .env trên VPS (đừng dán lên chat)
+$env:CSMS_URL="wss://<FQDN>/ocpp"; $env:CP_PASSWORD="<DEMO_CHARGE_POINT_PASSWORD>"; node simulator/d1-hmi/server.mjs
 ```
 
 Mở `http://localhost:8100`, cắm súng, quẹt thẻ: phiên phải hiện trong console của staging (mục 7). Hoặc chạy simulator ngay trên VPS: `./deploy.sh <TAG> --sim`.
