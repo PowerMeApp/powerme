@@ -20,7 +20,7 @@ This is the first product code for WF-04. A charge point fault becomes an operat
 | **STM-6 FaultEvent**: a pure class with 7 transitions (t2–t7) and creation t1. Every transition and the full 4 × 6 sweep are tested | **Driver fault report** (UC-CHG-05): no app API yet |
 | **Fault raised** from `StatusNotification Faulted`, including **connector 0** (whole charge point, `connector_id` null) | **Maintenance tickets** (UC-OPS-08, «Should») |
 | **One open fault per connector**: a repeated `Faulted` attaches to the open fault (the first `error_code` is kept), enforced in code (`SELECT … FOR UPDATE`) and in the DB (unique index, migration `0007`) | **Hide connector + void reservations** (AD-4, «Should») |
-| **Auto-resolve** when the connector works again: `Available`, or straight to `Preparing` / `Charging` / `SuspendedEV(SE)` / `Finishing` / `Reserved` (t3 from `raised`, t5 from `resetting`, t7 from `acknowledged`). `Unavailable` after a reboot does **not** resolve | **Offline > 900 s → fault** (G19, ADR-0016): the timer location is to be agreed with Trí |
+| **Auto-resolve** when the connector works again: `Available`, or straight to `Preparing` / `Charging` / `SuspendedEV(SE)` / `Finishing` / `Reserved` (t3 from `raised`, t5 from `resetting`, t7 from `acknowledged`). `Unavailable` after a reboot does **not** resolve | ~~Offline > 900 s → fault~~ **done in FE-10 (G10)**: `OfflineAlertService` in `stations/faults`, see §8 |
 | **Acknowledge** (t2), **remote Reset** (t4) with a `remote_commands` row and a timeout timer, refused with 409 while another connector is charging unless the operator forces it, **Reset failed / rejected / timeout** (t6), **manual close** (t7 `OPERATOR_CLOSE`) | **Realtime** `alert.*` events (BE-08), **dashboard alerts page** (WP4 UI) |
 | **Error-code guide**: all 16 OCPP 1.6 `ChargePointErrorCode` values with severity and an operator hint | Final hints for the four SRS hardware codes (waiting on WP1) |
 | **Console API + "Faults" table**: list, acknowledge, reset, close | Login / `RolesGuard` (ADR-0011): `acknowledged_by` stays null from the console |
@@ -223,7 +223,7 @@ CI runs on PR #61.
 
 - Driver fault report API (UC-CHG-05) and `fault_reports`.
 - Maintenance tickets, hiding the connector, voiding reservations («Should»).
-- Offline > 900 s → `fault_events` (G19). It needs a timer next to `OfflineGraceService`, to be agreed with Trí.
+- ~~Offline > 900 s → `fault_events`~~ **Done in FE-10 (G10, 07/11/2026).** `OfflineAlertService` (`stations/faults/offline-alert.service.ts`) sweeps every `OFFLINE_ALERT_SWEEP_S` (60 s) and opens a whole-charge-point fault (connector 0, `error_code = 'Offline'`, `source = 'ocpp'`) for any `in_service` charge point whose `COALESCE(last_message_at, online_changed_at)` is older than `OFFLINE_ALERT_S` (900 s). The fault closes by itself (`CONNECTOR_AVAILABLE`) once the charge point is online and has sent a frame after `raised_at`. No migration, no change to `ocpp-gateway`; tests in `test/wf04-offline.integration.test.ts` (TC-F10-04…07, NFR-06).
 - Realtime `alert.raised` / `alert.updated` / `alert.resolved` (BE-08), and the React dashboard alerts page.
 - Who closed a fault: `fault_events` has no column for it, so it is only logged.
 - The Reset timer is in RAM (rebuilt at startup). The target is a BullMQ delayed job, as for T61.
@@ -240,7 +240,7 @@ The WF-04 §6 questions still apply. New ones from this iteration:
 | 4 | Is 120 s the right Reset timeout for D1/YJ-EU hardware? | 120 s, configurable | WP1 / Trí |
 | 5 | Add `fault_events.closed_by` / `resolved_by`? | Not yet (log only) | Nghĩa + WP1 (LERD-2) |
 | 6 | Are these the right four SRS codes (`pendingWp1`)? | GroundFailure, HighTemperature, OverCurrentFailure, PowerMeterFailure | WP1 |
-| 7 | Where does the offline > 900 s fault timer live (G19)? | Out of scope | Trí + Nghĩa |
+| 7 | Where does the offline > 900 s fault timer live (G19)? | **Answered in FE-10:** a DB sweep in `stations/faults/offline-alert.service.ts`, not next to `OfflineGraceService`. It reads only what the gateway already writes, so it survives restarts and keeps ADR-0016 D-F (stations never imports the gateway). A dedicated `fault_source` value would need a migration (ask Ân); for now the code is `Offline` | Nghĩa |
 | 8 | A **replayed** `Faulted` that arrives **after** a live recovery would open a fault that is already over. | **Handled** after self-review: ignored when older than the last `resolved_at` (IT-16). `SessionsService` still mirrors a replayed status into `connectors.status`, so the connector can show an old status until the next live frame | Trí + Nghĩa |
 | 9 | STM-2 v0.1 draws only `Faulted → Available` ("fault cleared"); OCPP allows `Faulted` → any status | Code resolves on every working status (§3.2); STM-2 should add the other exits | WP1 (Ân) |
 | 10 | Should a forced Reset be allowed for operators, or only after the driver is warned in the app (BR-P07)? | Console allows `force` after a second confirmation; no driver notice yet | Nghĩa + WP3 |

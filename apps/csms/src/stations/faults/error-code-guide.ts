@@ -117,8 +117,21 @@ export function isChargePointErrorCode(
   return typeof code === 'string' && Object.hasOwn(ERROR_CODE_GUIDE, code);
 }
 
-/** Mục của mã; mã lạ (vendor tự đặt) hoặc thiếu → coi như OtherError. */
+/**
+ * G10 (FE-10): mã do CSMS tự đặt cho sự cố "trụ im lặng quá OFFLINE_ALERT_S" (NFR-OCPP-07). KHÔNG
+ * phải ChargePointErrorCode của OCPP 1.6 — trụ đã mất kết nối thì không gửi được mã nào — nên nằm
+ * ngoài {@link CHARGE_POINT_ERROR_CODES}; `fault_events.error_code` giữ nguyên văn chuỗi này.
+ */
+export const OFFLINE_ERROR_CODE = 'Offline';
+
+export const OFFLINE_GUIDE: ErrorCodeEntry = {
+  severity: 'major',
+  hint: 'Trụ không gửi bản tin nào quá ngưỡng: kiểm tra nguồn điện, SIM/4G và mạng tại trạm. Reset từ xa không tới được trụ khi đang offline.',
+};
+
+/** Mục của mã; `Offline` (G10) có mục riêng; mã lạ (vendor tự đặt) hoặc thiếu → OtherError. */
 export function guideFor(code: string | null | undefined): ErrorCodeEntry {
+  if (code === OFFLINE_ERROR_CODE) return OFFLINE_GUIDE;
   return isChargePointErrorCode(code) ? ERROR_CODE_GUIDE[code] : ERROR_CODE_GUIDE.OtherError;
 }
 
