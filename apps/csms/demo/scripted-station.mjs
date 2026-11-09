@@ -22,6 +22,7 @@
  * Tuỳ chọn: --id RH24D1-00001  --url ws://localhost:9000/ocpp  --connector 1
  *           --interval-s 10 (nhịp MeterValues)  --offline-s 60 (độ dài đứt mạng)  --fast (3 s / 15 s)
  *           --tag <idTag>
+ * Biến môi trường: CP_PASSWORD (mật khẩu Basic Auth của trụ; cần khi nối vào staging)
  */
 import { createRequire } from 'node:module';
 
@@ -61,6 +62,8 @@ async function connect({ boot }) {
     protocols: ['ocpp1.6'],
     strictMode: true,
     reconnect: false,
+    // Staging bật Basic Auth theo từng trụ (ALLOW_LEGACY_NO_CREDENTIAL=false): đặt CP_PASSWORD để nối được.
+    ...(process.env.CP_PASSWORD ? { password: process.env.CP_PASSWORD } : {}),
   });
   // Sau khi nối lại, CSMS gửi TriggerMessage(StatusNotification) cho connector 0/1/2 để biết trụ đang
   // ở trạng thái nào (đây là cách phiên orphaned được kéo về active — T13 #18).
