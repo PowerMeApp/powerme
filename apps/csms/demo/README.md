@@ -34,7 +34,7 @@ Dữ liệu nằm ở `apps/csms/.demo-data/` (đã `.gitignore`). Chỉ lắng 
 
 ## Dữ liệu mẫu (`seed.sql`)
 
-Một operator, một site ở TP.HCM, trụ `RH24D1-00001` (D1-120, lifecycle `awaiting_connection` — gateway tự chuyển `in_service` khi socket mở), hai connector, ba thẻ (`DEMO-CARD-0001` online/active gắn tài xế mẫu có ví 500.000 VND, `DEMO-WALLET-0001` wallet, `DEMO-BLOCKED-01` blocked), bảng giá 7 khung, và `charge_points.free_vend_tag = HMI-FREEVEND` (mật khẩu HMI `123456` → phiên `origin=free_vend`, `payment_mode=free`). Tên thẻ khớp `CARDS` trong `simulator/d1-hmi/model.mjs`. **Thẻ lạ cố ý không seed** (`DEMO-UNKNOWN-999` của HMI, `UNKNOWN-TAG-99` của DS-03c); HMI không có nút thẻ bị chặn nên DS-01b dùng trụ kịch bản. Chạy lại seed không nhân đôi dòng.
+Một operator, một site ở TP.HCM, trụ `RH24D1-00001` (D1-120, lifecycle `awaiting_connection` — gateway tự chuyển `in_service` khi socket mở), hai connector, hai tài xế mẫu (mỗi người Charging Credit 500.000 VND), ba thẻ (`DEMO-CARD-0001` online/active gắn tài xế mẫu, `DEMO-CARD-0002` online/active gắn tài xế mẫu 2, `DEMO-BLOCKED-01` blocked), bảng giá 7 khung, và `charge_points.free_vend_tag = HMI-FREEVEND` (mật khẩu HMI `123456` → phiên `origin=free_vend`, `payment_mode=unattributed`). Thẻ ví `DEMO-WALLET-0001` bỏ từ T110 (không còn thẻ `wallet` / `station_wallet`); DB demo cũ còn thẻ này thì migration 0016 đổi nó thành thẻ online chưa gắn tài xế, `Authorize` trả `Invalid`. Tên thẻ khớp `CARDS` trong `simulator/d1-hmi/model.mjs`. **Thẻ lạ cố ý không seed** (`DEMO-UNKNOWN-999` của HMI, `UNKNOWN-TAG-99` của DS-03c); HMI không có nút thẻ bị chặn nên DS-01b dùng trụ kịch bản. Chạy lại seed không nhân đôi dòng.
 
 ## Test tích hợp tại chỗ
 

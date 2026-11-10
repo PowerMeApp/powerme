@@ -30,10 +30,11 @@ export const ERROR_CODES = [
   'PowerSwitchFailure',
   'UnderVoltage',
 ];
-// Thẻ mẫu GIẢ. "valid"/"wallet" phải được seed ở CSMS thì mới Accepted; "unknown" thì không.
+// Thẻ mẫu GIẢ. "valid"/"valid2" phải được seed ở CSMS thì mới Accepted; "unknown" thì không.
+// "valid2" (thẻ online của tài xế mẫu 2) thay thẻ ví DEMO-WALLET-0001 đã bỏ ở T110.
 export const CARDS = {
   valid: 'DEMO-CARD-0001',
-  wallet: 'DEMO-WALLET-0001',
+  valid2: 'DEMO-CARD-0002',
   unknown: 'DEMO-UNKNOWN-999',
 };
 export const FREE_VEND_TAG = 'HMI-FREEVEND';
