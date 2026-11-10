@@ -5,7 +5,9 @@
  * Vì sao tồn tại: 0016 đổi dữ liệu cũ (phiên station_wallet → unattributed, thẻ wallet → online)
  * rồi tạo lại hai kiểu enum. Hỏng âm thầm có thể là: mất dòng phiên / meter / đối soát, đổi nhầm
  * phiên không phải station_wallet, làm mất driver_id / status / origin, kiểu cũ còn sót lại, hoặc
- * schema TS (enums.ts) lệch với DB.
+ * schema TS (enums.ts) lệch với DB — và nhất là TRỪ TIỀN HAI LẦN: phiên station_wallet đã trả tại
+ * trụ, sau 0016 là `unattributed` với thẻ `online`, nên console BE-24 (gán phiên unattributed cho
+ * tài xế) sẽ cho gán nếu 0016 không ghi sẵn quyết định `UNATTRIBUTED_CLOSED`.
  *
  * Phần 1 dựng DB ở trạng thái ngay trước 0016 (mọi file `drizzle/` có tên nhỏ hơn `0016`) với
  * phiên ở cả ba payment_mode cũ và thẻ ở cả ba card_kind cũ, gọi helper `migrate` (cùng logic
@@ -19,6 +21,11 @@ import path from 'node:path';
 import { Client } from 'pg';
 import { createDb, Db } from '../src/db/db.module.js';
 import { paymentModeEnum, rfidCardKindEnum } from '../src/db/schema/enums.js';
+import { ChargeSettlementService } from '../src/sessions/charge-settlement.service.js';
+import {
+  UnattributedSessionError,
+  UnattributedSessionService,
+} from '../src/sessions/unattributed-session.service.js';
 import {
   listMigrations,
   MIGRATIONS_DIR,
@@ -97,10 +104,42 @@ describeDb('migration 0016 — bỏ thẻ wallet và payment_mode station_wallet
         [driverId],
       );
       ids['driver'] = driverId;
+      await q(
+        `INSERT INTO credit_accounts (driver_id, status, balance_vnd) VALUES ($1, 'active', 200000)`,
+        [driverId],
+      );
+      // Operator, site và nhân viên vận hành để gọi UnattributedSessionService (quyền theo operator).
+      const op = (
+        await one(
+          `INSERT INTO operators (tax_code, legal_name) VALUES ('M16OP', 'Op') RETURNING id`,
+        )
+      )['id'];
+      const site = (
+        await one(
+          `INSERT INTO sites (site_code, operator_id, site_name) VALUES ('M16', $1, 'M16') RETURNING id`,
+          [op],
+        )
+      )['id'];
+      const staff = Number(
+        (
+          await one(
+            `INSERT INTO users (email, full_name, role) VALUES ('m16.staff@test', 'Van Hanh', 'operator_staff')
+             RETURNING id`,
+          )
+        )['id'],
+      );
+      await q(
+        `INSERT INTO operator_staff (user_id, operator_id, staff_role) VALUES ($1, $2, 'manager')`,
+        [staff, op],
+      );
+      ids['staff'] = staff;
       const cpId = Number(
-        (await one(`INSERT INTO charge_points (serial_number) VALUES ('M16-CP') RETURNING id`))[
-          'id'
-        ],
+        (
+          await one(
+            `INSERT INTO charge_points (serial_number, site_id) VALUES ('M16-CP', $1) RETURNING id`,
+            [site],
+          )
+        )['id'],
       );
       const connectorId = Number(
         (
@@ -135,13 +174,18 @@ describeDb('migration 0016 — bỏ thẻ wallet và payment_mode station_wallet
         cardKey: string | null,
         driver: number | null,
       ) => {
+        // reconciled / review = đã có StopTransaction (2.000 Wh); orphaned = chưa dừng.
+        const stopped = status !== 'orphaned';
+        const meterStart = 10000 * (Object.keys(ids).length + 1);
         ids[key] = Number(
           (
             await one(
               `INSERT INTO sessions (connector_id, charge_point_id, connector_no, id_tag, origin,
                  payment_mode, status, cp_started_at, meter_start_wh, rfid_card_id, driver_id,
-                 orphaned_at, updated_at)
-               VALUES ($1, $2, 1, $3, $4, $5, $6, $7, $11, $8, $9, $10, $7) RETURNING id`,
+                 orphaned_at, updated_at, meter_stop_wh, cp_stopped_at, received_stopped_at,
+                 energy_wh)
+               VALUES ($1, $2, 1, $3, $4, $5, $6, $7, $11, $8, $9, $10, $7,
+                 $12, $13, $13, $14) RETURNING id`,
               [
                 connectorId,
                 cpId,
@@ -154,7 +198,10 @@ describeDb('migration 0016 — bỏ thẻ wallet và payment_mode station_wallet
                 driver,
                 status === 'orphaned' ? OLD : null,
                 // meter_start khác nhau: khoá tự nhiên (trụ, súng, idTag, giờ, meterStart) của ADR-0010.
-                1000 * Object.keys(ids).length,
+                meterStart,
+                stopped ? meterStart + 2000 : null,
+                stopped ? new Date(OLD.getTime() + 600000) : null,
+                stopped ? 2000 : null,
               ],
             )
           )['id'],
@@ -205,10 +252,13 @@ describeDb('migration 0016 — bỏ thẻ wallet và payment_mode station_wallet
       }
     });
 
-    it('migrate() chỉ áp 0016 và in số dòng sẽ đổi (3 phiên, 2 thẻ)', () => {
+    it('migrate() chỉ áp 0016 và in số dòng sẽ đổi (3 phiên, 2 thẻ; 2 phiên đã dừng được đóng sẵn)', () => {
       expect(applied).toEqual([M0016]);
       expect(notices).toContain(
         '0016: 3 phiên station_wallet → unattributed, 2 thẻ wallet → online',
+      );
+      expect(notices).toContain(
+        '0016: ghi UNATTRIBUTED_CLOSED cho 2 phiên đã dừng; 1 phiên chưa dừng không được ghi (đóng tay sau khi dừng)',
       );
     });
 
@@ -258,12 +308,112 @@ describeDb('migration 0016 — bỏ thẻ wallet và payment_mode station_wallet
           [ids['S-WALLET-DRIVER']],
         ),
       ).toEqual([{ record_type: 'meter_gap', resolution: 'conflict: diff=5' }]);
-      // 0016 không ghi dòng lịch sử giả (giữ mốc hard cap của phiên orphaned).
+      // Phiên chưa dừng: 0016 không ghi gì (giữ mốc hard cap của phiên orphaned).
       expect(
         await q('SELECT event FROM session_status_history WHERE session_id = $1', [
           ids['S-WALLET-ORPHAN'],
         ]),
       ).toEqual([{ event: 'STATION_OFFLINE' }]);
+    });
+
+    it('phiên station_wallet đã dừng có đúng một dòng UNATTRIBUTED_CLOSED như BE-24 ghi (from = to, actor system); phiên khác không có', async () => {
+      const rows = await q(
+        `SELECT session_id, from_status, to_status, event, actor, note FROM session_status_history
+         WHERE event IN ('UNATTRIBUTED_CLOSED', 'UNATTRIBUTED_ASSIGNED') ORDER BY session_id`,
+      );
+      const note =
+        'legacy_station_wallet: đã trả tại trụ bằng thẻ ví (T110, migration 0016), không được tính tiền lại';
+      expect(rows).toEqual([
+        {
+          session_id: String(ids['S-WALLET-DONE']),
+          from_status: 'reconciled',
+          to_status: 'reconciled',
+          event: 'UNATTRIBUTED_CLOSED',
+          actor: 'system',
+          note,
+        },
+        {
+          session_id: String(ids['S-WALLET-DRIVER']),
+          from_status: 'review',
+          to_status: 'review',
+          event: 'UNATTRIBUTED_CLOSED',
+          actor: 'system',
+          note,
+        },
+      ]);
+    });
+
+    describe('chặn trừ tiền hai lần qua console BE-24 (UnattributedSessionService)', () => {
+      let service: UnattributedSessionService;
+      const code = async (p: Promise<unknown>) => {
+        try {
+          await p;
+        } catch (e) {
+          expect(e).toBeInstanceOf(UnattributedSessionError);
+          return (e as UnattributedSessionError).code;
+        }
+        throw new Error('kỳ vọng bị từ chối');
+      };
+      const money = async () => ({
+        tx: await q('SELECT 1 FROM credit_transactions'),
+        balance: (
+          await one('SELECT balance_vnd FROM credit_accounts WHERE driver_id = $1', [ids['driver']])
+        )['balance_vnd'],
+      });
+
+      beforeAll(() => {
+        service = new UnattributedSessionService(db, new ChargeSettlementService(db));
+      });
+
+      it('gán tài xế cho phiên station_wallet cũ đã dừng → already_resolved; không giao dịch credit, payment_mode giữ unattributed', async () => {
+        for (const key of ['S-WALLET-DONE', 'S-WALLET-DRIVER']) {
+          expect(
+            await code(service.assign(ids[key]!, ids['staff']!, ids['driver']!, 'gan thu')),
+          ).toBe('already_resolved');
+          expect(await one('SELECT payment_mode FROM sessions WHERE id = $1', [ids[key]])).toEqual({
+            payment_mode: 'unattributed',
+          });
+        }
+        expect(await money()).toEqual({ tx: [], balance: '200000' });
+        expect(
+          await q(`SELECT 1 FROM session_status_history WHERE event = 'UNATTRIBUTED_ASSIGNED'`),
+        ).toEqual([]);
+      });
+
+      it('đóng lại cùng quyết định → already_resolved = true (idempotent), không thêm dòng lịch sử', async () => {
+        const r = await service.close(
+          ids['S-WALLET-DONE']!,
+          ids['staff']!,
+          'owner_unknown',
+          'dong lai',
+        );
+        expect(r).toMatchObject({
+          decision: 'closed',
+          alreadyResolved: true,
+          reason: 'legacy_station_wallet',
+          paymentMode: 'unattributed',
+        });
+        expect(
+          await q(`SELECT 1 FROM session_status_history WHERE event = 'UNATTRIBUTED_CLOSED'`),
+        ).toHaveLength(2);
+        expect(await money()).toEqual({ tx: [], balance: '200000' });
+      });
+
+      it('hàng đợi unattributed không có phiên ví cũ đã dừng; phiên thẻ lạ và free vend vẫn còn', async () => {
+        const pending = (await service.listPending(50)).map((i) => i.session_id);
+        expect(pending.sort((a, b) => a - b)).toEqual(
+          [ids['S-FREE']!, ids['S-UNKNOWN']!].sort((a, b) => a - b),
+        );
+      });
+
+      it('giới hạn đã ghi: phiên station_wallet cũ CHƯA dừng chưa có quyết định — hiện bị từ chối vì chưa dừng', async () => {
+        expect(
+          await code(
+            service.assign(ids['S-WALLET-ORPHAN']!, ids['staff']!, ids['driver']!, 'gan thu'),
+          ),
+        ).toBe('session_not_stopped');
+        expect(await money()).toEqual({ tx: [], balance: '200000' });
+      });
     });
 
     it('thẻ wallet → online, giữ driver_id và status; thẻ online / free_vend không bị đụng', async () => {

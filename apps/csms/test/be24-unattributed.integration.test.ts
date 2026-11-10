@@ -3,7 +3,7 @@
  * quyết phiên `review`, trên Postgres thật. Mã TC-F12-01..03 trong tên test để truy vết với BM04.
  *
  * Phiên unattributed tạo bằng đường OCPP thật (SessionsService.onStartTransaction/onStopTransaction
- * với InboundContext dựng tay, như card-authorize): thẻ lạ, tag free vend của trụ, thẻ ví bị khoá.
+ * với InboundContext dựng tay, như card-authorize): thẻ lạ, tag free vend của trụ (thẻ ví bỏ ở T110).
  * Phiên `review` có StopTransaction dùng INSERT trực tiếp (như be18-operator-resolve).
  */
 import { Logger } from '@nestjs/common';
@@ -406,18 +406,15 @@ describeDb('BE-24 — phiên unattributed (F-12) và route review', () => {
     expect(await debits(sid)).toEqual([]);
   });
 
-  it('TC-F12-02 thẻ ví bị khoá: phiên unattributed nhưng tiền thuộc trụ → không gán được', async () => {
-    await q(
-      "INSERT INTO rfid_cards(card_identifier,card_kind,status) VALUES('BE24-WALLET','wallet','blocked')",
-    );
-    const sid = await chargeWith('BE24-WALLET');
-    expect(await session(sid)).toMatchObject({ payment_mode: 'unattributed', origin: 'rfid' });
-    expect(await code(service.assign(sid, opStaff, driver, 'x'))).toBe('wallet_card_not_billable');
-    const [item] = await service.listPending(50);
-    expect(item).toMatchObject({
-      session_id: sid,
-      not_assignable_reason: 'wallet_card_not_billable',
-    });
+  // T110 (migration 0016): không còn thẻ `wallet` nên không tạo được phiên mới của thẻ ví. Phiên
+  // station_wallet cũ (đã trả tại trụ) được 0016 ghi sẵn UNATTRIBUTED_CLOSED → gán bị
+  // `already_resolved`: xem migration-0016.integration.test.ts ("chặn trừ tiền hai lần").
+  it('TC-F12-02 T110: DB không còn nhận thẻ ví, nên không có phiên ví mới để gán', async () => {
+    await expect(
+      q(
+        "INSERT INTO rfid_cards(card_identifier,card_kind,status) VALUES('BE24-WALLET','wallet','blocked')",
+      ),
+    ).rejects.toThrow(/invalid input value for enum rfid_card_kind: "wallet"/);
   });
 
   it('TC-F12-02 phiên không unattributed và phiên chưa đóng bị từ chối, không ghi gì', async () => {

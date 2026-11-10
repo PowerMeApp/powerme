@@ -10,7 +10,8 @@
 
 | # | Đối tượng | Thay đổi | Use case |
 |---|---|---|---|
-| 1 | `sessions.payment_mode` | Dòng `station_wallet` → `unattributed`, `updated_at = now()` | Phiên cũ của thẻ ví: trụ đã tự trừ tiền trên thẻ, CSMS không thu. `unattributed` cùng nghĩa "không thu qua CSMS". Phiên rơi vào nhóm unattributed mà console xử lý (gán / đóng, T102) |
+| 0 | `session_status_history` | Phiên `station_wallet` **đã dừng** (`received_stopped_at` khác null): thêm một dòng `UNATTRIBUTED_CLOSED`, from = to = trạng thái hiện tại, actor `system`, note `legacy_station_wallet: đã trả tại trụ bằng thẻ ví (T110, migration 0016), không được tính tiền lại` | **Chặn trừ tiền hai lần** (mục 1a) |
+| 1 | `sessions.payment_mode` | Dòng `station_wallet` → `unattributed`, `updated_at = now()` | Phiên cũ của thẻ ví: trụ đã tự trừ tiền trên thẻ, CSMS không thu. `unattributed` cùng nghĩa "không thu qua CSMS" |
 | 2 | `rfid_cards.card_kind` | Dòng `wallet` → `online`, `updated_at = now()`; giữ `driver_id`, `status` | Thẻ ví cũ chưa gắn tài xế (như `DEMO-WALLET-0001`): `Authorize` trả `Invalid` theo BE-19 (#93, BR-P23). Thẻ đã gắn tài xế thì qua đúng kiểm Charging Credit như mọi thẻ online |
 | 3 | enum `payment_mode` | Tạo lại: `csms_billed`, `unattributed` | Ai thu tiền chỉ còn hai trường hợp (ADR-0012 sau T109) |
 | 4 | enum `rfid_card_kind` | Tạo lại: `online`, `free_vend` | Thẻ chỉ còn hai loại |
@@ -20,7 +21,29 @@
 
 **Không mất dữ liệu:** không xoá dòng nào. Phiên giữ `origin`, `id_tag`, `rfid_card_id`, `driver_id`, meter, trạng thái, `orphaned_at`, bản ghi đối soát và lịch sử trạng thái. Từ `id_tag` / `rfid_card_id` vẫn truy được thẻ cũ.
 
-**Vì sao không ghi thêm dòng `session_status_history`:** bảng đó là lịch sử **chuyển trạng thái** do state machine chấp nhận (0001). Đổi `payment_mode` không phải một chuyển. Một dòng giả `orphaned → orphaned` còn làm lệch mốc hard cap (`orphanedSinceSql` lấy lần vào `orphaned` gần nhất). Dấu vết là `updated_at` của dòng bị đổi, NOTICE in ra lúc chạy (mục 3) và nhật ký này.
+## 1a. Rủi ro trừ tiền hai lần và cách chặn
+
+**Rủi ro.** BE-24 / T102 (#109, `unattributed-session.service.ts`) cho operator gán một phiên `unattributed` đã dừng cho tài xế: đổi thành `csms_billed` rồi trừ Charging Credit. Phiên của thẻ ví bị chặn bằng `wallet_card_not_billable`, nhưng chặn đó dựa trên `rfid_cards.card_kind <> 'online'`. Sau 0016, phiên `station_wallet` cũ (đã trả tiền tại trụ) là `unattributed` và thẻ của nó là `online`. Nếu không làm gì, phiên này hiện trong hàng đợi console và gán được, tức là tài xế bị **trừ tiền lần hai**.
+
+**Cách chặn.** BE-24 coi phiên có dòng `session_status_history` event `UNATTRIBUTED_ASSIGNED` / `UNATTRIBUTED_CLOSED` là đã quyết. Vì vậy 0016 ghi sẵn quyết định "đã đóng" cho mọi phiên `station_wallet` đã dừng, đúng các cột mà `UnattributedSessionService.close()` ghi:
+
+- from = to = trạng thái hiện tại (không phải chuyển STM-1);
+- event `UNATTRIBUTED_CLOSED`;
+- actor `system` thay cho users.id của operator (`varchar(50)`, mặc định của cột cũng là `system`);
+- note `legacy_station_wallet: …`. Phần trước dấu `:` là mã lý do, giống `close()` đọc lại.
+
+Hệ quả:
+- `assign` trả 409 `already_resolved`, không giao dịch credit nào;
+- `close` trả `already_resolved = true` với reason `legacy_station_wallet`;
+- `listPending` không còn liệt kê phiên này.
+
+Dòng được chèn **trước** khi đổi `payment_mode`, trong cùng transaction. Phiên đã có quyết định BE-24 thì bỏ qua (`NOT EXISTS`).
+
+**Giới hạn: phiên `station_wallet` CHƯA dừng không được ghi dòng.** BE-24 chỉ quyết định phiên đã dừng. Ghi một dòng lên phiên `active` / `orphaned` sẽ chen vào lịch sử trước khi phiên kết thúc. Với phiên `orphaned`, mốc hard cap (`orphanedSinceSql`) chỉ đọc `to_status = 'orphaned'`, nên một dòng `orphaned → orphaned` có `occurred_at = now()` sẽ đẩy mốc đó lên. Khi phiên như vậy dừng, nó vào hàng đợi như phiên unattributed thường, và **operator phải đóng tay, không gán**. NOTICE thứ hai của 0016 in số phiên này. **DB demo: 0** (mục 3). Trên staging, kiểm NOTICE khi deploy; nếu khác 0 thì đóng tay qua console sau khi phiên dừng.
+
+**Không ghi thêm gì khác:** từ `id_tag` / `rfid_card_id` vẫn lần ra thẻ cũ; `updated_at` của dòng bị đổi và NOTICE là dấu vết còn lại.
+
+**Mã chết:** nhánh `wallet_card_not_billable` trong `unattributed-session.service.ts` (#109) không còn đường tới, vì `card_kind` chỉ còn `online` / `free_vend`. PR này để nguyên vì là code của BE-24; test BE-24 tương ứng đổi thành khẳng định DB từ chối thẻ `wallet`.
 
 **Cách làm:** PostgreSQL không có `DROP VALUE` cho enum, nên làm như 0009: đổi tên kiểu cũ (`*_truoc_0016`), tạo kiểu mới, `ALTER COLUMN … TYPE … USING col::text::kiểu_mới`, bỏ kiểu cũ. UPDATE chạy trước khi đổi kiểu, nên cast không gặp giá trị lạ.
 
@@ -30,13 +53,16 @@ Truy vấn `pg_depend` trên DB demo ở trạng thái 0015: mỗi kiểu chỉ 
 
 ## 3. Chạy thật
 
-**DB demo ở trạng thái `main` (0015):** dựng bằng `scripts/migrate.mjs` + `demo/seed.sql` của `main`, CSMS bản `main` chạy cổng riêng, `demo/scripted-station.mjs` sinh 4 phiên: `ds-01a --tag DEMO-WALLET-0001` (reconciled), `ds-01a` thẻ `DEMO-CARD-0001` (súng 2), `ds-03c` thẻ lạ, `ds-03a --tag DEMO-WALLET-0001` (review, có bản ghi replay / conflict).
+**DB demo ở trạng thái `main` (0015)** (chạy lại sau khi rebase lên `main` có #108, #109): dựng bằng `scripts/migrate.mjs` + `demo/seed.sql` của `main`, CSMS bản `main` chạy cổng riêng, `demo/scripted-station.mjs` sinh 4 phiên: `ds-01a --tag DEMO-WALLET-0001` (reconciled), `ds-01a` thẻ `DEMO-CARD-0001` (súng 2), `ds-03c` thẻ lạ, `ds-03a --tag DEMO-WALLET-0001` (review, có bản ghi replay / conflict).
 
 | | Trước 0016 | Sau 0016 |
 |---|---|---|
 | `payment_mode` | csms_billed 1 · station_wallet 2 · unattributed 1 | csms_billed 1 · unattributed 3 |
 | `card_kind` | online 2 · wallet 1 | online 3 |
 | Dòng bị đổi | — | **2 phiên, 1 thẻ** (`DEMO-WALLET-0001`) |
+| Dòng `UNATTRIBUTED_CLOSED` chèn | — | **2** (phiên #1 `reconciled`, #4 `review`; cả hai đã dừng) |
+| Phiên `station_wallet` chưa dừng | 0 | — (không phải đóng tay) |
+| `session_status_history` | 12 | 14 |
 | `reconciliation_records` / `meter_values` | 6 / 75 | 6 / 75 |
 
 Sau đó: seed mới chạy hai lần trên DB đó (idempotent, thêm tài xế mẫu 2 và `DEMO-CARD-0002`); CSMS bản mới: `ds-01a --tag DEMO-CARD-0002` → phiên `rfid · csms_billed · reconciled`, tài xế 2; `ds-01a --tag DEMO-WALLET-0001` → `Authorize` = `Invalid`, không có phiên.
