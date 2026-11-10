@@ -3,7 +3,7 @@
 # CI: .github/workflows/deploy-staging.yml. Triển khai: infra/staging/README.md.
 #
 # Ba stage: build (có devDependencies để chạy tsc) → deps (chỉ dependency production) → runtime
-# (dist/, drizzle/, scripts/, seed.sql + node_modules production; không có mã nguồn TS, test, tsc).
+# (dist/, drizzle/, scripts/, seed.sql, seed-app.sql + node_modules production; không có mã nguồn TS, test, tsc).
 # Base GHIM tag cụ thể (không `latest`); đổi phiên bản = sửa một dòng ARG, cả ba stage dùng chung.
 ARG NODE_IMAGE=node:24.18.1-alpine3.24
 
@@ -44,7 +44,7 @@ COPY --chown=node:node apps/csms/package.json ./package.json
 COPY --from=build --chown=node:node /app/apps/csms/dist ./dist
 COPY --chown=node:node apps/csms/drizzle ./drizzle
 COPY --chown=node:node apps/csms/scripts/migrate.mjs apps/csms/scripts/seed-demo.mjs ./scripts/
-COPY --chown=node:node apps/csms/demo/seed.sql ./demo/seed.sql
+COPY --chown=node:node apps/csms/demo/seed.sql apps/csms/demo/seed-app.sql ./demo/
 USER node
 # OCPP-J (wss kết thúc TLS ở Caddy). Console: xem CONSOLE_HOST bên dưới.
 EXPOSE 9000 3000

@@ -32,6 +32,7 @@ apps/csms/docs
 simulator/d1-hmi/docs
 simulator/d1-hmi/smoke.mjs
 
-# Demo chỉ cần seed.sql (scripts/seed-demo.mjs đọc nó)
+# Demo chỉ cần seed.sql và seed-app.sql (scripts/seed-demo.mjs đọc chúng)
 apps/csms/demo/*
 !apps/csms/demo/seed.sql
+!apps/csms/demo/seed-app.sql

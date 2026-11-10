@@ -4,7 +4,8 @@
 # Biến ${...} đọc từ infra/staging/.env (xem .env.example). Mỗi dịch vụ nhận CHỈ những biến nó cần
 # qua `environment:` — không dùng `env_file`, để secret của Postgres/simulator không lọt sang
 # dịch vụ khác. Khác với kit ban đầu, KHÔNG có: dashboard (apps/dashboard chưa có mã build —
-# thêm lại khi WP4 có), redis (apps/csms không dùng), JWT/VNPay/e-invoice (code không đọc).
+# thêm lại khi WP4 có), redis (apps/csms không dùng), JWT_SECRET/VNPay/e-invoice (code không đọc;
+# JWT của app tài xế là DRIVER_API_JWT_*, có ở dịch vụ csms).
 name: powerme
 
 x-logging: &default-logging
@@ -68,6 +69,19 @@ services:
       REMOTE_STOP_RETRY_INTERVAL_S: ${REMOTE_STOP_RETRY_INTERVAL_S:-30}
       RECONCILE_GAP_FACTOR: ${RECONCILE_GAP_FACTOR:-3}
       RECONCILE_ENERGY_TOLERANCE_WH: ${RECONCILE_ENERGY_TOLERANCE_WH:-1}
+      # BE-27: Driver API (app tài xế, /api/driver/v1) dùng chung listener cổng 3000 với console, nên
+      # cũng chỉ ra loopback VPS và tới được bằng SSH tunnel (DEV-ACCESS.md). Ba biến JWT đi cùng
+      # nhau: để trống cả ba thì CSMS vẫn chạy và /api/driver trả 503 auth_unavailable; đặt thiếu một
+      # cái thì CSMS không khởi động (check_env trong lib.sh chặn trước khi deploy). Sinh bằng
+      # ./init-env.sh (hoặc ./init-env.sh --add-missing cho .env cũ).
+      DRIVER_API_JWT_SECRET_BASE64: ${DRIVER_API_JWT_SECRET_BASE64:-}
+      DRIVER_API_JWT_ISSUER: ${DRIVER_API_JWT_ISSUER:-}
+      DRIVER_API_JWT_AUDIENCE: ${DRIVER_API_JWT_AUDIENCE:-}
+      # Refresh token sống bao lâu (giây, 3600..7776000); mặc định 30 ngày như code.
+      DRIVER_API_REFRESH_TTL_S: ${DRIVER_API_REFRESH_TTL_S:-2592000}
+      # PHẢI false trên staging: true cho phép giả danh tài xế bằng header X-Driver-Id (chỉ dành cho
+      # máy dev). Cố định ở đây, không đọc từ .env.
+      DRIVER_API_DEV_AUTH: 'false'
     ports:
       - '127.0.0.1:3000:3000' # console — chỉ loopback của VPS, truy cập bằng SSH tunnel
     expose:
@@ -84,6 +98,13 @@ services:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB}
+    # BE-27: publish CHỈ ra loopback của VPS, để dev xem/sửa dữ liệu staging qua SSH tunnel
+    # (DEV-ACCESS.md: user `devtunnel` chỉ được forward tới 127.0.0.1:5432 và 127.0.0.1:3000).
+    # Internet vẫn đóng: (1) Docker gắn cổng vào 127.0.0.1, không phải 0.0.0.0; (2) NSG của Azure chỉ
+    # mở 22/80/443. Đừng đổi thành '5432:5432' — Docker tự mở iptables, vượt qua ufw.
+    # Dev dùng role riêng `app_dev` (không superuser), không dùng POSTGRES_USER.
+    ports:
+      - '127.0.0.1:5432:5432'
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
