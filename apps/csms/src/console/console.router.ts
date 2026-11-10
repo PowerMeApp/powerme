@@ -21,7 +21,14 @@ export type Route =
   | { kind: 'faults'; filter: 'open' | 'all'; limit: number }
   | { kind: 'faultAcknowledge'; id: number }
   | { kind: 'faultReset'; id: number; type: 'Soft' | 'Hard'; force: boolean }
-  | { kind: 'faultClose'; id: number };
+  | { kind: 'faultClose'; id: number }
+  // BE-24 (F-12, FR-13): hàng đợi và quyết định của operator cho phiên unattributed / review.
+  // Thân POST là JSON; operator_user_id trong thân là TẠM (console chưa đăng nhập — F-13).
+  | { kind: 'unattributedQueue'; limit: number }
+  | { kind: 'reviewQueue'; limit: number }
+  | { kind: 'assignUnattributed'; id: number }
+  | { kind: 'closeUnattributed'; id: number }
+  | { kind: 'resolveReview'; id: number };
 
 export interface RouteError {
   status: 400 | 404 | 405;
@@ -67,7 +74,10 @@ export function matchRoute(method: string, rawUrl: string): RouteResult {
       ? route()
       : fail(405, 'method_not_allowed', `${method} không được hỗ trợ ở ${path}`, allowed);
 
-  const limitRoute = (kind: 'sessions' | 'reconciliation', fallback: number): RouteResult => {
+  const limitRoute = (
+    kind: 'sessions' | 'reconciliation' | 'unattributedQueue' | 'reviewQueue',
+    fallback: number,
+  ): RouteResult => {
     const limit = parseIntParam(q.get('limit'), 'limit', {
       min: 1,
       max: MAX_LIMIT,
@@ -89,6 +99,10 @@ export function matchRoute(method: string, rawUrl: string): RouteResult {
   if (path === '/api/admin/reconciliation') {
     return only(['GET'], () => limitRoute('reconciliation', 50));
   }
+  if (path === '/api/admin/unattributed') {
+    return only(['GET'], () => limitRoute('unattributedQueue', 50));
+  }
+  if (path === '/api/admin/review') return only(['GET'], () => limitRoute('reviewQueue', 50));
   if (path === '/api/admin/messages') {
     return only(['GET'], () => {
       const limit = parseIntParam(q.get('limit'), 'limit', {
@@ -110,10 +124,13 @@ export function matchRoute(method: string, rawUrl: string): RouteResult {
     });
   }
 
-  const sessionMatch = /^\/api\/admin\/sessions\/([^/]+)(\/remote-stop)?$/.exec(path);
+  const sessionMatch =
+    /^\/api\/admin\/sessions\/([^/]+)(?:\/(remote-stop|assign-driver|close-unattributed|resolve-review))?$/.exec(
+      path,
+    );
   if (sessionMatch) {
-    const isStop = sessionMatch[2] !== undefined;
-    return only(isStop ? ['POST'] : ['GET'], () => {
+    const action = sessionMatch[2];
+    return only(action !== undefined ? ['POST'] : ['GET'], () => {
       const id = parseIntParam(sessionMatch[1] ?? null, 'id', {
         min: 1,
         max: Number.MAX_SAFE_INTEGER,
@@ -122,10 +139,17 @@ export function matchRoute(method: string, rawUrl: string): RouteResult {
       if (!id.ok || id.value === null) {
         return fail(400, 'bad_request', 'id phiên phải là số nguyên dương');
       }
-      return {
-        ok: true,
-        route: isStop ? { kind: 'remoteStop', id: id.value } : { kind: 'session', id: id.value },
-      };
+      const kind =
+        action === 'remote-stop'
+          ? 'remoteStop'
+          : action === 'assign-driver'
+            ? 'assignUnattributed'
+            : action === 'close-unattributed'
+              ? 'closeUnattributed'
+              : action === 'resolve-review'
+                ? 'resolveReview'
+                : 'session';
+      return { ok: true, route: { kind, id: id.value } };
     });
   }
 

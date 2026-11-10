@@ -174,8 +174,13 @@ export class ChargeSettlementService {
         await c.query<BillableSession>(
           `
         SELECT s.*, st.operator_id FROM sessions s JOIN charge_points cp ON cp.id=s.charge_point_id
-        JOIN sites st ON st.id=cp.site_id WHERE s.id=$1 AND s.origin='app_qr'
-        AND EXISTS(SELECT 1 FROM driver_charge_intents i WHERE i.session_id=s.id AND i.driver_id=s.driver_id)
+        JOIN sites st ON st.id=cp.site_id WHERE s.id=$1 AND (
+          (s.origin='app_qr'
+            AND EXISTS(SELECT 1 FROM driver_charge_intents i WHERE i.session_id=s.id AND i.driver_id=s.driver_id))
+          -- BE-24 (F-12): phiên unattributed được operator gán tài xế (dấu vết append-only). Free vend
+          -- không bao giờ trừ tiền (BR-P08) dù dữ liệu có ra sao. Thẻ RFID csms_billed khác vẫn là G5.
+          OR (s.origin<>'free_vend' AND EXISTS(SELECT 1 FROM session_status_history h
+            WHERE h.session_id=s.id AND h.event='UNATTRIBUTED_ASSIGNED')))
         FOR UPDATE OF s`,
           [sessionId],
         )

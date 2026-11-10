@@ -80,6 +80,11 @@ export class ConsoleServer implements OnModuleInit, OnModuleDestroy {
       acknowledgeFault: (id) => this.commands.acknowledgeFault(id),
       resetFault: (id, type, force) => this.commands.resetFault(id, type, force),
       closeFault: (id) => this.commands.closeFault(id),
+      unattributedQueue: (limit) => this.commands.unattributedQueue(limit),
+      reviewQueue: (limit) => this.commands.reviewQueue(limit),
+      assignUnattributed: (id, input) => this.commands.assignUnattributed(id, input),
+      closeUnattributed: (id, input) => this.commands.closeUnattributed(id, input),
+      resolveReview: (id, input) => this.commands.resolveReview(id, input),
     });
     const driver =
       this.db && this.driver

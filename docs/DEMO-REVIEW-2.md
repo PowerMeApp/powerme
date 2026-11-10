@@ -142,6 +142,18 @@ Console có hai lệnh điều khiển (`apps/csms/src/console/console.commands.
 | **Ngắt kết nối trụ** (`POST /api/admin/stations/RH24D1-00001/disconnect`) | Súng A đang sạc ~15 s, bấm nút (đóng socket phía CSMS, mã 1001) | Phiên `active → orphaned` ngay; HMI báo `mất kết nối (CSMS/ping đóng socket)`, thử lại mỗi 30 s; **30 s sau** nối lại **epoch 2 không Boot**, phát bù 3 bản tin, phiên `orphaned → active`. Dùng được thay "Rớt mạng" của HMI khi muốn đứt ngắn hơn (30 s thay vì 60 s) và do **phía CSMS** gây ra |
 | **Dừng từ xa** (`POST /api/admin/sessions/1/remote-stop`) | Phiên #1 `active` | Trả `{"status":"Accepted"}`; HMI dừng súng A, `stop_reason = Remote`. Vì phiên đã sống qua rớt mạng và `STALE_METERSTOP` bật nên kết thúc ở `review` (`meterStop` 123511 vs chỉ số thật 125244). Chỉ gọi API cùng đường với nút, chưa bấm nút trên trang |
 
+#### Đường phụ: gán / đóng phiên `unattributed` và giải quyết `review` (BE-24, F-12 — chạy tay 10/11/2026)
+
+Chỉ có API (chưa có nút trên trang). Console chưa đăng nhập nên `operator_user_id` nằm trong thân JSON (tạm thời, xem `docs/BE-24-UNATTRIBUTED.md` §5). Seed demo **chưa có** `operator_staff`: thêm một user `operator_staff` + dòng `operator_staff` cho operator của trụ trước khi thử.
+
+| API | Thử thế nào | Thấy gì (10/11/2026, CSMS build từ nhánh BE-24, trụ kịch bản `ds-03c --fast`) |
+| --- | --- | --- |
+| `GET /api/admin/unattributed` | Sau `ds-03c --tag UNKNOWN-TAG-99` và `ds-03c --tag HMI-FREEVEND` | 2 dòng: phiên #2 `free_vend` có `not_assignable_reason = free_vend_not_billable`; phiên #1 `rfid` kèm `unknown_id_tag: id_tag=UNKNOWN-TAG-99` |
+| `POST /api/admin/sessions/1/assign-driver` `{"operator_user_id":2,"driver_id":1,"note":"…"}` | Gán phiên thẻ lạ cho tài xế demo | 200, `payment_mode = csms_billed`, `settlement = posted`: 170 Wh × 3.800 VND/kWh (khung `normal`) = **646 VND**, ví 500.000 → 499.354; gọi lại → `already_resolved: true`, `already_posted`, không trừ thêm. Gọi với `operator_user_id` của tài xế → 403 `forbidden`; `Content-Type: text/plain` → 415 |
+| `POST /api/admin/sessions/2/assign-driver` | Thử gán phiên free vend | 409 `free_vend_not_billable` |
+| `POST /api/admin/sessions/2/close-unattributed` `{"operator_user_id":2,"reason":"free_vend_ok","note":"…"}` | Đóng phiên free vend | 200, giữ `unattributed`, không có dòng tiền; `session_status_history` có `UNATTRIBUTED_CLOSED`, actor `2` |
+| `POST /api/admin/sessions/:id/resolve-review` `{"operator_user_id":2,"resolution":"meter_confirmed","note":"…"}` | Phiên `review` (DS-03a) | `review → reconciled` + quyết toán nếu phiên có tài xế. Phiên không ở `review` → 409 `not_in_review` (đã thử) |
+
 ### 2.2 WF-01 — Khởi tạo phiên từ trụ qua RFID (ba đường xác thực)
 
 Chạy được ở Iteration 1: **đường RFID** và **mật khẩu HMI (free vend)** — cả hai chỉ cần trụ tự gửi `Authorize`/`StartTransaction`, CSMS không phải gửi lệnh xuống. **Đường QR từ app chưa có**: cần CSMS gửi `RemoteStartTransaction` và API app.

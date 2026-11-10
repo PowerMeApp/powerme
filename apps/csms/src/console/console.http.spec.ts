@@ -39,6 +39,21 @@ const backend: ConsoleBackend = {
     { fault_id: id }
   ),
   closeFault: async (id) => ({ id, status: 'resolved' }),
+  unattributedQueue: async (limit) => (calls.push(`unattributed:${limit}`), []),
+  reviewQueue: async (limit) => (calls.push(`review:${limit}`), []),
+  assignUnattributed: async (id, input) => (
+    calls.push(`assign:${id}:${JSON.stringify(input)}`),
+    { session_id: id, decision: 'assigned' }
+  ),
+  closeUnattributed: async (id, input) => (
+    calls.push(`close:${id}:${JSON.stringify(input)}`),
+    { session_id: id, decision: 'closed' }
+  ),
+  resolveReview: async (id, input) => {
+    if (id === 404) throw new ConsoleError(404, 'not_found', 'Không có phiên này');
+    calls.push(`resolve:${id}:${JSON.stringify(input)}`);
+    return { session_id: id, status: 'reconciled' };
+  },
 };
 
 let server: Server;
@@ -205,5 +220,86 @@ describe('WF-04 — API sự cố (FE-04)', () => {
     const res = await fetch(`${base}/api/admin/faults/9/acknowledge`, { method: 'POST' });
     expect(res.status).toBe(409);
     expect(await res.json()).toEqual({ error: 'invalid_transition', detail: 'đã acknowledged' });
+  });
+});
+
+describe('BE-24 — hàng đợi và quyết định unattributed / review (F-12, FR-13)', () => {
+  const post = (path: string, body: unknown, headers: Record<string, string> = {}) =>
+    fetch(`${base}${path}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...headers },
+      body: typeof body === 'string' ? body : JSON.stringify(body),
+    });
+
+  it('GET hai hàng đợi chuyển limit cho backend (mặc định 50)', async () => {
+    expect((await fetch(`${base}/api/admin/unattributed`)).status).toBe(200);
+    expect((await fetch(`${base}/api/admin/review?limit=7`)).status).toBe(200);
+    expect(calls).toEqual(['unattributed:50', 'review:7']);
+  });
+
+  it('POST assign / close / resolve-review đọc thân JSON và gọi đúng backend', async () => {
+    const a = await post('/api/admin/sessions/11/assign-driver', {
+      operator_user_id: 3,
+      driver_id: 9,
+      note: 'Tài xế gọi tổng đài',
+    });
+    expect(a.status).toBe(200);
+    expect(await a.json()).toEqual({ session_id: 11, decision: 'assigned' });
+    expect(
+      (
+        await post('/api/admin/sessions/12/close-unattributed', {
+          operator_user_id: 3,
+          reason: 'test_session',
+          note: 'Phiên thử của kỹ thuật',
+        })
+      ).status,
+    ).toBe(200);
+    const r = await post('/api/admin/sessions/13/resolve-review', {
+      operator_user_id: 3,
+      resolution: 'meter_confirmed',
+      note: 'Đã xem ảnh công tơ',
+    });
+    expect(r.status).toBe(200);
+    expect(await r.json()).toEqual({ session_id: 13, status: 'reconciled' });
+    expect(calls).toEqual([
+      'assign:11:{"operatorUserId":3,"driverId":9,"note":"Tài xế gọi tổng đài"}',
+      'close:12:{"operatorUserId":3,"reason":"test_session","note":"Phiên thử của kỹ thuật"}',
+      'resolve:13:{"operatorUserId":3,"resolution":"meter_confirmed","note":"Đã xem ảnh công tơ"}',
+    ]);
+  });
+
+  it('ConsoleError của service giữ mã HTTP (resolve-review phiên không có → 404)', async () => {
+    const res = await post('/api/admin/sessions/404/resolve-review', {
+      operator_user_id: 3,
+      resolution: 'x',
+      note: 'n',
+    });
+    expect(res.status).toBe(404);
+    expect(await res.json()).toEqual({ error: 'not_found', detail: 'Không có phiên này' });
+  });
+
+  it.each([
+    ['thiếu Content-Type JSON', { 'Content-Type': 'text/plain' }, '{}', 415],
+    ['JSON hỏng', {}, '{oops', 400],
+    ['thân là mảng', {}, '[1]', 400],
+    ['operator_user_id dạng chuỗi', {}, { operator_user_id: '3', driver_id: 9, note: 'n' }, 400],
+    ['driver_id = 0', {}, { operator_user_id: 3, driver_id: 0, note: 'n' }, 400],
+    ['thiếu note', {}, { operator_user_id: 3, driver_id: 9 }, 400],
+    ['thân quá 8 KB', {}, { operator_user_id: 3, driver_id: 9, note: 'x'.repeat(9000) }, 413],
+  ])('assign: %s → %i, backend không được gọi', async (_n, headers, body, status) => {
+    const res = await post('/api/admin/sessions/11/assign-driver', body, headers);
+    expect(res.status).toBe(status);
+    expect(Object.keys((await res.json()) as object).sort()).toEqual(['detail', 'error']);
+    expect(calls).toEqual([]);
+  });
+
+  it('POST quyết định từ Origin lạ → 403, backend không được gọi', async () => {
+    const res = await post(
+      '/api/admin/sessions/11/close-unattributed',
+      { operator_user_id: 3, reason: 'x', note: 'n' },
+      { Origin: 'https://evil.example' },
+    );
+    expect(res.status).toBe(403);
+    expect(calls).toEqual([]);
   });
 });
