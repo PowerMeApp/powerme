@@ -8,7 +8,14 @@ export interface DriverApiConfig {
   audience?: string;
   devAuth: boolean;
   searchKey?: string;
+  /** Refresh token life in seconds (BE-21, `DRIVER_API_REFRESH_TTL_S`); access tokens stay 900 s. */
+  refreshTtlS?: number;
 }
+
+/** BE-21: default refresh token life = 30 days; bounds 1 h .. 90 days. */
+export const DEFAULT_DRIVER_REFRESH_TTL_S = 30 * 24 * 3600;
+const MIN_DRIVER_REFRESH_TTL_S = 3600;
+const MAX_DRIVER_REFRESH_TTL_S = 90 * 24 * 3600;
 
 export class DriverApiError extends Error {
   constructor(
@@ -51,12 +58,20 @@ export function loadDriverApiConfig(env: NodeJS.ProcessEnv): DriverApiConfig {
     if (secret.length < 32 || Buffer.from(secret).toString('base64') !== encoded)
       throw new Error('Driver JWT secret must be canonical base64 of at least 32 random bytes');
   }
+  const refreshRaw = env['DRIVER_API_REFRESH_TTL_S'];
+  let refreshTtlS = DEFAULT_DRIVER_REFRESH_TTL_S;
+  if (refreshRaw !== undefined && refreshRaw !== '') {
+    refreshTtlS = /^[1-9][0-9]{0,8}$/.test(refreshRaw) ? Number(refreshRaw) : NaN;
+    if (!(refreshTtlS >= MIN_DRIVER_REFRESH_TTL_S && refreshTtlS <= MAX_DRIVER_REFRESH_TTL_S))
+      throw new Error('DRIVER_API_REFRESH_TTL_S must be an integer between 3600 and 7776000');
+  }
   return {
     secret,
     issuer,
     audience,
     devAuth: dev === 'true',
     searchKey: env['VIETMAP_SEARCH_API_KEY'],
+    refreshTtlS,
   };
 }
 

@@ -12,6 +12,8 @@ thử nghiệm cũ đã bỏ (404). OpenAPI 0.4 có consent/ownership, GeoJSON l
 Charge/session/time-left HTTP vẫn chỉ là hợp đồng. Route Vietmap thật tách khỏi xếp hạng theo công thức brief.
 Xem [hướng dẫn MB03](MB03-BACKEND-DISCOVERY.md) cho trạng thái, token local, checks và giới hạn;
 không suy ra OTP/login đã hoàn thành. Thay đổi chưa merge/commit/push khi bàn giao review.
+**BE-21 (09/11/2026, OpenAPI 0.5.0):** thêm `POST /auth/register`, `/auth/login`, `/auth/refresh`
+(email + mật khẩu, không cần bearer) — xem §6. OTP/Google/Firebase vẫn chưa làm.
 
 ---
 
@@ -74,16 +76,40 @@ Câu trả lời một dòng cho hội đồng về RFID: **thẻ online** để
 
 MB03 xác minh HS256 JWT bằng jose 6.2.15: typ JWT, issuer/audience cấu hình, sub bigint chuỗi,
 role driver, iat/exp, tối đa 900 giây; DB xác nhận active Driver/subtype mỗi request. Xe phải thuộc
-Driver từ token. OTP/login/refresh chưa làm. `X-Driver-Id` chỉ khi flag bật và môi trường được
+Driver từ token. `X-Driver-Id` chỉ khi flag bật và môi trường được
 khai báo local/development hoặc test/test; bearer sai không fallback. Console admin vẫn chưa có
 auth nên server dùng chung bắt buộc loopback. Chi tiết và script token local ở hướng dẫn MB03.
+
+**Đăng ký / đăng nhập / làm mới (BE-21, Trí hỗ trợ F-01 của Sơn).** Ba route `POST`, không cần
+bearer, chỉ nhận `application/json` ≤ 16 KiB, trường lạ → 400:
+
+| Route | Body | Thành công | Lỗi chính |
+|---|---|---|---|
+| `/auth/register` | `email`, `password` (8–128), `full_name`, `phone_number?` (E.164), `consent_version`, `consent: true` | 201 + token như login | 400 `consent_required` (không ghi gì, BR-P05), `invalid_email`, `invalid_password`, `invalid_input`; 409 `email_taken` |
+| `/auth/login` | `email`, `password` | 200 `{access_token, token_type: Bearer, expires_in: 900, refresh_token, refresh_expires_in}` | 401 `invalid_credentials` (sai email = sai mật khẩu); 403 `account_locked`; 429 `too_many_attempts` |
+| `/auth/refresh` | `refresh_token` | 200 `{access_token, token_type, expires_in}` | 401 `invalid_refresh_token`; 403 `account_locked` / `forbidden` |
+
+- Access token đúng chuẩn verify ở trên (HS256, `typ: JWT`, `role: driver`, 900 s), nên dùng ngay với
+  `/me`, `/stations`. Refresh token cùng khoá nhưng `typ: refresh+jwt`, `token_use: refresh`, không có
+  `role`: không dùng làm access token và ngược lại. Sống `DRIVER_API_REFRESH_TTL_S` (mặc định 30 ngày,
+  1 giờ–90 ngày), không xoay vòng: hết hạn thì đăng nhập lại.
+- Không có bảng refresh token: không thu hồi từng token, logout = app xoá token. Khoá tài khoản
+  (`account_status` ≠ `active`) có hiệu lực ngay vì refresh và mọi request đều kiểm DB.
+- Tài khoản khoá: 403 `account_locked` (F-13 "tài khoản khoá không đăng nhập được"), chỉ trả khi mật
+  khẩu đúng — để app hiện "tài khoản bị khoá, liên hệ hỗ trợ" mà người dò mật khẩu không biết được.
+- Giới hạn thử sai: 5 lần / 60 s theo email + IP, 20 lần / 60 s theo IP → khoá 15 phút (Retry-After).
+  Trong bộ nhớ một tiến trình: restart là mất, nhiều instance thì mỗi cái đếm riêng.
+- Đăng ký tạo `users` (role driver, active, mật khẩu băm scrypt) + `drivers` (consent) trong một
+  transaction; **không** tạo ví credit/loyalty (SRS không yêu cầu; `ensureAccounts` tạo khi cần).
+- Chưa cấu hình JWT → 503 `auth_unavailable`. Không log mật khẩu, hash, token; response không có hash.
 
 ## 7. Lỗi: từ `ChargingError.code` sang HTTP
 
 | HTTP | Mã `error` |
 |---|---|
 | 400 | `invalid_input`, `invalid_search`, `invalid_connector_reference`, `invalid_idempotency_key`, `reserved_idempotency_key`, `unsupported_mode`, `vehicle_not_owned_or_incompatible` |
-| 401 / 403 | `unauthorized`, `forbidden` |
+| 401 / 403 | `unauthorized`, `forbidden`; `/auth/*`: `invalid_credentials`, `invalid_refresh_token`, `account_locked` |
+| 400 / 409 / 413 / 415 / 429 (`/auth/*`) | `consent_required`, `invalid_email`, `invalid_password`; `email_taken`; `payload_too_large`; `unsupported_media_type`; `too_many_attempts` |
 | 404 | `not_found` (không phân biệt "không có" và "không của bạn") |
 | 409 | `idempotency_conflict`, `credit_unavailable`, `connector_unavailable`, `connector_busy_or_unknown`, `tariff_unavailable`, `session_not_stoppable`, `stop_pending_or_unknown` |
 | 503 | `policy_unconfigured` |
@@ -118,4 +144,4 @@ hoặc generated Dart client trong slice này. Không tự tải thêm công c�
 | 1 | Đường cong sạc DC theo mẫu xe lấy từ đâu cho `soc_curve` | bảng `vehicle_models` thêm 3 điểm (kW tại 20/50/80 % SoC), Admin nhập | Trí + Khang |
 | 2 | `estimated_cost_vnd` khi đang sạc tính theo biểu giá lúc nào | giá của đoạn hiện tại × Wh đã sạc, ghi rõ "ước tính" (BR-P02) | Trí + Khang |
 | 3 | Chế độ sạc ngoài `energy_kwh` (tiền, thời gian) | giữ ngoài hợp đồng đến khi OCPP có lệnh đặt hạn mức; app làm hạn mức mềm | Sơn |
-| 4 | Login/OTP/refresh cho tài xế | MB03 chỉ verification HS256 tối đa 15 phút + token synthetic local; login/refresh vẫn pending | Sơn + Trí |
+| 4 | Login/OTP/refresh cho tài xế | BE-21 có đăng ký/đăng nhập email + mật khẩu và refresh không bảng (§6). OTP/Google/Firebase ngoài phạm vi, để sau Defense 1.1; hướng dự kiến: đổi token Firebase → JWT CSMS qua một route mới | Sơn + Trí |

@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: PowerMe CSMS — Driver API
-  version: 0.4.0
+  version: 0.5.0
   summary: Hợp đồng REST cho app tài xế (T77, phiếu v1.3 §3.2g)
   description: |
     Hợp đồng giữa CSMS (WP2) và app tài xế Flutter (WP3) cho trạng thái súng sạc, thời gian còn lại,
@@ -19,11 +19,13 @@ info:
       đường `sessions/*` trả cả phiên đó nếu `driver_id` khớp; `charges/*` chỉ có với phiên bắt đầu
       từ app.
   x-owner: Trí (WP2) — hợp đồng; Sơn (WP3) — route và client Dart
-  x-status: MB03 — brief 07/11 smart station search, address search and canonical road routes implemented locally; charge/time-left HTTP routes remain planned
+  x-status: MB03 — brief 07/11 smart station search, address search and canonical road routes implemented locally; BE-21 email/password register, login and refresh implemented; charge/time-left HTTP routes remain planned
 servers:
   - url: http://localhost:3000/api/driver/v1
     description: CSMS cục bộ (cùng tiến trình với console /api/admin)
 tags:
+  - name: auth
+    description: UC-ACC-01 đăng ký (kèm consent BR-P05), đăng nhập email + mật khẩu, làm mới access token (BE-21)
   - name: stations
     description: UC-CHG-01 tìm trạm, trạng thái từng súng (BR-P38, BR-P39)
   - name: time-left
@@ -37,6 +39,123 @@ security:
   - bearerAuth: []
 
 paths:
+  /auth/register:
+    post:
+      tags: [auth]
+      operationId: registerDriver
+      x-status: implemented — BE-21
+      summary: Tạo tài khoản tài xế bằng email + mật khẩu, kèm consent (UC-ACC-01, BR-P05)
+      description: |
+        Không cần bearer. Thiếu `consent: true` hoặc `consent_version` → 400 `consent_required`,
+        không ghi dòng nào. Email được trim + lowercase; trùng (không phân biệt hoa/thường) → 409
+        `email_taken`. Mật khẩu 8–128 ký tự, không ép quy tắc độ phức tạp. Một transaction tạo
+        `users` (role driver, active, mật khẩu băm scrypt) và `drivers` (consent_version,
+        consent_given_at = now). Không tạo ví credit/loyalty ở bước này. Trả token như login.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RegisterRequest' }
+      responses:
+        '201':
+          description: Tài khoản đã tạo; access + refresh token
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LoginTokens' }
+        '400': { $ref: '#/components/responses/AuthBadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '405': { $ref: '#/components/responses/AuthMethodNotAllowed' }
+        '409':
+          description: '`email_taken` — email đã có tài khoản (không phân biệt hoa/thường)'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '413': { $ref: '#/components/responses/PayloadTooLarge' }
+        '415': { $ref: '#/components/responses/UnsupportedMediaType' }
+        '429': { $ref: '#/components/responses/TooManyAttempts' }
+        '503': { $ref: '#/components/responses/AuthUnavailable' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /auth/login:
+    post:
+      tags: [auth]
+      operationId: loginDriver
+      x-status: implemented — BE-21
+      summary: Đăng nhập email + mật khẩu, nhận access token (900 s) và refresh token
+      description: |
+        Sai email và sai mật khẩu trả cùng 401 `invalid_credentials` (không phân biệt; khi không có
+        user CSMS vẫn băm một lần để thời gian tương đương). User không phải driver hoặc chưa có
+        dòng `drivers` cũng là `invalid_credentials`. Tài khoản `suspended`/`closed` (F-13) → 403
+        `account_locked`, chỉ trả khi mật khẩu đúng. 5 lần sai / 60 s theo email + IP (hoặc 20 lần
+        theo IP) → 429 `too_many_attempts` trong 15 phút, kể cả khi mật khẩu đúng; bộ đếm trong
+        bộ nhớ một tiến trình.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LoginRequest' }
+      responses:
+        '200':
+          description: Access + refresh token
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LoginTokens' }
+        '400': { $ref: '#/components/responses/AuthBadRequest' }
+        '401':
+          description: '`invalid_credentials` — sai email hoặc mật khẩu (cùng một mã)'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '403': { $ref: '#/components/responses/AccountLocked' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '405': { $ref: '#/components/responses/AuthMethodNotAllowed' }
+        '413': { $ref: '#/components/responses/PayloadTooLarge' }
+        '415': { $ref: '#/components/responses/UnsupportedMediaType' }
+        '429': { $ref: '#/components/responses/TooManyAttempts' }
+        '503': { $ref: '#/components/responses/AuthUnavailable' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /auth/refresh:
+    post:
+      tags: [auth]
+      operationId: refreshDriverAccessToken
+      x-status: implemented — BE-21
+      summary: Đổi refresh token lấy access token mới (không phát refresh token mới)
+      description: |
+        Refresh token là JWT HS256 riêng (header `typ: refresh+jwt`, claim `token_use: refresh`,
+        không có `role`), sống `DRIVER_API_REFRESH_TTL_S` (mặc định 30 ngày) tính từ lúc đăng nhập.
+        Access token không dùng làm refresh và ngược lại. Mỗi lần refresh kiểm lại DB: role driver,
+        có dòng `drivers`, `account_status = active`. Không có bảng refresh token nên không thu hồi
+        từng token; logout = app xoá token. Hết hạn refresh → đăng nhập lại.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RefreshRequest' }
+      responses:
+        '200':
+          description: Access token mới
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AccessToken' }
+        '400': { $ref: '#/components/responses/AuthBadRequest' }
+        '401':
+          description: '`invalid_refresh_token` — sai chữ ký, hết hạn, sai loại token hoặc user không còn'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '403': { $ref: '#/components/responses/AccountLocked' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '405': { $ref: '#/components/responses/AuthMethodNotAllowed' }
+        '413': { $ref: '#/components/responses/PayloadTooLarge' }
+        '415': { $ref: '#/components/responses/UnsupportedMediaType' }
+        '503': { $ref: '#/components/responses/AuthUnavailable' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
   /places/autocomplete:
     get:
       tags: [stations]
@@ -149,8 +268,9 @@ paths:
       summary: Hồ sơ tối thiểu và xe thuộc tài xế đang đăng nhập
       x-status: implemented — MB03 backend discovery slice
       description: |
-        Chỉ đọc tài xế từ JWT và DB, không nhận identity từ query. Không có login/OTP,
-        refresh, cập nhật profile/xe hoặc truy vấn phiên trong slice này.
+        Chỉ đọc tài xế từ JWT và DB, không nhận identity từ query. Token lấy từ `/auth/login`,
+        `/auth/register` hoặc `/auth/refresh` (BE-21). Không có OTP, cập nhật profile/xe hoặc
+        truy vấn phiên trong slice này.
       responses:
         '200':
           description: Own driver and vehicles
@@ -453,7 +573,9 @@ components:
         Issuer/audience/key do server cấu hình; tuổi token và exp-iat tối đa 900 giây,
         không chấp nhận future iat, expired hoặc thuật toán khác. DB xác nhận role driver,
         account active và subtype drivers mỗi request. Không nhận identity trong query.
-        OTP/login/refresh chưa triển khai. Local token script chỉ dành tài khoản synthetic.
+        Access token phát bởi `/auth/register`, `/auth/login`, `/auth/refresh` (BE-21); refresh
+        token (`typ: refresh+jwt`) bị từ chối ở đây. OTP/Google/Firebase chưa triển khai.
+        Local token script chỉ dành tài khoản synthetic.
         X-Driver-Id chỉ khi DRIVER_API_DEV_AUTH=true cùng NODE_ENV=development và
         DRIVER_API_ENV=local (hoặc test/test). Mặc định tắt; bearer sai không fallback.
 
@@ -537,6 +659,44 @@ components:
           schema: { $ref: '#/components/schemas/Error' }
     MethodNotAllowed:
       description: '`method_not_allowed`, Allow GET, OPTIONS'
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    AuthBadRequest:
+      description: |
+        `consent_required` (thiếu `consent: true` hoặc `consent_version`, BR-P05), `invalid_email`,
+        `invalid_password` (ngoài 8–128 ký tự), `invalid_input` (JSON hỏng, không phải object,
+        trường lạ, tên/điện thoại sai, có query string)
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    AccountLocked:
+      description: |
+        `account_locked` — tài khoản không active (F-13); `forbidden` — refresh token của user không
+        còn là driver; `forbidden_origin` — Origin ngoài local
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    AuthMethodNotAllowed:
+      description: '`method_not_allowed`, Allow POST, OPTIONS'
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    PayloadTooLarge:
+      description: '`payload_too_large` — body quá 16 KiB; server đóng kết nối'
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    UnsupportedMediaType:
+      description: '`unsupported_media_type` — chỉ nhận Content-Type application/json (charset utf-8 tuỳ chọn)'
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    TooManyAttempts:
+      description: '`too_many_attempts` — vượt giới hạn thử sai; Retry-After là số giây còn khoá'
+      headers:
+        Retry-After:
+          schema: { type: string, pattern: '^[1-9][0-9]*$' }
       content:
         application/json:
           schema: { $ref: '#/components/schemas/Error' }
@@ -654,6 +814,49 @@ components:
         detail: { type: string, description: Lời giải thích để hiển thị }
       examples:
         - { error: credit_unavailable, detail: 'Số dư 15.000 ₫ thấp hơn mức khởi đầu 50.000 ₫' }
+
+    RegisterRequest:
+      type: object
+      additionalProperties: false
+      required: [email, password, full_name, consent_version, consent]
+      properties:
+        email: { type: string, format: email, maxLength: 254, description: 'Trim + lowercase trước khi lưu' }
+        password: { type: string, minLength: 8, maxLength: 128, writeOnly: true }
+        full_name: { type: string, minLength: 1, maxLength: 100 }
+        phone_number:
+          type: [string, 'null']
+          pattern: '^\+[1-9][0-9]{6,14}$'
+          description: E.164, tối đa 16 ký tự
+        consent_version: { type: string, pattern: '^[A-Za-z0-9._-]{1,20}$', examples: ['tos-2026-11'] }
+        consent: { type: boolean, const: true, description: 'BR-P05: đồng ý xử lý dữ liệu trước khi lưu' }
+    LoginRequest:
+      type: object
+      additionalProperties: false
+      required: [email, password]
+      properties:
+        email: { type: string, maxLength: 254 }
+        password: { type: string, maxLength: 128, writeOnly: true }
+    RefreshRequest:
+      type: object
+      additionalProperties: false
+      required: [refresh_token]
+      properties:
+        refresh_token: { type: string, maxLength: 8192 }
+    AccessToken:
+      type: object
+      required: [access_token, token_type, expires_in]
+      properties:
+        access_token: { type: string, description: 'JWT HS256, typ JWT, role driver, sống 900 s' }
+        token_type: { type: string, const: Bearer }
+        expires_in: { type: integer, const: 900 }
+    LoginTokens:
+      allOf:
+        - $ref: '#/components/schemas/AccessToken'
+        - type: object
+          required: [refresh_token, refresh_expires_in]
+          properties:
+            refresh_token: { type: string, description: 'JWT HS256, typ refresh+jwt; chỉ dùng cho /auth/refresh' }
+            refresh_expires_in: { type: integer, description: 'Giây, theo DRIVER_API_REFRESH_TTL_S (mặc định 2592000)' }
 
     DriverBootstrap:
       type: object

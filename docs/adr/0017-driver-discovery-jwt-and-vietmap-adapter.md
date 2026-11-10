@@ -21,6 +21,17 @@ ownership. Preserve bigint strings through discovery, including values above MAX
 Optional dev headers require both explicit local/test environment and an explicit flag, off
 by default. An invalid bearer never falls back. Local synthetic token issuance is not OTP/login.
 
+**Update 2026-11-09 (BE-21):** email + password login now exists: `POST /api/driver/v1/auth/register`,
+`/auth/login` and `/auth/refresh` issue access tokens that pass the verification above unchanged
+(HS256, `typ: JWT`, `role: driver`, 900 s). Refresh tokens use the same key but `typ: refresh+jwt`,
+`token_use: refresh` and no `role`, so neither token type is accepted in place of the other. They
+live `DRIVER_API_REFRESH_TTL_S` (default 30 days) and are not rotated or stored: no per-token
+revocation, logout means the app deletes its tokens, and a locked account (`account_status` not
+`active`) is refused at once because refresh and every request re-check the database. Passwords
+reuse the scrypt format of ADR-0011. The synthetic local token script stays for seeded test data.
+OTP, Google and Firebase sign-in are **out of scope** until after Defense 1.1; the intended
+direction is a route that exchanges a verified Firebase ID token for a CSMS JWT of the same shape.
+
 The shared listener refuses all hosts except `127.0.0.1` and `::1`, including a configured
 wildcard. Driver JWT does not authenticate the existing admin console. This intentionally
 blocks a deployment configuration that tries to expose the shared unauthenticated console;
@@ -95,5 +106,5 @@ for time/body/request bounds and [RFC 8725](https://www.rfc-editor.org/rfc/rfc87
 algorithm/claims validation. These sources inform tests, not a security certification. Route v4
 docs were rechecked for units and coordinate order. [Named test matrix](../api/MB03-EDGE-CASE-MATRIX.md)
 records actual results. The runner/CI create a new DB per suite and never reset existing databases.
-Login/OTP/refresh/revocation, sessions, charge commands, mobile integration, staging and deployment
-are also outside this slice. No migrations, real payments or charge commands were added.
+OTP/revocation, sessions, charge commands, mobile integration, staging and deployment
+are also outside this slice (email/password login and refresh: see the BE-21 update above). No migrations, real payments or charge commands were added.
