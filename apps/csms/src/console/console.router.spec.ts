@@ -167,3 +167,38 @@ describe('matchRoute — WF-04 sự cố (FE-04)', () => {
     expect(matchRoute('POST', '/api/admin/faults/7/delete')).toMatchObject({ status: 404 });
   });
 });
+
+describe('matchRoute — BE-24 unattributed / review', () => {
+  it('GET hai hàng đợi, limit mặc định 50; POST → 405; limit sai → 400', () => {
+    expect(matchRoute('GET', '/api/admin/unattributed')).toEqual({
+      ok: true,
+      route: { kind: 'unattributedQueue', limit: 50 },
+    });
+    expect(matchRoute('GET', '/api/admin/review?limit=3')).toEqual({
+      ok: true,
+      route: { kind: 'reviewQueue', limit: 3 },
+    });
+    expect(matchRoute('POST', '/api/admin/unattributed')).toMatchObject({ status: 405 });
+    expect(matchRoute('GET', '/api/admin/review?limit=0')).toMatchObject({ status: 400 });
+  });
+
+  it.each([
+    ['assign-driver', 'assignUnattributed'],
+    ['close-unattributed', 'closeUnattributed'],
+    ['resolve-review', 'resolveReview'],
+  ])('POST /api/admin/sessions/8/%s → %s; GET → 405; id sai → 400', (suffix, kind) => {
+    expect(matchRoute('POST', `/api/admin/sessions/8/${suffix}`)).toEqual({
+      ok: true,
+      route: { kind, id: 8 },
+    });
+    expect(matchRoute('GET', `/api/admin/sessions/8/${suffix}`)).toMatchObject({
+      status: 405,
+      allow: ['POST'],
+    });
+    expect(matchRoute('POST', `/api/admin/sessions/0/${suffix}`)).toMatchObject({ status: 400 });
+  });
+
+  it('hành động phiên lạ → 404', () => {
+    expect(matchRoute('POST', '/api/admin/sessions/8/delete')).toMatchObject({ status: 404 });
+  });
+});
