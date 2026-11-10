@@ -504,6 +504,27 @@ describeDb(
         expect(await balance(loyaltyA)).toBe(300);
       });
 
+      it('hai lượt chồng nhau trên cùng tài khoản: B chờ khoá; chỉ A ghi expire, B expiredPoints = 0', async () => {
+        await seedEarn(loyaltyA, 500, DEAD_1);
+        await seedEarn(loyaltyA, 200, DEAD_2);
+        await seedEarn(loyaltyA, 300, LIVE_1);
+        const { a, b } = await overlap(
+          (c) => loyalty.expireDueForAccount(c, loyaltyA, AS_OF),
+          (c) => loyalty.expireDueForAccount(c, loyaltyA, AS_OF),
+        );
+        expect(a.expiredPoints).toBe(700);
+        expect(b.status).toBe('fulfilled');
+        expect((b as PromiseFulfilledResult<typeof a>).value).toEqual({
+          expiredPoints: 0,
+          entries: [],
+        });
+        expect(await typed(loyaltyA, 'expire')).toEqual([
+          { points: -500, exp: DEAD_1, topUp: null },
+          { points: -200, exp: DEAD_2, topUp: null },
+        ]);
+        expect(await balance(loyaltyA)).toBe(300);
+      });
+
       it('asOf mặc định = now() của DB: lô hạn trong tương lai không bị đụng', async () => {
         await seedEarn(loyaltyA, 500, '2099-01-01T00:00:00Z');
         expect((await inTx((c) => loyalty.expireDueForAccount(c, loyaltyA))).expiredPoints).toBe(0);
