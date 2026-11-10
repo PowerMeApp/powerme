@@ -15,8 +15,8 @@
     "demo:db": "node demo/db-embedded.mjs"
   },
   "dependencies": {
-    "@nestjs/common": "12.3.2",
-    "@nestjs/core": "12.3.2",
+    "@nestjs/common": "12.4.0",
+    "@nestjs/core": "12.4.0",
     "drizzle-orm": "0.45.4",
     "jose": "6.2.15",
     "ocpp-rpc": "2.2.1",
