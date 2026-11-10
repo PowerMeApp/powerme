@@ -209,6 +209,24 @@ export async function applySeed(client, log = () => {}) {
             (SELECT count(*) FROM tariff_periods) AS tariff_periods`,
   );
   log(`seed xong: ${JSON.stringify(rows[0])}`);
+  const actors = await seedActorIds(client);
+  log(
+    `WF-05 console actors: CONSOLE_ACTOR_ADMIN_ID=${actors.admin ?? '?'} CONSOLE_ACTOR_STAFF_ID=${actors.staff ?? '?'}`,
+  );
+  return actors;
+}
+
+/**
+ * T119: user ids of the demo Admin and operator staff (seed.sql), for CONSOLE_ACTOR_*.
+ * Returns `{admin, staff}` as numbers, or null when a row is missing.
+ */
+export async function seedActorIds(client) {
+  const { rows } = await client.query(
+    `SELECT (SELECT id FROM users WHERE email = 'admin.demo@powerme.test') AS admin,
+            (SELECT id FROM users WHERE email = 'staff.demo@powerme.test') AS staff`,
+  );
+  const num = (v) => (v === null || v === undefined ? null : Number(v));
+  return { admin: num(rows[0]?.admin), staff: num(rows[0]?.staff) };
 }
 
 /** Bật DB + migration + seed; dùng chung cho `demo:db` và `demo`. */
@@ -217,7 +235,7 @@ export async function prepareDb({ portOffset = 0, log = () => {}, pgLog = () => 
   const client = await connectDemoDb(db.url);
   try {
     await applyMigration(client, log);
-    await applySeed(client, log);
+    db.actors = await applySeed(client, log);
   } finally {
     await client.end();
   }

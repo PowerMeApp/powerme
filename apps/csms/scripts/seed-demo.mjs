@@ -76,6 +76,14 @@ export async function seedDemo(client, password, log = () => {}) {
     [DEMO_SERIAL],
   );
   log(`seed xong: ${JSON.stringify(rows[0])}; trụ ${DEMO_SERIAL} đã có credential`);
+  // T119: ids for CONSOLE_ACTOR_ADMIN_ID / CONSOLE_ACTOR_STAFF_ID (console onboarding routes).
+  const actors = await client.query(
+    `SELECT (SELECT id FROM users WHERE email = 'admin.demo@powerme.test') AS admin,
+            (SELECT id FROM users WHERE email = 'staff.demo@powerme.test') AS staff`,
+  );
+  log(
+    `WF-05 console actors: CONSOLE_ACTOR_ADMIN_ID=${actors.rows[0]?.admin ?? '?'} CONSOLE_ACTOR_STAFF_ID=${actors.rows[0]?.staff ?? '?'}`,
+  );
   return rows[0];
 }
 

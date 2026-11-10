@@ -28,7 +28,11 @@ export type Route =
   | { kind: 'reviewQueue'; limit: number }
   | { kind: 'assignUnattributed'; id: number }
   | { kind: 'closeUnattributed'; id: number }
-  | { kind: 'resolveReview'; id: number };
+  | { kind: 'resolveReview'; id: number }
+  // WF-05 (T119): Admin registry step (UC-ADM-03) and operator onboarding (UC-OPS-01). The body is
+  // read by the listener with BE-24's readJsonBody and checked by parse*Body below.
+  | { kind: 'registerChargePoint' }
+  | { kind: 'onboardChargePoint' };
 
 export interface RouteError {
   status: 400 | 404 | 405;
@@ -204,6 +208,13 @@ export function matchRoute(method: string, rawUrl: string): RouteResult {
     });
   }
 
+  if (path === '/api/admin/charge-points') {
+    return only(['POST'], () => ({ ok: true, route: { kind: 'registerChargePoint' } }));
+  }
+  if (path === '/api/operator/charge-points/onboard') {
+    return only(['POST'], () => ({ ok: true, route: { kind: 'onboardChargePoint' } }));
+  }
+
   const stationMatch = /^\/api\/admin\/stations\/([^/]+)\/disconnect$/.exec(path);
   if (stationMatch) {
     return only(['POST'], () => {
@@ -219,4 +230,125 @@ export function matchRoute(method: string, rawUrl: string): RouteResult {
   }
 
   return fail(404, 'not_found', `Không có đường dẫn ${path}`);
+}
+
+// ---- WF-05 request bodies (T119) ---------------------------------------------------------------
+// Shape checks on the snake_case body of the T98 contract (OnboardRequest / RegisterDeviceRequest),
+// converted to the service's camelCase input. The business rules (1–2 connectors, connectorNo 1/2,
+// role and operator scoping) stay in ChargePointOnboardingService and are not duplicated here.
+
+export type BodyResult<T> = { ok: true; value: T } | ({ ok: false } & RouteError);
+
+const CONNECTOR_TYPES = ['ccs2', 'chademo', 'gbt', 'type2'] as const;
+/** OCPP identity = Basic-auth user name (same rule as the service and the T98 contract). */
+const SERIAL_RE = /^[A-Za-z0-9._-]{3,48}$/;
+/** numeric(7, 2) columns (rated_power_kw, max_power_kw). */
+const MAX_KW = 99_999.99;
+
+function badBody(detail: string) {
+  return fail(400, 'invalid_input', detail);
+}
+
+function isPlainObject(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null && !Array.isArray(v);
+}
+
+function unknownKey(obj: Record<string, unknown>, allowed: readonly string[]): string | null {
+  return Object.keys(obj).find((k) => !allowed.includes(k)) ?? null;
+}
+
+function optionalKw(v: unknown, name: string): BodyResult<number | null | undefined> {
+  if (v === undefined || v === null) return { ok: true, value: v };
+  if (typeof v !== 'number' || !Number.isFinite(v) || v <= 0 || v > MAX_KW) {
+    return badBody(`${name} must be a number in (0, ${MAX_KW}]`);
+  }
+  return { ok: true, value: v };
+}
+
+export interface RegisterBody {
+  serialNumber: string;
+  model?: string | null;
+  ratedPowerKw?: number | null;
+}
+
+function serialField(v: Record<string, unknown>): BodyResult<string> {
+  const serial = v['serial_number'];
+  if (typeof serial !== 'string' || !SERIAL_RE.test(serial.trim())) {
+    return badBody('serial_number must be 3–48 chars [A-Za-z0-9._-]');
+  }
+  return { ok: true, value: serial.trim() };
+}
+
+/** `POST /api/admin/charge-points` body: `{serial_number, model?, rated_power_kw?}`. */
+export function parseRegisterBody(v: unknown): BodyResult<RegisterBody> {
+  if (!isPlainObject(v)) return badBody('body must be a JSON object');
+  const extra = unknownKey(v, ['serial_number', 'model', 'rated_power_kw']);
+  if (extra) return badBody(`unknown field ${extra}`);
+  const serial = serialField(v);
+  if (!serial.ok) return serial;
+  const model = v['model'];
+  if (model !== undefined && model !== null && (typeof model !== 'string' || model.length > 20)) {
+    return badBody('model must be a string of at most 20 characters');
+  }
+  const kw = optionalKw(v['rated_power_kw'], 'rated_power_kw');
+  if (!kw.ok) return kw;
+  return {
+    ok: true,
+    value: {
+      serialNumber: serial.value,
+      ...(model !== undefined ? { model: model as string | null } : {}),
+      ...(kw.value !== undefined ? { ratedPowerKw: kw.value } : {}),
+    },
+  };
+}
+
+export interface OnboardBody {
+  serialNumber: string;
+  siteId: number;
+  connectors: {
+    connectorNo: number;
+    connectorType?: (typeof CONNECTOR_TYPES)[number];
+    maxPowerKw?: number | null;
+  }[];
+}
+
+/**
+ * `POST /api/operator/charge-points/onboard` body:
+ * `{serial_number, site_id, connectors: [{connector_no, connector_type?, max_power_kw?}]}`.
+ */
+export function parseOnboardBody(v: unknown): BodyResult<OnboardBody> {
+  if (!isPlainObject(v)) return badBody('body must be a JSON object');
+  const extra = unknownKey(v, ['serial_number', 'site_id', 'connectors']);
+  if (extra) return badBody(`unknown field ${extra}`);
+  const serial = serialField(v);
+  if (!serial.ok) return serial;
+  const siteId = v['site_id'];
+  if (typeof siteId !== 'number' || !Number.isSafeInteger(siteId) || siteId < 1) {
+    return badBody('site_id must be a positive integer');
+  }
+  const list = v['connectors'];
+  // Upper bound only to keep the work bounded; the 1–2 rule is the service's (invalid_input).
+  if (!Array.isArray(list) || list.length > 8) return badBody('connectors must be an array');
+  const connectors: OnboardBody['connectors'] = [];
+  for (const c of list) {
+    if (!isPlainObject(c)) return badBody('each connector must be a JSON object');
+    const bad = unknownKey(c, ['connector_no', 'connector_type', 'max_power_kw']);
+    if (bad) return badBody(`unknown connector field ${bad}`);
+    const no = c['connector_no'];
+    if (typeof no !== 'number' || !Number.isSafeInteger(no)) {
+      return badBody('connector_no must be an integer');
+    }
+    const type = c['connector_type'];
+    if (type !== undefined && !CONNECTOR_TYPES.includes(type as (typeof CONNECTOR_TYPES)[number])) {
+      return badBody(`connector_type must be one of ${CONNECTOR_TYPES.join(', ')}`);
+    }
+    const kw = optionalKw(c['max_power_kw'], 'max_power_kw');
+    if (!kw.ok) return kw;
+    connectors.push({
+      connectorNo: no,
+      ...(type !== undefined ? { connectorType: type as (typeof CONNECTOR_TYPES)[number] } : {}),
+      ...(kw.value !== undefined ? { maxPowerKw: kw.value } : {}),
+    });
+  }
+  return { ok: true, value: { serialNumber: serial.value, siteId, connectors } };
 }
