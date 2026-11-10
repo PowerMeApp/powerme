@@ -83,7 +83,7 @@ Nghĩa của cột đã có:
 
 - `POST …/billing/top-ups {amountVnd, redeemPoints}`, header `Idempotency-Key`. Cùng key trả lại cùng top-up.
 - Kiểm tra: tài khoản chưa đóng, hạn mức **BR-P22 theo ADR-0013**: mỗi lần nạp 50.000–2.000.000 VND, số dư sau nạp ≤ 5.000.000 VND; không có top-up đang mở khác. Sai → `TopUpRejected(reason)` → 409 / 422 `{reason}`.
-- `redeemPoints` và còn ≥ 500 điểm → tính `discountVnd`. **Chỉ trừ điểm khi cộng tiền** (SD-2b). Điểm hết hạn trong lúc chờ thanh toán: xem D3 ⊕.
+- `redeemPoints` và còn ≥ 500 điểm → tính `discountVnd`. ⊕ `LoyaltyService.quoteRedemption` nhận `requestedPoints?` (bỏ trống = dùng tối đa `min(điểm còn sống, trần 50 %)`), không bắt bội số 100 (1 điểm = 10 VND), chỉ tính điểm còn sống (D11). Chốt 10/11, T32 Phần 4. **Chỉ trừ điểm khi cộng tiền** (SD-2b). Điểm hết hạn trong lúc chờ thanh toán: xem D3 ⊕.
 - Lưu top-up `pending`, `expiresAt = now + 15 phút`; `VnpayAdapter.buildPaymentUrl(topUp, amountVnd − discountVnd)`; trả **201 `{topUpId, paymentUrl}`**.
 - Return URL chỉ hiển thị. Chỉ IPN có chữ ký (SD-2b) hoặc querydr sau 15 phút (SD-2d) mới cộng tiền.
 - ⊕ "Top-up đang mở" chỉ tính `pending`; `expired` (kể cả trong cửa sổ trễ 1 giờ) không chặn tạo mới. SRS BR-P22 sửa theo (chốt 09/11).
@@ -112,6 +112,7 @@ Cộng tiền, dòng sổ cái và điểm nằm trong **một** DB transaction,
 Áp dụng cho mọi đường cộng tiền (D4).
 ⊕ **`restoreForTopUp` (Admin hoàn top-up, D1) trả lại số điểm thực tế đã trừ** = −Σ `points` của các dòng `redeem` có `top_up_id` này (giữ hạn cũ). Không lấy theo `top_ups.points_redeemed`, vì như vậy sẽ trả dư phần điểm đã hết hạn.
 Điểm "còn hiệu lực", "hạn cũ" ở trên tính theo lô earn FIFO của D11 (redeem tiêu lô cũ nhất; restore trả về đúng hạn cũ của lô).
+⊕ Cách ghi (chốt 10/11, T32 Phần 4): mỗi dòng `redeem` / `restore` ghi đúng một lô và mang `expires_at` của lô đó, nên một top-up tiêu hai lô có hai dòng `redeem`. Dòng `adjust` `points = 0` để `expires_at` NULL. Restore vào lô **đã hết hạn** tới lúc hoàn: vẫn trả về lô cũ (= −Σ `redeem`), rồi expire ngay trong cùng transaction, nên ngay sau khi hoàn `points_balance` = điểm còn sống.
 ⊕ Kết quả thanh toán tới khi top-up đã có kết quả không đổi trạng thái (BR-P13), không ném lỗi (chốt 04/11, T32 Phần 2):
 - `already_applied` → RspCode 02: thành công trên `credited` / `refunded` với `transactionNo` = `gateway_transaction_no` đã ghi; lỗi trên `failed` / `expired`.
 - `conflicting_result` → không ghi gì, service log warn: thành công trên `credited` / `refunded` với `transactionNo` **khác** (có thể là lần trả thứ hai cho cùng top-up); lỗi trên `credited` / `refunded`.
@@ -224,7 +225,7 @@ Diagram chỉ ghi "job" / "queue" / "after commit". Repo chưa có BullMQ (Redis
 - **Chỗ CD-2 lệch code** (theo code, ghi vào `diagrams/README.md` mục "Known differences"):
   - ~~`CreditTransaction.transactionType` có `reservation_fee`; enum `credit_transaction_type` không có.~~ Hết lệch từ 0010 (BE-16): enum đã có `reservation_fee`, CD-2 đúng.
   - Tiền ghi `number`; code dùng `bigint` VND (Drizzle `mode: 'number'` ở tầng TS, không dùng số thực).
-  - CD-2 chỉ có thành viên chính. Code thêm các class / method sau, không mâu thuẫn diagram: `TopUpStateMachine`, `RefundStateMachine`, worker của D7, `BillingExceptionsQuery`, `CreditLedgerService.getBalance`, `ensureAccounts`, `LoyaltyService.quoteRedemption` / `earnForSession`.
+  - CD-2 chỉ có thành viên chính. Code thêm các class / method sau, không mâu thuẫn diagram: `TopUpStateMachine`, `RefundStateMachine`, worker của D7, `BillingExceptionsQuery`, `CreditLedgerService.getBalance`, `ensureAccounts`, `LoyaltyService.quoteRedemption` / `earnForSession` / `expireDueForAccount`.
 - SD-2a ghi "monthly cap": theo ADR-0013 thì BR-P22 không có hạn mức tháng. Code theo ADR-0013; chờ Ân sửa diagram (mục "Còn mở").
 
 ## D9. Ranh giới với WP3 và tạo tài khoản ⊕
@@ -253,7 +254,14 @@ Chốt 09/11: WP5 làm job hết hạn điểm.
   - `restoreForTopUp` trả điểm về **đúng hạn cũ của lô** đã bị tiêu (D3: trả −Σ `redeem` của top-up, không theo `points_redeemed`);
   - dòng `expire` trừ phần còn sống của lô hết hạn. Điểm đã bị `expire` trước lúc cộng tiền thì D3 ghi `adjust` `points = 0`, không trừ thêm;
   - `expire` lúc đóng tài khoản (D6 (g)) xoá toàn bộ phần còn lại.
-- **Phần 4:** hàm thuần tính điểm còn sống theo lô + `LoyaltyService.expireDue(now)` (thuần ở phần tính, có test).
+- **Nhận diện lô** (chốt 10/11, T32 Phần 4, không migration):
+  - lô = các dòng `earn` cùng `expires_at` (so chính xác µs; trùng hạn gộp một lô);
+  - mỗi dòng `redeem` / `restore` / `expire` theo hạn ghi đúng một lô và mang `expires_at` của lô đó, **copy bằng SQL** từ dòng earn (JS `Date` mất phần µs);
+  - `adjust` 0 và `expire` lúc đóng tài khoản để `expires_at` NULL;
+  - dòng không khớp quy tắc → `LoyaltyLedgerCorrupt`, không đoán cách sửa.
+- Restore vào lô đã hết hạn → trả về lô cũ rồi expire ngay trong cùng transaction (D3 ⊕).
+- **Hiển thị điểm** (UC-PAY-04, API sau này) và mọi chỗ cần "điểm khả dụng" dùng `livePoints` / `pointsExpiringBy` từ `replayLots`, **không** đọc `points_balance`: lô đã hết hạn vẫn nằm trong `points_balance` tới khi job Phần 13 ghi `expire`.
+- **Phần 4:** hàm thuần `loyalty-lots.ts` + `LoyaltyService.expireDueForAccount(tx, loyaltyAccountId, asOf?)` (một tài khoản, khoá `loyalty_accounts`). `expireDue(now)` của CD-2 (lặp qua tài khoản) để Phần 13.
 - **Phần 13:** job chạy hằng ngày gọi `expireDue(now)`. Chống chạy chồng (hai instance / hai lượt không trừ hai lần), bỏ qua tài khoản `closed`, chỉ trừ phần còn sống.
 
 ## Còn mở (hỏi trước khi code phần liên quan)
@@ -275,6 +283,7 @@ Chốt 09/11: WP5 làm job hết hạn điểm.
 - **Physical ERD v1.1 lệch 0015:** enum `refund_error_kind` riêng (0015 dùng lại `e_invoice_error_kind`); unique đầy đủ thay partial unique `(top_up_id, kind)`; `invoice_adjustments.refund_id` NOT NULL (0015 nullable); thiếu `next_attempt_at`; thiếu `refunds_requested_by_check`. Báo Ân.
 - AD-9 và Physical ERD dẫn BR-P45 cho refund, trong khi BR-P45 là làm tròn tiền phiên. Hỏi Ân.
 - **Lần trả thứ hai cho cùng top-up** (D3 ⊕: thành công với `transactionNo` khác trên `credited` / `refunded` → `conflicting_result`): tiền đã vào VNPay nhưng không có cột để ghi (`late_*` chỉ dành cho top-up chưa cộng, `gateway_transaction_no` đã có giá trị). Cần chốt cách ghi và cách Admin hoàn (cột mới? bảng riêng? `refunds.kind` mới?) trước Phần 6.
+- **`redeemForTopUp` ném `LoyaltyLedgerCorrupt` khi cộng tiền** (sổ điểm sai dạng hoặc lệch snapshot): lỗi rollback cả việc cộng tiền trong transaction IPN, VNPay nhận lỗi và retry mãi. Phần 6 phải chọn: chặn cộng tiền (top-up kẹt `pending`, báo Admin), hay cộng tiền + log lỗi + ghi `adjust` cho phần điểm. Phần 4 giữ hành vi ném lỗi.
 - Đổi tên `lateGatewayRef` → `lateGatewayTransactionNo`?
 - VNPay sandbox: refund có chống trùng không, có API tra trạng thái hoàn không (`VnpayAdapter.queryRefund`), thời hạn được hoàn, danh sách mã IPN.
 - Cách tạo `CreditAccount` + `LoyaltyAccount` khi tài xế đăng ký (WF-05 gọi billing hay billing nghe event).
