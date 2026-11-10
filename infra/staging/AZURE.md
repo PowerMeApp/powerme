@@ -116,6 +116,8 @@ Giữ cửa sổ đó mở, rồi mở `http://localhost:3000` (console) và `ht
 
 Chưa bật `STAGING_ENABLED` thì đẩy tag chỉ build ảnh, không deploy (đúng ý: không làm workflow đỏ khi chưa có VPS).
 
+**Trạng thái (10/11):** đã bật. `STAGING_HOST` = `powerme-staging.japaneast.cloudapp.azure.com`, `STAGING_ENABLED=true`; lần deploy tự động đầu tiên là `review-7` (job "Triển khai staging" xanh, CSMS `healthy`). Sau mỗi lần CI deploy, repo trên VM ở trạng thái `--detach` tại tag: deploy tay thì `git fetch --tags --force origin && git checkout --detach <tag>`, không `git pull`.
+
 ## 9. Chi phí, tắt máy, dọn dẹp
 
 - Azure for Students có **hạn mức credit** (kiểm số dư ở Cost Management + Billing). Máy chạy 24/7 tiêu credit theo giờ.
@@ -135,9 +137,11 @@ Chưa bật `STAGING_ENABLED` thì đẩy tag chỉ build ảnh, không deploy (
 | SSH `Permission denied` | đang dùng đúng khoá `-i ~/.ssh/powerme_staging` và user `deploy` chưa; cloud-init đã xong chưa |
 | Deploy thất bại giữa chừng | **không tự lùi nếu đã áp migration** (an toàn dữ liệu); đọc thông báo và mục Rollback ở `README.md` |
 
-## 11. Những gì chưa được kiểm chứng
+## 11. Đã kiểm chứng và chưa kiểm chứng
 
-- Chưa tạo VM nào trên Azure: mọi bước portal là từ mô tả, chưa bấm thật.
-- `cloud-init.yaml` chưa chạy trên Ubuntu 24.04 thật (chỉ kiểm cú pháp YAML). Rủi ro chính: tên gói/kho Docker thay đổi, hoặc user `deploy` chưa có nhóm `docker` ngay phiên SSH đầu (đăng xuất rồi đăng nhập lại là đủ).
-- Chưa kiểm Let's Encrypt trên tên miền `cloudapp.azure.com` (về nguyên tắc dùng được; giới hạn tần suất cấp chứng chỉ áp cho cả tên miền cha, hiếm khi chạm tới).
+Đã chạy thật (04–10/11): tạo VM qua Portal, `cloud-init.yaml` trên Ubuntu 24.04 (Docker, user `deploy`, clone repo), Let's Encrypt trên `cloudapp.azure.com`, `init-env.sh`, `deploy.sh` (tay `review-4`…`review-6`, CI `review-7`).
+
+Chưa kiểm chứng:
+
+- Rollback (`rollback.sh`) chưa diễn tập trên staging.
 - Hành vi `docker compose` với cú pháp lồng `${SIM_CSMS_URL:-wss://${DOMAIN}/ocpp}` chưa kiểm bằng Docker thật (đã nêu từ PR #48).
