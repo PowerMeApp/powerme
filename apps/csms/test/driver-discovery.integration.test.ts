@@ -365,7 +365,8 @@ describeDb('MB03 authenticated Driver discovery over HTTP and dedicated Postgres
 
   it('preserves method, CORS, unknown route and dev-auth boundaries', async () => {
     expect((await get('/me', token, {}, 'POST')).response.status).toBe(405);
-    expect((await get('/charges')).response.status).toBe(404);
+    expect((await get('/charges')).response.status).toBe(405);
+    expect((await get('/sessions')).response.status).toBe(404);
     expect((await get('/me', token, { Origin: 'https://untrusted.invalid' })).response.status).toBe(
       403,
     );

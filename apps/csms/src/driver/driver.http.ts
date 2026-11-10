@@ -5,13 +5,19 @@ import { ChargingError } from '../sessions/charging-error.js';
 import type { StationSearchInput } from '../sessions/station-search.js';
 import { DriverAccounts, DriverRateLimited } from './driver-account.js';
 import { authenticateDriver, databaseId, DriverApiConfig, DriverApiError } from './driver-auth.js';
+import {
+  chargeRouteMethod,
+  chargingErrorStatus,
+  handleChargeRoute,
+  isChargePath,
+} from './charges.http.js';
 import { handleRoad, isRoadPath } from './road.http.js';
 import { RoadDiscovery } from './road-discovery.js';
 import { ProviderUnavailable, VietmapAdapter } from './vietmap.js';
 
 const BASE = '/api/driver/v1';
 const LOCAL_ORIGIN = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/;
-/** BE-21: body JSON của /auth/* tối đa 16 KiB — đủ cho refresh token (≤ 8192 ký tự) và form đăng ký. */
+/** BE-21/BE-22: body JSON của /auth/* và POST /charges tối đa 16 KiB (refresh token ≤ 8192 ký tự, form đăng ký). */
 const AUTH_BODY_LIMIT = 16 * 1024;
 const AUTH_ROUTES = ['register', 'login', 'refresh'] as const;
 
@@ -45,10 +51,14 @@ export function createDriverListener(
         return;
       }
       if (req.method === 'OPTIONS') {
-        res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+        // BE-22: route POST của charges/sessions cần thêm Content-Type và Idempotency-Key.
+        const write =
+          chargeRouteMethod(new URL(req.url ?? '', 'http://driver.local').pathname) === 'POST';
+        res.setHeader('Access-Control-Allow-Methods', write ? 'POST, OPTIONS' : 'GET, OPTIONS');
+        const headers = config.devAuth ? 'Authorization, X-Driver-Id' : 'Authorization';
         res.setHeader(
           'Access-Control-Allow-Headers',
-          config.devAuth ? 'Authorization, X-Driver-Id' : 'Authorization',
+          write ? `${headers}, Content-Type, Idempotency-Key` : headers,
         );
         res.writeHead(204);
         res.end();
@@ -73,6 +83,21 @@ export function createDriverListener(
         } finally {
           res.off('close', cancel);
         }
+        return;
+      }
+      if (isChargePath(path)) {
+        const result = await handleChargeRoute({
+          req,
+          path,
+          q,
+          driverId,
+          db,
+          service,
+          readBody: () => readJsonObject(req, res),
+          drainBody: () => drainBody(req, res),
+          setAllow: (methods) => res.setHeader('Allow', methods),
+        });
+        send(res, result.status, result.body);
         return;
       }
       const connector = new RegExp(`^${BASE}/connectors/by-code/([^/]+)/([^/]+)$`).exec(path);
@@ -201,16 +226,7 @@ export function createDriverListener(
         return;
       }
       if (error instanceof ChargingError) {
-        const status =
-          error.code === 'not_found'
-            ? 404
-            : error.code === 'forbidden'
-              ? 403
-              : error.code === 'policy_unconfigured'
-                ? 503
-                : error.code.startsWith('invalid_')
-                  ? 400
-                  : 500;
+        const status = chargingErrorStatus(error.code);
         send(res, status, {
           error: status === 500 ? 'internal_error' : error.code,
           detail: status === 500 ? 'Lỗi nội bộ của CSMS' : error.code,
@@ -282,6 +298,18 @@ async function readJsonObject(
   if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed))
     throw new DriverApiError(400, 'invalid_input');
   return parsed as Record<string, unknown>;
+}
+
+/** BE-22: POST /sessions/{id}/stop không có body theo hợp đồng; bỏ phần thân nếu có, vẫn giới hạn cỡ. */
+async function drainBody(req: IncomingMessage, res: ServerResponse): Promise<void> {
+  let size = 0;
+  for await (const chunk of req as AsyncIterable<Buffer>) {
+    size += chunk.length;
+    if (size > AUTH_BODY_LIMIT) {
+      res.setHeader('Connection', 'close');
+      throw new DriverApiError(413, 'payload_too_large');
+    }
+  }
 }
 
 function only(q: URLSearchParams, allowed: string[]) {

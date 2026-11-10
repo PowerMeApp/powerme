@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: PowerMe CSMS — Driver API
-  version: 0.5.0
+  version: 0.6.0
   summary: Hợp đồng REST cho app tài xế (T77, phiếu v1.3 §3.2g)
   description: |
     Hợp đồng giữa CSMS (WP2) và app tài xế Flutter (WP3) cho trạng thái súng sạc, thời gian còn lại,
@@ -19,7 +19,7 @@ info:
       đường `sessions/*` trả cả phiên đó nếu `driver_id` khớp; `charges/*` chỉ có với phiên bắt đầu
       từ app.
   x-owner: Trí (WP2) — hợp đồng; Sơn (WP3) — route và client Dart
-  x-status: MB03 — brief 07/11 smart station search, address search and canonical road routes implemented locally; BE-21 email/password register, login and refresh implemented; charge/time-left HTTP routes remain planned
+  x-status: MB03 — brief 07/11 smart station search, address search and canonical road routes implemented locally; BE-21 email/password register, login and refresh implemented; BE-22 charges, sessions (progress/stop/statement) and credit implemented; time-left remains planned
 servers:
   - url: http://localhost:3000/api/driver/v1
     description: CSMS cục bộ (cùng tiến trình với console /api/admin)
@@ -34,6 +34,8 @@ tags:
     description: UC-CHG-02 bắt đầu phiên từ app (D4 start intent có idempotency key)
   - name: sessions
     description: UC-CHG-03 dừng, UC-CHG-04 theo dõi, bảng kê sau phiên
+  - name: credit
+    description: UC-PAY-02 / màn hình 9 — số dư Charging Credit và lịch sử sổ cái của chính tài xế (BE-22)
 
 security:
   - bearerAuth: []
@@ -430,7 +432,7 @@ paths:
     post:
       tags: [charges]
       operationId: startCharge
-      x-status: planned — not implemented by MB03
+      x-status: implemented — BE-22
       summary: Yêu cầu bắt đầu phiên từ app
       description: |
         Ánh xạ `DriverChargingService.start(driverId, key, input)`. Tạo **start intent** bền
@@ -439,6 +441,14 @@ paths:
         Kiểm tra tín dụng theo BR-P18 (đủ mức khởi đầu) và giữ trước `reserved_vnd`; CSMS tự dừng
         khi chạm mức dự trữ cắt (BR-P19). Chỉ có chế độ `energy_kwh` (hạn mức kWh); các chế độ
         khác là hướng phát triển (README WP3).
+
+        BE-22: body `application/json` ≤ 16 KiB, trường lạ → 400 `invalid_input`; `connector_id`,
+        `vehicle_id` là **chuỗi** số. Request trả về khi lệnh RemoteStart đã có kết quả (tối đa
+        `CHARGE_COMMAND_TIMEOUT_MS`, mặc định 30 s). **Tín dụng không đủ không phải lỗi HTTP**: intent
+        được ghi ở trạng thái từ chối và trả 202 với `outcome = topuprequired` (dưới mức khởi đầu)
+        hoặc `requiresconfirmation` (đủ mức khởi đầu nhưng không đủ cho hạn mức xin; `max_energy_wh`
+        là hạn mức tối đa CSMS đề nghị — app hỏi tài xế rồi gửi **key mới** với
+        `energy_limit_wh = max_energy_wh`). Gửi lại cùng key trả lại đúng kết quả đó.
       parameters:
         - $ref: '#/components/parameters/idempotencyKey'
       requestBody:
@@ -454,25 +464,34 @@ paths:
               schema: { $ref: '#/components/schemas/ChargeSnapshot' }
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
-        '404': { $ref: '#/components/responses/NotFound' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '405': { $ref: '#/components/responses/PostOnly' }
         '409':
           description: |
-            `idempotency_conflict` (cùng key khác body), `credit_unavailable` (BR-P18),
-            `connector_unavailable`, `connector_busy_or_unknown` (BR-P12), `tariff_unavailable`
+            `idempotency_conflict` (cùng key khác body); `credit_unavailable` (tài xế **chưa có ví**
+            hoặc ví không `active` — số dư thấp đi qua 202 `topuprequired`); `connector_unavailable`
+            (không có súng đó, trụ offline / không `in_service`, operator ngừng, hoặc súng không ở
+            Available/Preparing — kể cả đang Charging); `connector_busy_or_unknown` (BR-P12: còn
+            intent/phiên mở trên súng, hoặc chưa có Available sau phiên trước); `tariff_unavailable`
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
+        '413': { $ref: '#/components/responses/PayloadTooLarge' }
+        '415': { $ref: '#/components/responses/UnsupportedMediaType' }
         '503': { $ref: '#/components/responses/PolicyUnconfigured' }
 
   /charges/{idempotencyKey}:
     get:
       tags: [charges]
       operationId: getChargeStart
-      x-status: planned — not implemented by MB03
+      x-status: implemented — BE-22
       summary: Xem lại kết quả một yêu cầu bắt đầu
       description: |
         Ánh xạ `DriverChargingService.getStart`. App gọi khi mất mạng giữa chừng hoặc mở lại
         màn hình. Khi `session_id` khác null, chuyển sang `GET /sessions/{sessionId}/progress`.
+        BE-22: key thuộc từng tài xế — key của tài xế khác → 404 như key không tồn tại. Poll mỗi
+        1–2 s, dừng khi `session_id` khác null hoặc `outcome` là trạng thái kết thúc
+        (`rejected`, `released`, `start_timeout`, `topuprequired`, `requiresconfirmation`).
       parameters:
         - name: idempotencyKey
           in: path
@@ -484,14 +503,16 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ChargeSnapshot' }
+        '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/NotFound' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
 
   /sessions/{sessionId}/progress:
     get:
       tags: [sessions]
       operationId: getSessionProgress
-      x-status: planned — not implemented by MB03
+      x-status: implemented — BE-22 (`time_left` luôn null cho đến khi có hàm ước tính)
       summary: Tiến trình phiên đang chạy hoặc vừa dừng
       description: |
         Ánh xạ `DriverChargingService.progress`. Trả cho mọi phiên có `driver_id` là tài xế gọi,
@@ -500,6 +521,8 @@ paths:
         là `unknown` khi chưa có mẫu hoặc mẫu không hợp lệ.
         Ngưỡng M3 của WP3: SoC và kWh lên app trong vài giây sau MeterValues → app **poll mỗi 5 s**
         cho đến khi có kênh realtime (Tuần 10, ngoài hợp đồng này).
+        BE-22: phiên không do app tạo có `reserved_vnd = null`. Ngừng poll khi `status` là
+        `closed`/`reconciled` và `settlement_state = posted` (khi đó gọi statement), hoặc `review`.
       parameters:
         - $ref: '#/components/parameters/sessionId'
       responses:
@@ -508,20 +531,27 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/SessionProgress' }
+        '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/NotFound' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
 
   /sessions/{sessionId}/stop:
     post:
       tags: [sessions]
       operationId: stopCharge
-      x-status: planned — not implemented by MB03
+      x-status: implemented — BE-22
       summary: Yêu cầu dừng phiên từ app
       description: |
         Ánh xạ `DriverChargingService.stop(driverId, key, sessionId)`. Ghi **stop intent** rồi
         gửi RemoteStopTransaction; phiên kết thúc thật bằng StopTransaction của trụ (BR-P01).
         Key bắt đầu bằng `limit:` là dành riêng cho CSMS tự cắt (BR-P19) → 400
         `reserved_idempotency_key`.
+
+        BE-22: không có body (nếu gửi thì bị bỏ qua, ≤ 16 KiB). Gọi lại cùng key → cùng
+        `command_id`, không gửi RemoteStop lần hai. Chỉ dừng được phiên **bắt đầu từ app**; phiên
+        thẻ RFID / HMI → 404 (dừng tại trụ). `command_status = accepted` chưa phải đã dừng: poll
+        progress tới khi `meter_stop_wh` khác null.
       parameters:
         - $ref: '#/components/parameters/sessionId'
         - $ref: '#/components/parameters/idempotencyKey'
@@ -534,8 +564,12 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/NotFound' }
+        '405': { $ref: '#/components/responses/PostOnly' }
+        '413': { $ref: '#/components/responses/PayloadTooLarge' }
         '409':
-          description: '`session_not_stoppable` (phiên không ở active/paused), `idempotency_conflict`'
+          description: |
+            `session_not_stoppable` (phiên không ở active/paused/orphaned), `idempotency_conflict`
+            (key đã dùng cho phiên khác), `stop_pending_or_unknown` (đã có yêu cầu dừng khác đang mở)
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
@@ -545,7 +579,7 @@ paths:
     get:
       tags: [sessions]
       operationId: getChargingStatement
-      x-status: planned — not implemented by MB03
+      x-status: implemented — BE-22
       summary: Bảng kê sau phiên (một lần trừ tiền, BR-P45)
       description: |
         Ánh xạ `DriverChargingService.statement`. Chỉ có sau khi quyết toán xong; trước đó 404
@@ -559,8 +593,61 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ChargingStatement' }
+        '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/NotFound' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+
+  /credit:
+    get:
+      tags: [credit]
+      operationId: getOwnCredit
+      x-status: implemented — BE-22
+      summary: Số dư Charging Credit của tài xế đang đăng nhập
+      description: |
+        Chỉ đọc (UC-PAY-02, màn hình 9). `balance_vnd` là snapshot `credit_accounts.balance_vnd`,
+        luôn bằng tổng `amount_vnd` của sổ cái. `held_vnd` là tiền đang giữ trước cho start intent
+        còn mở (BR-P18); `available_vnd = balance_vnd − held_vnd` là số CSMS dùng khi kiểm mức khởi
+        đầu. Tài xế chưa có ví (đăng ký BE-21 không tạo ví) → 200 với số 0 và `status = none`;
+        GET không tạo ví. Không có query.
+      responses:
+        '200':
+          description: Số dư hiện tại
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CreditSummary' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+
+  /credit/transactions:
+    get:
+      tags: [credit]
+      operationId: listOwnCreditTransactions
+      x-status: implemented — BE-22
+      summary: Lịch sử sổ cái credit, mới nhất trước
+      description: |
+        Các dòng `credit_transactions` của ví tài xế, sắp `entry_no` giảm dần. Dòng `session_debit`
+        có `session_id` → app mở `GET /sessions/{id}/statement` để xem bảng kê. Trang vượt cuối →
+        `items` rỗng, `total` vẫn đúng.
+      parameters:
+        - name: page
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100000, default: 1 }
+        - name: page_size
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+      responses:
+        '200':
+          description: Một trang sổ cái
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CreditTransactionPage' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
 
 components:
   securitySchemes:
@@ -659,6 +746,11 @@ components:
           schema: { $ref: '#/components/schemas/Error' }
     MethodNotAllowed:
       description: '`method_not_allowed`, Allow GET, OPTIONS'
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    PostOnly:
+      description: '`method_not_allowed`, Allow POST, OPTIONS'
       content:
         application/json:
           schema: { $ref: '#/components/schemas/Error' }
@@ -799,7 +891,8 @@ components:
     IdempotencyKey:
       type: string
       minLength: 8
-      maxLength: 128
+      maxLength: 100
+      description: 'BE-22: tối đa 100 (giới hạn của service); sai → 400 `invalid_idempotency_key`'
       pattern: '^[A-Za-z0-9._:-]+$'
     Timestamp:
       type: string
@@ -1065,10 +1158,16 @@ components:
         outcome:
           type: string
           description: |
-            Một trong: trạng thái intent `pending`, `sent`, `accepted`, `unknown`, `effect`,
-            `released`; lý do từ chối `credit_unavailable`, `connector_unavailable`,
-            `requiresconfirmation`, `outcome_unknown`; hoặc trạng thái phiên khi đã có phiên
-            (`active`, `paused`, `stopping`, `closed`, `reconciled`, `review`, `orphaned`).
+            BE-22 (khớp code): lý do từ chối nếu có, nếu không thì trạng thái phiên khi đã có phiên,
+            nếu không thì trạng thái intent.
+            - Lý do từ chối: `topuprequired` (số dư khả dụng dưới mức khởi đầu, BR-P18),
+              `requiresconfirmation` (xem `max_energy_wh`), `start_timeout` (trụ không bắt đầu
+              trong hạn, intent đã giải phóng).
+            - Trạng thái phiên: `active`, `paused`, `stopping`, `closed`, `reconciled`, `review`,
+              `orphaned`.
+            - Trạng thái intent: `sent` (đang chờ trụ), `accepted` (trụ nhận lệnh, chờ
+              StartTransaction), `unknown` (trụ không trả lời — tiếp tục poll), `rejected` (trụ từ
+              chối), `released`.
         effect_confirmed:
           type: boolean
           description: true khi `session_id` khác null, tức trụ đã gửi StartTransaction khớp intent
@@ -1117,7 +1216,10 @@ components:
         reserved_vnd: { type: [integer, 'null'], description: Số tiền đang giữ trước cho phiên }
         estimated_cost_vnd:
           type: [integer, 'null']
-          description: Ước tính theo biểu giá hiện hành (UC-CHG-04); Tuần 9, null cho đến khi có
+          description: |
+            BE-22 (§11 #2): cận trên ceil(`consumed_wh` × giá cao nhất hiện hành của operator / 1000)
+            — cùng giá dùng để giữ trước. Null khi chưa có `consumed_wh` hoặc chưa có biểu giá.
+            Không phải số trừ thật; số trừ thật ở statement (BR-P45).
         billing_review_required: { type: boolean }
         settlement_state:
           type: [string, 'null']
@@ -1125,6 +1227,7 @@ components:
         settlement_reason: { type: [string, 'null'] }
         settlement_retry_at: { oneOf: [{ $ref: '#/components/schemas/Timestamp' }, { type: 'null' }] }
         time_left:
+          description: BE-22 luôn null (hàm ước tính chưa có)
           oneOf: [{ $ref: '#/components/schemas/TimeLeftEstimate' }, { type: 'null' }]
         charge_point:
           type: object
@@ -1148,3 +1251,49 @@ components:
         debit_id: { $ref: '#/components/schemas/Id' }
         loyalty_entry_id: { $ref: '#/components/schemas/Id' }
         created_at: { $ref: '#/components/schemas/Timestamp' }
+
+    CreditSummary:
+      type: object
+      additionalProperties: false
+      required: [balance_vnd, held_vnd, available_vnd, status, updated_at]
+      properties:
+        balance_vnd: { type: integer, description: 'Có thể âm khi ví in_shortfall' }
+        held_vnd: { type: integer, minimum: 0, description: Đang giữ trước cho start intent còn mở }
+        available_vnd: { type: integer, description: balance_vnd − held_vnd }
+        status:
+          type: string
+          enum: [active, in_shortfall, closed, none]
+          description: '`none` = chưa có ví'
+        updated_at: { oneOf: [{ $ref: '#/components/schemas/Timestamp' }, { type: 'null' }] }
+      examples:
+        - { balance_vnd: 200000, held_vnd: 50000, available_vnd: 150000, status: active, updated_at: '2026-11-10T13:20:00.000Z' }
+
+    CreditTransaction:
+      type: object
+      additionalProperties: false
+      required: [transaction_id, entry_no, transaction_type, amount_vnd, balance_after_vnd, session_id, top_up_id, reservation_id, created_at]
+      properties:
+        transaction_id: { $ref: '#/components/schemas/Id' }
+        entry_no: { type: integer, minimum: 1 }
+        transaction_type:
+          type: string
+          enum: [top_up, session_debit, refund, adjustment, reservation_fee]
+        amount_vnd: { type: integer, description: 'Dương = cộng ví, âm = trừ ví' }
+        balance_after_vnd: { type: integer }
+        session_id: { oneOf: [{ $ref: '#/components/schemas/Id' }, { type: 'null' }] }
+        top_up_id: { oneOf: [{ $ref: '#/components/schemas/Id' }, { type: 'null' }] }
+        reservation_id: { oneOf: [{ $ref: '#/components/schemas/Id' }, { type: 'null' }] }
+        created_at: { $ref: '#/components/schemas/Timestamp' }
+
+    CreditTransactionPage:
+      type: object
+      additionalProperties: false
+      required: [items, total, page, page_size]
+      properties:
+        items:
+          type: array
+          maxItems: 100
+          items: { $ref: '#/components/schemas/CreditTransaction' }
+        total: { type: integer, minimum: 0 }
+        page: { type: integer, minimum: 1 }
+        page_size: { type: integer, minimum: 1, maximum: 100 }
