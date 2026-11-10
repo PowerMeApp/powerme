@@ -172,7 +172,7 @@ Compose chỉ truyền cho `csms` những biến mà `apps/csms/src/config.ts` �
 | `app.ds02@powerme.test` | DS-02 thiếu tiền (< `CHARGE_MINIMUM_START_VND` 50.000) → `topuprequired` | 30.000 VND | 0 | ★ VinFast VF e34 (CCS2) `51K-902.01` |
 | `app.ds03@powerme.test` | DS-03 có điểm (≥ 500 điểm tối thiểu để dùng khi nạp) | 100.000 VND | 600 (hạn 12 tháng từ lần seed đầu) | ★ Hyundai Ioniq 5 (CCS2, không VinFast) `51K-903.01`; Wuling HongGuang MiniEV (Type2) `51K-903.02` |
 
-Mật khẩu: một mật khẩu chung = `DEMO_DRIVER_PASSWORD` trong `.env` trên VM. **Không ghi ở đây, không có trong repo**; Trí gửi riêng. Tài xế `driver.demo@powerme.test` của `seed.sql` không có mật khẩu và không có xe (giữ cho demo RFID Review 2).
+Mật khẩu: một mật khẩu chung = `DEMO_DRIVER_PASSWORD` trong `.env` trên VM. **Không ghi ở đây, không có trong repo**; Trí gửi riêng. Hai tài xế `driver.demo@powerme.test`, `driver2.demo@powerme.test` của `seed.sql` không có mật khẩu và không có xe (giữ cho demo thẻ RFID `DEMO-CARD-0001`/`0002`, không đăng nhập app được).
 
 Trạm (operator mẫu `0312345678`, biểu giá theo khung giờ của `seed.sql`: 2.800 / 3.800 / 5.500 VND/kWh). Toạ độ là vị trí gần đúng của địa danh thật; tên, công suất là giả.
 
