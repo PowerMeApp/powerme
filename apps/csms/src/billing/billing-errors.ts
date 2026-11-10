@@ -43,6 +43,61 @@ export class LedgerPostRejected extends Error {
   }
 }
 
+/** Lý do từ chối dùng điểm cho top-up (BR-P35, `quoteRedemption`). */
+export type RedemptionRejectReason =
+  /** `amountVnd` không phải safe integer > 0. */
+  | 'invalid_amount'
+  /** `requestedPoints` không phải số nguyên > 0. */
+  | 'invalid_points'
+  /** Điểm còn sống < 500, hoặc số điểm yêu cầu < 500. */
+  | 'below_minimum'
+  /** Số điểm yêu cầu vượt điểm còn sống. */
+  | 'insufficient_points'
+  /** Vượt trần 50 % số tiền nạp (hoặc trần quá nhỏ để đạt 500 điểm). */
+  | 'exceeds_cap';
+
+export class RedemptionRejected extends Error {
+  constructor(readonly reason: RedemptionRejectReason) {
+    super(`redemption_rejected: ${reason}`);
+    this.name = 'RedemptionRejected';
+  }
+}
+
+/** Lý do sổ điểm không phát lại được theo lô (`loyalty-lots.ts`). */
+export type LoyaltyCorruptReason =
+  /** Sai dấu theo loại dòng (earn ≥ 0, redeem < 0, restore > 0, expire < 0). */
+  | 'invalid_points'
+  /** earn / redeem / restore thiếu `expires_at`. */
+  | 'missing_expires_at'
+  /** `expires_at` không khớp lô earn nào đã có trước đó. */
+  | 'unknown_lot'
+  /** Lô bị trừ quá phần còn lại, hoặc trả quá phần đã earn. */
+  | 'lot_overdrawn'
+  /** `adjust` khác 0 — chưa có quy tắc phát lại (BR-P37 sẽ cần). */
+  | 'unsupported_adjust'
+  /** `loyalty_accounts.points_balance` ≠ Σ `points`. */
+  | 'balance_mismatch';
+
+/**
+ * Sổ điểm có dòng không đúng dạng hoặc lệch snapshot. Ném trước mọi câu ghi; không đoán cách sửa.
+ */
+export class LoyaltyLedgerCorrupt extends Error {
+  constructor(
+    readonly reason: LoyaltyCorruptReason,
+    readonly entryNo: number | null = null,
+  ) {
+    super(`loyalty_ledger_corrupt: ${reason}${entryNo === null ? '' : ` (entry_no=${entryNo})`}`);
+    this.name = 'LoyaltyLedgerCorrupt';
+  }
+}
+
+export class LoyaltyAccountNotFound extends Error {
+  constructor(readonly loyaltyAccountId: number) {
+    super(`loyalty_account_not_found: ${loyaltyAccountId}`);
+    this.name = 'LoyaltyAccountNotFound';
+  }
+}
+
 /**
  * Đã có dòng sổ cái cho cùng top-up + loại, hoặc cùng phiên (session_debit / earn). Bên gọi cần
  * idempotent thì dùng `existing`.

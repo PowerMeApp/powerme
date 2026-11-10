@@ -43,6 +43,14 @@ Decisions khác diagram thì theo diagram và sửa decisions. Diagram mâu thu�
 - Thứ tự khoá dòng khi cần nhiều bảng: **`top_ups` → `credit_accounts` → `loyalty_accounts`** (tránh deadlock; WP3 cũng khoá `credit_accounts` trước `loyalty_accounts`). `CreditLedgerService.post` chỉ khoá `credit_accounts`, nên luồng nào cần khoá `top_ups` (IPN, timeout, hoàn) thì phải khoá **trước** khi gọi `post`. `LoyaltyService` khoá `loyalty_accounts`, nên gọi **sau** `post`.
 - `post` / `earnForSession` nhận client của transaction bên gọi (`LedgerClient = Pick<PoolClient, 'query'>`) và **không tự BEGIN/COMMIT**. Lỗi nghiệp vụ (`LedgerPostRejected`, `LedgerEntryExists`, `CreditAccountNotFound` trong `billing-errors.ts`) ném ra trước khi có câu SQL lỗi, nên transaction bên gọi vẫn dùng được. DB không có CHECK dấu tiền: `post` kiểm dấu theo loại dòng.
 - Tiền là `bigint` VND, không dùng số thực.
+- **Sổ điểm** (T32 Phần 4, decisions D3/D11):
+  - `loyalty_accounts.points_balance` = Σ `loyalty_transactions.points` ≥ 0, cập nhật cùng transaction.
+  - Mọi nơi ghi loyalty khoá `loyalty_accounts … FOR UPDATE` trước khi tính `entry_no`. Khoá trước, chỉ INSERT tài khoản khi thiếu.
+  - Điểm tính theo lô earn (`loyalty-lots.ts`, lô = `expires_at`):
+    - mỗi dòng `redeem` / `restore` / `expire` theo hạn mang `expires_at` của đúng một lô, **copy bằng SQL** từ dòng earn của lô (không truyền timestamp từ JS, `Date` mất µs);
+    - chỉ `adjust` 0 và `expire` lúc đóng tài khoản để `expires_at` NULL;
+    - dòng sai dạng → `LoyaltyLedgerCorrupt`.
+  - Hiển thị / kiểm điểm khả dụng dùng `livePoints` của `replayLots`, **không** dùng `points_balance` (lô hết hạn còn nằm trong đó tới khi job hết hạn chạy).
 
 ## Ai được ghi bảng nào
 
