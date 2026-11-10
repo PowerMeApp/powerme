@@ -61,5 +61,6 @@ DATABASE_URL=postgresql://powerme:powerme@127.0.0.1:54330/powerme_test npm test 
 | `db-embedded.mjs`      | Postgres nhúng, áp migration (qua `scripts/migrate.mjs`), nạp `seed.sql`, dừng sạch |
 | `../scripts/migrate.mjs` | Áp tuần tự `drizzle/*.sql` còn thiếu, theo dõi bằng bảng `_migrations` (DB demo cũ tự lên 0001) |
 | `seed.sql`             | Dữ liệu mẫu, idempotent                                           |
+| `seed-app.sql`         | Dữ liệu cho app tài xế trên staging (BE-27): 9 trạm TP.HCM, mẫu xe, tài xế `app.ds0x@powerme.test`; nạp bằng `scripts/seed-demo.mjs` (không nạp ở `npm run demo`) |
 | `scripted-station.mjs` | Trụ kịch bản cho DS-01a/b, DS-03a/b/c/d                           |
 | `show.mjs`             | Truy vấn nhanh DB demo                                            |

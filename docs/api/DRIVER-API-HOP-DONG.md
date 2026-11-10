@@ -108,6 +108,16 @@ bearer, chỉ nhận `application/json` ≤ 16 KiB, trường lạ → 400:
   transaction; **không** tạo ví credit/loyalty (SRS không yêu cầu; `ensureAccounts` tạo khi cần).
 - Chưa cấu hình JWT → 503 `auth_unavailable`. Không log mật khẩu, hash, token; response không có hash.
 
+**Môi trường staging (BE-27).** Driver API chạy trên staging nhưng **không ra internet** (cùng
+listener với console vận hành chưa xác thực; Caddy chỉ proxy `/ocpp/*` và `/health`). App dev gọi
+qua SSH tunnel: `ssh -N -L 5433:127.0.0.1:5432 -L 3000:127.0.0.1:3000 devtunnel@<FQDN>`, base URL
+`http://127.0.0.1:3000/api/driver/v1` (Android Emulator: `http://10.0.2.2:3000/api/driver/v1`).
+JWT: issuer `powerme-staging`, audience `powerme-driver-app`, refresh 30 ngày; `X-Driver-Id` tắt.
+Tài xế mẫu `app.ds01/ds02/ds03@powerme.test` (DS-01 200.000 VND, DS-02 30.000 VND, DS-03 600 điểm),
+mật khẩu nhận riêng. Chỉ trụ demo `PM-D1-HCM-0001` bắt đầu sạc được; trạm `HCM-APP-*` luôn
+`offline`. Hướng dẫn, cảnh báo: [infra/staging/DEV-ACCESS.md](../../infra/staging/DEV-ACCESS.md);
+dữ liệu mẫu: [infra/staging/README.md](../../infra/staging/README.md#dữ-liệu-mẫu-cho-app-tài-xế-be-27).
+
 ## 7. Lỗi: từ `ChargingError.code` sang HTTP
 
 | HTTP | Mã `error` |
