@@ -1835,7 +1835,8 @@ describeDb('WP3/T31 WF-01 service journey with real OCPP + Postgres', () => {
       ).toBe('system');
     },
   );
-  it.each(['station_wallet', 'unattributed'] as const)(
+  // T110: station_wallet bỏ ở migration 0016 — unattributed là phiên không thu qua CSMS duy nhất.
+  it.each(['unattributed'] as const)(
     'T72 review system cutoff refuses %s attribution',
     async (mode) => {
       await observedStart();
@@ -2229,7 +2230,8 @@ describeDb('WP3/T31 WF-01 service journey with real OCPP + Postgres', () => {
   it.each([
     { change: 'meter', cardKind: null },
     { change: 'time', cardKind: 'online' },
-    { change: 'both', cardKind: 'wallet' },
+    // T110: thẻ wallet bỏ ở migration 0016; ca 'both' giữ bằng thẻ online.
+    { change: 'both', cardKind: 'online' },
     { change: 'both', cardKind: 'free_vend' },
   ])(
     'preserves a separate unattributed start after $change changes with RFID $cardKind',

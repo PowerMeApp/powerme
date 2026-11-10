@@ -6,7 +6,7 @@
 Thẻ chỉ bị kiểm `rfid_cards.status` (#56). Thẻ `online` `active` **chưa gắn tài xế** hoặc gắn tài xế **không đủ tiền / ví đóng** vẫn được `Authorize` = `Accepted`, và `StartTransaction` gán `csms_billed` kể cả khi `driver_id` rỗng (phiên "tính tiền" cho không ai). Trái BR-P23 ("thẻ online cần tài xế đã liên kết với Charging Credit đủ") và BR-P18. Chỉ tag của app được kiểm (`authorizeAppTag`, #58). Test tái hiện: `test/card-authorize.integration.test.ts` chạy trên code cũ → 14/23 đỏ.
 
 ## Quy tắc (một nơi: `src/sessions/card-eligibility.ts`)
-Chỉ áp cho thẻ `card_kind = 'online'` đã qua kiểm `status = 'active'`. Thẻ `wallet` (trả tại trụ, `station_wallet`) và `free_vend` không có tài xế để kiểm; `charge_points.free_vend_tag` (không nằm trong sổ thẻ) giữ nguyên.
+Chỉ áp cho thẻ `card_kind = 'online'` đã qua kiểm `status = 'active'`. Thẻ `free_vend` không có tài xế để kiểm (thẻ `wallet` / `station_wallet` bỏ ở migration 0016, BE-23 / T110: thẻ ví cũ thành `online`, nên cũng qua đúng các kiểm dưới đây — chưa gắn tài xế thì `Invalid`); `charge_points.free_vend_tag` (không nằm trong sổ thẻ) giữ nguyên.
 
 Số dư khả dụng = `credit_accounts.balance_vnd` trừ phần giữ chỗ (`reserved_vnd`) của các `driver_charge_intents` chưa kết thúc của cùng tài xế — cùng cách `authorizeAppTag` tính. Ngưỡng dùng chung hàm `meetsStartMinimum` (`charge-start-policy.ts`, `CHARGE_MINIMUM_START_VND`, mặc định 50.000) với `startCreditPolicy` của app.
 
@@ -38,7 +38,7 @@ Chọn mã OCPP: `Invalid` = "không xác định được người được ph�
 - Coi `in_shortfall` là unattributed: sẽ làm mất khoản nợ đáng ra thu được.
 
 ## Giữ nguyên
-`free_vend_tag` của trụ và thẻ `free_vend` (→ `free_vend`/`unattributed`); thẻ `wallet` (`station_wallet`); tag của app (đường `authorizeAppTag`); bảng chuyển STM-1; thẻ chưa active/lạ khi StartTransaction.
+`free_vend_tag` của trụ và thẻ `free_vend` (→ `free_vend`/`unattributed`); tag của app (đường `authorizeAppTag`); bảng chuyển STM-1; thẻ chưa active/lạ khi StartTransaction.
 
 ## G5 (không làm trong PR này)
 Sau G8, phiên thẻ `csms_billed` luôn có `driver_id` hợp lệ (nếu không đã thành `unattributed`), nên `charge-settlement.service.ts` (hiện chỉ `origin='app_qr'`) có thể tính tiền phiên thẻ trong một PR riêng. Điều kiện cần: (1) mở rộng điều kiện chọn phiên sang `origin='rfid' AND payment_mode='csms_billed' AND driver_id IS NOT NULL`; (2) không có `driver_charge_intents` để lấy giá/giữ chỗ → tính giá theo biểu giá tại `cp_started_at` như app, không có reserve trước, nên số dư có thể âm (chuyển ví `in_shortfall`); (3) phiên có record `card_denied=below_start_minimum|credit_in_shortfall` là ứng viên thu nợ; (4) idempotency theo `session_id` như app; (5) phiên `delivered_offline` tính theo giờ trụ (G18).
@@ -46,4 +46,4 @@ Sau G8, phiên thẻ `csms_billed` luôn có `driver_id` hợp lệ (nếu khôn
 ## Cách kiểm
 - Unit/đơn: `npm run typecheck -w @powerme/csms`.
 - Tích hợp (cần `DATABASE_URL` tới Postgres test, chạy `-i`): `node scripts/run-jest.cjs -i test/card-authorize test/session-history` trong `apps/csms`.
-- Demo: seed gắn `DEMO-CARD-0001` với tài xế có ví 500.000 VND → vẫn `Accepted`; `DEMO-WALLET-0001` không cần tài xế. Thử: hạ `credit_accounts.balance_vnd` của tài xế demo xuống 0 rồi quẹt `DEMO-CARD-0001` trên HMI → `Authorize` = `Blocked`.
+- Demo: seed gắn `DEMO-CARD-0001` với tài xế có Charging Credit 500.000 VND → vẫn `Accepted`; `DEMO-CARD-0002` (tài xế mẫu 2, thay `DEMO-WALLET-0001` từ T110) cũng vậy. DB demo cũ còn `DEMO-WALLET-0001` thì sau 0016 thẻ này là online chưa gắn tài xế → `Invalid`. Thử: hạ `credit_accounts.balance_vnd` của tài xế demo xuống 0 rồi quẹt `DEMO-CARD-0001` trên HMI → `Authorize` = `Blocked`.

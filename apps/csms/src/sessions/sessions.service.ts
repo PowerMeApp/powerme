@@ -125,7 +125,8 @@ export class SessionsService {
    *     OCPP 1.6 không có trạng thái riêng cho "chưa gắn"; Invalid = "không được phép dùng".
    * BE-19 (G8): thẻ `online` đang `active` còn phải gắn tài xế đang hoạt động có Charging Credit
    * còn hoạt động và số dư khả dụng ≥ mức tối thiểu (BR-P23, BR-P18) — xem card-eligibility.ts.
-   * Thẻ `wallet` (trả tại trụ) và `free_vend` không cần tài xế.
+   * Thẻ `free_vend` không cần tài xế. Không còn thẻ ví (`wallet` bỏ ở migration 0016, T109):
+   * thẻ ví cũ thành `online`, chưa gắn tài xế thì Invalid như mọi thẻ online (BR-P23).
    */
   async authorize(idTag: string): Promise<AuthorizeStatus> {
     const [card] = await this.db
@@ -853,13 +854,8 @@ export class SessionsService {
           billable = isBillableWhenDenied(e.reason);
         }
       }
-      const paymentMode = !billable
-        ? 'unattributed'
-        : card.cardKind === 'online'
-          ? 'csms_billed'
-          : card.cardKind === 'wallet'
-            ? 'station_wallet'
-            : 'unattributed';
+      // T110: chỉ còn thẻ online (thu qua CSMS) và free_vend (không thu) — hết station_wallet.
+      const paymentMode = billable && card.cardKind === 'online' ? 'csms_billed' : 'unattributed';
       return {
         origin: card.cardKind === 'free_vend' ? 'free_vend' : 'rfid',
         paymentMode,

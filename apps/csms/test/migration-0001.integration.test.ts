@@ -146,9 +146,14 @@ describeDb('migration 0001 — nâng cấp DB đã có 0000 và ràng buộc m�
     it('dữ liệu cũ còn nguyên: cột đổi tên giữ giá trị, bản ghi cũ không bị sửa', async () => {
       const ev = (await q('SELECT cp_timestamp FROM connector_status_events'))[0];
       expect((ev?.['cp_timestamp'] as Date).toISOString()).toBe('2026-10-20T09:59:00.000Z');
-      expect(await q(`SELECT 1 FROM sessions WHERE payment_mode = 'station_wallet'`)).toHaveLength(
-        1,
-      );
+      // Phiên station_wallet theo 0000 còn nguyên dòng; 0016 (T110) đổi payment_mode → unattributed.
+      expect(
+        await q(
+          `SELECT 1 FROM sessions WHERE id = $1 AND id_tag = 'OLD-TAG' AND origin = 'rfid'
+           AND payment_mode = 'unattributed' AND status = 'orphaned'`,
+          [sessionId],
+        ),
+      ).toHaveLength(1);
       const rec = (await q('SELECT record_type, resolution FROM reconciliation_records'))[0];
       expect(rec).toEqual({ record_type: 'meter_gap', resolution: 'conflict: diff=5' });
       const s = (await q('SELECT orphaned_at FROM sessions'))[0];
@@ -213,7 +218,7 @@ describeDb('migration 0001 — nâng cấp DB đã có 0000 và ràng buộc m�
       expect(epochCols).toHaveLength(5);
     });
 
-    it('giá trị enum 0001 nằm CUỐI danh sách (ADD VALUE); payment_mode sau 0009 còn ba giá trị', async () => {
+    it('giá trị enum 0001 nằm CUỐI danh sách (ADD VALUE); payment_mode sau 0009 và 0016 còn hai giá trị', async () => {
       const vals = async (t: string) =>
         (
           await q(
@@ -222,7 +227,7 @@ describeDb('migration 0001 — nâng cấp DB đã có 0000 và ràng buộc m�
             [t],
           )
         ).map((r) => r['enumlabel']);
-      expect(await vals('payment_mode')).toEqual(['csms_billed', 'station_wallet', 'unattributed']);
+      expect(await vals('payment_mode')).toEqual(['csms_billed', 'unattributed']);
       expect(await vals('reconciliation_record_type')).toEqual([
         'replay',
         'duplicate',
