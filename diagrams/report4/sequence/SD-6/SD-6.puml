@@ -1,7 +1,7 @@
 @startuml SD-6
 !include ../_style.iuml
 title SD-6 (Software level, CSMS) — Session started at the Charge Point with an RFID card\nPrecondition: Charge Point in service · System view: AD-6 · State: STM-1, STM-8
-footer Owner: Ngô Văn Minh Trí (WP2) · v1.0 · 01/11/2026 · names = code (apps/csms/src) · left gate = Charge Point [OCPP 1.6J, WSS]
+footer Owner: Ngô Văn Minh Trí (WP2) · v1.1 · 10/11/2026 · names = code (apps/csms/src) · left gate = Charge Point [OCPP 1.6J, WSS]
 
 participant "«component»\n<u>:OcppHandlers</u>" as H
 participant "«component»\n<u>:DriverChargingService</u>" as D
@@ -14,20 +14,28 @@ participant "«component»\n<u>:ChargeSettlementService</u>" as CS
 H -> D ++ : authorizeAppTag(idTag, ctx)
 D --> H -- : null (not an app tag)
 H -> S ++ : authorize(idTag) : AuthorizeStatus
-S --> H -- : Accepted (card active) | Blocked | Invalid (unknown)
+S --> H -- : Accepted (active card; online card: linked active Driver\nand credit ≥ start minimum, BR-P23) | Blocked | Invalid
 [<-- H -- : Authorize.conf {idTagInfo.status}
 
 == Charge Point starts the transaction ==
 [-> H ++ : StartTransaction {connectorId, idTag, meterStart, timestamp}
 H -> S ++ : onStartTransaction(req, ctx)
 S -> S : classifyIdTag(chargePointId, idTag)
-alt online card linked to a Driver
+alt online card linked to an active Driver (credit OK, or only below minimum / in shortfall)
   S -> S : payment_mode = csms_billed
-else wallet card
-  S -> S : payment_mode = station_wallet\n(the card pays at the Charge Point)
-else unknown tag, inactive card or free-vend tag
+  opt credit below start minimum or in shortfall (session ran offline)
+    S -> R ++ : recordCardDenied(sessionId, idTag, reason)
+    R --> S --
+  end
+else free-vend tag or free-vend card
+  S -> S : payment_mode = unattributed (origin free_vend), no record
+else unknown tag, or card unlinked / blocked
   S -> S : payment_mode = unattributed
   S -> R ++ : recordUnknownIdTag(sessionId, idTag)
+  R --> S --
+else online card denied (no active Driver or credit account)
+  S -> S : payment_mode = unattributed
+  S -> R ++ : recordCardDenied(sessionId, idTag, reason)
   R --> S --
 end
 S -> S : create session
@@ -46,13 +54,11 @@ H -> D ++ : onStopped(transactionId)
 D -> CS ++ : settle(sessionId)
 alt payment_mode = csms_billed
   CS --> D : posted (debit Driver credit, points, statement)
-else station_wallet
-  CS --> D : ineligible (price recorded only, no debit)
 else unattributed
   CS --> D : ineligible (listed for the Operator, UC-OPS-05)
 end
 deactivate CS
 D --> H --
 [<-- H -- : StopTransaction.conf {Accepted}
-note over H, CS : Code gaps (Trí): settle() only posts sessions with origin = app_qr, so online-card sessions are not debited yet;\nfree-vend tags are still classified as payment_mode = free (DB brief B6 → unattributed).
+note over H, CS : Code gap (Sơn with Trí, D9): settle() only posts sessions with origin = app_qr, so RFID-card sessions are not debited yet.
 @enduml

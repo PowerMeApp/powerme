@@ -14,10 +14,10 @@ if ( ) then ([RFID card tapped])
   :Ask platform to\nauthorize the card>
   |«software system»\nPowerMe Platform|
   :Check card in the\ncard registry;
-  if ( ) then ([unknown, unlinked or blocked card,\nonline card with credit < start minimum,\nor connector held for another Driver])
+  if ( ) then ([BR-P06, P23: unknown, unlinked or blocked card,\nlinked card with credit < start minimum,\nor connector held for another Driver])
     :Refuse card (Charge Point\nshows the refusal)>
     stop
-  else ([online card with enough\ncredit, or wallet card])
+  else ([linked card with\nenough credit])
     :Accept card>
   endif
 else ([password entered or\nfree-vend plug-in])
@@ -29,7 +29,7 @@ endif
 |«software system»\nPowerMe Platform|
 :Record session (never dropped)\nand classify its tag;
 :ChargingSession\n&#91;active&#93;]
-if ( ) then ([tag not in the registry])
+if ( ) then ([BR-P06: tag not in the registry])
   :Log unknown tag for\nOperator review;
   :ReconciliationRecord\n&#91;unknown_id_tag&#93;]
 else ([else])
@@ -49,30 +49,24 @@ endif
 |«external system»\nCharge Point|
 :Stop delivery and\nreport session end>
 |«software system»\nPowerMe Platform|
-:Close session and price\nit per tariff period;
+:Close session;
 :ChargingSession\n&#91;closed&#93;]
-if ( ) then ([online card:\ncsms_billed])
-  :Debit Charging Credit, split platform\nfee and Operator share, award points;
+if ( ) then ([BR-P08: RFID card:\ncsms_billed])
   :ChargingSession\n&#91;reconciled&#93;]
+  :Price per tariff period, debit\nCharging Credit, award points;
   :CreditTransaction\n&#91;session_debit&#93;]
-  if ( ) then ([cost > credit balance])
+  if ( ) then ([BR-P20: cost > credit balance])
     :CreditAccount\n&#91;in_shortfall&#93;]
   else ([else])
   endif
   |«person»\nDriver|
   :View charging statement\nin the app;
   stop
-else ([else])
+else ([password, free-vend or\nunknown tag: unattributed])
   |«software system»\nPowerMe Platform|
-  if ( ) then ([wallet card:\nstation_wallet])
-    :Keep price for reconciliation\nonly (no debit, no invoice);
-    :ChargingSession\n&#91;reconciled&#93;]
-    stop
-  else ([password, free-vend or\nunknown tag: unattributed])
-    :Add to the unattributed\nsession list;
-    |«person»\nOperator|
-    :Resolve unattributed\nsession (UC-OPS-05);
-    stop
-  endif
+  :Add to the unattributed\nsession list;
+  |«person»\nOperator|
+  :Resolve unattributed\nsession (UC-OPS-05);
+  stop
 endif
 @enduml

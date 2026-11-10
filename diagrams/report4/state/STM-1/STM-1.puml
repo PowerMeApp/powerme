@@ -1,6 +1,6 @@
 @startuml STM-1
 !include _style.iuml
-title STM-1 (System level) — Lifecycle of a ChargingSession\nsessions.status · v1.0 · 01/11/2026
+title STM-1 (System level) — Lifecycle of a ChargingSession\nsessions.status · v1.1 · 10/11/2026
 
 state c0 <<choice>>
 [*] -down-> c0
@@ -20,10 +20,20 @@ state "Running" as Running {
   active -down-> stopping : Driver stops, limit reached\nor credit at cutoff\n/ ask Charge Point to stop
   paused -down-> stopping : Driver stops\n/ ask Charge Point to stop
   stopping -up-> active : Charge Point refuses\nto stop / tell Driver
+  stopping : no stop reply in 30 s\n/ resend (max 3, 30 s apart),\nthen flag for the Operator
 }
 
 pending -right-> Running : Charge Point\nconfirms start
 pending -down-> failed : after(120 s)\n/ tell Driver, no charge
+note left of pending
+  App start: pending and failed are held on
+  the start request (driver_charge_intents:
+  accepted / released + start_timeout); the
+  sessions row is created in active when the
+  Charge Point reports the start. No reply to
+  the start in 30 s: outcome unknown, credit
+  stays held until the Operator fences it.
+end note
 failed -down-> [*]
 
 Running -down-> closed : Charge Point reports stop\n(Driver, limit, battery full\nor at the Charge Point)
@@ -33,13 +43,13 @@ orphaned --> Running : live data of\nthe session resumes
 closed -down-> reconciled : energy check consistent
 closed -down-> review : energy check conflict\n/ hold billing
 orphaned -down-> reconciled : stop data replayed,\nenergy check consistent
-orphaned -down-> review : stop data replayed, energy\ncheck conflict, or at(start + 24 h)\n/ hold billing
+orphaned -down-> review : stop data replayed, energy\ncheck conflict, or after(24 h\nin orphaned) / hold billing
 review -left-> reconciled : Operator resolves\n/ record decision
 reconciled -right-> review : late data changes the result\n[credit not yet debited]
 reconciled -down-> [*] : charge settled\n/ price per tariff period,\ndebit credit, award points,\nsend statement
 note left of reconciled
-  Only app-billed sessions are
-  settled; station_wallet and
+  Only csms_billed sessions (app
+  or RFID card) are settled;
   unattributed sessions stay
   reconciled (no debit).
 end note

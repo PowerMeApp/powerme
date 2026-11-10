@@ -1,4 +1,6 @@
-# Single source for the PowerMe ERD (v1.1, 01/11: + Refund, R8) (conceptual + logical): entities, weak entities, relationships.
+# Single source for the PowerMe ERD (v1.2, 10/11: synced with the DB of migrations 0000-0015, audit A5 / D20:
+# + Connector is reported in ConnectorStatusEvent; RemoteCommand linked to User as in the DB (PolicyTemplate stays Admin, SRS Table 9) -> 54 relationships;
+# v1.1, 01/11: + Refund, R8) (conceptual + logical): entities, weak entities, relationships.
 # (A, verb, B, ca, cb, identifying)   "A : B" = ca : cb  (ca = how many A per B, cb = how many B per A)
 ENTITIES = ["User","Admin","OperatorStaff","Driver","Operator","Site","ChargePoint","Connector","ConnectorStatusEvent",
  "RemoteCommand","FaultEvent","FaultReport","MaintenanceTicket","PolicyTemplate","TariffPeriod","Promotion",
@@ -15,14 +17,15 @@ REL = [
  ("Operator","owns","Site","1","0..N",0),
  ("Operator","offers","Promotion","1","0..N",0),
  ("Operator","defines","TariffPeriod","1","0..N",1),
- ("Admin","maintains","PolicyTemplate","1","0..N",0),
+ ("Admin","maintains","PolicyTemplate","1","0..N",0),   # created_by -> users (admin user), SRS Table 9
  ("Site","hosts","ChargePoint","0..1","0..N",0),
  ("ChargePoint","has (max 2)","Connector","1","1..N",1),
  ("ChargePoint","records","ConnectorStatusEvent","1","0..N",1),
+ ("Connector","is reported in","ConnectorStatusEvent","0..1","0..N",0),   # connector_id, NULL for connector 0 (0000_init.sql:223)
  ("ChargePoint","raises","FaultEvent","1","0..N",0),
  ("Connector","is subject of","FaultEvent","0..1","0..N",0),
  ("ChargePoint","receives","RemoteCommand","1","0..N",0),
- ("OperatorStaff","sends","RemoteCommand","0..1","0..N",0),
+ ("User","sends","RemoteCommand","0..1","0..N",0),   # requested_by -> users; NULL = system (0001:94)
  ("RemoteCommand","resets","FaultEvent","0..1","0..N",0),
  ("OperatorStaff","acknowledges","FaultEvent","0..1","0..N",0),
  ("Connector","is reported in","FaultReport","1","0..N",0),

@@ -1,7 +1,6 @@
-// PowerMe — Physical ERD (PostgreSQL 16), 01/11/2026 (v1.1: + refunds, R8).
-// Generated from the database built with migrations 0000-0012 (gen_dbml.py). Paste into dbdiagram.io.
-// After `dbml2sql powerme_physical.dbml --postgres`, run powerme_physical_supplement.sql
-// (sequences, partitions, partial / expression indexes, triggers, report views: not expressible in DBML).
+// PowerMe — Physical ERD (PostgreSQL 16), 10/11/2026 (v1.2: synced with the DB of migrations 0000-0015, audit A5 / D20;
+// v1.1 01/11: + refunds, R8). 44 tables (+10 partitions), 442 columns, 32 enums, 84 foreign keys. Paste into dbdiagram.io.
+// Not expressible in DBML (see the migrations): sequences, partitions, partial / expression indexes, triggers.
 
 Project powerme {
   database_type: 'PostgreSQL'
@@ -104,8 +103,7 @@ Enum pause_cause {
 }
 Enum payment_mode {
   "csms_billed"
-  "station_wallet"
-  "free"
+  "station_wallet" [note: 'still in the DB enum, out of scope since 09/11 (wallet cards removed, T110)']
   "unattributed"
 }
 Enum reconciliation_record_type {
@@ -116,11 +114,6 @@ Enum reconciliation_record_type {
   "unknown_id_tag"
   "conflict"
   "late_sample"
-}
-Enum refund_error_kind {
-  "transient"
-  "unknown"
-  "rejected"
 }
 Enum refund_kind {
   "top_up"
@@ -257,7 +250,7 @@ Table vehicles {
     driver_id [name: 'vehicles_driver_id_idx']
     vehicle_model_id [name: 'vehicles_vehicle_model_id_idx']
   }
-  Note: 'Driver\'s vehicle (plate); one default per driver. Partial / expression indexes: vehicles_one_default_per_driver (supplement).'
+  Note: 'Driver\'s vehicle (plate); one default per driver. Partial / expression indexes: vehicles_one_default_per_driver (in the migrations).'
 }
 
 Table vehicle_models {
@@ -369,6 +362,7 @@ Table connectors {
 Table connector_status_events {
   id bigint [pk, increment]
   charge_point_id bigint [not null]
+  connector_id bigint [note: 'NULL only for connector_no 0']
   connector_no smallint [not null, note: '0 = whole charge point (BR-P10)']
   status connector_status [not null]
   error_code "varchar(30)" [not null, default: 'NoError']
@@ -379,8 +373,10 @@ Table connector_status_events {
   unexpected_transition boolean [not null, default: false]
   indexes {
     (charge_point_id, connector_no, received_at) [unique, name: 'connector_status_events_cp_no_received_key']
+    (connector_id, received_at) [name: 'connector_status_events_connector_id_received_at_idx']
   }
   checks {
+    `((connector_no = 0) = (connector_id IS NULL))` [name: 'connector_status_events_connector_id_check']
     `(connector_no = ANY (ARRAY[0, 1, 2]))` [name: 'connector_status_events_connector_no_check']
   }
   Note: 'Every StatusNotification received (connector_no 0 = whole charge point). Append-only history.'
@@ -409,12 +405,12 @@ Table remote_commands {
     `((responded_at IS NULL) OR ((sent_at IS NOT NULL) AND (responded_at >= sent_at)))` [name: 'remote_commands_responded_check']
     `((sent_at IS NULL) OR (sent_at >= requested_at))` [name: 'remote_commands_sent_check']
   }
-  Note: 'Command sent from CSMS to a charge point (RemoteStart/Stop, Reset, ChangeAvailability, ReserveNow…). Partial / expression indexes: remote_commands_cp_requested_at_idx; remote_commands_idempotency_key_key; remote_commands_in_flight_idx (supplement).'
+  Note: 'Command sent from CSMS to a charge point (RemoteStart/Stop, Reset, ChangeAvailability, ReserveNow…). Partial / expression indexes: remote_commands_cp_requested_at_idx; remote_commands_idempotency_key_key; remote_commands_in_flight_idx (in the migrations).'
 }
 
 Table fault_events {
   id bigint [pk, increment]
-  event_no bigint [not null, unique, note: 'auto number (sequence, see supplement)']
+  event_no bigint [not null, unique, note: 'auto number (sequence, see the migrations)']
   charge_point_id bigint [not null]
   connector_id bigint [note: 'NULL = fault of the whole charge point']
   source fault_source [not null]
@@ -432,12 +428,12 @@ Table fault_events {
     connector_id [name: 'fault_events_connector_id_idx']
     reset_command_id [name: 'fault_events_reset_command_id_idx']
   }
-  Note: 'Fault raised by a charge point (OCPP), a driver report or an operator; tracked to resolution (STM). Partial / expression indexes: fault_events_one_open_per_connector_key; fault_events_open_idx (supplement).'
+  Note: 'Fault raised by a charge point (OCPP), a driver report or an operator; tracked to resolution (STM). Partial / expression indexes: fault_events_one_open_per_connector_key; fault_events_open_idx (in the migrations).'
 }
 
 Table fault_reports {
   id bigint [pk, increment]
-  report_no bigint [not null, unique, note: 'auto number (sequence, see supplement)']
+  report_no bigint [not null, unique, note: 'auto number (sequence, see the migrations)']
   driver_id bigint [not null]
   connector_id bigint [not null]
   description text [not null]
@@ -457,7 +453,7 @@ Table fault_reports {
 
 Table maintenance_tickets {
   id bigint [pk, increment]
-  ticket_no bigint [not null, unique, note: 'auto number (sequence, see supplement)']
+  ticket_no bigint [not null, unique, note: 'auto number (sequence, see the migrations)']
   fault_event_id bigint [not null]
   assigned_to bigint
   status maintenance_ticket_status [not null, default: 'open']
@@ -533,7 +529,7 @@ Table policy_templates {
 // ---------- charging ----------
 Table reservations {
   id bigint [pk, increment]
-  reservation_no integer [not null, unique, note: 'auto number (sequence, see supplement)']
+  reservation_no integer [not null, unique, note: 'auto number (sequence, see the migrations)']
   driver_id bigint [not null]
   connector_id bigint [not null]
   status reservation_status [not null, default: 'active', note: 'State Diagram: reservation; one active per driver and per connector (BR-P24)']
@@ -544,12 +540,12 @@ Table reservations {
   checks {
     `(expires_at > created_at)` [name: 'reservations_expires_check']
   }
-  Note: '[Should] Connector hold by a driver for the hold window; fee on no-show / late cancel. Partial / expression indexes: reservations_one_active_per_connector; reservations_one_active_per_driver (supplement).'
+  Note: '[Should] Connector hold by a driver for the hold window; fee on no-show / late cancel. Partial / expression indexes: reservations_one_active_per_connector; reservations_one_active_per_driver (in the migrations).'
 }
 
 Table sessions {
   id bigint [pk, increment]
-  transaction_no integer [not null, unique, note: 'auto number (sequence, see supplement)']
+  transaction_no integer [not null, unique, note: 'auto number (sequence, see the migrations)']
   connector_id bigint [not null]
   charge_point_id bigint [not null, note: 'copy for the OCPP key; kept consistent by the composite FK to connectors']
   connector_no smallint [not null]
@@ -640,7 +636,7 @@ Table meter_values {
     (id, received_at) [pk]
     (session_id, cp_timestamp, measurand) [name: 'meter_values_session_id_cp_timestamp_idx']
   }
-  Note: 'MeterValues samples of a session. Partitioned by month on received_at. Partitioned by RANGE (received_at), one partition per month (supplement).'
+  Note: 'MeterValues samples of a session. Partitioned by month on received_at. Partitioned by RANGE (received_at), one partition per month (in the migrations).'
 }
 
 Table session_tariff_segments {
@@ -684,7 +680,7 @@ Table reconciliation_records {
     `(record_no >= 1)` [name: 'reconciliation_records_record_no_check']
     `((reviewed_by IS NULL) = (reviewed_at IS NULL))` [name: 'reconciliation_records_reviewed_check']
   }
-  Note: 'Data problem found on a session (replay, gap, orphan stop…) and its review. Partial / expression indexes: reconciliation_records_unreviewed_idx (supplement).'
+  Note: 'Data problem found on a session (replay, gap, orphan stop…) and its review. Partial / expression indexes: reconciliation_records_unreviewed_idx (in the migrations).'
 }
 
 // ---------- billing ----------
@@ -723,7 +719,7 @@ Table credit_transactions {
     `((transaction_type <> 'session_debit') OR (session_id IS NOT NULL))` [name: 'credit_transactions_session_debit_check']
     `((transaction_type <> 'top_up') OR (top_up_id IS NOT NULL))` [name: 'credit_transactions_top_up_check']
   }
-  Note: 'Ledger entry of a credit account (top-up, session debit, refund, adjustment, reservation fee). Partial / expression indexes: credit_transactions_one_debit_per_session; credit_transactions_one_per_top_up_and_type (supplement).'
+  Note: 'Ledger entry of a credit account (top-up, session debit, refund, adjustment, reservation fee). Partial / expression indexes: credit_transactions_one_debit_per_session; credit_transactions_one_per_top_up_and_type (in the migrations).'
 }
 
 Table top_ups {
@@ -748,6 +744,7 @@ Table top_ups {
   updated_at timestamptz [not null, default: `now()`]
   indexes {
     credit_account_id [name: 'top_ups_credit_account_id_idx']
+    (status, expires_at) [name: 'top_ups_status_expires_at_idx']
   }
   checks {
     `((amount_vnd > 0) AND (points_discount_vnd >= 0) AND (amount_paid_vnd = (amount_vnd - points_discount_vnd)))` [name: 'top_ups_amount_check']
@@ -759,7 +756,7 @@ Table top_ups {
     `(points_redeemed >= 0)` [name: 'top_ups_points_redeemed_check']
     `((status = 'refunded') = (refunded_at IS NOT NULL))` [name: 'top_ups_refunded_check']
   }
-  Note: 'Payment of credit through the gateway; late payment and refund fields. Partial / expression indexes: top_ups_gateway_transaction_no_key (supplement).'
+  Note: 'Payment of credit through the gateway; late payment and refund fields. Partial / expression indexes: top_ups_gateway_transaction_no_key (in the migrations).'
 }
 
 Table e_invoices {
@@ -774,11 +771,16 @@ Table e_invoices {
   last_error_kind e_invoice_error_kind
   last_error_message text
   last_attempt_at timestamptz
+  next_attempt_at timestamptz [default: `now()`, note: 'background retry schedule (D7, 0015)']
   created_at timestamptz [not null, default: `now()`]
   updated_at timestamptz [not null, default: `now()`]
+  indexes {
+    (status, next_attempt_at) [name: 'e_invoices_status_next_attempt_at_idx']
+  }
   checks {
     `((status <> 'issued') OR ((invoice_no IS NOT NULL) AND (issued_at IS NOT NULL)))` [name: 'e_invoices_issued_check']
     `((last_error_kind IS NULL) OR (last_attempt_at IS NOT NULL))` [name: 'e_invoices_last_error_check']
+    `((status <> ALL (ARRAY['requested', 'failed'])) OR (next_attempt_at IS NOT NULL))` [name: 'e_invoices_next_attempt_check']
   }
   Note: 'E-invoice for a top-up, with provider retry state.'
 }
@@ -790,23 +792,26 @@ Table invoice_adjustments {
   reason text [not null]
   amount_vnd bigint [not null]
   issued_at timestamptz
-  refund_id bigint [not null, unique, note: 'issued only after this refund is done (BR-P45)']
+  refund_id bigint [unique, note: 'issued only after this refund is done (BR-P51); NULL for rows before 0015']
   provider_adjustment_no "varchar(20)" [unique]
   status e_invoice_status [not null, default: 'requested', note: 'same provider flow as e_invoices (BR-P44)']
   attempt_count integer [not null, default: 0]
   last_error_kind e_invoice_error_kind
   last_error_message text
   last_attempt_at timestamptz
+  next_attempt_at timestamptz [default: `now()`, note: 'background retry schedule (D7, 0015)']
   created_at timestamptz [not null, default: `now()`]
   updated_at timestamptz [not null, default: `now()`]
   indexes {
     (e_invoice_id, adjustment_no) [unique, name: 'invoice_adjustments_invoice_adjustment_no_key']
+    (status, next_attempt_at) [name: 'invoice_adjustments_status_next_attempt_at_idx']
   }
   checks {
     `(adjustment_no >= 1)` [name: 'invoice_adjustments_adjustment_no_check']
     `(attempt_count >= 0)` [name: 'invoice_adjustments_attempt_count_check']
     `((status <> 'issued') OR ((provider_adjustment_no IS NOT NULL) AND (issued_at IS NOT NULL)))` [name: 'invoice_adjustments_issued_check']
     `((last_error_kind IS NULL) OR (last_attempt_at IS NOT NULL))` [name: 'invoice_adjustments_last_error_check']
+    `((status <> ALL (ARRAY['requested', 'failed'])) OR (next_attempt_at IS NOT NULL))` [name: 'invoice_adjustments_next_attempt_check']
   }
   Note: 'Adjustment invoice correcting an issued e-invoice (issued invoices are never edited).'
 }
@@ -814,31 +819,34 @@ Table invoice_adjustments {
 Table refunds {
   id bigint [pk, increment]
   top_up_id bigint [not null]
-  kind refund_kind [not null, note: 'top-up refund / late payment / account closure; one of each per top-up (BR-P21, BR-P44)']
+  kind refund_kind [not null, note: 'top-up refund / late payment / account closure; one per top-up for top_up and late_payment, closure refunds can be several (BR-P21, BR-P51)']
   amount_vnd bigint [not null]
-  status refund_status [not null, default: 'requested', note: 'requested -> done | failed; never sent twice, gateway queried first on an unknown result (BR-P45)']
+  status refund_status [not null, default: 'requested', note: 'requested -> done | failed; never sent twice, gateway queried first on an unknown result (BR-P51)']
   attempt_count integer [not null, default: 0]
-  last_error_kind refund_error_kind
+  last_error_kind e_invoice_error_kind [note: 'shares the e-invoice enum (transient / data), 0015']
   last_error_message text
   last_attempt_at timestamptz
+  next_attempt_at timestamptz [default: `now()`, note: 'background retry schedule (D7, 0015)']
   gateway_refund_no "varchar(20)" [unique]
   requested_by bigint [note: 'Admin who refunded; NULL = created by the system at account closure']
   completed_at timestamptz [note: 'gateway confirmed (set together with status done)']
   created_at timestamptz [not null, default: `now()`]
   updated_at timestamptz [not null, default: `now()`]
   indexes {
-    (top_up_id, kind) [unique, name: 'refunds_top_up_kind_key']
     requested_by [name: 'refunds_requested_by_idx']
+    (status, next_attempt_at) [name: 'refunds_status_next_attempt_at_idx']
+    top_up_id [name: 'refunds_top_up_id_idx']
   }
   checks {
     `(amount_vnd > 0)` [name: 'refunds_amount_check']
     `(attempt_count >= 0)` [name: 'refunds_attempt_count_check']
-    `((completed_at IS NULL) OR (completed_at >= created_at))` [name: 'refunds_completed_check']
-    `((status = 'done') = (completed_at IS NOT NULL))` [name: 'refunds_done_check']
-    `((status <> 'done') OR (gateway_refund_no IS NOT NULL))` [name: 'refunds_done_no_check']
+    `((status = 'done') = (completed_at IS NOT NULL))` [name: 'refunds_completed_check']
+    `((status <> 'done') OR (gateway_refund_no IS NOT NULL))` [name: 'refunds_gateway_refund_no_check']
+    `((status <> 'requested') OR (next_attempt_at IS NOT NULL))` [name: 'refunds_next_attempt_check']
+    `((kind = 'account_closure') OR (requested_by IS NOT NULL))` [name: 'refunds_requested_by_check']
     `((last_error_kind IS NULL) OR (last_attempt_at IS NOT NULL))` [name: 'refunds_last_error_check']
   }
-  Note: 'Refund request (R8): money sent back to the payment source of a top-up by a background job; requested -> done / failed (BR-P45). Partial / expression indexes: refunds_open_idx (supplement).'
+  Note: 'Refund request (R8): money sent back to the payment source of a top-up by a background job; requested -> done / failed (BR-P51). Partial unique index refunds_one_per_top_up_and_kind (top_up_id, kind) WHERE kind IN (top_up, late_payment): account-closure refunds may repeat per top-up (0015).'
 }
 
 Table loyalty_accounts {
@@ -865,7 +873,7 @@ Table loyalty_transactions {
     session_id [name: 'loyalty_transactions_session_id_idx']
     top_up_id [name: 'loyalty_transactions_top_up_id_idx']
   }
-  Note: 'Ledger entry of loyalty points (earn, redeem, expire, adjust, restore). Partial / expression indexes: loyalty_transactions_one_earn_per_session (supplement).'
+  Note: 'Ledger entry of loyalty points (earn, redeem, expire, adjust, restore). Partial / expression indexes: loyalty_transactions_one_earn_per_session (in the migrations).'
 }
 
 // ---------- technical ----------
@@ -890,12 +898,13 @@ Table ocpp_message_log {
   charge_point_id bigint [not null]
   epoch integer [not null]
   direction ocpp_direction [not null]
-  message_type smallint [not null]
+  message_type smallint [note: 'NULL only when validation_error is set (0013)']
   unique_id "varchar(36)" [not null]
   action "varchar(40)"
   cp_timestamp timestamptz
   raw jsonb [not null]
   replayed boolean
+  validation_error text [note: 'frame rejected by strict schema validation (0013)']
   indexes {
     (id, received_at) [pk]
     (action, received_at) [name: 'ocpp_message_log_action_idx']
@@ -903,10 +912,10 @@ Table ocpp_message_log {
     (charge_point_id, unique_id) [name: 'ocpp_message_log_cp_unique_id_idx']
   }
   checks {
-    `((message_type = 2) = (action IS NOT NULL))` [name: 'ocpp_message_log_action_check']
-    `(message_type = ANY (ARRAY[2, 3, 4]))` [name: 'ocpp_message_log_message_type_check']
+    `((validation_error IS NOT NULL) OR ((message_type = 2) = (action IS NOT NULL)))` [name: 'ocpp_message_log_action_check']
+    `(((message_type IS NOT NULL) AND (message_type = ANY (ARRAY[2, 3, 4]))) OR ((message_type IS NULL) AND (validation_error IS NOT NULL)))` [name: 'ocpp_message_log_message_type_check']
   }
-  Note: 'Technical: raw OCPP frames in/out, append-only, partitioned by month. Partitioned by RANGE (received_at), one partition per month (supplement).'
+  Note: 'Technical: raw OCPP frames in/out, append-only, partitioned by month. Partitioned by RANGE (received_at), one partition per month (in the migrations).'
 }
 
 Table driver_charge_intents {
@@ -940,7 +949,7 @@ Table driver_charge_intents {
     `((state) = ANY (ARRAY['sent', 'accepted', 'rejected', 'unknown', 'effect', 'settled', 'released']))` [name: 'driver_charge_intents_state_check']
     `(version > 0)` [name: 'driver_charge_intents_version_check']
   }
-  Note: 'Technical (WP3): driver\'s start request from the app; idempotency, credit hold, state. Partial / expression indexes: driver_charge_intents_open_connector (supplement).'
+  Note: 'Technical (WP3): driver\'s start request from the app; idempotency, credit hold, state. Partial / expression indexes: driver_charge_intents_open_connector (in the migrations).'
 }
 
 Table driver_charge_intent_events {
@@ -972,7 +981,7 @@ Table driver_stop_intents {
   checks {
     `((state) = ANY (ARRAY['sent', 'accepted', 'rejected', 'unknown', 'effect']))` [name: 'driver_stop_intents_state_check']
   }
-  Note: 'Technical (WP3): driver\'s stop request from the app. Partial / expression indexes: driver_stop_intents_open_session (supplement).'
+  Note: 'Technical (WP3): driver\'s stop request from the app. Partial / expression indexes: driver_stop_intents_open_session (in the migrations).'
 }
 
 Table driver_stop_attempts {
@@ -1026,7 +1035,7 @@ Table driver_start_recoveries {
 Table charge_settlement_jobs {
   session_id bigint [pk]
   state "varchar(20)" [not null, default: 'pending']
-  reason "varchar(30)" [not null, default: 'stop_observed']
+  reason "varchar(50)" [not null, default: 'stop_observed']
   attempts integer [not null, default: 0]
   last_error_code "varchar(50)"
   next_attempt_at timestamptz [not null, default: `now()`]
@@ -1035,7 +1044,7 @@ Table charge_settlement_jobs {
   checks {
     `((state) = ANY (ARRAY['pending', 'posted', 'ineligible']))` [name: 'charge_settlement_jobs_state_check']
   }
-  Note: 'Technical (WP3): outbox job that settles a closed session (debit + points). Partial / expression indexes: charge_settlement_jobs_due (supplement).'
+  Note: 'Technical (WP3): outbox job that settles a closed session (debit + points). Partial / expression indexes: charge_settlement_jobs_due (in the migrations).'
 }
 
 Table charge_tariff_boundary_evidence {
@@ -1085,6 +1094,7 @@ Ref charging_statements_driver_id_fkey: charging_statements.driver_id > drivers.
 Ref charging_statements_loyalty_entry_id_fkey: loyalty_transactions.id - charging_statements.loyalty_entry_id
 Ref charging_statements_session_id_fkey: sessions.id - charging_statements.session_id
 Ref connector_status_events_charge_point_id_fkey: connector_status_events.charge_point_id > charge_points.id [delete: cascade]
+Ref connector_status_events_connector_id_fkey: connector_status_events.connector_id > connectors.id
 Ref connectors_charge_point_id_fkey: connectors.charge_point_id > charge_points.id [delete: cascade]
 Ref credit_accounts_driver_id_fkey: drivers.user_id - credit_accounts.driver_id
 Ref credit_transactions_credit_account_id_fkey: credit_transactions.credit_account_id > credit_accounts.id [delete: restrict]
@@ -1120,7 +1130,7 @@ Ref fault_reports_connector_id_fkey: fault_reports.connector_id > connectors.id
 Ref fault_reports_driver_id_fkey: fault_reports.driver_id > drivers.user_id
 Ref fault_reports_fault_event_id_fkey: fault_reports.fault_event_id > fault_events.id
 Ref invoice_adjustments_e_invoice_id_fkey: invoice_adjustments.e_invoice_id > e_invoices.id [delete: restrict]
-Ref invoice_adjustments_refund_id_fkey: refunds.id - invoice_adjustments.refund_id [delete: restrict]
+Ref invoice_adjustments_refund_id_fkey: refunds.id - invoice_adjustments.refund_id
 Ref loyalty_accounts_driver_id_fkey: drivers.user_id - loyalty_accounts.driver_id
 Ref loyalty_transactions_loyalty_account_id_fkey: loyalty_transactions.loyalty_account_id > loyalty_accounts.id [delete: restrict]
 Ref loyalty_transactions_session_id_fkey: loyalty_transactions.session_id > sessions.id
@@ -1131,14 +1141,14 @@ Ref meter_values_session_id_fkey: meter_values.session_id > sessions.id [delete:
 Ref ocpp_message_log_charge_point_id_fkey: ocpp_message_log.charge_point_id > charge_points.id
 Ref operator_staff_operator_id_fkey: operator_staff.operator_id > operators.id
 Ref operator_staff_user_id_fkey: users.id - operator_staff.user_id [delete: cascade]
-Ref policy_templates_created_by_fkey: policy_templates.created_by > admins.user_id
+Ref policy_templates_created_by_fkey: policy_templates.created_by > users.id
 Ref promotions_operator_id_fkey: promotions.operator_id > operators.id
 Ref reconciliation_records_reviewed_by_fkey: reconciliation_records.reviewed_by > operator_staff.user_id
 Ref reconciliation_records_session_id_fkey: reconciliation_records.session_id > sessions.id [delete: restrict]
 Ref refunds_requested_by_fkey: refunds.requested_by > admins.user_id
-Ref refunds_top_up_id_fkey: refunds.top_up_id > top_ups.id [delete: restrict]
+Ref refunds_top_up_id_fkey: refunds.top_up_id > top_ups.id
 Ref remote_commands_charge_point_id_fkey: remote_commands.charge_point_id > charge_points.id
-Ref remote_commands_requested_by_fkey: remote_commands.requested_by > operator_staff.user_id
+Ref remote_commands_requested_by_fkey: remote_commands.requested_by > users.id
 Ref reservations_connector_id_fkey: reservations.connector_id > connectors.id
 Ref reservations_driver_id_fkey: reservations.driver_id > drivers.user_id
 Ref rfid_cards_driver_id_fkey: rfid_cards.driver_id > drivers.user_id

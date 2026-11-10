@@ -1,30 +1,28 @@
 @startuml STM-4
 !include _style.iuml
-title STM-4 (System level) — Lifecycle of a TopUp\ntop_ups.status · v1.0 · 01/11/2026
+title STM-4 (System level) — Lifecycle of a TopUp\ntop_ups.status · v1.1 · 10/11/2026
 
 state c1 <<choice>>
 [*] --> pending : / send payment request
 note left of pending
   created when the Driver confirms an
   amount within the limits (BR-P22) and
-  has no other open top-up
+  has no other pending top-up
 end note
 pending --> credited : payment confirmed\n[valid, amount matches, not yet applied]\n/ credit full amount, settle shortfall,\nredeem points, request e-invoice
 pending --> failed : payment failed\nor Driver cancels
-pending --> c1 : after(15 min)\n/ query gateway
+pending --> c1 : at(expires_at + 2 min)\n/ query gateway (querydr)
 c1 --> credited : [paid]\n/ credit, as above
-c1 --> expired : [else]
-expired --> credited : late payment confirmed\n[within 1 h, limits OK, not yet applied]\n/ credit once
-expired --> [*] : after(1 h)
+c1 --> expired : [else]\n/ tell Driver (MSG26)
+expired --> [*]
 credited --> refunded : Admin refunds it\n[balance ≥ amount]\n/ debit credit, restore points,\ncreate refund (STM-10)
 failed --> [*]
 refunded --> [*]
 note bottom of expired
-  A payment confirmed after the 1 h window, or when the
-  limits fail (account closed, or balance would exceed
-  5,000,000 VND), is recorded as a late payment: no credit,
-  no invoice, the top-up stays expired, and it is listed
-  for Admin refund (STM-10, late_payment).
+  Expiry is final. A payment confirmed after
+  expiry is recorded as a late payment (no credit,
+  no invoice), the top-up stays expired, and it is
+  listed for Admin refund (STM-10, late_payment).
   A repeated payment result never changes the state.
 end note
 note bottom of failed

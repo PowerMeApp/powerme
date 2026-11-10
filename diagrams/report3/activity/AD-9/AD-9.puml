@@ -1,6 +1,6 @@
 @startuml AD-9
 !include _style.iuml
-title AD-9 (System level) — Handle billing exceptions: refunds and e-invoice retry\nTrigger: Admin picks an item on Billing Exceptions, or a Driver closes the account\nUse cases: UC-ADM-08, UC-ACC-02 · Rules: BR-P13, BR-P14, BR-P21, BR-P44, BR-P45
+title AD-9 (System level) — Handle billing exceptions: refunds and e-invoice retry\nTrigger: Admin picks an item on Billing Exceptions, or a Driver closes the account\nUse cases: UC-ADM-08, UC-ACC-02 · Rules: BR-P13, BR-P14, BR-P21, BR-P44, BR-P51
 
 |«person»\nDriver|
 |«person»\nAdmin|
@@ -14,8 +14,8 @@ if ( ) then ([Admin picks an item])
   :Open Billing Exceptions\nand choose an item;
   |«software system»\nPowerMe Platform|
   if ( ) then ([top-up to refund])
-    :Check that the balance\ncovers the top-up;
-    if ( ) then ([balance < top-up amount,\nor top-up not credited])
+    :Check that the available\nbalance covers the top-up;
+    if ( ) then ([BR-P21: available balance < amount,\naccount closed, or top-up not credited])
       :Refuse with reason;
       stop
     else ([balance covers it])
@@ -24,7 +24,7 @@ if ( ) then ([Admin picks an item])
       :LoyaltyTransaction\n&#91;restore&#93;]
     endif
   else ([else])
-    if ( ) then ([e-invoice needs review])
+    if ( ) then ([BR-P44: e-invoice needs review])
       :Send the e-invoice to the provider\nagain, once (attempt count not reset)>
       if ( ) then ([issued by the provider])
         :EInvoice\n&#91;issued&#93;]
@@ -36,13 +36,22 @@ if ( ) then ([Admin picks an item])
     endif
   endif
 else ([Driver closed the account])
+  |«person»\nDriver|
+  :Confirm closure after the preview\n(refundable, non-refundable amount\nand points forfeited);
   |«software system»\nPowerMe Platform|
-  :Debit unused credit and split it\nover the newest credited top-ups;
+  if ( ) then ([account not active, a pending top-up,\nor an unsettled charge or session])
+    :Refuse closure with reason (MSG23);
+    stop
+  else ([closure allowed])
+  endif
+  :Debit unused credit and split it\nover the newest credited top-ups\n(each share ≤ amount paid; the rest\nwritten off by an adjustment);
+  :Forfeit remaining points;
+  :LoyaltyTransaction\n&#91;expire&#93;]
   :CreditAccount\n&#91;closed&#93;]
 endif
 if ( ) then ([failed refund\nbeing retried])
 else ([new refund])
-  :Create refund request\n(one per top-up and kind);
+  :Create refund request (top_up and\nlate_payment: one per top-up;\nclosure: one per share);
   :Refund\n&#91;requested&#93;]
 endif
 :Send refund to the original payment\nsource (automatic retries after 5 min,\n30 min, 2 h; unknown result: query\nthe gateway before any resend)>

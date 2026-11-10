@@ -7,37 +7,32 @@ title AD-5 (System level) — Get station suggestion\nTrigger: Driver opens "Sug
 |«external system»\nMap & Routing\nService|
 |«person»\nDriver|
 start
-:Choose Fastest or Cheapest,\noptionally enter battery %\nand target charge (default 80%);
+:Enter battery % and target charge\n(default 80%, at most 80%) and share\nlocation (optional);
 |«software system»\nPowerMe Platform|
-:Find stations compatible with the\nvehicle, not Faulted or Offline;
-if ( ) then ([battery % entered])
-  :Drop stations beyond\nbattery % × rated range × 0.8;
-else ([else])
-endif
-if ( ) then ([no candidate station])
-  :Tell Driver no compatible\nstation is in range;
-  stop
+:Estimate range = rated range\n× battery % × 0.75;
+:Find stations compatible with the\nvehicle within 1.5 × estimated range;
+if ( ) then ([BR-P33: nothing in range])
+  :Take the 3 nearest compatible\nstations, marked risky;
 else ([candidates found])
 endif
-:Request travel times\nto candidate stations>
-|«external system»\nMap & Routing\nService|
-:Return travel times>
-|«software system»\nPowerMe Platform|
-if ( ) then ([routing error\nor timeout])
-  :Estimate travel time from straight-line\ndistance ÷ 30 km/h, mark approximate;
-else ([travel times received])
-endif
-:Estimate wait on arrival per connector\n(free now, time left, or hold end);
-:Estimate charging time to target\nand cost at the arrival tariff period;
-:Add reliability penalty (+10 min, label)\nfor 7-day uptime < 80%, an open reported\nissue, or out-of-date status;
-if ( ) then ([Fastest])
-  :Score by travel + wait\n+ charging time;
-else ([Cheapest])
-  :Score by estimated cost,\nties broken by time;
-endif
+:Label each station by reach: ok, tight\nor risky (10 km reserve; road = straight\nline × 1.3, 30 km/h), nothing dropped;
+:Estimate wait by connector status\n(free 0, freeing soon 5, in use 30 min);
+:Estimate charging time to target\n(85% efficiency) and the cost at\nthe highest tariff of the day;
+:BR-P41: rank by reach, then total time\n(drive + wait + charge), then distance;
+note right
+  Stations with no estimate (e.g. status
+  out of date) are listed last.
+  Cheapest mode, reliability penalty and
+  session-based wait: planned after the MVP.
+end note
 :Keep the top three and show them\nwith reasons (drive, wait, time, cost);
 |«person»\nDriver|
 if ( ) then ([Driver taps Navigate])
+  |«software system»\nPowerMe Platform|
+  :Request the road route\nto the chosen station>
+  |«external system»\nMap & Routing\nService|
+  :Return route (Vietmap)>
+  |«person»\nDriver|
   :Open navigation to\nthe chosen station;
   stop
 else ([else])

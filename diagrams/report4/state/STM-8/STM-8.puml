@@ -1,12 +1,13 @@
 @startuml STM-8
 !include _style.iuml
-title STM-8 (System level) — Status of an RfidCard\nrfid_cards.status · v1.0 · 01/11/2026
+title STM-8 (System level) — Status of an RfidCard\nrfid_cards.status · v1.1 · 10/11/2026
 
 [*] --> unlinked
 note left of unlinked
   created when the Admin registers
-  a card (UC-ADM-04); kind online,
-  wallet or free_vend
+  a card (UC-ADM-04); free-vend tags
+  are set per Charge Point (UC-ADM-05),
+  not as cards
 end note
 unlinked --> active : Admin links it\nto a Driver
 active --> unlinked : Admin unlinks it

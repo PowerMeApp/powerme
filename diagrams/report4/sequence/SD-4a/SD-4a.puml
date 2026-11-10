@@ -1,7 +1,7 @@
 @startuml SD-4a
 !include ../_style.iuml
 title SD-4a (Software level, CSMS) — Connector faulted, Operator acknowledges, remote reset, back to Available\nPrecondition: Charge Point in service · System view: AD-7 · State: STM-6, STM-2
-footer Owner: Trần Trọng Nghĩa (WP4) · v2.0 · 01/11/2026 · names = code (apps/csms/src) · left gate = Charge Point / Operator Dashboard, right gate = Charge Point
+footer Owner: Trần Trọng Nghĩa (WP4) · v2.1 · 10/11/2026 · names = code (apps/csms/src) · left gate = Charge Point / Operator Dashboard, right gate = Charge Point
 
 participant "«component»\n<u>:OcppHandlers</u>" as H
 participant "«component»\n<u>:SessionsService</u>" as S
@@ -15,20 +15,23 @@ H -> S ++ : onStatusNotification(req, ctx)
 S -> S : record status event, connector → Faulted
 S --> H --
 H -> FS ++ : onConnectorStatus({connector, Faulted, errorCode, occurredAt})
-FS -> FS : no open fault → create fault,\nhide connector, alert Operator
+FS -> FS : no open fault → create fault,\nconnector shown as Unavailable, alert Operator
 hnote over FS : {fault.status = raised}
 FS --> H --
 [<-- H -- : StatusNotification.conf {}
 
 == Operator acknowledges ==
-[-> CC ++ : POST /api/admin/faults/{id}/acknowledge [HTTPS]
+[-> CC ++ : POST /api/admin/faults/{id}/acknowledge [HTTP, localhost console]
 CC -> FS ++ : acknowledge(faultId, operatorId)
 FS -> FS : raised → acknowledged
 FS --> CC --
 [<-- CC -- : 200
 
 == Operator sends a remote reset ==
-[-> CC ++ : POST /api/admin/faults/{id}/reset?type=Soft [HTTPS]
+[-> CC ++ : POST /api/admin/faults/{id}/reset?type=Soft [HTTP, localhost console]
+break a reset is already pending, or another connector is charging and force is not set
+  [<-- CC : 409 {reset_in_progress | sessions_active}
+end
 CC -> FS ++ : beginReset(faultId, {type}) : commandId
 FS -> FS : acknowledged → resetting,\nstart 120 s reset timer
 FS --> CC -- : commandId
@@ -40,16 +43,16 @@ REG <--] : Reset.conf {Accepted}
 REG --> CC -- : Accepted
 CC -> FS ++ : onResetResult(commandId, Accepted)
 FS --> CC --
-[<-- CC -- : 202 reset sent
+[<-- CC -- : 200 {reset_status = Accepted, fault_status = resetting}
 
 == Charge Point restarts and reports Available ==
 [-> H ++ : StatusNotification {connectorId, Available}
 H -> S ++ : onStatusNotification(req, ctx)
 S --> H --
 H -> FS ++ : onConnectorStatus({connector, Available})
-FS -> FS : resetting → resolved, clear timer,\nshow connector again
+FS -> FS : resetting → resolved, clear timer,\nshow connector by its status again
 hnote over FS : {fault.status = resolved}
 FS --> H --
 [<-- H -- : StatusNotification.conf {}
-note over H, REG : ConsoleCommands is the Iteration 1 operator API; the Operator Dashboard (WP4) will call the same FaultService operations.
+note over H, REG : ConsoleCommands is the Iteration 1 operator API (plain HTTP on 127.0.0.1, no login yet); the Operator Dashboard (WP4) will call the same FaultService operations.\nThe fault also resolves when the connector starts serving (Preparing … Finishing, Reserved) instead of Available.
 @enduml

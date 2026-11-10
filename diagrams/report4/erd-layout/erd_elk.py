@@ -16,6 +16,7 @@ def tw(s, n, b=False):
     k = (n, b)
     if k not in _f: _f[k] = ImageFont.truetype(FB if b else FR, n)
     return _f[k].getlength(s)
+BOLD = ' font-weight="bold"'  # no backslash inside f-string {} (Python < 3.12)
 e = lambda s: html.escape(str(s), quote=True)
 INK, GREY, LINE = "#1F2D3D", "#5E6B78", "#46525E"
 DOMAIN = {  # domain -> (colour, label, logical entities)
@@ -263,7 +264,7 @@ for n in nodes:
         elif i: boxes.append(f'<line x1="{x0+6:.1f}" y1="{ry:.1f}" x2="{x0+w-6:.1f}" y2="{ry:.1f}" stroke="#E6EAEE"/>')
         cx = x0 + 10
         for j, (txt, fs, bold, fc) in enumerate(r):
-            if txt: boxes.append(f'<text x="{cx:.1f}" y="{ry+21:.1f}" font-size="{fs}"{" font-weight=\"bold\"" if bold else ""} fill="{fc}">{e(txt)}</text>')
+            if txt: boxes.append(f'<text x="{cx:.1f}" y="{ry+21:.1f}" font-size="{fs}"{BOLD if bold else ""} fill="{fc}">{e(txt)}</text>')
             cx += n["cw"][j]
 o += lines + boxes + marks + labels + ["</svg>"]
 need = max(tw(TITLE, 40, True), x) + 80

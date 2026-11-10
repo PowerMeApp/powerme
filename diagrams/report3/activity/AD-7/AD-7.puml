@@ -11,15 +11,15 @@ start
 if ( ) then ([Driver report])
   :Record the report\nagainst the connector;
   :FaultReport]
-  if ( ) then ([2nd Driver within 2 h, or\nconnector status abnormal])
+  if ( ) then ([BR-P42: 2nd Driver within 2 h, or\nconnector status abnormal])
     :Show "reported issue"\nlabel on the connector;
   else ([else])
     :Keep the report for\nlater grouping;
     stop
   endif
-else ([Faulted status\nor offline alert])
+else ([BR-P50: Faulted status\nor offline alert])
 endif
-:Raise fault event, hide connector from\nsearch and suggestions, void its\nreservations (no fee), alert Operator>
+:Raise fault event, show connector as\nUnavailable (left out of suggestions),\nvoid its reservations (Should),\nalert Operator>
 :FaultEvent\n&#91;raised&#93;]
 :Reservation\n&#91;voided&#93;]
 |«person»\nOperator|
@@ -28,6 +28,12 @@ endif
 if ( ) then ([remote reset may fix it])
   :Choose soft or hard reset;
   |«software system»\nPowerMe Platform|
+  if ( ) then ([another connector\nis charging])
+    |«person»\nOperator|
+    :Confirm the reset anyway\n(force: those sessions stop);
+    |«software system»\nPowerMe Platform|
+  else ([else])
+  endif
   :Send reset command>
   :FaultEvent\n&#91;resetting&#93;]
   |«external system»\nCharge Point|
@@ -36,7 +42,7 @@ if ( ) then ([remote reset may fix it])
 else ([needs a site visit])
 endif
 |«software system»\nPowerMe Platform|
-if ( ) then ([connector reports Available\nwithin the reset timeout])
+if ( ) then ([connector reports Available or\nstarts serving, within the reset timeout])
 else ([reset rejected, timed out or still\nfaulted, or site visit needed])
   |«person»\nOperator|
   if ( ) then ([maintenance tickets\nin use (Should)])
@@ -51,7 +57,7 @@ else ([reset rejected, timed out or still\nfaulted, or site visit needed])
   :Report connector\nAvailable>
   |«software system»\nPowerMe Platform|
 endif
-:Resolve fault, show connector again\nand clear "reported issue" label;
+:Resolve fault, show connector by its\nstatus again, clear "reported issue" label;
 :FaultEvent\n&#91;resolved&#93;]
 stop
 @enduml

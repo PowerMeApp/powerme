@@ -1,6 +1,6 @@
 @startuml STM-2
 !include _style.iuml
-title STM-2 (System level) — Status of a Connector\nconnectors.status · v1.0 · 01/11/2026
+title STM-2 (System level) — Status of a Connector\nconnectors.status · v1.1 · 10/11/2026
 
 [*] -down-> Unavailable
 note left of Unavailable
@@ -29,8 +29,8 @@ state Operational {
 
 Unavailable -right-> Operational : Charge Point reports it ready\n(after connecting or back in service)
 Operational -left-> Unavailable : taken out of service\nor Charge Point restarts
-Operational -down-> Faulted : fault reported\n/ hide from search
-Faulted -up-> Operational : fault cleared\n/ show in search
+Operational -down-> Faulted : fault reported\n/ show as Unavailable,\nleave out of suggestions
+Faulted -up-> Operational : fault cleared\n/ show by its status again
 Faulted -left-> Unavailable : Charge Point restarts\nor taken out of service
 
 note right of Operational

@@ -122,6 +122,8 @@ Cộng tiền, dòng sổ cái và điểm nằm trong **một** DB transaction,
 
 ## D4. Timeout và thanh toán trễ (SD-2d)
 
+> **Chốt 09/11 (Khang), thay phần cửa sổ trễ 1 giờ bên dưới:** bỏ cửa sổ trễ. `expired` là trạng thái cuối: mọi kết quả thành công đến sau khi hết hạn đều ghi thành khoản trễ (không cộng, không hoá đơn, Admin hoàn `late_payment`). Vòng quét timeout chạy lúc `expires_at + 2 phút` rồi querydr (IPN đang trên đường vẫn kịp tới). `vnp_ExpireDate` = `expires_at`. Báo tài xế MSG26. SRS BR-P13/BR-P22, STM-4 v1.1, SD-2d đã sửa theo; code (`top-up-state-machine.ts`: bỏ `withinLateWindow`, chuyển #5) và `LATE_WINDOW` ở D7 còn phải sửa (Khang).
+
 - 15 phút sau khi tạo mà chưa có IPN: `TopUpService.onPendingTimeout(topUpId)`; nếu vẫn `pending` thì `VnpayAdapter.queryTransaction(ref)` (querydr, 10 s). Đã trả → `pending → credited` + ghi sổ; chưa trả → `pending → expired`.
 - IPN đến khi top-up `expired`:
   - trong vòng 1 giờ sau khi hết hạn và chưa áp dụng → `expired → credited` + ghi sổ;

@@ -1,7 +1,7 @@
 @startuml SD-5b
 !include ../_style.iuml
 title SD-5b (Software level, CSMS) — Charge Point connects for the first time and goes into service\nPrecondition: Charge Point is awaiting_connection · System view: AD-8 · State: STM-3, STM-2
-footer Owner: Trần Đức Ân (WP1) · v2.0 · 01/11/2026 · names = code after the Charge Point rename (T90) · left gate = Charge Point [OCPP 1.6J, WSS]
+footer Owner: Trần Đức Ân (WP1) · v2.1 · 10/11/2026 · names = code after the Charge Point rename (T90) · left gate = Charge Point [OCPP 1.6J, WSS]
 
 participant "«component»\n<u>:OcppServer</u>" as OS
 participant "«component»\n<u>:ChargePointAuthService</u>" as PA
@@ -16,8 +16,9 @@ PA -> PA : find Charge Point, check login limit,\ncompare credential hash
 PA -> PLP ++ : mayConnect(lifecycle) : boolean
 PLP --> PA --
 PA --> OS -- : accept | reject
-break unknown serial, not onboarded, or wrong credential
-  [<-- OS : HTTP 404 / 403 / 401, connection refused (attempt logged)
+break unknown serial, not onboarded, wrong credential, or source locked
+  [<-- OS : HTTP 404 / 403 / 401 / 429, connection refused (attempt logged)
+  note right : 429 = locked 15 min after 5 failed logins\nin 60 s for one serial and IP, or 20 from one IP (BR-P49)
 end
 OS -> REG ++ : open(identity, client) : Connection
 REG -> REG : new epoch, is_online = true,\nawaiting_connection → in_service (FIRST_CONNECT)
@@ -40,5 +41,5 @@ loop for each connector
   H --> OS --
   [<-- OS -- : StatusNotification.conf {}
 end
-note over OS, S : The Charge Point now appears on the driver map and on the Operator dashboard. Reading capabilities (reservation support, battery level, free-vend tag) after boot is design (AD-8), not in code yet.
+note over OS, S : The Charge Point now appears on the driver map and on the Operator dashboard. Reading capabilities (reservation support, battery level) after boot is design (AD-8, «planned»), not in code yet; the free-vend tag is set by the Admin (UC-ADM-05).
 @enduml
