@@ -205,13 +205,18 @@ Repo: `UserAccountService.disableLogin` và `SessionQuery.hasUnsettledSession` l
 
 Diagram chỉ ghi "job" / "queue" / "after commit". Repo chưa có BullMQ (Redis có nhưng chưa dùng), nên chốt 03/11:
 - DB là nguồn sự thật: `status` + `attempt_count` + `next_attempt_at` nằm trên dòng nghiệp vụ, giống `charge_settlement_jobs` của WP3.
-- Mỗi loại việc có một worker quét `… WHERE <điều kiện đến hạn> ORDER BY next_attempt_at LIMIT n FOR UPDATE SKIP LOCKED`, xử lý từng dòng trong transaction riêng:
+- Mỗi loại việc có một worker quét `… WHERE <điều kiện đến hạn> ORDER BY next_attempt_at LIMIT n FOR UPDATE SKIP LOCKED`. ⊕ **Giữ chỗ có hạn** (T32 Phần 12, 10/11): vì không được gọi VNPay / querydr / e-invoice (HTTP ~10 s) trong DB transaction, mỗi dòng đi qua ba bước (`src/billing/due-rows.ts`):
+  1. tx ngắn giữ chỗ **một** dòng: SKIP LOCKED + `next_attempt_at = now() + lease`, COMMIT;
+  2. gọi bên ngoài, ngoài transaction;
+  3. tx thứ hai khoá lại dòng (`lockLeased`, kiểm `next_attempt_at` còn đúng lease của mình) rồi ghi kết quả qua state machine.
+
+  Sập giữa chừng thì hết lease dòng tự đến hạn lại. Lease không tăng `attempt_count`. Các điều kiện đến hạn:
   - `refunds`: `status = 'requested' AND next_attempt_at <= now()` → `RefundService.send`.
   - `e_invoices`, `invoice_adjustments`: `status IN ('requested','failed') AND next_attempt_at <= now()` → `EInvoiceService.issue` / điều chỉnh.
-  - `top_ups`: `status = 'pending' AND expires_at <= now()` → `TopUpService.onPendingTimeout` (dùng `expires_at` đã có).
+  - `top_ups`: `status = 'pending' AND expires_at <= now()` → `TopUpService.onPendingTimeout` (dùng `expires_at` đã có; D4 09/11: chạy lúc `expires_at + 2 phút`). Không có `next_attempt_at`, nên cách giữ chỗ do Phần 5/8 chọn (interface `BackgroundWork.runDue` không ràng buộc).
 - `Scheduler` (`src/common/scheduler.ts`) chỉ để **chạy sớm** (ngay sau commit, đúng `expires_at`); mất khi sập cũng được vì vòng quét bắt lại. Lúc khởi động mỗi worker quét một lần.
-- Lịch retry: `next_attempt_at = now() + 5 phút / 30 phút / 2 giờ`; một helper dùng chung cho e-invoice và refund. `RETRY_LIMIT = 4`, `PENDING_TIMEOUT = 15 phút`, `LATE_WINDOW = 1 giờ` đặt trong config.
-- Viết sau interface `BackgroundWork` trong billing để sau đổi sang BullMQ mà không sửa service.
+- Lịch retry: `next_attempt_at = now() + 5 phút / 30 phút / 2 giờ`; một helper dùng chung cho e-invoice và refund (`nextRetry` trong `retry-schedule.ts`). `RETRY_LIMIT = 4` là hằng số export ở `refund-state-machine.ts` (không phải biến môi trường). `PENDING_TIMEOUT = 15 phút` đặt ở Phần 5. ~~`LATE_WINDOW = 1 giờ`~~ bỏ theo D4 09/11 (T117 sửa code).
+- Viết sau interface `BackgroundWork` trong billing để sau đổi sang BullMQ mà không sửa service. ⊕ Runner `BackgroundWorkRunner` (Phần 12): các loại chạy song song, mỗi loại không chạy chồng; `kick` / `kickAt` để chạy sớm; cấu hình `BILLING_WORKER_*` (`infra/.env.example`).
 - Index cần: `(status, next_attempt_at)` trên `e_invoices`, `invoice_adjustments`, `refunds`; `top_ups (status, expires_at)`.
 
 ## D8. Khớp với repo
