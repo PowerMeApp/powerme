@@ -77,7 +77,7 @@ def port(x, y):
 # ---------------- frame and title
 out.append(f'<rect width="{W}" height="{H}" fill="white"/>')
 T(40, 44, "ARCH-1 (Software level) — UML component diagram of the PowerMe Platform", 22, "bold", "start")
-T(40, 68, "One deployable component (CSMS back end) with its internal components, ports, provided and required interfaces, and the clients and external systems it is assembled with · v2.1 · 02/11/2026", 13, anchor="start", fill=GREY)
+T(40, 68, "One deployable component (CSMS back end) with its internal components, ports, provided and required interfaces, and the clients and external systems it is assembled with · v2.2 · 10/11/2026", 13, anchor="start", fill=GREY)
 
 # ---------------- CSMS (outer component)
 X0, Y0, X1, Y1 = 420, 78, 1400, 1020
@@ -87,18 +87,19 @@ T((X0 + X1) / 2, Y0 + 22, "«component»", 12, fill=GREY)
 T((X0 + X1) / 2, Y0 + 41, "CSMS back end  [NestJS 12 · Node.js 24 · modular monolith, ADR-0002]", 15, "bold")
 
 # ---------------- internal components
-comp("drv", 470, 200, 200, 80, "driver-api", "api", sub=["REST /api/driver/v1"], planned=True)
-comp("usr", 470, 350, 200, 70, "users", "platform", sub=["accounts, roles, JWT"], planned=True)
+comp("drv", 470, 200, 200, 80, "driver-api", "api", sub=["/api/driver/v1: search, places,", "route (#98); charge «planned»"])
+comp("usr", 470, 350, 200, 78, "users", "platform", sub=["accounts, roles (driver JWT", "check is in driver-api, #98)"], planned=True)
 comp("opr", 470, 490, 200, 80, "operator-api", "api", sub=["REST for dashboard / console"], planned=True)
 comp("ocpp", 470, 760, 200, 100, "ocpp-gateway", "network", sub=["OCPP 1.6J server, epochs,", "message log, replay detector"])
-comp("sug", 790, 185, 210, 75, "suggestions", "platform", sub=["status, time left, ranking"])
+comp("sug", 790, 185, 210, 75, "suggestions", "platform", sub=["smart ranking (#98);", "time left «planned»"])
 comp("ses", 790, 330, 210, 90, "sessions", "charging", sub=["STM-1, start / stop,", "settlement job"])
 comp("rec", 790, 500, 210, 75, "reconciliation", "charging", sub=["replay, gaps, conflicts (RQ1)"])
 comp("sta", 790, 640, 210, 90, "stations", "network", sub=["charge points, onboarding,", "faults (STM-3, STM-6)"])
 comp("tar", 1120, 175, 230, 60, "tariffs", "billing", sub=["time-of-day prices"], planned=True)
-comp("bil", 1120, 290, 230, 190, "billing", "billing", sub=["Charging Credit ledger,", "top-ups, refunds, e-invoices,", "loyalty, revenue split", "(platform fee / Operator share)"], planned=True)
+comp("bil", 1120, 290, 230, 190, "billing", "billing", sub=["in code: Charging Credit ledger,", "loyalty earn, STM-4 / STM-10;", "«planned»: top-ups, refunds,", "e-invoices, revenue report"])
 comp("db", 1110, 870, 135, 70, "db", "platform", sub=["Drizzle ORM"])
-comp("job", 1255, 870, 135, 70, "jobs", "platform", sub=["BullMQ"])
+comp("job", 1255, 870, 135, 70, "jobs", "platform", sub=["DB polling (D7)"])
+comp("con", 470, 600, 200, 80, "console", "api", sub=["operator HTTP :3000,", "loopback, no login yet"])
 T(1250, 962, "used by every module (uses not drawn)", 11, fill=GREY, style="italic")
 
 # vertical hop support: redefine poly to hop on either orientation
@@ -130,7 +131,7 @@ assembly([(670, 222), (720, 222)], [(790, 222), (733, 222)], (733, 222), 'right'
 assembly([(670, 262), (745, 262), (745, 288)], [(790, 372), (745, 372), (745, 301)], (745, 301), 'down', "IChargingControl", lab=(-12, 4), anchor="end")
 assembly([(560, 200), (560, 150), (900, 150)], [(1120, 305), (1090, 305), (1090, 150), (913, 150)], (913, 150), 'right', "ICreditAccount", lab=(0, -12))
 assembly([(540, 280), (540, 307)], [(540, 350), (540, 320)], (540, 320), 'down', "IAuth", lab=(14, 4), anchor="start")
-assembly([(540, 490), (540, 463)], [(540, 420), (540, 450)], (540, 450), 'up', "IAuth", lab=(14, 4), anchor="start")
+assembly([(540, 490), (540, 463)], [(540, 428), (540, 450)], (540, 450), 'up', "IAuth", lab=(14, 4), anchor="start")
 assembly([(1000, 350), (1047, 350)], [(1120, 350), (1060, 350)], (1060, 350), 'right', "ISettlement", lab=(0, -14))
 assembly([(895, 420), (895, 447)], [(895, 500), (895, 460)], (895, 460), 'down', "IReconcile", lab=(14, 4), anchor="start")
 assembly([(1235, 290), (1235, 262)], [(1235, 235), (1235, 249)], (1235, 249), 'up', "IPricing", lab=(14, 4), anchor="start")
@@ -154,6 +155,9 @@ def left_provided(y, inner_x, name, proto):    # CSMS provides at a left port; c
 left_provided(240, 470, "IDriverAPI", "HTTPS / JSON")
 left_provided(530, 470, "IOperatorAPI", "HTTPS / JSON")
 left_provided(790, 470, "IOcppCentralSystem", "OCPP 1.6J over WSS")
+# console: provided on a loopback port only (no client assembled; Iteration 1)
+port(420, 640); poly([(427, 640), (470, 640)]); poly([(413, 640), (348, 640)]); ball(340, 640)
+label(335, 620, "IConsole", None); T(335, 666, "HTTP, 127.0.0.1 only", 10.5, fill=GREY)
 # CSMS requires the charge point's interface (remote commands)
 port(420, 845); poly([(427, 845), (470, 845)]); poly([(413, 845), (353, 845)]); socket(340, 845, 'left'); poly([(250, 845), (332, 845)]); ball(340, 845)
 label(335, 872, "IOcppChargePoint", None); T(335, 886, "remote start / stop / reset", 10.5, fill=GREY)
@@ -172,16 +176,16 @@ right_provided(365, [(1350, 365)], "IPaymentNotification", "signed IPN")
 right_required(460, [(1350, 425), (1372, 425), (1372, 460)], "IEInvoice", "issue, adjust")
 right_required(565, [(1350, 465), (1385, 465), (1385, 565)], "IPushNotification", "HTTPS")
 # top: map and routing for suggestions
-ext(815, -30, 300, 70, "Map & Routing Service", "«external system»", ["travel times"])
+ext(815, -30, 300, 70, "Vietmap Maps API v4", "«external system»", ["map & routing: places, route (#98)"])
 port(965, 78); poly([(965, 185), (965, 85)]); poly([(965, 71), (965, 66)]); socket(965, 58, 'up'); poly([(965, 40), (965, 50)]); ball(965, 58)
 T(985, 62, "IRouting", 12, "bold", "start")
 # bottom: database and job queue
 ext(1070, 1080, 210, 75, "PostgreSQL 16", "«external system»", ["44 tables, partitions"])
-ext(1295, 1080, 170, 75, "Redis 7.4", "«external system»", ["job queue"])
+ext(1295, 1080, 215, 75, "Redis 7.4", "«external system»", ["BullMQ queue"], planned=True)
 port(1177, 1020); poly([(1177, 940), (1177, 1013)]); poly([(1177, 1027), (1177, 1037)]); socket(1177, 1050, 'down'); poly([(1177, 1080), (1177, 1058)]); ball(1177, 1050)
 T(1165, 1054, "ISQL", 12, "bold", "end")
-port(1322, 1020); poly([(1322, 940), (1322, 1013)]); poly([(1322, 1027), (1322, 1037)]); socket(1322, 1050, 'down'); poly([(1375, 1080), (1375, 1068), (1322, 1068), (1322, 1058)]); ball(1322, 1050)
-T(1340, 1054, "IJobQueue", 12, "bold", "start")
+port(1322, 1020); poly([(1322, 940), (1322, 1013)], dash="6 4"); poly([(1322, 1027), (1322, 1037)], dash="6 4"); socket(1322, 1050, 'down'); poly([(1375, 1080), (1375, 1068), (1322, 1068), (1322, 1058)], dash="6 4"); ball(1322, 1050)
+T(1340, 1054, "IJobQueue «planned»", 12, "bold", "start")
 
 # ---------------- legend
 LX, LY = 20, 1060
@@ -195,7 +199,7 @@ for i, (k, n) in enumerate([("api", "API adapters"), ("network", "charge-point n
     fx = LX + 640 + (i // 3) * 0; fy = LY + 30 + i * 18
     fill, col = DOM[k]; out.append(f'<rect x="{fx}" y="{fy-11}" width="22" height="14" fill="{fill}" stroke="{col}" stroke-width="1.4"/>'); T(fx + 30, fy, n, 11.5, anchor="start")
 out.append(f'<rect x="{LX+640}" y="{LY+109}" width="22" height="12" fill="white" stroke="{GREY}" stroke-width="1.4" stroke-dasharray="5 3"/>'); T(LX + 670, LY + 119, "«planned»: designed, not in code yet", 11.5, anchor="start")
-T(W - 30, 1200, "Owner: Trần Đức Ân (WP1) with Ngô Văn Minh Trí (WP2) · names = PKG-1 modules (origin/main ce3902c) · deployment view: ARCH-2", 11, fill=GREY, anchor="end")
+T(W - 30, 1200, "Owner: Trần Đức Ân (WP1) with Ngô Văn Minh Trí (WP2) · names = PKG-1 modules (GitHub main 0ba20c4) · deployment view: ARCH-2", 11, fill=GREY, anchor="end")
 
 body = "\n".join(out)
 svg = f'<svg xmlns="http://www.w3.org/2000/svg" width="{W}" height="{H}" viewBox="0 0 {W} {H}">\n<rect width="{W}" height="{H}" fill="white"/>\n'

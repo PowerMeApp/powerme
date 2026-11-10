@@ -2,8 +2,8 @@
 !include ../_style.iuml
 skinparam nodesep 35
 skinparam ranksep 45
-title PKG-1 (Software level) — Package diagram of the CSMS back end (apps/csms, one NestJS process)\nPlain packages = in code at origin/main ce3902c · dashed «planned» = designed, not in code yet
-footer Owner: Ngô Văn Minh Trí (WP2) · v2.0 · 01/11/2026 · module names = code folders · «import» = NestJS module import · «use» = planned dependency
+title PKG-1 (Software level) — Package diagram of the CSMS back end (apps/csms, one NestJS process)\nPlain packages = in code at GitHub main 0ba20c4 · dashed «planned» = designed, not in code yet
+footer Owner: Ngô Văn Minh Trí (WP2) · v2.1 · 10/11/2026 · module names = code folders · «import» = NestJS module import · «use» = planned dependency
 
 package "apps/csms" {
   package "ocpp-gateway" {
@@ -20,11 +20,13 @@ package "apps/csms" {
   }
   package "config" {
   }
-  package "driver-api" <<planned>> #line.dashed {
+  package "billing" {
+  }
+  package "common" {
+  }
+  package "driver" {
   }
   package "operator-api" <<planned>> #line.dashed {
-  }
-  package "billing" <<planned>> #line.dashed {
   }
   package "tariffs" <<planned>> #line.dashed {
   }
@@ -33,8 +35,11 @@ package "apps/csms" {
   package "realtime" <<planned>> #line.dashed {
   }
 }
-package "packages/shared" {
+package "packages/shared" <<planned>> #line.dashed {
 }
+note "billing in code: credit ledger, loyalty earn,\nTopUp / Refund state machines (#91);\ntop-up, IPN, refund, e-invoice\nservices «planned»" as NB
+note "common: in-process Scheduler\n(background work polls the DB, D7)" as NC
+note "driver: Driver API GET routes on the console\nport (JWT): me, stations search + smart\nsuggestion, connector by code, places, route\n(#98); charge / stop / progress «planned»" as ND
 database "PostgreSQL 16" as PG
 
 "ocpp-gateway" ..> "sessions" : <<import>>
@@ -48,19 +53,24 @@ database "PostgreSQL 16" as PG
 "reconciliation" ..> "db"
 "stations" ..> "db"
 "console" ..> "db"
+"console" ..> "driver" : shared HTTP listener
+"driver" ..> "sessions"
+"driver" ..> "db"
+"billing" ..> "db"
+"ocpp-gateway" ..> "common"
+"stations" ..> "common"
 "db" ..> PG : SQL
 "db" ..> "config"
 
-"driver-api" .[dashed].> "sessions" : <<use>>
 "operator-api" .[dashed].> "stations" : <<use>>
 "operator-api" .[dashed].> "reconciliation" : <<use>>
 "sessions" .[dashed].> "billing" : session settled
 "billing" .[dashed].> "tariffs" : <<use>>
-"driver-api" .[dashed].> "billing" : <<use>>
-"driver-api" .[dashed].> "users" : <<use>>
+"driver" .[dashed].> "billing" : <<use>>
+"driver" .[dashed].> "users" : <<use>>
 "operator-api" .[dashed].> "users" : <<use>>
 "sessions" .[dashed].> "realtime" : <<use>>
 "stations" .[dashed].> "realtime" : <<use>>
-"ocpp-gateway" ..> "packages/shared"
+"ocpp-gateway" .[dashed].> "packages/shared" : <<use>>
 
 @enduml

@@ -1,6 +1,6 @@
 @startuml AD-3
 !include _style.iuml
-title AD-3 (System level) — Charge Point loses connection during a session, then reconcile\nTrigger: Charge Point stops answering while a session is active · Use cases: UC-INT-03, UC-OPS-03, UC-OPS-05, UC-CHG-04
+title AD-3 (System level) — Charge Point loses connection during a session, then reconcile\nTrigger: Charge Point's connection is lost while a session is active · Use cases: UC-INT-03, UC-OPS-03, UC-OPS-05, UC-CHG-04
 
 |«person»\nDriver|
 |«software system»\nPowerMe Platform|
@@ -19,8 +19,12 @@ fork again
   :See "Charge Point offline,\ndata delayed" notice;
 end fork
 |«software system»\nPowerMe Platform|
-if ( ) then ([still offline after\n120 s grace period])
-  :Mark session orphaned, void\nreservations (no fee) and\nraise offline alert (AD-7)>
+if ( ) then ([BR-P47: still offline after\n120 s grace period])
+  :Mark session orphaned (shown on\nthe operator console) and void\nreservations (no fee);
+  note right
+    Operator alert: the Offline alert
+    after 900 s (BR-P50, AD-7)
+  end note
   :ChargingSession\n&#91;orphaned&#93;]
   :Reservation\n&#91;voided&#93;]
 else ([reconnected within\n120 s grace period])
@@ -37,22 +41,22 @@ if ( ) then ([Charge Point reconnects])
   else ([session stopped\nwhile offline])
     :Cross-check energy: start and\nstop totals against readings;
   endif
-else ([no reconnection within\n24 h session time limit])
+else ([no reconnection within\n24 h of being orphaned])
 endif
-if ( ) then ([energy conflict over tolerance\nor no reconnection])
+if ( ) then ([BR-P48: energy conflict over tolerance\nor no reconnection])
   :Hold billing and flag\nsession for review;
   :ChargingSession\n&#91;review&#93;]
   |«person»\nOperator|
   :Resolve: accept Charge Point\ntotal, accept readings or void;
   |«software system»\nPowerMe Platform|
-else ([consistent, or gap\nwithin tolerance])
+else ([consistent, or gap only\n(no energy conflict)])
 endif
-:Record reconciliation result;
+:Record reconciliation result\n(gap or conflict only);
 :ReconciliationRecord]
-:Price per tariff period and\ndebit cost (void = no charge);
 :ChargingSession\n&#91;reconciled&#93;]
+:Price per tariff period and\ndebit cost (void = no charge);
 :CreditTransaction\n&#91;session_debit&#93;]
-if ( ) then ([cost > credit balance:\nnew starts blocked\nuntil top-up])
+if ( ) then ([BR-P20: cost > credit balance:\nnew starts blocked\nuntil top-up])
   :CreditAccount\n&#91;in_shortfall&#93;]
 else ([else])
 endif

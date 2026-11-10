@@ -1,7 +1,7 @@
 @startuml SD-1a
 !include ../_style.iuml
-title SD-1a (Software level, Driver App) — Driver finds a station and charges with the app\nPrecondition: Driver is logged in and has a compatible vehicle · System view: AD-1 · State: STM-1 · API: Driver API contract v0.1.0 (#69)
-footer Owner: Lý Hoàng Sơn (WP3) · v2.1 · 01/11/2026 · names = CD-1 (apps/mobile) · left gate = Driver (UI), right gate = CSMS /api/driver/v1 · no realtime in v0.1.0: the app polls
+title SD-1a (Software level, Driver App) — Driver finds a station and charges with the app\nPrecondition: Driver is logged in and has a compatible vehicle · System view: AD-1 · State: STM-1 · API: Driver API contract (#69, OpenAPI 0.4)
+footer Owner: Lý Hoàng Sơn (WP3) · v2.2 · 10/11/2026 · names = CD-1 (apps/mobile) · left gate = Driver (UI), right gate = CSMS /api/driver/v1 · discovery routes live on main (#98), charge routes still contract · no realtime: the app polls
 
 participant "«component»\n<u>:StationsController</u>" as SC
 participant "«port»\n<u>:StationRepository</u>" as SR
@@ -10,10 +10,14 @@ participant "«port»\n<u>:ChargingRepository</u>" as CR
 
 [-> SC ++ : find(vehicleId, query)
 SC -> SR ++ : find(vehicleId, query) : List<StationOption>
-SR ->] : GET /stations?vehicleId&q [HTTPS, JWT]
-SR <--] : 200 stations with live connector status
+SR ->] : GET /stations?vehicle_id&latitude&longitude&soc_percent\n&target_soc_percent&sort=smart [HTTPS, JWT]
+SR <--] : 200 stations ranked by reach and total time (estimate),\nwith live connector status
 SR --> SC -- : options
 [<-- SC -- : show ranked stations
+opt Driver opens the route
+  SR ->] : GET /stations/{site_id}/route?location_consent=true [HTTPS, JWT]
+  SR <--] : 200 road route from Vietmap (metres, seconds, GeoJSON)\n| 503 provider_unavailable (no invented route)
+end
 
 ... Driver goes to the station, plugs in and scans the connector QR code ...
 
@@ -23,6 +27,9 @@ CR ->] : POST /charges {connectorId, vehicleId, mode, limit} [HTTPS, JWT, Idempo
 note right : {d ≤ 10 s}, else\nretry with the same key
 CR <--] : 202 {outcome} | 409 / 422 {reasonCode}
 CR --> CC -- : outcome
+break outcome = requiresconfirmation {maxEnergyWh}: the limit costs more than the credit at the highest tariff of the day (BR-P18)
+  [<-- CC : offer the largest affordable limit;\nthe Driver confirms it in a new start request
+end
 break outcome = rejected (connector busy, incompatible, credit below start minimum)
   [<-- CC : show reason, offer top-up (ref SD-2a)
 end
@@ -37,7 +44,7 @@ end
 CC -> CR ++ : watch(sessionId) : Stream<SessionSnapshot>
 loop every 5 s until state is closed, reconciled or failed
   CR ->] : GET /sessions/{id}/progress
-  CR <--] : 200 {state, energyWh, estimatedCostVnd, availableCreditVnd, socPercent}
+  CR <--] : 200 {state, energyWh, estimatedCostVnd, availableCreditVnd «planned», socPercent «planned»}
   CR ->> CC : snapshot(SessionSnapshot)
   [<<- CC : show live energy, cost, credit left
 end
@@ -53,7 +60,7 @@ CR --> CC -- : accepted
 
 CR ->] : GET /sessions/{id}/statement
 note right : after the CSMS settles\nthe session (ref SD-1b)
-CR <--] : 200 {energyWh, amountVnd, earnedPoints, balanceVnd}
+CR <--] : 200 {energyWh, amountVnd, earnedPoints, balanceVnd «planned»}
 CR ->> CC : snapshot(Statement)
 [<<- CC : show receipt
 @enduml

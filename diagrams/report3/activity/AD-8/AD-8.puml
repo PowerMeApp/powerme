@@ -10,7 +10,7 @@ title AD-8 (System level) — Onboard a Charge Point and first connection\nTrigg
 start
 :Register the Charge Point\nserial in the registry;
 |«software system»\nPowerMe Platform|
-if ( ) then ([serial already\nin the registry])
+if ( ) then ([BR-P49: serial already\nin the registry])
   :Reject duplicate serial;
   stop
 else ([new serial])
@@ -21,7 +21,7 @@ endif
 :Enter serial, choose own\nsite and connectors;
 |«software system»\nPowerMe Platform|
 :Check site ownership\nand serial status;
-if ( ) then ([site of another Operator, or serial\nnot registered or already onboarded])
+if ( ) then ([BR-P16, P49: site of another Operator, or serial\nnot registered or already onboarded])
   :Refuse with reason;
   stop
 else ([valid])
@@ -34,14 +34,14 @@ endif
 |«external system»\nCharge Point|
 :Connect with credential\nand send boot report>
 |«software system»\nPowerMe Platform|
-if ( ) then ([wrong credential])
+if ( ) then ([BR-P49: wrong credential])
   :Reject connection and log it\n(Charge Point stays awaiting);
   stop
 else ([credential valid])
 endif
 :Accept boot and set\nheartbeat interval;
 :ChargePoint\n&#91;in_service&#93;]
-:Read capabilities (reservation\nsupport, battery-level reporting,\nfree-vend tag);
+:Read capabilities «planned»\n(reservation support,\nbattery-level reporting);
 |«external system»\nCharge Point|
 :Report each\nconnector's status>
 |«software system»\nPowerMe Platform|

@@ -1,7 +1,7 @@
 @startuml SD-3a
 !include ../_style.iuml
 title SD-3a (Software level, CSMS) — Charge Point loses connection mid-session, reconnects and the session is reconciled\nPrecondition: session is active on the Charge Point · System view: AD-3 · State: STM-1
-footer Owner: Ngô Văn Minh Trí (WP2) · v2.0 · 01/11/2026 · names = code (apps/csms/src) · left gate = Charge Point [OCPP 1.6J, WSS]
+footer Owner: Ngô Văn Minh Trí (WP2) · v2.1 · 10/11/2026 · names = code (apps/csms/src) · left gate = Charge Point [OCPP 1.6J, WSS]
 
 participant "«component»\n<u>:OcppServer</u>" as OS
 participant "«component»\n<u>:ConnectionRegistry</u>" as REG
@@ -28,7 +28,7 @@ else still offline
   OG -> S ++ : onStationOffline(chargePointId, at) : count
   S -> S : active / paused / stopping → orphaned\n(STATION_OFFLINE), void reservations
   S --> OG -- : orphaned sessions
-  note right : Operator is alerted\nwithin 900 s (NFR-OCPP-07)
+  note right : shown as orphaned on the operator\nconsole; the Operator is alerted by the\nOffline alert (BR-P50, ≤ 900 s)
 end
 deactivate OG
 
@@ -46,7 +46,7 @@ S -> R ++ : recordReplay(sessionId, frame)
 R --> S --
 S -> R ++ : evaluate(series, meterStop) : ReconciliationVerdict
 R --> S -- : verdict
-alt consistent, or gap explained by the offline window
+alt consistent, or gap only (no energy conflict)
   S -> S : orphaned → reconciled (RECONCILE_OK)
   note right : then settled as in SD-1b
 else energy conflict
@@ -55,9 +55,9 @@ end
 S --> OS --
 [<-- OS -- : StopTransaction.conf {Accepted}
 
-... no reconnection 24 h after the session start ...
-[o-> S ++ : at(start + 24 h)
+... no stop data 24 h after the session became orphaned ...
+[o-> S ++ : after(24 h in orphaned)  (job every 10 s, BE-18)
 S -> S : orphaned → review (HARD_CAP_EXCEEDED), billing held
 deactivate S
-note over OS, R : If live MeterValues arrive after reconnecting (the session is still running), the session goes orphaned → active (LIVE_MESSAGE) instead.\nThe 24 h trigger is in the state table but no job fires it yet (Trí).
+note over OS, R : If live MeterValues arrive after reconnecting (the session is still running), the session goes orphaned → active (LIVE_MESSAGE) instead.
 @enduml

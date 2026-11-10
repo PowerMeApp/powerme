@@ -1,7 +1,7 @@
 @startuml SD-2a
 !include ../_style.iuml
 title SD-2a (Software level, CSMS billing) — Driver creates a top-up and is sent to the payment page\nPrecondition: Driver is logged in, credit account is active or in_shortfall · System view: AD-2 · State: STM-4
-footer Owner: Lê Bảo Khang (WP5) · v2.0 · 01/11/2026 · names = CD-2 class diagram (billing not in code yet) · left gate = Driver App
+footer Owner: Lê Bảo Khang (WP5) · v2.1 · 10/11/2026 · names = CD-2 class diagram (top-up services not in code yet) · left gate = Driver App
 
 participant "«component»\n<u>:TopUpController</u>" as TC
 participant "«component»\n<u>:TopUpService</u>" as TS
@@ -9,8 +9,13 @@ participant "«port»\n<u>:VnpayAdapter</u>" as VA
 
 [-> TC ++ : POST /billing/top-ups {amountVnd, redeemPoints}\n[HTTPS, JWT, Idempotency-Key]
 TC -> TS ++ : create(driverId, dto, key)
-TS -> TS : check account not closed, amount limits,\nmonthly cap, no other open top-up (BR-P22)
-break a rule is not met
+TS -> TS : check account not closed, amount 50,000–2,000,000 VND,\nbalance after ≤ 5,000,000 VND, no pending top-up (BR-P22)
+break another top-up is still pending
+  TS --> TC : TopUpRejected(open_top_up, topUpId, paymentUrl)
+  [<-- TC : 409 {reason, topUpId, paymentUrl}
+  note right : the app asks "continue payment?"\nand reopens the same paymentUrl
+end
+break another rule is not met
   TS --> TC : TopUpRejected(reason)
   [<-- TC : 409 / 422 {reason}
 end
@@ -26,6 +31,6 @@ TS --> TC -- : topUpId, paymentUrl
 note over TC, VA
   The Driver pays on the gateway page; the return URL only shows the result.
   Credit is added only by the signed payment notification (SD-2b), or by the
-  status query after 15 min (SD-2d). The same Idempotency-Key returns the same top-up.
+  status query 2 min after expiry (SD-2d). The same Idempotency-Key returns the same top-up.
 end note
 @enduml

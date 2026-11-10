@@ -1,30 +1,52 @@
 @startuml SD-2f
 !include ../_style.iuml
 title SD-2f (Software level, CSMS billing) — Driver closes the account and unused credit is refunded\nPrecondition: credit account is active · System view: AD-9 · State: STM-5, STM-10
-footer Owner: Lê Bảo Khang (WP5) · v2.0 · 01/11/2026 · closure refunds created by the system (R8 Q1, Khang to confirm) · left gate = Driver App
+footer Owner: Lê Bảo Khang (WP5) · v2.1 · 10/11/2026 · closure refunds created by the system (WF-02 decision D6, confirmed 09/11, repo #100) · left gate = Driver App
 
 participant "«component»\n<u>:AccountClosureController</u>" as AC
 participant "«component»\n<u>:AccountClosureService</u>" as AS
 participant "«component»\n<u>:CreditLedgerService</u>" as CL
 participant "«component»\n<u>:RefundService</u>" as RS
+participant "«component»\n<u>:LoyaltyService</u>" as LS
+
+[-> AC ++ : GET /me/account/close-preview [HTTPS, JWT]
+AC -> AS ++ : previewClosure(driverId)
+AS -> AS : same split as below, read only, no lock
+AS --> AC -- : preview
+[<-- AC -- : 200 {balanceVnd, refundableVnd, nonRefundableVnd,\npointsForfeited, blockers[]}
+
+... Driver confirms the closure ...
 
 [-> AC ++ : POST /me/account/close [HTTPS, JWT]
 AC -> AS ++ : requestClosure(driverId)
-AS -> AS : check account active (balance ≥ 0),\nno open top-up, no running session
+AS -> AS : lock credit account (FOR UPDATE)
+break account already closed (repeated request)
+  AS --> AC : earlier result (rebuilt from the stored rows)
+  [<-- AC : 200 {closed, refundIds, refundTotalVnd,\nnonRefundableVnd, pointsForfeited}
+end
+AS -> AS : check account active (balance ≥ 0),\nno pending top-up, no unsettled session
 break a rule is not met
   AS --> AC : ClosureNotAllowed(reason)
   [<-- AC : 409 / 422 {reason}
 end
-AS -> CL ++ : post(accountId, refund, −balanceVnd)
+AS -> AS : split the balance over the newest credited top-ups\n(each share ≤ amount paid for that top-up)
+AS -> CL ++ : post(accountId, refund, −refundableVnd)
 CL --> AS --
-AS -> AS : split the balance over the newest credited top-ups
+opt a remainder cannot be refunded (e.g. points discount)
+  AS -> CL ++ : post(accountId, adjustment, −nonRefundableVnd)
+  CL --> AS --
+end
 loop for each top-up share
   AS -> RS ++ : create(topUpId, kind = account_closure, shareVnd, requestedBy = null)
   RS --> AS -- : refundId
 end
-AS -> AS : active → closed, disable login
+opt points balance > 0
+  AS -> LS ++ : forfeitOnClosure(driverId)
+  LS --> AS -- : pointsForfeited (loyalty entry expire)
+end
+AS -> AS : active → closed, disable login\n(no refund created → closure_refunded_at = closed_at)
 hnote over AS : {creditAccount.status = closed}
-AS --> AC -- : closed, refund total
-[<-- AC -- : 200 {closed, refundTotalVnd}
-note over AC, RS : Each refund is then sent to its original payment source exactly as in SD-2e (part 2). No Admin action is needed.
+AS --> AC -- : closure result
+[<-- AC -- : 200 {closed, refundIds, refundTotalVnd,\nnonRefundableVnd, pointsForfeited}
+note over AC, LS : Each refund is then sent to its original payment source exactly as in SD-2e (part 2). No Admin action is needed.
 @enduml

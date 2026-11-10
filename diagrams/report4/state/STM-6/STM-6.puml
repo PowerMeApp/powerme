@@ -1,6 +1,6 @@
 @startuml STM-6
 !include _style.iuml
-title STM-6 (System level) — Lifecycle of a FaultEvent (Operator alert)\nfault_events.status · v1.0 · 01/11/2026
+title STM-6 (System level) — Lifecycle of a FaultEvent (Operator alert)\nfault_events.status · v1.1 · 10/11/2026
 
 [*] -down-> Open
 note left of Open
@@ -12,16 +12,16 @@ note left of Open
 end note
 
 state "Open" as Open {
-  [*] -down-> raised : / hide connector, void\nreservations, alert Operator
+  [*] -down-> raised : / show connector as Unavailable,\nvoid reservations (Should),\nalert Operator
   raised -down-> acknowledged : Operator acknowledges
   acknowledged -down-> resetting : Operator sends\nremote reset
   resetting -up-> acknowledged : reset refused\nor after(120 s)
 }
 Open : fault signal / attach to this fault
 
-Open -right-> resolved : connector reports Available\nor Charge Point back online
+Open -right-> resolved : connector reports Available or\nstarts serving (Preparing…Finishing),\nor Charge Point back online
 acknowledged -right-> resolved : Operator closes\nafter site visit
-resolved : entry / show connector, clear label
+resolved : entry / show connector by its status,\nclear label
 resolved -down-> [*]
 note bottom of Open
   Open groups raised, acknowledged, resetting;

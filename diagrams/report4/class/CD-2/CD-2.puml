@@ -2,8 +2,8 @@
 !include ../_style.iuml
 skinparam nodesep 35
 skinparam ranksep 50
-title CD-2 (Software level, CSMS billing) — Class diagram of WF-02: top-up, payment, e-invoice, refunds\nDesign (module billing «planned», tables in migrations 0003 / 0012) · Behaviour: SD-2a…2f · State: STM-4, 5, 7, 10
-footer Owner: Lê Bảo Khang (WP5) · v2.0 · 01/11/2026 · v0.3 (28/10) + RefundService, Refund, InvoiceAdjustment, EInvoiceProviderAdapter (ERD v1.1, R8) · main members only
+title CD-2 (Software level, CSMS billing) — Class diagram of WF-02: top-up, payment, e-invoice, refunds\nbilling partly in code (CreditLedgerService, LoyaltyService, TopUp / Refund state machines; other classes «planned»), tables in migrations 0003 / 0015 · Behaviour: SD-2a…2f · State: STM-4, 5, 7, 10
+footer Owner: Lê Bảo Khang (WP5) · v2.1 · 10/11/2026 · v0.3 (28/10) + RefundService, Refund, InvoiceAdjustment, EInvoiceProviderAdapter (ERD v1.1, R8) · main members only
 
 package "controllers" {
   class TopUpController <<controller>> {
@@ -20,6 +20,7 @@ package "controllers" {
     + retryInvoice(invoiceId : number) : void
   }
   class AccountClosureController <<controller>> {
+    + preview() : ClosurePreview
     + requestClosure() : ClosureView
   }
 }
@@ -38,6 +39,8 @@ package "services" {
   class LoyaltyService <<component>> {
     + redeemForTopUp(topUp : TopUp) : void
     + restoreForTopUp(topUp : TopUp) : void
+    + forfeitOnClosure(driverId : number) : number
+    + expireDue(now : Date) : void
   }
   class RefundService <<component>> {
     + create(topUpId : number, kind : RefundKind, amountVnd : number, requestedBy : number [0..1]) : Refund
@@ -50,6 +53,7 @@ package "services" {
     + adjustForRefund(refund : Refund) : InvoiceAdjustment
   }
   class AccountClosureService <<component>> {
+    + previewClosure(driverId : number) : ClosurePreview
     + requestClosure(driverId : number) : CreditAccount
   }
 }
@@ -111,6 +115,7 @@ TopUpService --> RefundService
 TopUpService --> VnpayAdapter
 TopUpService ..> EInvoiceService : <<async>>
 AccountClosureService --> CreditLedgerService
+AccountClosureService --> LoyaltyService
 AccountClosureService --> RefundService
 RefundService --> VnpayAdapter
 RefundService ..> EInvoiceService : <<async>>
@@ -126,6 +131,6 @@ Refund "1" -- "0..1" InvoiceAdjustment : invoiced as >
 note bottom of RefundService
   4 attempts (5 min, 30 min, 2 h);
   closure refunds created by the system
-  (requestedBy = null, R8 Q1)
+  (requestedBy = null, R8 Q1, D3 09/11)
 end note
 @enduml

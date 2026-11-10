@@ -3,7 +3,7 @@
 skinparam nodesep 40
 skinparam ranksep 50
 title CD-1 (Software level, Driver App) — Class diagram of WF-01: find a station and charge\nFrom apps/mobile/lib at origin/main ce3902c (#70) · Behaviour: SD-1a · State: STM-1 (SessionState mirrors session_status)
-footer Owner: Lý Hoàng Sơn (WP3) · v2.0 · 01/11/2026 · names = code · main members only · ApiChargingRepository «planned» = Driver API contract #69
+footer Owner: Lý Hoàng Sơn (WP3) · v2.1 · 10/11/2026 · names = code · main members only · ApiChargingRepository «planned» = Driver API contract #69
 
 package "application" {
   class StationsController <<Notifier>> {
@@ -62,9 +62,11 @@ package "domain" {
     + paymentMode : PaymentMode
   }
   class Statement {
-    + energyWh : int
-    + amountVnd : int
+    + debitVnd : int
+    + balanceVnd : int
     + earnedPoints : int
+    + segments : List<TariffSegment>
+    + stopReason : String
   }
   enum SessionState <<enumeration>> {
     pending

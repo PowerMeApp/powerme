@@ -7,14 +7,14 @@ start
 :Plug in, scan connector QR code\nand choose billing mode and limit;
 |«software system»\nPowerMe Platform|
 :Check connector status\nand vehicle compatibility;
-if ( ) then ([busy, faulted, offline,\nreserved by another Driver\nor incompatible])
+if ( ) then ([BR-P38: busy, faulted, offline,\nreserved by another Driver\nor incompatible])
   :Refuse with reason and\nnearby available connectors;
   stop
 else ([Available, or Reserved by\nthis Driver, and compatible])
 endif
 |«software system»\nPowerMe Platform|
 :Check Charging Credit\nagainst start minimum;
-while ( ) is ([credit < start minimum])
+while ( ) is ([BR-P18: credit < start minimum])
   |«person»\nDriver|
   if ( ) then ([Driver cancels])
     stop
@@ -23,26 +23,46 @@ while ( ) is ([credit < start minimum])
   endif
   |«software system»\nPowerMe Platform|
 endwhile ([credit ≥ start minimum])
-if ( ) then ([Driver holds a reservation\non this connector])
+if ( ) then ([BR-P29: Driver holds a reservation\non this connector])
   :Reservation\n&#91;fulfilled&#93;]
 else ([else])
 endif
-:Create session with limit\ncapped to what credit can pay;
+if ( ) then ([BR-P18: limit costs more than the\ncredit at the highest tariff of the day])
+  :Refuse with the largest affordable\nlimit (Driver may start again with it);
+  stop
+else ([affordable])
+endif
+:Create start request and hold\nthe limit's cost from credit;
 :ChargingSession\n&#91;pending&#93;]
+note right
+  For an app start, pending and failed
+  are held on the start request
+  (driver_charge_intents); the sessions
+  row is created in active when the
+  Charge Point reports the start.
+end note
 :Send start request>
 |«external system»\nCharge Point|
-if ( ) then ([start rejected or\nno reply within 60 s])
+if ( ) then ([start rejected])
   |«software system»\nPowerMe Platform|
-  :Close session without\ncharge and notify Driver;
+  :Refuse the start, keep no\nhold and notify Driver;
+  stop
+elseif ( ) then ([no reply within 30 s])
+  |«software system»\nPowerMe Platform|
+  :Mark start outcome unknown, credit\nstays held until the Operator\nfences the connector (WF-03);
+  stop
+elseif ( ) then ([accepted, but no start\nwithin 120 s])
+  |«software system»\nPowerMe Platform|
+  :Close start request without\ncharge, release hold, notify Driver;
   :ChargingSession\n&#91;failed&#93;]
   stop
-else ([start accepted])
+else ([start accepted\nand started])
   |«external system»\nCharge Point|
   :Lock connector and\nstart energy delivery;
 endif
 |«software system»\nPowerMe Platform|
 :ChargingSession\n&#91;active&#93;]
-while ( ) is ([no stop condition])
+while ( ) is ([BR-P19: no stop condition])
   |«external system»\nCharge Point|
   :Send meter reading>
   |«software system»\nPowerMe Platform|
@@ -51,7 +71,7 @@ while ( ) is ([no stop condition])
   :View battery level, energy,\ntime and running cost;
   |«software system»\nPowerMe Platform|
 endwhile ([stop condition met])
-if ( ) then ([Driver stops, limit reached\nor credit at cutoff reserve])
+if ( ) then ([BR-P01, P19: Driver stops, limit reached\nor credit at cutoff reserve])
   if ( ) then ([Driver chose to stop])
     |«person»\nDriver|
     :Tap Stop;
@@ -66,15 +86,15 @@ endif
 :Stop delivery, unlock connector\nand send final meter reading>
 |«software system»\nPowerMe Platform|
 :ChargingSession\n&#91;closed&#93;]
-:Price per tariff period and\ndebit cost from Charging Credit;
 :ChargingSession\n&#91;reconciled&#93;]
+:Price per tariff period and\ndebit cost from Charging Credit;
 :CreditTransaction\n&#91;session_debit&#93;]
-if ( ) then ([cost > credit balance:\nnew starts blocked\nuntil top-up])
+if ( ) then ([BR-P20: cost > credit balance:\nnew starts blocked\nuntil top-up])
   :CreditAccount\n&#91;in_shortfall&#93;]
 else ([else])
 endif
 fork
-  :Split charge into platform\nfee and Operator share;
+  :Count the session once in\nthe revenue report (BR-P46);
 fork again
   :Award loyalty points;
   :LoyaltyTransaction\n&#91;earn&#93;]

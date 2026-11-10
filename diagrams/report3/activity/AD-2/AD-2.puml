@@ -6,13 +6,13 @@ title AD-2 (System level) — Top up Charging Credit (with optional points redem
 start
 :Enter top-up amount and\nchoose whether to redeem points;
 |«software system»\nPowerMe Platform|
-:Check amount limits, balance\ncap and open top-ups;
-if ( ) then ([amount outside 50,000–2,000,000 VND,\nbalance after > 5,000,000 VND\nor another top-up still open])
+:Check amount limits, balance\ncap and pending top-ups;
+if ( ) then ([BR-P22: amount outside 50,000–2,000,000 VND,\nbalance after > 5,000,000 VND\nor another top-up still pending])
   :Reject with reason;
   stop
 else ([valid])
 endif
-if ( ) then ([redeem chosen and\npoints ≥ 500])
+if ( ) then ([BR-P35: redeem chosen and\npoints ≥ 500])
   :Compute points discount\n(≤ 50% of the amount);
 else ([else])
 endif
@@ -28,21 +28,19 @@ if ( ) then ([payment failed or\nDriver cancelled])
   :TopUp\n&#91;failed&#93;]
   stop
 else ([else])
-  if ( ) then ([no result within 15 min])
+  if ( ) then ([BR-P13: no result 2 min after\nthe 15-min expiry])
     :Query payment status\n(retry every 5 min while\nthe gateway is unavailable)>
     |«external system»\nPayment Gateway|
     :Return payment status>
     |«software system»\nPowerMe Platform|
     if ( ) then ([not paid])
       :TopUp\n&#91;expired&#93;]
-      if ( ) then ([late payment within 1 h,\nnot yet applied])
-      else ([else])
-        if ( ) then ([late payment\nafter 1 h])
-          :Record late payment\nfor Admin refund (AD-9);
-          stop
-        else ([no late payment])
-          stop
-        endif
+      :Tell Driver the payment was\nnot received in time (MSG26);
+      if ( ) then ([BR-P13: late payment\n(expiry is final)])
+        :Record late payment, not credited,\nfor Admin refund (AD-9);
+        stop
+      else ([no late payment])
+        stop
       endif
     else ([paid, amount matches])
     endif
@@ -68,7 +66,7 @@ fork again
   |«external system»\nE-Invoice\nProvider|
   :Issue e-invoice;
   |«software system»\nPowerMe Platform|
-  if ( ) then ([issued])
+  if ( ) then ([BR-P44: issued])
     :EInvoice\n&#91;issued&#93;]
   else ([provider error after\nautomatic retries])
     :Alert Admin to\nretry the e-invoice;

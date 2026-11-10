@@ -1,7 +1,7 @@
 @startuml SD-4b
 !include ../_style.iuml
 title SD-4b (Software level, CSMS) — Driver reports a fault, the reset fails, the Operator fixes it on site\nPrecondition: Charge Point in service · System view: AD-7 · State: STM-6
-footer Owner: Trần Trọng Nghĩa (WP4) · v2.0 · 01/11/2026 · names = code; reportFromDriver = design (WF-04 class), not in code yet · left gate = Driver App / Operator Dashboard
+footer Owner: Trần Trọng Nghĩa (WP4) · v2.1 · 10/11/2026 · names = code; reportFromDriver = design (WF-04 class), not in code yet · left gate = Driver App / Operator Dashboard
 
 participant "«component»\n<u>:FaultService</u>" as FS
 participant "«component»\n<u>:ConsoleCommands</u>" as CC
@@ -11,7 +11,7 @@ participant "«component»\n<u>:ConnectionRegistry</u>" as REG
 [-> FS ++ : reportFromDriver(driverId, connectorId, description)\n(POST /faults/reports [HTTPS, JWT])
 FS -> FS : save fault report
 alt second report within 2 h, or connector status abnormal
-  FS -> FS : create fault, hide connector, alert Operator
+  FS -> FS : create fault, connector shown as Unavailable, alert Operator
   hnote over FS : {fault.status = raised}
 else otherwise
   FS -> FS : keep the report only
@@ -20,23 +20,30 @@ end
 note right of FS : Operator acknowledges as in SD-4a\n{fault.status = acknowledged}
 
 == Operator tries a remote reset ==
-[-> CC ++ : POST /api/admin/faults/{id}/reset [HTTPS]
+[-> CC ++ : POST /api/admin/faults/{id}/reset [HTTP, localhost console]
 CC -> FS ++ : beginReset(faultId, {type}) : commandId
 FS -> FS : acknowledged → resetting, start 120 s timer
 FS --> CC -- : commandId
 CC -> REG ++ : call(identity, Reset {type})
 REG ->] : Reset [OCPP 1.6J, WSS]
-alt Charge Point rejects, or no answer
-  REG <--] : Reset.conf {Rejected} | timeout
-  REG --> CC : Rejected | error
-  CC -> FS ++ : onResetResult(commandId, Rejected | error)
+alt Charge Point rejects
+  REG <--] : Reset.conf {Rejected}
+  REG --> CC : Rejected
+  CC -> FS ++ : onResetResult(commandId, Rejected)
   FS -> FS : resetting → acknowledged (RESET_FAILED)
   FS --> CC --
-  [<-- CC : 200 "reset failed"
+  [<-- CC : 200 {reset_status = Rejected, fault_status = acknowledged}
+else no answer
+  REG <--] : timeout
+  REG --> CC : error
+  CC -> FS ++ : onResetResult(commandId, error)
+  FS -> FS : resetting → acknowledged (RESET_FAILED)
+  FS --> CC --
+  [<-- CC : 502 {station_error}
 else accepted, but no Available within 120 s
   REG <--] : Reset.conf {Accepted}
   REG --> CC : Accepted
-  [<-- CC : 202 reset sent
+  [<-- CC : 200 {reset_status = Accepted, fault_status = resetting}
   ... 120 s, connector not Available ...
   [o-> FS ++ : onResetTimeout(faultId, commandId)
   FS -> FS : resetting → acknowledged (RESET_FAILED)
@@ -46,9 +53,9 @@ deactivate REG
 deactivate CC
 
 == Operator fixes the Charge Point on site ==
-[-> CC ++ : POST /api/admin/faults/{id}/close [HTTPS]
+[-> CC ++ : POST /api/admin/faults/{id}/close [HTTP, localhost console]
 CC -> FS ++ : close(faultId, operatorId)
-FS -> FS : acknowledged → resolved (OPERATOR_CLOSE),\nshow connector again
+FS -> FS : acknowledged → resolved (OPERATOR_CLOSE),\nshow connector by its status again
 hnote over FS : {fault.status = resolved}
 FS --> CC --
 [<-- CC -- : 200

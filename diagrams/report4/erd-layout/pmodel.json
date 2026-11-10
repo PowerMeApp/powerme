@@ -51,7 +51,7 @@
     "admins": [
       {
         "key": "PK,FK",
-        "planned": true,
+        "planned": false,
         "name": "user_id",
         "type": "bigint",
         "nn": true,
@@ -320,7 +320,7 @@
         "key": "",
         "planned": false,
         "name": "reason",
-        "type": "varchar(30)",
+        "type": "varchar(50)",
         "nn": true,
         "default": "'stop_observed'",
         "raw_default": "'stop_observed'::text"
@@ -526,6 +526,15 @@
         "name": "connector_no",
         "type": "smallint",
         "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "FK",
+        "planned": false,
+        "name": "connector_id",
+        "type": "bigint",
+        "nn": false,
         "default": "",
         "raw_default": ""
       },
@@ -825,7 +834,7 @@
       },
       {
         "key": "FK,UQ",
-        "planned": true,
+        "planned": false,
         "name": "reservation_id",
         "type": "bigint",
         "nn": false,
@@ -1493,6 +1502,15 @@
         "nn": true,
         "default": "now()",
         "raw_default": "now()"
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "next_attempt_at",
+        "type": "timestamptz",
+        "nn": false,
+        "default": "now()",
+        "raw_default": "now()"
       }
     ],
     "fault_events": [
@@ -1763,16 +1781,16 @@
       },
       {
         "key": "FK,UQ",
-        "planned": true,
+        "planned": false,
         "name": "refund_id",
         "type": "bigint",
-        "nn": true,
+        "nn": false,
         "default": "",
         "raw_default": ""
       },
       {
         "key": "UQ",
-        "planned": true,
+        "planned": false,
         "name": "provider_adjustment_no",
         "type": "varchar(20)",
         "nn": false,
@@ -1781,7 +1799,7 @@
       },
       {
         "key": "",
-        "planned": true,
+        "planned": false,
         "name": "status",
         "type": "e_invoice_status",
         "nn": true,
@@ -1790,7 +1808,7 @@
       },
       {
         "key": "",
-        "planned": true,
+        "planned": false,
         "name": "attempt_count",
         "type": "integer",
         "nn": true,
@@ -1799,7 +1817,7 @@
       },
       {
         "key": "",
-        "planned": true,
+        "planned": false,
         "name": "last_error_kind",
         "type": "e_invoice_error_kind",
         "nn": false,
@@ -1808,7 +1826,7 @@
       },
       {
         "key": "",
-        "planned": true,
+        "planned": false,
         "name": "last_error_message",
         "type": "text",
         "nn": false,
@@ -1817,7 +1835,7 @@
       },
       {
         "key": "",
-        "planned": true,
+        "planned": false,
         "name": "last_attempt_at",
         "type": "timestamptz",
         "nn": false,
@@ -1826,7 +1844,16 @@
       },
       {
         "key": "",
-        "planned": true,
+        "planned": false,
+        "name": "next_attempt_at",
+        "type": "timestamptz",
+        "nn": false,
+        "default": "now()",
+        "raw_default": "now()"
+      },
+      {
+        "key": "",
+        "planned": false,
         "name": "created_at",
         "type": "timestamptz",
         "nn": true,
@@ -1835,7 +1862,7 @@
       },
       {
         "key": "",
-        "planned": true,
+        "planned": false,
         "name": "updated_at",
         "type": "timestamptz",
         "nn": true,
@@ -2199,7 +2226,7 @@
         "planned": false,
         "name": "message_type",
         "type": "smallint",
-        "nn": true,
+        "nn": false,
         "default": "",
         "raw_default": ""
       },
@@ -2244,6 +2271,15 @@
         "planned": false,
         "name": "replayed",
         "type": "boolean",
+        "nn": false,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "validation_error",
+        "type": "text",
         "nn": false,
         "default": "",
         "raw_default": ""
@@ -2364,7 +2400,7 @@
       },
       {
         "key": "FK",
-        "planned": true,
+        "planned": false,
         "name": "created_by",
         "type": "bigint",
         "nn": true,
@@ -2557,7 +2593,7 @@
       },
       {
         "key": "FK",
-        "planned": true,
+        "planned": false,
         "name": "reviewed_by",
         "type": "bigint",
         "nn": false,
@@ -2604,7 +2640,7 @@
     "refunds": [
       {
         "key": "PK",
-        "planned": true,
+        "planned": false,
         "name": "id",
         "type": "bigint",
         "nn": true,
@@ -2612,8 +2648,8 @@
         "raw_default": ""
       },
       {
-        "key": "FK,UQ1",
-        "planned": true,
+        "key": "FK",
+        "planned": false,
         "name": "top_up_id",
         "type": "bigint",
         "nn": true,
@@ -2621,8 +2657,8 @@
         "raw_default": ""
       },
       {
-        "key": "UQ1",
-        "planned": true,
+        "key": "",
+        "planned": false,
         "name": "kind",
         "type": "refund_kind",
         "nn": true,
@@ -2631,7 +2667,7 @@
       },
       {
         "key": "",
-        "planned": true,
+        "planned": false,
         "name": "amount_vnd",
         "type": "bigint",
         "nn": true,
@@ -2640,7 +2676,7 @@
       },
       {
         "key": "",
-        "planned": true,
+        "planned": false,
         "name": "status",
         "type": "refund_status",
         "nn": true,
@@ -2649,7 +2685,7 @@
       },
       {
         "key": "",
-        "planned": true,
+        "planned": false,
         "name": "attempt_count",
         "type": "integer",
         "nn": true,
@@ -2658,16 +2694,16 @@
       },
       {
         "key": "",
-        "planned": true,
+        "planned": false,
         "name": "last_error_kind",
-        "type": "refund_error_kind",
+        "type": "e_invoice_error_kind",
         "nn": false,
         "default": "",
         "raw_default": ""
       },
       {
         "key": "",
-        "planned": true,
+        "planned": false,
         "name": "last_error_message",
         "type": "text",
         "nn": false,
@@ -2676,7 +2712,7 @@
       },
       {
         "key": "",
-        "planned": true,
+        "planned": false,
         "name": "last_attempt_at",
         "type": "timestamptz",
         "nn": false,
@@ -2685,7 +2721,7 @@
       },
       {
         "key": "UQ",
-        "planned": true,
+        "planned": false,
         "name": "gateway_refund_no",
         "type": "varchar(20)",
         "nn": false,
@@ -2693,8 +2729,17 @@
         "raw_default": ""
       },
       {
+        "key": "",
+        "planned": false,
+        "name": "next_attempt_at",
+        "type": "timestamptz",
+        "nn": false,
+        "default": "now()",
+        "raw_default": "now()"
+      },
+      {
         "key": "FK",
-        "planned": true,
+        "planned": false,
         "name": "requested_by",
         "type": "bigint",
         "nn": false,
@@ -2703,7 +2748,7 @@
       },
       {
         "key": "",
-        "planned": true,
+        "planned": false,
         "name": "completed_at",
         "type": "timestamptz",
         "nn": false,
@@ -2712,7 +2757,7 @@
       },
       {
         "key": "",
-        "planned": true,
+        "planned": false,
         "name": "created_at",
         "type": "timestamptz",
         "nn": true,
@@ -2721,7 +2766,7 @@
       },
       {
         "key": "",
-        "planned": true,
+        "planned": false,
         "name": "updated_at",
         "type": "timestamptz",
         "nn": true,
@@ -2786,7 +2831,7 @@
       },
       {
         "key": "FK",
-        "planned": true,
+        "planned": false,
         "name": "requested_by",
         "type": "bigint",
         "nn": false,
@@ -3446,7 +3491,7 @@
       },
       {
         "key": "FK,UQ",
-        "planned": true,
+        "planned": false,
         "name": "reservation_id",
         "type": "bigint",
         "nn": false,
@@ -4254,6 +4299,18 @@
       },
       {
         "type": "c",
+        "name": "connector_status_events_connector_id_check",
+        "defn": "CHECK (((connector_no = 0) = (connector_id IS NULL)))",
+        "cols": ["connector_no", "connector_id"]
+      },
+      {
+        "type": "f",
+        "name": "connector_status_events_connector_id_fkey",
+        "defn": "FOREIGN KEY (connector_id) REFERENCES connectors(id)",
+        "cols": ["connector_id"]
+      },
+      {
+        "type": "c",
         "name": "connector_status_events_connector_no_check",
         "defn": "CHECK ((connector_no = ANY (ARRAY[0, 1, 2])))",
         "cols": ["connector_no"]
@@ -4719,6 +4776,12 @@
         "cols": ["last_error_kind", "last_attempt_at"]
       },
       {
+        "type": "c",
+        "name": "e_invoices_next_attempt_check",
+        "defn": "CHECK (((status <> ALL (ARRAY['requested'::e_invoice_status, 'failed'::e_invoice_status])) OR (next_attempt_at IS NOT NULL)))",
+        "cols": ["status", "next_attempt_at"]
+      },
+      {
         "type": "p",
         "name": "e_invoices_pkey",
         "defn": "PRIMARY KEY (id)",
@@ -4841,14 +4904,20 @@
       {
         "type": "c",
         "name": "invoice_adjustments_issued_check",
-        "defn": "CHECK (((status <> 'issued'::e_invoice_status) OR ((provider_adjustment_no IS NOT NULL) AND (issued_at IS NOT NULL))))",
-        "cols": ["status", "provider_adjustment_no", "issued_at"]
+        "defn": "CHECK (((status <> 'issued'::e_invoice_status) OR ((issued_at IS NOT NULL) AND (provider_adjustment_no IS NOT NULL))))",
+        "cols": ["status", "issued_at", "provider_adjustment_no"]
       },
       {
         "type": "c",
         "name": "invoice_adjustments_last_error_check",
         "defn": "CHECK (((last_error_kind IS NULL) OR (last_attempt_at IS NOT NULL)))",
         "cols": ["last_error_kind", "last_attempt_at"]
+      },
+      {
+        "type": "c",
+        "name": "invoice_adjustments_next_attempt_check",
+        "defn": "CHECK (((status <> ALL (ARRAY['requested'::e_invoice_status, 'failed'::e_invoice_status])) OR (next_attempt_at IS NOT NULL)))",
+        "cols": ["status", "next_attempt_at"]
       },
       {
         "type": "p",
@@ -4865,7 +4934,7 @@
       {
         "type": "f",
         "name": "invoice_adjustments_refund_id_fkey",
-        "defn": "FOREIGN KEY (refund_id) REFERENCES refunds(id) ON DELETE RESTRICT",
+        "defn": "FOREIGN KEY (refund_id) REFERENCES refunds(id)",
         "cols": ["refund_id"]
       },
       {
@@ -4977,8 +5046,8 @@
       {
         "type": "c",
         "name": "ocpp_message_log_action_check",
-        "defn": "CHECK (((message_type = 2) = (action IS NOT NULL)))",
-        "cols": ["message_type", "action"]
+        "defn": "CHECK (((validation_error IS NOT NULL) OR ((message_type = 2) = (action IS NOT NULL))))",
+        "cols": ["validation_error", "message_type", "action"]
       },
       {
         "type": "f",
@@ -4989,8 +5058,8 @@
       {
         "type": "c",
         "name": "ocpp_message_log_message_type_check",
-        "defn": "CHECK ((message_type = ANY (ARRAY[2, 3, 4])))",
-        "cols": ["message_type"]
+        "defn": "CHECK ((((message_type IS NOT NULL) AND (message_type = ANY (ARRAY[2, 3, 4]))) OR ((message_type IS NULL) AND (validation_error IS NOT NULL))))",
+        "cols": ["message_type", "validation_error"]
       },
       {
         "type": "p",
@@ -5037,7 +5106,7 @@
       {
         "type": "f",
         "name": "policy_templates_created_by_fkey",
-        "defn": "FOREIGN KEY (created_by) REFERENCES admins(user_id)",
+        "defn": "FOREIGN KEY (created_by) REFERENCES users(id)",
         "cols": ["created_by"]
       },
       {
@@ -5139,18 +5208,12 @@
       {
         "type": "c",
         "name": "refunds_completed_check",
-        "defn": "CHECK (((completed_at IS NULL) OR (completed_at >= created_at)))",
-        "cols": ["completed_at", "created_at"]
-      },
-      {
-        "type": "c",
-        "name": "refunds_done_check",
         "defn": "CHECK (((status = 'done'::refund_status) = (completed_at IS NOT NULL)))",
         "cols": ["status", "completed_at"]
       },
       {
         "type": "c",
-        "name": "refunds_done_no_check",
+        "name": "refunds_gateway_refund_no_check",
         "defn": "CHECK (((status <> 'done'::refund_status) OR (gateway_refund_no IS NOT NULL)))",
         "cols": ["status", "gateway_refund_no"]
       },
@@ -5167,10 +5230,22 @@
         "cols": ["last_error_kind", "last_attempt_at"]
       },
       {
+        "type": "c",
+        "name": "refunds_next_attempt_check",
+        "defn": "CHECK (((status <> 'requested'::refund_status) OR (next_attempt_at IS NOT NULL)))",
+        "cols": ["status", "next_attempt_at"]
+      },
+      {
         "type": "p",
         "name": "refunds_pkey",
         "defn": "PRIMARY KEY (id)",
         "cols": ["id"]
+      },
+      {
+        "type": "c",
+        "name": "refunds_requested_by_check",
+        "defn": "CHECK (((kind = 'account_closure'::refund_kind) OR (requested_by IS NOT NULL)))",
+        "cols": ["kind", "requested_by"]
       },
       {
         "type": "f",
@@ -5181,14 +5256,8 @@
       {
         "type": "f",
         "name": "refunds_top_up_id_fkey",
-        "defn": "FOREIGN KEY (top_up_id) REFERENCES top_ups(id) ON DELETE RESTRICT",
+        "defn": "FOREIGN KEY (top_up_id) REFERENCES top_ups(id)",
         "cols": ["top_up_id"]
-      },
-      {
-        "type": "u",
-        "name": "refunds_top_up_kind_key",
-        "defn": "UNIQUE (top_up_id, kind)",
-        "cols": ["top_up_id", "kind"]
       }
     ],
     "remote_commands": [
@@ -5213,7 +5282,7 @@
       {
         "type": "f",
         "name": "remote_commands_requested_by_fkey",
-        "defn": "FOREIGN KEY (requested_by) REFERENCES operator_staff(user_id)",
+        "defn": "FOREIGN KEY (requested_by) REFERENCES users(id)",
         "cols": ["requested_by"]
       },
       {
@@ -5643,6 +5712,13 @@
         "unique": false
       }
     ],
+    "connector_status_events": [
+      {
+        "name": "connector_status_events_connector_id_received_at_idx",
+        "defn": "(connector_id, received_at)",
+        "unique": false
+      }
+    ],
     "credit_transactions": [
       {
         "name": "credit_transactions_one_debit_per_session",
@@ -5705,6 +5781,13 @@
         "unique": true
       }
     ],
+    "e_invoices": [
+      {
+        "name": "e_invoices_status_next_attempt_at_idx",
+        "defn": "(status, next_attempt_at)",
+        "unique": false
+      }
+    ],
     "fault_events": [
       {
         "name": "fault_events_acknowledged_by_idx",
@@ -5756,6 +5839,13 @@
       {
         "name": "fault_reports_fault_event_id_idx",
         "defn": "(fault_event_id)",
+        "unique": false
+      }
+    ],
+    "invoice_adjustments": [
+      {
+        "name": "invoice_adjustments_status_next_attempt_at_idx",
+        "defn": "(status, next_attempt_at)",
         "unique": false
       }
     ],
@@ -5847,13 +5937,23 @@
     ],
     "refunds": [
       {
-        "name": "refunds_open_idx",
-        "defn": "(status, last_attempt_at) WHERE (status <> 'done'::refund_status)",
-        "unique": false
+        "name": "refunds_one_per_top_up_and_kind",
+        "defn": "(top_up_id, kind) WHERE (kind = ANY (ARRAY['top_up'::refund_kind, 'late_payment'::refund_kind]))",
+        "unique": true
       },
       {
         "name": "refunds_requested_by_idx",
         "defn": "(requested_by)",
+        "unique": false
+      },
+      {
+        "name": "refunds_status_next_attempt_at_idx",
+        "defn": "(status, next_attempt_at)",
+        "unique": false
+      },
+      {
+        "name": "refunds_top_up_id_idx",
+        "defn": "(top_up_id)",
         "unique": false
       }
     ],
@@ -5961,6 +6061,11 @@
         "name": "top_ups_gateway_transaction_no_key",
         "defn": "(gateway_transaction_no) WHERE (gateway_transaction_no IS NOT NULL)",
         "unique": true
+      },
+      {
+        "name": "top_ups_status_expires_at_idx",
+        "defn": "(status, expires_at)",
+        "unique": false
       }
     ],
     "users": [
@@ -6043,7 +6148,7 @@
     "ocpp_direction": ["in", "out"],
     "operator_status": ["active", "suspended", "closed"],
     "pause_cause": ["ev", "evse"],
-    "payment_mode": ["csms_billed", "station_wallet", "free", "unattributed"],
+    "payment_mode": ["csms_billed", "station_wallet", "unattributed"],
     "reconciliation_record_type": [
       "replay",
       "duplicate",
@@ -6053,7 +6158,6 @@
       "conflict",
       "late_sample"
     ],
-    "refund_error_kind": ["transient", "unknown", "rejected"],
     "refund_kind": ["top_up", "late_payment", "account_closure"],
     "refund_status": ["requested", "done", "failed"],
     "remote_command_status": ["pending", "sent", "accepted", "rejected", "timeout", "failed"],
@@ -6174,6 +6278,14 @@
       "ref": "charge_points",
       "ref_cols": ["id"],
       "on_delete": "CASCADE"
+    },
+    {
+      "table": "connector_status_events",
+      "name": "connector_status_events_connector_id_fkey",
+      "cols": ["connector_id"],
+      "ref": "connectors",
+      "ref_cols": ["id"],
+      "on_delete": "NO ACTION"
     },
     {
       "table": "connectors",
@@ -6461,7 +6573,7 @@
       "cols": ["refund_id"],
       "ref": "refunds",
       "ref_cols": ["id"],
-      "on_delete": "RESTRICT"
+      "on_delete": "NO ACTION"
     },
     {
       "table": "loyalty_accounts",
@@ -6547,8 +6659,8 @@
       "table": "policy_templates",
       "name": "policy_templates_created_by_fkey",
       "cols": ["created_by"],
-      "ref": "admins",
-      "ref_cols": ["user_id"],
+      "ref": "users",
+      "ref_cols": ["id"],
       "on_delete": "NO ACTION"
     },
     {
@@ -6589,7 +6701,7 @@
       "cols": ["top_up_id"],
       "ref": "top_ups",
       "ref_cols": ["id"],
-      "on_delete": "RESTRICT"
+      "on_delete": "NO ACTION"
     },
     {
       "table": "remote_commands",
@@ -6603,8 +6715,8 @@
       "table": "remote_commands",
       "name": "remote_commands_requested_by_fkey",
       "cols": ["requested_by"],
-      "ref": "operator_staff",
-      "ref_cols": ["user_id"],
+      "ref": "users",
+      "ref_cols": ["id"],
       "on_delete": "NO ACTION"
     },
     {
