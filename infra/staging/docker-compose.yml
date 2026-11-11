@@ -82,6 +82,10 @@ services:
       # PHẢI false trên staging: true cho phép giả danh tài xế bằng header X-Driver-Id (chỉ dành cho
       # máy dev). Cố định ở đây, không đọc từ .env.
       DRIVER_API_DEV_AUTH: 'false'
+      # WF-05 (T119, #111): người thao tác các route onboarding của console (đăng ký trụ, onboard).
+      # Là id user lấy từ log seed ("WF-05 console actors: ..."), KHÔNG lấy từ body. Trống → 503.
+      CONSOLE_ACTOR_ADMIN_ID: ${CONSOLE_ACTOR_ADMIN_ID:-}
+      CONSOLE_ACTOR_STAFF_ID: ${CONSOLE_ACTOR_STAFF_ID:-}
     ports:
       - '127.0.0.1:3000:3000' # console — chỉ loopback của VPS, truy cập bằng SSH tunnel
     expose:
