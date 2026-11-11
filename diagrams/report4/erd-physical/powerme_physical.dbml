@@ -1,4 +1,5 @@
-// PowerMe — Physical ERD (PostgreSQL 16), 10/11/2026 (v1.2: synced with the DB of migrations 0000-0015, audit A5 / D20;
+// PowerMe — Physical ERD (PostgreSQL 16), 10/11/2026 (v1.3: migration 0016 / T110 drops the RFID wallet card —
+// rfid_card_kind 'wallet' and payment_mode 'station_wallet'; v1.2: synced with the DB of migrations 0000-0015, audit A5 / D20;
 // v1.1 01/11: + refunds, R8). 44 tables (+10 partitions), 442 columns, 32 enums, 84 foreign keys. Paste into dbdiagram.io.
 // Not expressible in DBML (see the migrations): sequences, partitions, partial / expression indexes, triggers.
 
@@ -103,8 +104,7 @@ Enum pause_cause {
 }
 Enum payment_mode {
   "csms_billed"
-  "station_wallet" [note: 'still in the DB enum, out of scope since 09/11 (wallet cards removed, T110)']
-  "unattributed"
+  "unattributed" [note: 'station_wallet removed in migration 0016 (T109/T110: no RFID wallet cards)']
 }
 Enum reconciliation_record_type {
   "replay"
@@ -147,8 +147,7 @@ Enum reservation_status {
 }
 Enum rfid_card_kind {
   "online"
-  "wallet"
-  "free_vend"
+  "free_vend" [note: 'wallet removed in migration 0016 (T109/T110); old wallet cards became online']
 }
 Enum rfid_card_status {
   "unlinked"
@@ -273,7 +272,7 @@ Table vehicle_models {
 Table rfid_cards {
   id bigint [pk, increment]
   card_identifier "varchar(20)" [not null, unique]
-  card_kind rfid_card_kind [not null, note: 'online / wallet / free vend (BR-P15)']
+  card_kind rfid_card_kind [not null, note: 'online / free vend (BR-P15)']
   driver_id bigint
   status rfid_card_status [not null, default: 'unlinked']
   issued_at timestamptz [not null, default: `now()`]
@@ -281,7 +280,7 @@ Table rfid_cards {
   indexes {
     driver_id [name: 'rfid_cards_driver_id_idx']
   }
-  Note: 'RFID card: online (CSMS bills) / wallet (pays on the charge point) / free vend.'
+  Note: 'RFID card: online (CSMS bills the Charging Credit of the linked driver) / free vend.'
 }
 
 // ---------- network ----------

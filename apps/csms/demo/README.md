@@ -35,7 +35,7 @@ Dữ liệu nằm ở `apps/csms/.demo-data/` (đã `.gitignore`). Chỉ lắng 
 
 ## Dữ liệu mẫu (`seed.sql`)
 
-Một operator, một site ở TP.HCM, trụ `RH24D1-00001` (D1-120, lifecycle `awaiting_connection` — gateway tự chuyển `in_service` khi socket mở), hai connector, ba thẻ (`DEMO-CARD-0001` online/active gắn tài xế mẫu có ví 500.000 VND, `DEMO-WALLET-0001` wallet, `DEMO-BLOCKED-01` blocked), bảng giá 7 khung, và `charge_points.free_vend_tag = HMI-FREEVEND` (mật khẩu HMI `123456` → phiên `origin=free_vend`, `payment_mode=free`). Tên thẻ khớp `CARDS` trong `simulator/d1-hmi/model.mjs`. **Thẻ lạ cố ý không seed** (`DEMO-UNKNOWN-999` của HMI, `UNKNOWN-TAG-99` của DS-03c); HMI không có nút thẻ bị chặn nên DS-01b dùng trụ kịch bản. Chạy lại seed không nhân đôi dòng.
+Một operator, một site ở TP.HCM, trụ `RH24D1-00001` (D1-120, lifecycle `awaiting_connection` — gateway tự chuyển `in_service` khi socket mở), hai connector, hai tài xế mẫu (mỗi người Charging Credit 500.000 VND), ba thẻ (`DEMO-CARD-0001` online/active gắn tài xế mẫu, `DEMO-CARD-0002` online/active gắn tài xế mẫu 2, `DEMO-BLOCKED-01` blocked), bảng giá 7 khung, và `charge_points.free_vend_tag = HMI-FREEVEND` (mật khẩu HMI `123456` → phiên `origin=free_vend`, `payment_mode=unattributed`). Thẻ ví `DEMO-WALLET-0001` bỏ từ T110 (không còn thẻ `wallet` / `station_wallet`); DB demo cũ còn thẻ này thì migration 0016 đổi nó thành thẻ online chưa gắn tài xế, `Authorize` trả `Invalid`. Tên thẻ khớp `CARDS` trong `simulator/d1-hmi/model.mjs`. **Thẻ lạ cố ý không seed** (`DEMO-UNKNOWN-999` của HMI, `UNKNOWN-TAG-99` của DS-03c); HMI không có nút thẻ bị chặn nên DS-01b dùng trụ kịch bản. Chạy lại seed không nhân đôi dòng.
 
 ## DS-09 / DS-10 — onboard SIM-0005 qua HTTP (WF-05, T119)
 
@@ -78,5 +78,6 @@ DATABASE_URL=postgresql://powerme:powerme@127.0.0.1:54330/powerme_test npm test 
 | `db-embedded.mjs`      | Postgres nhúng, áp migration (qua `scripts/migrate.mjs`), nạp `seed.sql`, dừng sạch |
 | `../scripts/migrate.mjs` | Áp tuần tự `drizzle/*.sql` còn thiếu, theo dõi bằng bảng `_migrations` (DB demo cũ tự lên 0001) |
 | `seed.sql`             | Dữ liệu mẫu, idempotent                                           |
+| `seed-app.sql`         | Dữ liệu cho app tài xế trên staging (BE-27): 9 trạm TP.HCM, mẫu xe, tài xế `app.ds0x@powerme.test`; nạp bằng `scripts/seed-demo.mjs` (không nạp ở `npm run demo`) |
 | `scripted-station.mjs` | Trụ kịch bản cho DS-01a/b, DS-03a/b/c/d                           |
 | `show.mjs`             | Truy vấn nhanh DB demo                                            |

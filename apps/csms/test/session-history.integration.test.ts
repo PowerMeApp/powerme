@@ -166,7 +166,6 @@ describeDb(
           status: 'active',
           driverId: onlineDriverId,
         },
-        { cardIdentifier: 'CARD-WALLET', cardKind: 'wallet', status: 'active' },
         { cardIdentifier: 'CARD-BLOCKED', cardKind: 'online', status: 'blocked' },
         { cardIdentifier: 'CARD-UNLINKED', cardKind: 'online', status: 'unlinked' },
         { cardIdentifier: 'CARD-FREEVEND', cardKind: 'free_vend', status: 'active' },
@@ -325,31 +324,26 @@ describeDb(
       expect(await chain(tx)).toContain('closed -RECONCILE_OK-> reconciled');
     });
 
-    it('payment_mode theo idTag: online → csms_billed, wallet → station_wallet, free vend → unattributed KHÔNG unknown_id_tag, thẻ lạ → unattributed + unknown_id_tag', async () => {
+    // T110 (migration 0016): không còn thẻ ví / station_wallet — payment_mode chỉ có hai giá trị.
+    it('payment_mode theo idTag: online → csms_billed, free vend → unattributed KHÔNG unknown_id_tag, thẻ lạ → unattributed + unknown_id_tag', async () => {
       const online = await start(1, 'CARD-ONLINE', 1000, T('07:00'));
-      const wallet = await start(1, 'CARD-WALLET', 1000, T('07:01'));
       const free = await start(1, FREE_VEND_TAG, 1000, T('07:02'));
       const unknown = await start(1, 'KHONG-CO-TRONG-SO', 1000, T('07:03'));
 
       expect(await session(online)).toMatchObject({ paymentMode: 'csms_billed', origin: 'rfid' });
-      expect(await session(wallet)).toMatchObject({
-        paymentMode: 'station_wallet',
-        origin: 'rfid',
-      });
       expect(await session(free)).toMatchObject({
         paymentMode: 'unattributed',
         origin: 'free_vend',
       });
       expect(await session(unknown)).toMatchObject({ paymentMode: 'unattributed', origin: 'rfid' });
       expect((await records(unknown)).map((r) => r.recordType)).toEqual(['unknown_id_tag']);
-      for (const tx of [online, wallet, free]) {
+      for (const tx of [online, free]) {
         expect((await records(tx)).map((r) => r.recordType)).not.toContain('unknown_id_tag');
       }
     });
 
     it('Authorize theo rfid_cards.status (STM-8, BR-P06): active → Accepted, blocked → Blocked, unlinked → Invalid, thẻ lạ → Invalid', async () => {
       expect(await svc.authorize('CARD-ONLINE')).toBe('Accepted');
-      expect(await svc.authorize('CARD-WALLET')).toBe('Accepted');
       expect(await svc.authorize('CARD-FREEVEND')).toBe('Accepted');
       expect(await svc.authorize('CARD-BLOCKED')).toBe('Blocked');
       expect(await svc.authorize('CARD-UNLINKED')).toBe('Invalid');

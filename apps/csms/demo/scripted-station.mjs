@@ -11,7 +11,8 @@
  *   node demo/scripted-station.mjs <kịch bản> [tuỳ chọn]
  *
  * Kịch bản:
- *   ds-01a   quẹt thẻ hợp lệ (mặc định DEMO-CARD-0001; --tag DEMO-WALLET-0001 cho thẻ ví) → phiên active, origin=rfid
+ *   ds-01a   quẹt thẻ hợp lệ (mặc định DEMO-CARD-0001; --tag DEMO-CARD-0002 cho thẻ của tài xế mẫu 2)
+ *            → phiên active, origin=rfid, payment_mode=csms_billed
  *   ds-01b   thẻ bị chặn DEMO-BLOCKED-01 → Authorize Blocked, không có phiên
  *   ds-03a   phiên sạc → rớt mạng 60 s → nối lại KHÔNG Boot → StopTransaction phát lại mang meterStop cũ
  *            (tái hiện hiện tượng 3 của EXP-01) → phiên review + bản ghi conflict + mẫu phát lại
