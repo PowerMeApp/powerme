@@ -308,6 +308,12 @@ paths:
         tính thời gian); không mở rộng bán kính người dùng đã nhập. Smart không bảo đảm top ba
         toàn mạng ngoài bán kính. UI lấy page_size=3 nếu muốn ba gợi ý.
         Tham số lạ/trùng, chuỗi điều khiển, SoC không hữu hạn hoặc không thỏa 0≤soc<target≤80 trả 400.
+        Súng đang có sự cố mở (`fault_events.status` khác `resolved`) bị ẩn khỏi kết quả (WF-04,
+        AD-7); sự cố cả trụ (`connector_id` null, vd. `Offline`) ẩn mọi súng của trụ đó. Trạm không
+        còn súng nào thì không xuất hiện và không tính vào `total`. Áp dụng cho mọi kiểu sắp xếp,
+        kể cả smart và danh sách trạm gần nhất dự phòng, nên súng lỗi không bao giờ là
+        `best_connector_id`. Sự cố do tài xế báo (`driver_report`) không ẩn súng. Sự cố `resolved`
+        thì súng hiện lại.
       parameters:
         - $ref: '#/components/parameters/vehicleId'
         - name: q
@@ -985,7 +991,8 @@ components:
         Trạng thái hướng tài xế (BR-P38): `available` = Available; `in_use` = Preparing, Charging,
         SuspendedEV, SuspendedEVSE; `freeing_soon` = Finishing; `unavailable` = Reserved,
         Unavailable, Faulted; `offline` = không có bản tin quá ngưỡng offline; `unknown` = chưa
-        từng có StatusNotification.
+        từng có StatusNotification. Súng có sự cố mở (trừ `driver_report`) không được trả về, nên
+        `unavailable` / `offline` chỉ còn gặp khi sự cố chưa được ghi (vd. trước ngưỡng 900 s).
       enum: [available, in_use, freeing_soon, unavailable, offline, unknown]
     StatusQuality:
       type: string
