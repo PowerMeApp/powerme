@@ -99,6 +99,15 @@ export class OcppHandlers {
         return {};
       case 'StopTransaction':
         await this.sessions.onStopTransaction(params as StopTransactionRequest, ctx);
+        // FE-17 (BR-P42, t8): a normally completed session clears a driver-report fault. Best effort,
+        // like the StatusNotification hook: a fault-side error never fails the StopTransaction.
+        try {
+          await this.faults?.onSessionCompleted((params as StopTransactionRequest).transactionId);
+        } catch (err) {
+          this.logger.error(
+            `${ctx.identity} tx ${(params as StopTransactionRequest).transactionId}: đóng sự cố tài xế báo lỗi: ${String(err)}`,
+          );
+        }
         try {
           await this.driverCharging?.onStopped((params as StopTransactionRequest).transactionId);
         } catch {

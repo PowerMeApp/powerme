@@ -41,9 +41,20 @@ import {
 } from '@nestjs/common';
 import { and, desc, eq, isNull, ne, SQL, sql, SQLWrapper } from 'drizzle-orm';
 import { ScheduledTask, Scheduler, TimeoutScheduler } from '../../common/scheduler.js';
-import { CONFIG, CsmsConfig, DEFAULT_FAULT_RESET_TIMEOUT_S } from '../../config.js';
+import {
+  CONFIG,
+  CsmsConfig,
+  DEFAULT_FAULT_RESET_TIMEOUT_S,
+  DEFAULT_OFFLINE_ALERT_S,
+} from '../../config.js';
 import { DB, Db, DbExecutor } from '../../db/db.module.js';
-import { chargePoints, connectors, faultEvents, remoteCommands } from '../../db/schema/index.js';
+import {
+  chargePoints,
+  connectors,
+  faultEvents,
+  faultReports,
+  remoteCommands,
+} from '../../db/schema/index.js';
 import {
   CHARGE_POINT_ERROR_CODES,
   ERROR_CODE_GUIDE,
@@ -80,6 +91,39 @@ export type StatusOutcome =
   /** Bản phát lại cũ hơn trạng thái hiện tại của sự cố: không đổi gì (xem {@link eventTime}). */
   | { kind: 'stale'; faultId: number | null }
   | { kind: 'none' };
+
+/** FE-17 (UC-CHG-05): lỗi nghiệp vụ của báo lỗi từ tài xế; route HTTP đổi sang mã lỗi. */
+export class DriverReportError extends Error {
+  constructor(readonly code: 'invalid_description' | 'not_found' | 'duplicate_report') {
+    super(code);
+    this.name = 'DriverReportError';
+  }
+}
+
+export interface DriverReportResult {
+  reportId: number;
+  reportNo: number;
+  connectorId: number;
+  reportedAt: Date;
+  /** Sự cố mà báo cáo được gắn vào (mới tạo hoặc đang mở); null = chờ gộp sau (AD-7). */
+  faultEventId: number | null;
+  /** Súng đang mang nhãn "reported issue" (BR-P42) sau báo cáo này. */
+  reportedIssue: boolean;
+}
+
+/** BR-P42: cửa sổ 2 giờ — đếm tài xế khác nhau, và gộp báo cáo chờ khi một sự cố mở (Q79). */
+export const REPORT_WINDOW_MS = 2 * 3600 * 1000;
+/** Q80: cùng tài xế, cùng súng trong 60 s → trùng (bấm hai lần). */
+export const DUPLICATE_REPORT_MS = 60 * 1000;
+/** Q78: trạng thái súng "bất thường" — một báo cáo là đủ. Trụ Offline cũng tính. */
+const ABNORMAL_STATUSES = ['Faulted', 'Unavailable'];
+/** Q77: phiên dừng vì các lý do này không phải "hoàn tất bình thường" (BR-P42). */
+export const FAULT_STOP_REASONS: ReadonlySet<string> = new Set([
+  'EmergencyStop',
+  'PowerLoss',
+  'Other',
+]);
+const CONTROL = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/;
 
 export interface ConnectorStatusInput {
   chargePointId: number;
@@ -139,6 +183,8 @@ export interface FaultListItem {
   resetCommandId: number | null;
   resetCommandStatus: string | null;
   isOnline: boolean;
+  /** Số báo cáo của tài xế gắn vào sự cố (F-05: Operator thấy báo cáo). */
+  reportCount: number;
 }
 
 /**
@@ -269,15 +315,22 @@ export class FaultService implements OnApplicationBootstrap, OnApplicationShutdo
           })
           .returning({ id: faultEvents.id });
         if (!row) throw new Error('INSERT fault_events không trả id');
+        await this.attachWaitingReports(tx, input.chargePointId, connectorId, row.id, at);
         return { kind: 'raised', faultId: row.id } as const;
       }
       if (!open) return { kind: 'none' } as const;
+      // FE-17 (Q76): sự cố do tài xế báo chỉ đóng bằng đúng `Available` như STM-6 ghi — cắm xe
+      // (Preparing) không chứng minh súng đã hết lỗi.
+      if (open.source === 'driver_report' && input.status !== 'Available') {
+        return { kind: 'none' } as const;
+      }
       if (at < open.raisedAt) return { kind: 'stale', faultId: open.id } as const;
       const step = this.sm.apply(open.status, 'CONNECTOR_AVAILABLE');
       await tx
         .update(faultEvents)
         .set({ status: step.to, resolvedAt: at })
         .where(eq(faultEvents.id, open.id));
+      await this.clearReports(tx, open.id, at, null);
       return { kind: 'resolved', faultId: open.id, from: open.status } as const;
     });
 
@@ -327,6 +380,7 @@ export class FaultService implements OnApplicationBootstrap, OnApplicationShutdo
         })
         .returning({ id: faultEvents.id });
       if (!row) throw new Error('INSERT fault_events không trả id');
+      await this.attachWaitingReports(tx, chargePointId, null, row.id, at);
       return { kind: 'raised', faultId: row.id } as const;
     });
     if (outcome.kind === 'raised') {
@@ -354,6 +408,7 @@ export class FaultService implements OnApplicationBootstrap, OnApplicationShutdo
         .update(faultEvents)
         .set({ status: step.to, resolvedAt: at })
         .where(eq(faultEvents.id, faultId));
+      await this.clearReports(tx, faultId, at, null);
       return 'resolved' as const;
     });
     if (res === 'resolved') {
@@ -366,6 +421,176 @@ export class FaultService implements OnApplicationBootstrap, OnApplicationShutdo
   // ---------------------------------------------------------------------------------------------
   // Hành động của operator
   // ---------------------------------------------------------------------------------------------
+
+  // ---------------------------------------------------------------------------------------------
+  // Tài xế báo lỗi (FE-17: UC-CHG-05, BR-P42, Q75–Q81)
+  // ---------------------------------------------------------------------------------------------
+
+  /**
+   * Ghi một báo lỗi của tài xế cho một súng và áp BR-P42:
+   * - súng (hoặc cả trụ) đang có sự cố mở → gắn vào đó, không tạo sự cố mới (Q81, STM-6);
+   * - 2 tài xế khác nhau trong 2 giờ, hoặc 1 tài xế khi súng Faulted / Unavailable / trụ Offline
+   *   (Q78) → tạo sự cố `driver_report` (t1) và gộp mọi báo cáo chờ của súng trong 2 giờ (Q79);
+   * - chưa đủ → chỉ lưu, chờ gộp sau (AD-7).
+   * Cùng tài xế + cùng súng trong 60 s → `duplicate_report`, không ghi gì (Q80).
+   */
+  async reportFromDriver(
+    driverId: number,
+    connectorId: number,
+    description: string,
+    at: Date = new Date(),
+  ): Promise<DriverReportResult> {
+    const text = typeof description === 'string' ? description.trim() : '';
+    const length = [...text].length;
+    if (length < 5 || length > 500 || CONTROL.test(text))
+      throw new DriverReportError('invalid_description');
+    const offlineMs = (this.config.offlineAlertS ?? DEFAULT_OFFLINE_ALERT_S) * 1000;
+
+    const result = await this.db.transaction(async (tx) => {
+      // Khoá dòng súng: hai báo cáo cùng lúc cho một súng đi tuần tự (đếm tài xế không lệch).
+      const target = (
+        await tx.execute<{
+          charge_point_id: string;
+          status: string | null;
+          offline: boolean;
+        }>(sql`SELECT c.charge_point_id::text AS charge_point_id, c.status,
+            (NOT cp.is_online OR cp.last_message_at IS NULL
+              OR cp.last_message_at < ${at}::timestamptz - (${offlineMs}::bigint * interval '1 millisecond')) AS offline
+          FROM connectors c JOIN charge_points cp ON cp.id = c.charge_point_id
+          JOIN sites st ON st.id = cp.site_id JOIN operators o ON o.id = st.operator_id
+          WHERE c.id = ${connectorId} AND cp.lifecycle = 'in_service' AND o.status = 'active'
+          FOR UPDATE OF c`)
+      ).rows[0];
+      if (!target) throw new DriverReportError('not_found');
+      const chargePointId = Number(target.charge_point_id);
+
+      const duplicate = await tx.execute(sql`SELECT 1 FROM fault_reports
+        WHERE driver_id = ${driverId} AND connector_id = ${connectorId}
+          AND reported_at > ${at}::timestamptz - (${DUPLICATE_REPORT_MS}::bigint * interval '1 millisecond')`);
+      if (duplicate.rows.length) throw new DriverReportError('duplicate_report');
+
+      const open =
+        (await this.findOpenForUpdate(tx, chargePointId, connectorId)) ??
+        (await this.findOpenForUpdate(tx, chargePointId, null));
+      if (open) this.sm.apply(open.status, 'SIGNAL'); // no-op: gắn vào sự cố đang mở
+
+      const [report] = await tx
+        .insert(faultReports)
+        .values({
+          driverId,
+          connectorId,
+          description: text,
+          reportedAt: at,
+          faultEventId: open?.id ?? null,
+        })
+        .returning({ id: faultReports.id, reportNo: faultReports.reportNo });
+      if (!report) throw new Error('INSERT fault_reports không trả id');
+      if (open) return { report, faultEventId: open.id, raised: false };
+
+      const drivers = (
+        await tx.execute<{ n: number }>(sql`SELECT count(DISTINCT driver_id)::int AS n
+          FROM fault_reports WHERE connector_id = ${connectorId} AND fault_event_id IS NULL
+            AND cleared_at IS NULL
+            AND reported_at > ${at}::timestamptz - (${REPORT_WINDOW_MS}::bigint * interval '1 millisecond')`)
+      ).rows[0]!.n;
+      const abnormal = target.offline || ABNORMAL_STATUSES.includes(target.status ?? '');
+      if (drivers < 2 && !abnormal) return { report, faultEventId: null, raised: false };
+
+      const [event] = await tx
+        .insert(faultEvents)
+        .values({
+          chargePointId,
+          connectorId,
+          source: 'driver_report',
+          errorCode: null,
+          status: this.sm.initial(),
+          raisedAt: at,
+        })
+        .returning({ id: faultEvents.id });
+      if (!event) throw new Error('INSERT fault_events không trả id');
+      await this.attachWaitingReports(tx, chargePointId, connectorId, event.id, at);
+      return { report, faultEventId: event.id, raised: true };
+    });
+
+    if (result.raised)
+      this.logger.warn(
+        `sự cố #${result.faultEventId} raised: tài xế báo lỗi súng ${connectorId} (BR-P42)`,
+      );
+    return {
+      reportId: result.report.id,
+      reportNo: result.report.reportNo,
+      connectorId,
+      reportedAt: at,
+      faultEventId: result.faultEventId,
+      reportedIssue: result.faultEventId !== null,
+    };
+  }
+
+  /**
+   * t8 (BR-P42, Q77): một phiên trên súng hoàn tất bình thường — bắt đầu SAU khi sự cố
+   * `driver_report` được tạo, đã dừng, có điện năng > 0 Wh, lý do dừng không phải
+   * EmergencyStop / PowerLoss / Other — thì đóng sự cố và xoá nhãn. Gọi sau StopTransaction.
+   */
+  async onSessionCompleted(transactionNo: number): Promise<'resolved' | 'none'> {
+    const session = (
+      await this.db.execute<{
+        charge_point_id: string;
+        connector_id: string;
+        received_started_at: Date;
+        received_stopped_at: Date | null;
+        energy_wh: string | null;
+        stop_reason: string | null;
+      }>(sql`SELECT charge_point_id::text, connector_id::text, received_started_at,
+          received_stopped_at, (meter_stop_wh - meter_start_wh)::text AS energy_wh, stop_reason
+        FROM sessions WHERE transaction_no = ${transactionNo}`)
+    ).rows[0];
+    if (
+      !session?.received_stopped_at ||
+      !(Number(session.energy_wh) > 0) ||
+      FAULT_STOP_REASONS.has(session.stop_reason ?? 'Local')
+    )
+      return 'none';
+    const at = new Date(session.received_stopped_at);
+    const resolvedId = await this.db.transaction(async (tx) => {
+      const open = await this.findOpenForUpdate(
+        tx,
+        Number(session.charge_point_id),
+        Number(session.connector_id),
+      );
+      if (
+        !open ||
+        open.source !== 'driver_report' ||
+        !(new Date(session.received_started_at) > open.raisedAt) ||
+        !this.sm.canApply(open.status, 'SESSION_COMPLETED')
+      )
+        return null;
+      const step = this.sm.apply(open.status, 'SESSION_COMPLETED');
+      await tx
+        .update(faultEvents)
+        .set({ status: step.to, resolvedAt: at })
+        .where(eq(faultEvents.id, open.id));
+      await this.clearReports(tx, open.id, at, null);
+      return open.id;
+    });
+    if (resolvedId === null) return 'none';
+    this.logger.log(`sự cố #${resolvedId} resolved: phiên ${transactionNo} hoàn tất bình thường`);
+    return 'resolved';
+  }
+
+  /** Báo cáo của tài xế gắn vào một sự cố (F-05: Operator thấy nội dung). */
+  async reportsOf(faultId: number) {
+    return this.db
+      .select({
+        reportNo: faultReports.reportNo,
+        connectorId: faultReports.connectorId,
+        description: faultReports.description,
+        reportedAt: faultReports.reportedAt,
+        clearedAt: faultReports.clearedAt,
+      })
+      .from(faultReports)
+      .where(eq(faultReports.faultEventId, faultId))
+      .orderBy(faultReports.reportedAt);
+  }
 
   /** t2 raised → acknowledged. `operatorId` = operator_staff.user_id; null khi chưa có đăng nhập. */
   async acknowledge(faultId: number, operatorId: number | null, at: Date = new Date()) {
@@ -514,6 +739,7 @@ export class FaultService implements OnApplicationBootstrap, OnApplicationShutdo
         .update(faultEvents)
         .set({ status: step.to, resolvedAt: at })
         .where(eq(faultEvents.id, faultId));
+      await this.clearReports(tx, faultId, at, operatorId);
       return { id: faultId, status: step.to };
     });
     // fault_events chưa có cột "ai đóng" — chỉ vào log (ITERATION-1-WF04 câu hỏi mở).
@@ -546,6 +772,7 @@ export class FaultService implements OnApplicationBootstrap, OnApplicationShutdo
         resetCommandId: faultEvents.resetCommandId,
         resetCommandStatus: remoteCommands.status,
         isOnline: chargePoints.isOnline,
+        reportCount: sql<number>`(SELECT count(*)::int FROM fault_reports r WHERE r.fault_event_id = ${faultEvents.id})`,
       })
       .from(faultEvents)
       .innerJoin(chargePoints, eq(chargePoints.id, faultEvents.chargePointId))
@@ -676,7 +903,12 @@ export class FaultService implements OnApplicationBootstrap, OnApplicationShutdo
     connectorId: number | null,
   ) {
     const [row] = await tx
-      .select({ id: faultEvents.id, status: faultEvents.status, raisedAt: faultEvents.raisedAt })
+      .select({
+        id: faultEvents.id,
+        status: faultEvents.status,
+        raisedAt: faultEvents.raisedAt,
+        source: faultEvents.source,
+      })
       .from(faultEvents)
       .where(
         and(
@@ -712,6 +944,40 @@ export class FaultService implements OnApplicationBootstrap, OnApplicationShutdo
       .orderBy(desc(faultEvents.resolvedAt))
       .limit(1);
     return row?.resolvedAt ?? null;
+  }
+
+  /**
+   * Q79 / AD-7: gắn các báo cáo chờ (chưa gộp, chưa xoá, trong 2 giờ) vào sự cố vừa mở —
+   * của một súng, hoặc của mọi súng trên trụ khi sự cố là cả trụ (`connectorId` null).
+   */
+  private async attachWaitingReports(
+    tx: DbExecutor,
+    chargePointId: number,
+    connectorId: number | null,
+    faultId: number,
+    at: Date,
+  ): Promise<void> {
+    await tx.execute(sql`UPDATE fault_reports SET fault_event_id = ${faultId}, updated_at = now()
+      WHERE fault_event_id IS NULL AND cleared_at IS NULL
+        AND reported_at > ${at}::timestamptz - (${REPORT_WINDOW_MS}::bigint * interval '1 millisecond')
+        AND ${
+          connectorId === null
+            ? sql`connector_id IN (SELECT id FROM connectors WHERE charge_point_id = ${chargePointId})`
+            : sql`connector_id = ${connectorId}`
+        }`);
+  }
+
+  /** BR-P42: sự cố đóng → xoá nhãn "reported issue" của các báo cáo gắn vào nó. */
+  private async clearReports(
+    tx: DbExecutor,
+    faultId: number,
+    at: Date,
+    staffId: number | null,
+  ): Promise<void> {
+    await tx
+      .update(faultReports)
+      .set({ clearedAt: at, clearedBy: staffId })
+      .where(and(eq(faultReports.faultEventId, faultId), isNull(faultReports.clearedAt)));
   }
 
   private async lockFault(tx: DbExecutor, faultId: number) {
