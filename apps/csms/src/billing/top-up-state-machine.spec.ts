@@ -1,10 +1,10 @@
 /**
- * Unit test TopUpStateMachine (STM-4 v0.3) — không DB.
+ * Unit test TopUpStateMachine (STM-4 v1.1, 10/11/2026: bỏ cửa sổ trả trễ, T117) — không DB.
  *
- * Một test cho MỖI chuyển của STM-4 (#2–#7, tên test = số chuyển), các nhánh guard, kết quả lặp
- * / mâu thuẫn của BR-P13, timeout đến muộn (`stale`), các ⊕ của decisions D4 (thành công sau
- * `failed`, khoản trễ đã ghi), rồi quét TOÀN BỘ 5 trạng thái × 4 event = 20 cặp: 16 cặp được
- * nhận, 4 cặp ném InvalidTransition (ADMIN_REFUND khi không ở credited).
+ * Một test cho MỖI chuyển của STM-4 (#2–#4, #6, #7; #5 đã bỏ; tên test = số chuyển), các nhánh
+ * guard, kết quả lặp / mâu thuẫn của BR-P13, timeout đến muộn (`stale`), các ⊕ của decisions D4
+ * (thành công sau `failed`, khoản trễ đã ghi), rồi quét TOÀN BỘ 5 trạng thái × 4 event = 20 cặp:
+ * 16 cặp được nhận, 4 cặp ném InvalidTransition (ADMIN_REFUND khi không ở credited).
  */
 import { topUpStatusEnum } from '../db/schema/enums.js';
 import { InvalidTransition, MissingGuard } from './invalid-transition.js';
@@ -28,8 +28,6 @@ const OK: TopUpGuards = {
   transactionNo: 'VNP-1',
   appliedTransactionNo: 'VNP-1',
   recordedLateRef: null,
-  withinLateWindow: true,
-  limitsOk: true,
   balanceCoversAmount: true,
 };
 
@@ -42,8 +40,13 @@ describe('TopUpStateMachine — các chuyển của STM-4', () => {
   const STM4: Row[] = [
     ['#2', 'pending', 'PAYMENT_SUCCEEDED', 'credited', 'IPN/querydr báo đã trả (TC-STM4-02)'],
     ['#3', 'pending', 'PAYMENT_FAILED', 'failed', 'thanh toán lỗi hoặc huỷ (TC-STM4-03)'],
-    ['#4', 'pending', 'TIMEOUT_NOT_PAID', 'expired', '15 phút, querydr chưa trả (TC-STM4-04)'],
-    ['#5', 'expired', 'PAYMENT_SUCCEEDED', 'credited', 'trả trễ trong 1 giờ (TC-STM4-05)'],
+    [
+      '#4',
+      'pending',
+      'TIMEOUT_NOT_PAID',
+      'expired',
+      'quá expires_at + 2 phút, querydr báo chưa trả dứt khoát (TC-STM4-04)',
+    ],
     ['#7', 'credited', 'ADMIN_REFUND', 'refunded', 'Admin hoàn, số dư đủ (UC-ADM-08)'],
   ];
 
@@ -58,29 +61,31 @@ describe('TopUpStateMachine — các chuyển của STM-4', () => {
   });
 });
 
-describe('TopUpStateMachine — #5/#6: thanh toán tới khi đã expired', () => {
-  it.each([
-    [true, true, 'credited', 'transition', '#5'],
-    [false, true, 'expired', 'late_payment', '#6'],
-    [true, false, 'expired', 'late_payment', '#6'],
-    [false, false, 'expired', 'late_payment', '#6'],
-  ] as const)(
-    'trong cửa sổ=%s, hạn mức ok=%s → %s (%s)',
-    (withinLateWindow, limitsOk, to, outcome, no) => {
-      expect(
-        sm.apply('expired', 'PAYMENT_SUCCEEDED', { ...OK, withinLateWindow, limitsOk }),
-      ).toEqual({
-        to,
-        outcome,
-        no,
-      });
-    },
-  );
+describe('TopUpStateMachine — thanh toán thành công tới khi chưa / đã expired', () => {
+  it('TC-STM4-05: thành công khi còn pending → credited (#2)', () => {
+    // Máy không xét đồng hồ: top-up còn `pending` thì cộng, kể cả khi đã quá `expires_at` (đang
+    // chờ querydr chốt, D4 ⊕). Test mức service (vòng quét + querydr) là việc của Phần 8.
+    expect(sm.apply('pending', 'PAYMENT_SUCCEEDED', OK)).toEqual({
+      to: 'credited',
+      outcome: 'transition',
+      no: '#2',
+    });
+  });
 
-  it('TC-STM4-06: ngoài cửa sổ 1 giờ không cộng tiền, ghi khoản trễ', () => {
-    const step = sm.apply('expired', 'PAYMENT_SUCCEEDED', { ...OK, withinLateWindow: false });
-    expect(step.outcome).toBe('late_payment');
-    expect(step.to).toBe('expired');
+  it('#6 / TC-STM4-06: thành công khi đã expired → late_payment, giữ expired', () => {
+    expect(sm.apply('expired', 'PAYMENT_SUCCEEDED', OK)).toEqual({
+      to: 'expired',
+      outcome: 'late_payment',
+      no: '#6',
+    });
+  });
+
+  it('#6 chỉ cần transactionNo + recordedLateRef (không MissingGuard)', () => {
+    const step = sm.apply('expired', 'PAYMENT_SUCCEEDED', {
+      transactionNo: 'VNP-1',
+      recordedLateRef: null,
+    });
+    expect(step).toEqual({ to: 'expired', outcome: 'late_payment', no: '#6' });
   });
 });
 
@@ -93,7 +98,7 @@ describe('TopUpStateMachine — ⊕ D4: thành công tới khi đã failed', () 
     });
   });
 
-  it('không xét cửa sổ trễ hay hạn mức: không cần hai guard đó, luôn là khoản trễ', () => {
+  it('chỉ cần transactionNo + recordedLateRef, luôn là khoản trễ', () => {
     const step = sm.apply('failed', 'PAYMENT_SUCCEEDED', {
       transactionNo: 'VNP-1',
       recordedLateRef: null,
@@ -103,46 +108,24 @@ describe('TopUpStateMachine — ⊕ D4: thành công tới khi đã failed', () 
 });
 
 describe('TopUpStateMachine — ⊕ D4: khoản trễ đã ghi rồi', () => {
-  const cases = [
-    ['failed', true],
-    ['expired', true],
-    ['expired', false],
-  ] as const;
+  const cases = ['failed', 'expired'] as const;
 
-  it.each(cases)(
-    '%s (trong cửa sổ=%s): cùng transactionNo → already_applied (TC-STM4-15)',
-    (from, w) => {
-      const step = sm.apply(from, 'PAYMENT_SUCCEEDED', {
-        ...OK,
-        withinLateWindow: w,
-        recordedLateRef: 'VNP-1',
-        transactionNo: 'VNP-1',
-      });
-      expect(step).toEqual({ to: from, outcome: 'already_applied', no: null });
-    },
-  );
-
-  it.each(cases)('%s (trong cửa sổ=%s): khác transactionNo → conflicting_result', (from, w) => {
+  it.each(cases)('%s: cùng transactionNo → already_applied (TC-STM4-15)', (from) => {
     const step = sm.apply(from, 'PAYMENT_SUCCEEDED', {
       ...OK,
-      withinLateWindow: w,
+      recordedLateRef: 'VNP-1',
+      transactionNo: 'VNP-1',
+    });
+    expect(step).toEqual({ to: from, outcome: 'already_applied', no: null });
+  });
+
+  it.each(cases)('%s: khác transactionNo → conflicting_result', (from) => {
+    const step = sm.apply(from, 'PAYMENT_SUCCEEDED', {
+      ...OK,
       recordedLateRef: 'VNP-1',
       transactionNo: 'VNP-2',
     });
     expect(step).toEqual({ to: from, outcome: 'conflicting_result', no: null });
-  });
-
-  it('khoản trễ ghi trong cửa sổ (vì vượt hạn mức) không bị cộng khi IPN lặp lại', () => {
-    // Lần đầu: trong cửa sổ nhưng !limitsOk → khoản trễ. Lần lặp: hạn mức đã ok, vẫn không cộng.
-    const step = sm.apply('expired', 'PAYMENT_SUCCEEDED', {
-      ...OK,
-      withinLateWindow: true,
-      limitsOk: true,
-      recordedLateRef: 'VNP-1',
-      transactionNo: 'VNP-1',
-    });
-    expect(step.to).toBe('expired');
-    expect(step.outcome).toBe('already_applied');
   });
 });
 
@@ -225,21 +208,8 @@ describe('TopUpStateMachine — chuyển không hợp lệ bị từ chối', ()
 
 describe('TopUpStateMachine — thiếu guard thì ném MissingGuard, không đoán', () => {
   it.each([
-    [
-      'expired',
-      'PAYMENT_SUCCEEDED',
-      { transactionNo: 'VNP-1', recordedLateRef: null, limitsOk: true },
-    ],
-    [
-      'expired',
-      'PAYMENT_SUCCEEDED',
-      { transactionNo: 'VNP-1', recordedLateRef: null, withinLateWindow: true },
-    ],
-    [
-      'expired',
-      'PAYMENT_SUCCEEDED',
-      { withinLateWindow: true, limitsOk: true, recordedLateRef: null },
-    ],
+    ['expired', 'PAYMENT_SUCCEEDED', { recordedLateRef: null }],
+    ['expired', 'PAYMENT_SUCCEEDED', { transactionNo: 'VNP-1' }],
     ['failed', 'PAYMENT_SUCCEEDED', { transactionNo: 'VNP-1' }],
     ['credited', 'PAYMENT_SUCCEEDED', { transactionNo: 'VNP-1' }],
     ['refunded', 'PAYMENT_SUCCEEDED', { appliedTransactionNo: 'VNP-1' }],
@@ -279,7 +249,7 @@ describe('TopUpStateMachine — quét toàn bộ 5 × 4 = 20 cặp', () => {
       ADMIN_REFUND: 'throw',
     },
     expired: {
-      PAYMENT_SUCCEEDED: 'transition',
+      PAYMENT_SUCCEEDED: 'late_payment',
       PAYMENT_FAILED: 'already_applied',
       TIMEOUT_NOT_PAID: 'stale',
       ADMIN_REFUND: 'throw',
@@ -331,7 +301,7 @@ describe('TopUpStateMachine — quét toàn bộ 5 × 4 = 20 cặp', () => {
     }
   });
 
-  it('chỉ #2–#5, #7 đổi trạng thái; mọi kết quả khác giữ nguyên', () => {
+  it('chỉ #2–#4, #7 đổi trạng thái; mọi kết quả khác giữ nguyên', () => {
     for (const [s, e] of pairs) {
       if (!sm.canApply(s, e)) continue;
       const step = sm.apply(s, e, OK);
