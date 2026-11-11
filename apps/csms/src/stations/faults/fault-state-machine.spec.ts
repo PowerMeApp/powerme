@@ -1,8 +1,8 @@
 /**
  * Unit test FaultStateMachine (STM-6 v0.2) — không DB.
  *
- * Một test cho MỖI chuyển của STM-6 (tên test = số chuyển), rồi quét TOÀN BỘ 4 trạng thái × 6
- * trigger = 24 cặp: đúng 7 cặp hợp lệ, 3 cặp no-op (SIGNAL khi đang mở), 14 cặp bị từ chối.
+ * Một test cho MỖI chuyển của STM-6 (tên test = số chuyển), rồi quét TOÀN BỘ 4 trạng thái × 7
+ * trigger = 28 cặp: đúng 9 cặp hợp lệ, 3 cặp no-op (SIGNAL khi đang mở), 16 cặp bị từ chối.
  */
 import {
   FAULT_STATUSES,
@@ -26,9 +26,11 @@ const STM6: Row[] = [
   ['t6', 'resetting', 'RESET_FAILED', 'acknowledged', 'Reset bị từ chối hoặc hết hạn chờ'],
   ['t7', 'acknowledged', 'CONNECTOR_AVAILABLE', 'resolved', 'súng Available sau khi đã xác nhận'],
   ['t7', 'acknowledged', 'OPERATOR_CLOSE', 'resolved', 'đóng sau khi kiểm tra tại chỗ'],
+  ['t8', 'raised', 'SESSION_COMPLETED', 'resolved', 'BR-P42: phiên hoàn tất bình thường'],
+  ['t8', 'acknowledged', 'SESSION_COMPLETED', 'resolved', 'BR-P42: sau khi đã xác nhận'],
 ];
 
-describe('FaultStateMachine — 7 chuyển của STM-6', () => {
+describe('FaultStateMachine — 9 chuyển của STM-6', () => {
   it('t1: tín hiệu đầu tiên tạo sự cố ở raised', () => {
     expect(sm.initial()).toBe('raised');
   });
@@ -38,7 +40,7 @@ describe('FaultStateMachine — 7 chuyển của STM-6', () => {
     expect(sm.canApply(from, trigger)).toBe(true);
   });
 
-  it('bảng TRANSITIONS khớp đúng 7 dòng của test', () => {
+  it('bảng TRANSITIONS khớp đúng 9 dòng của test', () => {
     expect(FAULT_TRANSITIONS.map((t) => [t.no, t.from, t.trigger, t.to])).toEqual(
       STM6.map(([no, from, trigger, to]) => [no, from, trigger, to]),
     );
@@ -64,6 +66,8 @@ describe('FaultStateMachine — chuyển không hợp lệ bị từ chối', ()
     ['resetting', 'RESET_SENT', 'gửi Reset chồng khi đang chờ'],
     ['resetting', 'OPERATOR_CLOSE', 'đóng khi Reset còn chờ'],
     ['resolved', 'CONNECTOR_AVAILABLE', 'đã đóng'],
+    ['resetting', 'SESSION_COMPLETED', 'trụ đang khởi động lại, không có phiên'],
+    ['resolved', 'SESSION_COMPLETED', 'đã đóng'],
   ] as const)('%s --%s--> ✗ (%s)', (from, trigger, _why) => {
     expect(() => sm.apply(from, trigger)).toThrow(InvalidFaultTransitionError);
     expect(sm.canApply(from, trigger)).toBe(false);
@@ -81,10 +85,10 @@ describe('FaultStateMachine — chuyển không hợp lệ bị từ chối', ()
   });
 });
 
-describe('FaultStateMachine — quét toàn bộ 4 × 6 = 24 cặp', () => {
+describe('FaultStateMachine — quét toàn bộ 4 × 7 = 28 cặp', () => {
   const pairs = FAULT_STATUSES.flatMap((s) => FAULT_TRIGGERS.map((t) => [s, t] as const));
 
-  it('đúng 24 cặp: 7 hợp lệ, 3 no-op, 14 bị từ chối', () => {
+  it('đúng 28 cặp: 9 hợp lệ, 3 no-op, 16 bị từ chối', () => {
     let valid = 0;
     let noop = 0;
     let rejected = 0;
@@ -97,11 +101,11 @@ describe('FaultStateMachine — quét toàn bộ 4 × 6 = 24 cặp', () => {
         rejected += 1;
       }
     }
-    expect(pairs).toHaveLength(24);
-    expect([valid, noop, rejected]).toEqual([7, 3, 14]);
+    expect(pairs).toHaveLength(28);
+    expect([valid, noop, rejected]).toEqual([9, 3, 16]);
   });
 
-  it('canApply khớp apply trên cả 24 cặp', () => {
+  it('canApply khớp apply trên cả 28 cặp', () => {
     for (const [s, t] of pairs) {
       let applies = true;
       try {

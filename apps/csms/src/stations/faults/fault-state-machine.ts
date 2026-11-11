@@ -12,7 +12,11 @@
  * được gắn vào sự cố đang mở chứ không tạo sự cố mới. `resolved` là trạng thái cuối: tín hiệu sau
  * đó tạo một FaultEvent MỚI (FaultService), máy trạng thái từ chối mọi trigger trên `resolved`.
  *
- * Bộ 4 × 6 = 24 cặp (trạng thái, trigger): 7 hợp lệ · 3 no-op (SIGNAL khi đang mở) · 14 bị từ chối.
+ * t8 (FE-17, ADR-0019): BR-P42 — nhãn "reported issue" xoá khi một phiên trên súng đó hoàn tất bình
+ * thường, nên sự cố `driver_report` đóng bằng `SESSION_COMPLETED` từ raised / acknowledged. FaultService
+ * chỉ áp trigger này cho sự cố `driver_report`.
+ *
+ * Bộ 4 × 7 = 28 cặp (trạng thái, trigger): 9 hợp lệ · 3 no-op (SIGNAL khi đang mở) · 16 bị từ chối.
  */
 
 export const FAULT_STATUSES = ['raised', 'acknowledged', 'resetting', 'resolved'] as const;
@@ -31,18 +35,20 @@ export const FAULT_TRIGGERS = [
   'CONNECTOR_AVAILABLE',
   /** Operator đóng sự cố sau khi kiểm tra tại chỗ (t7). */
   'OPERATOR_CLOSE',
+  /** Một phiên trên súng hoàn tất bình thường — chỉ cho sự cố driver_report (t8, BR-P42). */
+  'SESSION_COMPLETED',
 ] as const;
 export type FaultTrigger = (typeof FAULT_TRIGGERS)[number];
 
 export interface FaultTransition {
-  /** Số chuyển trong STM-6 (t2…t7). */
+  /** Số chuyển trong STM-6 (t2…t8). */
   no: string;
   from: FaultStatus;
   trigger: FaultTrigger;
   to: FaultStatus;
 }
 
-/** 7 dòng — t7 có hai trigger. */
+/** 9 dòng — t7 có hai trigger, t8 có hai trạng thái nguồn. */
 export const FAULT_TRANSITIONS: readonly FaultTransition[] = [
   { no: 't2', from: 'raised', trigger: 'ACKNOWLEDGE', to: 'acknowledged' },
   { no: 't3', from: 'raised', trigger: 'CONNECTOR_AVAILABLE', to: 'resolved' },
@@ -51,6 +57,8 @@ export const FAULT_TRANSITIONS: readonly FaultTransition[] = [
   { no: 't6', from: 'resetting', trigger: 'RESET_FAILED', to: 'acknowledged' },
   { no: 't7', from: 'acknowledged', trigger: 'CONNECTOR_AVAILABLE', to: 'resolved' },
   { no: 't7', from: 'acknowledged', trigger: 'OPERATOR_CLOSE', to: 'resolved' },
+  { no: 't8', from: 'raised', trigger: 'SESSION_COMPLETED', to: 'resolved' },
+  { no: 't8', from: 'acknowledged', trigger: 'SESSION_COMPLETED', to: 'resolved' },
 ];
 
 export class InvalidFaultTransitionError extends Error {
