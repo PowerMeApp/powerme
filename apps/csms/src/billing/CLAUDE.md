@@ -40,6 +40,10 @@ Decisions khác diagram thì theo diagram và sửa decisions. Diagram mâu thu�
 - Mọi chuyển trạng thái top-up đi qua `TopUpStateMachine`. Chuyển không hợp lệ → ném `InvalidTransition`.
 - **VNPay refund chỉ được gọi từ `RefundService.send`** (do worker refund gọi), không gọi trong DB transaction.
 - Việc nền (e-invoice, gửi refund, realtime emit) chỉ chạy **sau khi commit**. Việc nền chạy bằng **quét DB** (`status` + `next_attempt_at`, `FOR UPDATE SKIP LOCKED`), `Scheduler` chỉ để chạy sớm; không thêm BullMQ (decisions D7).
+- **Việc nền gọi bên ngoài đi theo lease, không giữ transaction qua HTTP** (T32 Phần 12):
+  - cài `BackgroundWork.runDue(limit, signal)` (`background-work.ts`); bảng có `next_attempt_at` dùng `runLeasedBatch` (`due-rows.ts`): tx ngắn giữ chỗ một dòng → gọi ngoài tx → tx2 `lockLeased` (trả `null` = mất lease, bỏ kết quả) rồi ghi qua state machine;
+  - đăng ký bằng `BackgroundWorkRunner.register(this)` trong `onModuleInit`, sau commit gọi `kick(name)` / `kickAt(name, at)`. **Luôn register trong `onModuleInit`, kể cả khi `BILLING_WORKER_ENABLED=false`**: `kick` một tên chưa đăng ký sẽ ném sau commit. Có test kiểm việc đăng ký;
+  - lịch retry dùng `nextRetry` (`retry-schedule.ts`), không tự viết 5 phút / 30 phút / 2 giờ.
 - Thứ tự khoá dòng khi cần nhiều bảng: **`top_ups` → `credit_accounts` → `loyalty_accounts`** (tránh deadlock; WP3 cũng khoá `credit_accounts` trước `loyalty_accounts`). `CreditLedgerService.post` chỉ khoá `credit_accounts`, nên luồng nào cần khoá `top_ups` (IPN, timeout, hoàn) thì phải khoá **trước** khi gọi `post`. `LoyaltyService` khoá `loyalty_accounts`, nên gọi **sau** `post`.
 - `post` / `earnForSession` nhận client của transaction bên gọi (`LedgerClient = Pick<PoolClient, 'query'>`) và **không tự BEGIN/COMMIT**. Lỗi nghiệp vụ (`LedgerPostRejected`, `LedgerEntryExists`, `CreditAccountNotFound` trong `billing-errors.ts`) ném ra trước khi có câu SQL lỗi, nên transaction bên gọi vẫn dùng được. DB không có CHECK dấu tiền: `post` kiểm dấu theo loại dòng.
 - Tiền là `bigint` VND, không dùng số thực.

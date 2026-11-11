@@ -1,6 +1,6 @@
 # WF-02 – Quyết định thiết kế
 
-> Đặt tại `docs/spec/WF-02_decisions.md`. Cập nhật: 09/11/2026.
+> Đặt tại `docs/spec/WF-02_decisions.md`. Cập nhật: 10/11/2026.
 > **Nguồn chính là diagram trong `diagrams/report4/class/CD-2/` + `diagrams/report4/sequence/SD-2a…2f/`** (CD-2, SD-2a…2f v2.0, 01/11/2026, bản đã chia sẻ vào tài liệu chung của nhóm). File này chỉ ghi lại:
 > (1) những điểm trong diagram mà code phải bám, viết ra cho dễ tra;
 > (2) cách khớp diagram với repo hiện tại;
@@ -108,8 +108,14 @@ Cộng tiền, dòng sổ cái và điểm nằm trong **một** DB transaction,
   - dòng `expire` đã trừ các điểm này rồi, nên dòng `adjust` không trừ thêm và `pointsBalance` không bị âm;
   - dòng này chỉ ghi lại rằng top-up đã được giảm giá cho số điểm không còn. Số điểm thiếu = `top_ups.points_redeemed` − |Σ `redeem` của top-up|;
 - không từ chối, không bắt tài xế trả thêm.
+- Áp dụng cả khi điểm hết hạn **giữa lúc báo giá và lúc IPN về**: khoản giảm giữ nguyên, nền tảng chịu phần thiếu, ghi `adjust` 0. Ân xác nhận 10/11; SRS BR-P35 sẽ thêm câu tương ứng (Ân).
 
 Áp dụng cho mọi đường cộng tiền (D4).
+⊕ **`redeemForTopUp` ném `LoyaltyLedgerCorrupt` khi cộng tiền** (sổ điểm sai dạng hoặc lệch snapshot; chốt 10/11, Ân): **cộng tiền + log lỗi + ghi `adjust` + báo Admin**. Lý do: tài xế đã trả giá sau giảm trên VNPay; chặn cộng tiền không lấy lại được khoản giảm, chỉ làm kẹt tiền thật của tài xế. Yêu cầu cho Phần 6:
+- lỗi phần điểm không được rollback việc cộng tiền. `redeemForTopUp` ném trước mọi câu ghi nên transaction vẫn dùng được; chỉ catch đúng `LoyaltyLedgerCorrupt` (lỗi khác vẫn rollback); vẫn bọc SAVEPOINT quanh lời gọi redeem làm lớp an toàn;
+- vẫn trả VNPay RspCode 00 để VNPay dừng retry;
+- ghi `adjust` 0 cho top-up bằng một hàm riêng (khoá `loyalty_accounts`, không phát lại sổ đang hỏng), log lỗi có cấu trúc, báo Admin. Dòng `adjust` này làm `redeemForTopUp` gọi lặp trả `created: false`;
+- idempotent theo `topUpId`: IPN lặp không cộng tiền hai lần, không ghi `adjust` hai lần.
 ⊕ **`restoreForTopUp` (Admin hoàn top-up, D1) trả lại số điểm thực tế đã trừ** = −Σ `points` của các dòng `redeem` có `top_up_id` này (giữ hạn cũ). Không lấy theo `top_ups.points_redeemed`, vì như vậy sẽ trả dư phần điểm đã hết hạn.
 Điểm "còn hiệu lực", "hạn cũ" ở trên tính theo lô earn FIFO của D11 (redeem tiêu lô cũ nhất; restore trả về đúng hạn cũ của lô).
 ⊕ Cách ghi (chốt 10/11, T32 Phần 4): mỗi dòng `redeem` / `restore` ghi đúng một lô và mang `expires_at` của lô đó, nên một top-up tiêu hai lô có hai dòng `redeem`. Dòng `adjust` `points = 0` để `expires_at` NULL. Restore vào lô **đã hết hạn** tới lúc hoàn: vẫn trả về lô cũ (= −Σ `redeem`), rồi expire ngay trong cùng transaction, nên ngay sau khi hoàn `points_balance` = điểm còn sống.
@@ -199,13 +205,18 @@ Repo: `UserAccountService.disableLogin` và `SessionQuery.hasUnsettledSession` l
 
 Diagram chỉ ghi "job" / "queue" / "after commit". Repo chưa có BullMQ (Redis có nhưng chưa dùng), nên chốt 03/11:
 - DB là nguồn sự thật: `status` + `attempt_count` + `next_attempt_at` nằm trên dòng nghiệp vụ, giống `charge_settlement_jobs` của WP3.
-- Mỗi loại việc có một worker quét `… WHERE <điều kiện đến hạn> ORDER BY next_attempt_at LIMIT n FOR UPDATE SKIP LOCKED`, xử lý từng dòng trong transaction riêng:
+- Mỗi loại việc có một worker quét `… WHERE <điều kiện đến hạn> ORDER BY next_attempt_at LIMIT n FOR UPDATE SKIP LOCKED`. ⊕ **Giữ chỗ có hạn** (T32 Phần 12, 10/11): vì không được gọi VNPay / querydr / e-invoice (HTTP ~10 s) trong DB transaction, mỗi dòng đi qua ba bước (`src/billing/due-rows.ts`):
+  1. tx ngắn giữ chỗ **một** dòng: SKIP LOCKED + `next_attempt_at = now() + lease`, COMMIT;
+  2. gọi bên ngoài, ngoài transaction;
+  3. tx thứ hai khoá lại dòng (`lockLeased`, kiểm `next_attempt_at` còn đúng lease của mình) rồi ghi kết quả qua state machine.
+
+  Sập giữa chừng thì hết lease dòng tự đến hạn lại. Lease không tăng `attempt_count`. Các điều kiện đến hạn:
   - `refunds`: `status = 'requested' AND next_attempt_at <= now()` → `RefundService.send`.
   - `e_invoices`, `invoice_adjustments`: `status IN ('requested','failed') AND next_attempt_at <= now()` → `EInvoiceService.issue` / điều chỉnh.
-  - `top_ups`: `status = 'pending' AND expires_at <= now()` → `TopUpService.onPendingTimeout` (dùng `expires_at` đã có).
+  - `top_ups`: `status = 'pending' AND expires_at <= now()` → `TopUpService.onPendingTimeout` (dùng `expires_at` đã có; D4 09/11: chạy lúc `expires_at + 2 phút`). Không có `next_attempt_at`, nên cách giữ chỗ do Phần 5/8 chọn (interface `BackgroundWork.runDue` không ràng buộc).
 - `Scheduler` (`src/common/scheduler.ts`) chỉ để **chạy sớm** (ngay sau commit, đúng `expires_at`); mất khi sập cũng được vì vòng quét bắt lại. Lúc khởi động mỗi worker quét một lần.
-- Lịch retry: `next_attempt_at = now() + 5 phút / 30 phút / 2 giờ`; một helper dùng chung cho e-invoice và refund. `RETRY_LIMIT = 4`, `PENDING_TIMEOUT = 15 phút`, `LATE_WINDOW = 1 giờ` đặt trong config.
-- Viết sau interface `BackgroundWork` trong billing để sau đổi sang BullMQ mà không sửa service.
+- Lịch retry: `next_attempt_at = now() + 5 phút / 30 phút / 2 giờ`; một helper dùng chung cho e-invoice và refund (`nextRetry` trong `retry-schedule.ts`). `RETRY_LIMIT = 4` là hằng số export ở `refund-state-machine.ts` (không phải biến môi trường). `PENDING_TIMEOUT = 15 phút` đặt ở Phần 5. ~~`LATE_WINDOW = 1 giờ`~~ bỏ theo D4 09/11 (T117 sửa code).
+- Viết sau interface `BackgroundWork` trong billing để sau đổi sang BullMQ mà không sửa service. ⊕ Runner `BackgroundWorkRunner` (Phần 12): các loại chạy song song, mỗi loại không chạy chồng; `kick` / `kickAt` để chạy sớm; cấu hình `BILLING_WORKER_*` (`infra/.env.example`).
 - Index cần: `(status, next_attempt_at)` trên `e_invoices`, `invoice_adjustments`, `refunds`; `top_ups (status, expires_at)`.
 
 ## D8. Khớp với repo
@@ -285,7 +296,7 @@ Chốt 09/11: WP5 làm job hết hạn điểm.
 - **Physical ERD v1.1 lệch 0015:** enum `refund_error_kind` riêng (0015 dùng lại `e_invoice_error_kind`); unique đầy đủ thay partial unique `(top_up_id, kind)`; `invoice_adjustments.refund_id` NOT NULL (0015 nullable); thiếu `next_attempt_at`; thiếu `refunds_requested_by_check`. Báo Ân.
 - AD-9 và Physical ERD dẫn BR-P45 cho refund, trong khi BR-P45 là làm tròn tiền phiên. Hỏi Ân.
 - **Lần trả thứ hai cho cùng top-up** (D3 ⊕: thành công với `transactionNo` khác trên `credited` / `refunded` → `conflicting_result`): tiền đã vào VNPay nhưng không có cột để ghi (`late_*` chỉ dành cho top-up chưa cộng, `gateway_transaction_no` đã có giá trị). Cần chốt cách ghi và cách Admin hoàn (cột mới? bảng riêng? `refunds.kind` mới?) trước Phần 6.
-- **`redeemForTopUp` ném `LoyaltyLedgerCorrupt` khi cộng tiền** (sổ điểm sai dạng hoặc lệch snapshot): lỗi rollback cả việc cộng tiền trong transaction IPN, VNPay nhận lỗi và retry mãi. Phần 6 phải chọn: chặn cộng tiền (top-up kẹt `pending`, báo Admin), hay cộng tiền + log lỗi + ghi `adjust` cho phần điểm. Phần 4 giữ hành vi ném lỗi.
+- **Billing Exceptions (Phần 10) phân biệt hai loại `adjust` 0 của top-up:** do sổ điểm hỏng (D3 ⊕, chốt 10/11) và do điểm hết hạn (D3 ⊕) — nhận ra bằng log riêng hay một dấu hiệu ghi trên dòng / bảng nào. Chốt trước Phần 6: cả hai cách đều phải ghi ngay lúc xảy ra ở Phần 6 (nếu chọn dấu hiệu trên dòng thì hàm ghi `adjust` cho sổ hỏng ghi luôn dấu hiệu đó).
 - Đổi tên `lateGatewayRef` → `lateGatewayTransactionNo`?
 - VNPay sandbox: refund có chống trùng không, có API tra trạng thái hoàn không (`VnpayAdapter.queryRefund`), thời hạn được hoàn, danh sách mã IPN.
 - Cách tạo `CreditAccount` + `LoyaltyAccount` khi tài xế đăng ký (WF-05 gọi billing hay billing nghe event).
