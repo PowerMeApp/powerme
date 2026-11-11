@@ -69,7 +69,16 @@ cd ~/powerme/infra/staging
 ./init-env.sh <FQDN> <TAG>        # ví dụ: ./init-env.sh powerme-staging.japaneast.cloudapp.azure.com review-4
 ```
 
-Script sinh `POSTGRES_PASSWORD` và `DEMO_CHARGE_POINT_PASSWORD`, ghi vào `.env` (chmod 600), **không in ra**. Chạy lại sẽ bị từ chối (tránh làm lệch mật khẩu DB đã tạo); chỉ dùng `--force` khi chấp nhận mất mật khẩu cũ.
+Script sinh `POSTGRES_PASSWORD`, `DEMO_CHARGE_POINT_PASSWORD`, khoá JWT Driver API (`DRIVER_API_JWT_SECRET_BASE64` + issuer `powerme-staging` + audience `powerme-driver-app`) và `DEMO_DRIVER_PASSWORD` (mật khẩu tài xế mẫu cho app), ghi vào `.env` (chmod 600), **không in ra**. Chạy lại sẽ bị từ chối (tránh làm lệch mật khẩu DB đã tạo); chỉ dùng `--force` khi chấp nhận mất mật khẩu cũ.
+
+**`.env` đã có từ trước BE-27** (VM hiện tại): đừng `--force`. Chạy
+
+```bash
+./init-env.sh --add-missing        # chỉ thêm biến còn trống; in TÊN biến đã thêm, không in giá trị
+./deploy.sh <TAG> --seed           # csms nhận biến mới + nạp dữ liệu mẫu cho app (idempotent)
+```
+
+Chưa chạy `--add-missing` thì deploy vẫn chạy (chỉ cảnh báo), nhưng app nhận 503 `auth_unavailable`.
 
 ## 5. Deploy lần đầu (tay)
 
@@ -107,6 +116,8 @@ ssh -i ~/.ssh/powerme_staging -L 3000:127.0.0.1:3000 -L 8100:127.0.0.1:8100 depl
 ```
 
 Giữ cửa sổ đó mở, rồi mở `http://localhost:3000` (console) và `http://localhost:8100` (HMI trụ nếu bật `--sim`).
+
+Cho dev app (Sơn) dùng DB và Driver API staging: **không** đưa khoá `powerme_staging`; làm theo [`DEV-ACCESS.md`](DEV-ACCESS.md) (user `devtunnel` chỉ forward được `127.0.0.1:5432` và `127.0.0.1:3000`, role Postgres `app_dev`).
 
 ## 8. Bật deploy tự động từ GitHub (sau khi deploy tay thành công)
 

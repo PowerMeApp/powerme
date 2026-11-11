@@ -1,7 +1,7 @@
 /**
  * Spec bộ định tuyến thuần: đường dẫn → route, và các mã lỗi 404 / 400 / 405.
  */
-import { matchRoute } from './console.router.js';
+import { matchRoute, parseOnboardBody, parseRegisterBody } from './console.router.js';
 
 describe('matchRoute — đường dẫn hợp lệ', () => {
   it('GET / → trang', () => {
@@ -165,5 +165,144 @@ describe('matchRoute — WF-04 sự cố (FE-04)', () => {
       status: 400,
     });
     expect(matchRoute('POST', '/api/admin/faults/7/delete')).toMatchObject({ status: 404 });
+  });
+});
+
+describe('matchRoute — BE-24 unattributed / review', () => {
+  it('GET hai hàng đợi, limit mặc định 50; POST → 405; limit sai → 400', () => {
+    expect(matchRoute('GET', '/api/admin/unattributed')).toEqual({
+      ok: true,
+      route: { kind: 'unattributedQueue', limit: 50 },
+    });
+    expect(matchRoute('GET', '/api/admin/review?limit=3')).toEqual({
+      ok: true,
+      route: { kind: 'reviewQueue', limit: 3 },
+    });
+    expect(matchRoute('POST', '/api/admin/unattributed')).toMatchObject({ status: 405 });
+    expect(matchRoute('GET', '/api/admin/review?limit=0')).toMatchObject({ status: 400 });
+  });
+
+  it.each([
+    ['assign-driver', 'assignUnattributed'],
+    ['close-unattributed', 'closeUnattributed'],
+    ['resolve-review', 'resolveReview'],
+  ])('POST /api/admin/sessions/8/%s → %s; GET → 405; id sai → 400', (suffix, kind) => {
+    expect(matchRoute('POST', `/api/admin/sessions/8/${suffix}`)).toEqual({
+      ok: true,
+      route: { kind, id: 8 },
+    });
+    expect(matchRoute('GET', `/api/admin/sessions/8/${suffix}`)).toMatchObject({
+      status: 405,
+      allow: ['POST'],
+    });
+    expect(matchRoute('POST', `/api/admin/sessions/0/${suffix}`)).toMatchObject({ status: 400 });
+  });
+
+  it('hành động phiên lạ → 404', () => {
+    expect(matchRoute('POST', '/api/admin/sessions/8/delete')).toMatchObject({ status: 404 });
+  });
+});
+
+describe('matchRoute — WF-05 onboarding (T119)', () => {
+  it('POST the two paths; trailing slash allowed', () => {
+    expect(matchRoute('POST', '/api/admin/charge-points')).toEqual({
+      ok: true,
+      route: { kind: 'registerChargePoint' },
+    });
+    expect(matchRoute('POST', '/api/operator/charge-points/onboard/')).toEqual({
+      ok: true,
+      route: { kind: 'onboardChargePoint' },
+    });
+  });
+
+  it('GET → 405 Allow POST; unknown operator path → 404', () => {
+    expect(matchRoute('GET', '/api/admin/charge-points')).toMatchObject({
+      status: 405,
+      allow: ['POST'],
+    });
+    expect(matchRoute('GET', '/api/operator/charge-points/onboard')).toMatchObject({
+      status: 405,
+      allow: ['POST'],
+    });
+    expect(matchRoute('POST', '/api/operator/charge-points')).toMatchObject({ status: 404 });
+  });
+});
+
+describe('parseRegisterBody / parseOnboardBody — snake_case bodies of the T98 contract (T119)', () => {
+  it('register: snake_case in, the service input out; wrong shapes → 400 invalid_input', () => {
+    expect(parseRegisterBody({ serial_number: ' SIM-0005 ' })).toEqual({
+      ok: true,
+      value: { serialNumber: 'SIM-0005' },
+    });
+    expect(parseRegisterBody({ serial_number: 'SIM-1', model: null, rated_power_kw: 120 })).toEqual(
+      { ok: true, value: { serialNumber: 'SIM-1', model: null, ratedPowerKw: 120 } },
+    );
+    for (const bad of [
+      [],
+      'SIM',
+      {},
+      { serial_number: 5 },
+      { serial_number: 'ab' },
+      { serial_number: 'a:b:c' },
+      { serialNumber: 'SIM-1' },
+      { serial_number: 'SIM-1', rated_power_kw: -1 },
+      { serial_number: 'SIM-1', rated_power_kw: '120' },
+      { serial_number: 'SIM-1', model: 'x'.repeat(21) },
+      { serial_number: 'SIM-1', admin_user_id: 1 },
+    ]) {
+      expect(parseRegisterBody(bad)).toMatchObject({
+        ok: false,
+        status: 400,
+        error: 'invalid_input',
+      });
+    }
+  });
+
+  it('onboard: a valid body becomes the service input; the connector count is left to the service', () => {
+    expect(
+      parseOnboardBody({
+        serial_number: 'SIM-0005',
+        site_id: 3,
+        connectors: [
+          { connector_no: 1, connector_type: 'gbt', max_power_kw: 60 },
+          { connector_no: 2 },
+        ],
+      }),
+    ).toEqual({
+      ok: true,
+      value: {
+        serialNumber: 'SIM-0005',
+        siteId: 3,
+        connectors: [{ connectorNo: 1, connectorType: 'gbt', maxPowerKw: 60 }, { connectorNo: 2 }],
+      },
+    });
+    expect(parseOnboardBody({ serial_number: 'SIM-0005', site_id: 3, connectors: [] })).toEqual({
+      ok: true,
+      value: { serialNumber: 'SIM-0005', siteId: 3, connectors: [] },
+    });
+  });
+
+  it('onboard: wrong shapes → 400 invalid_input', () => {
+    const ok = { serial_number: 'SIM-1', site_id: 1, connectors: [{ connector_no: 1 }] };
+    for (const bad of [
+      null,
+      { ...ok, serial_number: 'no spaces allowed' },
+      { ...ok, site_id: '1' },
+      { ...ok, site_id: 0 },
+      { ...ok, site_id: 1.5 },
+      { ...ok, connectors: 'two' },
+      { ...ok, connectors: [1] },
+      { ...ok, connectors: [{ connector_no: '1' }] },
+      { ...ok, connectors: [{ connector_no: 1, connector_type: 'tesla' }] },
+      { ...ok, connectors: [{ connector_no: 1, max_power_kw: 0 }] },
+      { ...ok, connectors: [{ connector_no: 1, status: 'Available' }] },
+      { ...ok, staff_user_id: 9 },
+    ]) {
+      expect(parseOnboardBody(bad)).toMatchObject({
+        ok: false,
+        status: 400,
+        error: 'invalid_input',
+      });
+    }
   });
 });

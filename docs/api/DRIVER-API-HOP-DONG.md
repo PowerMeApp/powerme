@@ -9,11 +9,14 @@
 [Brief 07/11](../requirements/smart-station-search-brief-20261107.md) được người dùng ưu tiên cho search/gợi ý:
 `/stations` thêm SoC/target/smart, tính reach và tổng phút trước phân trang; `/stations/suggestions`
 thử nghiệm cũ đã bỏ (404). OpenAPI 0.4 có consent/ownership, GeoJSON lon/lat, nullable estimates và lỗi provider.
-Charge/session/time-left HTTP vẫn chỉ là hợp đồng. Route Vietmap thật tách khỏi xếp hạng theo công thức brief.
+Charge/session/credit HTTP có từ BE-22 (dưới); time-left vẫn chỉ là hợp đồng. Route Vietmap thật tách khỏi xếp hạng theo công thức brief.
 Xem [hướng dẫn MB03](MB03-BACKEND-DISCOVERY.md) cho trạng thái, token local, checks và giới hạn;
 không suy ra OTP/login đã hoàn thành. Thay đổi chưa merge/commit/push khi bàn giao review.
 **BE-21 (09/11/2026, OpenAPI 0.5.0):** thêm `POST /auth/register`, `/auth/login`, `/auth/refresh`
 (email + mật khẩu, không cần bearer) — xem §6. OTP/Google/Firebase vẫn chưa làm.
+**BE-22 (10/11/2026, OpenAPI 0.6.0, T95):** nối HTTP cho `POST /charges`, `GET /charges/{key}`,
+`GET /sessions/{id}/progress`, `POST /sessions/{id}/stop`, `GET /sessions/{id}/statement` và thêm
+`GET /credit`, `GET /credit/transactions` — xem §2, §7 và §12 (cách app gọi). Còn lại: `time-left`.
 
 ---
 
@@ -25,21 +28,23 @@ Tình huống chuỗi phải chạy được ở Review 3: HMI trụ đổi sún
 
 ## 2. Tám đường dẫn và hàm đã có
 
-| Đường dẫn | Hàm trong `DriverChargingService` | UC / BR | Có trên `main`? |
+| Đường dẫn | Hàm trong `DriverChargingService` | UC / BR | Trạng thái route |
 |---|---|---|---|
-| `GET /stations` | `findStations` → `searchStations` | UC-CHG-01; BR-P03, P38, P39 | hàm có, route chưa |
-| `GET /connectors/by-code/{code}/{no}` | `resolveConnector` | UC-CHG-02 bước quét QR; BR-P10 | hàm có, route chưa |
-| `GET /connectors/{id}/time-left` | **chưa có** | FR-03; BR-P32, P40 | Tuần 9, hình dạng chốt ở đây |
-| `POST /charges` | `start` | UC-CHG-02; D4; BR-P18, P19 | hàm có, route chưa |
-| `GET /charges/{key}` | `getStart` | UC-CHG-02 (mất mạng giữa chừng) | hàm có, route chưa |
-| `GET /sessions/{id}/progress` | `progress` | UC-CHG-04 | hàm có, route chưa; `estimated_cost_vnd` và `time_left` Tuần 9 |
-| `POST /sessions/{id}/stop` | `stop` → `commandSnapshot` | UC-CHG-03; BR-P01 | hàm có, route chưa |
-| `GET /sessions/{id}/statement` | `statement` | BR-P45, P34 | hàm có, route chưa |
+| `GET /stations` | `findStations` → `searchStations` | UC-CHG-01; BR-P03, P38, P39 | có (MB03) |
+| `GET /connectors/by-code/{code}/{no}` | `resolveConnector` | UC-CHG-02 bước quét QR; BR-P10 | có (MB03) |
+| `GET /connectors/{id}/time-left` | **chưa có** | FR-03; BR-P32, P40 | chưa — hình dạng chốt ở đây |
+| `POST /charges` | `start` | UC-CHG-02; D4; BR-P18, P19 | có (BE-22) |
+| `GET /charges/{key}` | `getStart` | UC-CHG-02 (mất mạng giữa chừng) | có (BE-22) |
+| `GET /sessions/{id}/progress` | `progress` | UC-CHG-04 | có (BE-22); `estimated_cost_vnd` cận trên, `time_left` luôn null |
+| `POST /sessions/{id}/stop` | `stop` → `commandSnapshot` | UC-CHG-03; BR-P01 | có (BE-22) |
+| `GET /sessions/{id}/statement` | `statement` | BR-P45, P34 | có (BE-22) |
+| `GET /credit` | — (đọc `credit_accounts`, `driver/driver-credit.ts`) | UC-PAY-02; BR-P18 | có (BE-22) |
+| `GET /credit/transactions` | — (đọc `credit_transactions`) | UC-PAY-02 | có (BE-22) |
 
-Route discovery MB03 nằm **cùng tiến trình/cổng HTTP** với console `/api/admin/*` (mặc định 3000),
-qua handler riêng `driver/driver.http.ts` do `ConsoleServer` chọn trước handler admin. Không mở cổng
-mới hoặc Nest controller. Admin chưa có auth nên shared listener bắt buộc loopback. Các route khác
-trong bảng vẫn chưa được nối HTTP.
+Route tài xế nằm **cùng tiến trình/cổng HTTP** với console `/api/admin/*` (mặc định 3000),
+qua handler riêng `driver/driver.http.ts` (route sạc/credit ở `driver/charges.http.ts`) do
+`ConsoleServer` chọn trước handler admin. Không mở cổng mới hoặc Nest controller. Admin chưa có
+auth nên shared listener bắt buộc loopback.
 
 ## 3. Trạng thái súng và thời gian còn lại: luật nghiệp vụ thành trường JSON
 
@@ -103,18 +108,30 @@ bearer, chỉ nhận `application/json` ≤ 16 KiB, trường lạ → 400:
   transaction; **không** tạo ví credit/loyalty (SRS không yêu cầu; `ensureAccounts` tạo khi cần).
 - Chưa cấu hình JWT → 503 `auth_unavailable`. Không log mật khẩu, hash, token; response không có hash.
 
+**Môi trường staging (BE-27).** Driver API chạy trên staging nhưng **không ra internet** (cùng
+listener với console vận hành chưa xác thực; Caddy chỉ proxy `/ocpp/*` và `/health`). App dev gọi
+qua SSH tunnel: `ssh -N -L 5433:127.0.0.1:5432 -L 3000:127.0.0.1:3000 devtunnel@<FQDN>`, base URL
+`http://127.0.0.1:3000/api/driver/v1` (Android Emulator: `http://10.0.2.2:3000/api/driver/v1`).
+JWT: issuer `powerme-staging`, audience `powerme-driver-app`, refresh 30 ngày; `X-Driver-Id` tắt.
+Tài xế mẫu `app.ds01/ds02/ds03@powerme.test` (DS-01 200.000 VND, DS-02 30.000 VND, DS-03 600 điểm),
+mật khẩu nhận riêng. Chỉ trụ demo `PM-D1-HCM-0001` bắt đầu sạc được; trạm `HCM-APP-*` luôn
+`offline`. Hướng dẫn, cảnh báo: [infra/staging/DEV-ACCESS.md](../../infra/staging/DEV-ACCESS.md);
+dữ liệu mẫu: [infra/staging/README.md](../../infra/staging/README.md#dữ-liệu-mẫu-cho-app-tài-xế-be-27).
+
 ## 7. Lỗi: từ `ChargingError.code` sang HTTP
 
 | HTTP | Mã `error` |
 |---|---|
-| 400 | `invalid_input`, `invalid_search`, `invalid_connector_reference`, `invalid_idempotency_key`, `reserved_idempotency_key`, `unsupported_mode`, `vehicle_not_owned_or_incompatible` |
+| 202 (không phải lỗi) | `POST /charges` với tín dụng không đủ: `outcome = topuprequired` / `requiresconfirmation` trong body (BE-22, xem §12) |
+| 400 | `invalid_input`, `invalid_search`, `invalid_connector_reference`, `invalid_idempotency_key` (thiếu / trùng / sai header `Idempotency-Key`, 8–100 ký tự `[A-Za-z0-9._:-]`), `reserved_idempotency_key`, `unsupported_mode`, `vehicle_not_owned_or_incompatible` |
 | 401 / 403 | `unauthorized`, `forbidden`; `/auth/*`: `invalid_credentials`, `invalid_refresh_token`, `account_locked` |
 | 400 / 409 / 413 / 415 / 429 (`/auth/*`) | `consent_required`, `invalid_email`, `invalid_password`; `email_taken`; `payload_too_large`; `unsupported_media_type`; `too_many_attempts` |
 | 404 | `not_found` (không phân biệt "không có" và "không của bạn") |
-| 409 | `idempotency_conflict`, `credit_unavailable`, `connector_unavailable`, `connector_busy_or_unknown`, `tariff_unavailable`, `session_not_stoppable`, `stop_pending_or_unknown` |
+| 405 / 413 / 415 (charges) | `method_not_allowed` (+ `Allow`); `payload_too_large` (> 16 KiB); `unsupported_media_type` (`POST /charges` không phải `application/json`) |
+| 409 | `idempotency_conflict`, `credit_unavailable` (chưa có ví hoặc ví không `active`), `connector_unavailable`, `connector_busy_or_unknown`, `tariff_unavailable`, `session_not_stoppable`, `stop_pending_or_unknown` |
 | 503 | `policy_unconfigured` |
 
-Các mã `recovery_*`, `start_not_recoverable`, `stop_attempt_not_current` thuộc đường operator (T72), không có trong API tài xế.
+Các mã `recovery_*`, `start_not_recoverable`, `stop_attempt_not_current` thuộc đường operator (T72), không có trong API tài xế; nếu lọt ra thì route trả 500 `internal_error` đã làm sạch. Ánh xạ nằm ở `chargingErrorStatus` (`driver/charges.http.ts`).
 
 ## 8. JSON: snake_case, id là chuỗi
 
@@ -145,3 +162,44 @@ hoặc generated Dart client trong slice này. Không tự tải thêm công c�
 | 2 | `estimated_cost_vnd` khi đang sạc tính theo biểu giá lúc nào | giá của đoạn hiện tại × Wh đã sạc, ghi rõ "ước tính" (BR-P02) | Trí + Khang |
 | 3 | Chế độ sạc ngoài `energy_kwh` (tiền, thời gian) | giữ ngoài hợp đồng đến khi OCPP có lệnh đặt hạn mức; app làm hạn mức mềm | Sơn |
 | 4 | Login/OTP/refresh cho tài xế | BE-21 có đăng ký/đăng nhập email + mật khẩu và refresh không bảng (§6). OTP/Google/Firebase ngoài phạm vi, để sau Defense 1.1; hướng dự kiến: đổi token Firebase → JWT CSMS qua một route mới | Sơn + Trí |
+
+## 12. BE-22 — cách app gọi route sạc và credit (cho Sơn, T96)
+
+Mọi route cần `Authorization: Bearer <access_token>` từ `/auth/login` (§6); 401 → gọi `/auth/refresh`
+rồi thử lại một lần. Id luôn là **chuỗi**; tiền (VND) và điện năng (Wh) là số nguyên.
+
+**Bắt đầu (UC-CHG-02).** App sinh một UUID v4 cho mỗi lần tài xế bấm "Bắt đầu", lưu lại cùng màn
+hình, rồi:
+
+```
+POST /charges   Idempotency-Key: <uuid>   Content-Type: application/json
+{"connector_id":"12","vehicle_id":"3","mode":"energy_kwh","energy_limit_wh":20000}
+→ 202 {intent_id, command_id, session_id, outcome, effect_confirmed, version, max_energy_wh}
+```
+
+- Mất mạng / timeout: gửi lại **đúng key, đúng body** (không tạo intent thứ hai, không gửi lệnh lần
+  hai) hoặc `GET /charges/<uuid>`. Đổi body với key cũ → 409 `idempotency_conflict`.
+- Poll `GET /charges/<uuid>` mỗi 1–2 s cho tới khi `session_id` khác null → sang màn theo dõi.
+- Dừng poll và báo lỗi theo `outcome`: `topuprequired` → "số dư dưới mức tối thiểu, nạp thêm";
+  `requiresconfirmation` → hỏi "chỉ sạc được tối đa `max_energy_wh`", đồng ý thì gửi **key mới**
+  với hạn mức đó; `rejected` → trụ từ chối; `start_timeout` / `released` → trụ không bắt đầu, thử
+  lại. `sent`, `accepted`, `unknown` → tiếp tục poll (tài xế cắm súng).
+- 409 `connector_unavailable` / `connector_busy_or_unknown` → súng không sẵn sàng, chọn súng khác.
+
+**Theo dõi (UC-CHG-04).** `GET /sessions/{id}/progress` mỗi 5 s: `status`, `consumed_wh` (hiện
+kWh = /1000), `estimated_cost_vnd` (ghi "tạm tính, tối đa"), `charge_point.is_online`.
+`telemetry_quality = unknown` → "chưa có số đo". Phiên tài xế bắt đầu bằng thẻ RFID cũng xem được.
+
+**Dừng (UC-CHG-03).** `POST /sessions/{id}/stop` với `Idempotency-Key` mới (UUID), không body → 202
+`{command_id, command_status, session_status, effect_confirmed}`. Gửi lại cùng key an toàn.
+`command_status = accepted` chưa là đã dừng: poll progress tới khi `meter_stop_wh` khác null, rồi
+tới khi `settlement_state = posted` thì gọi `GET /sessions/{id}/statement` (trước đó 404). `timeout`
+→ CSMS tự gửi lại (BE-17); app tiếp tục poll. 409 `session_not_stoppable` → phiên đã dừng.
+Phiên RFID/HMI dừng tại trụ (route trả 404).
+
+**Credit (UC-PAY-02).** `GET /credit` → `{balance_vnd, held_vnd, available_vnd, status, updated_at}`;
+hiện `available_vnd` là số có thể dùng để sạc, `held_vnd` là "đang giữ cho phiên".
+`status = none` → tài xế chưa có ví (chưa nạp lần nào). `GET /credit/transactions?page=1&page_size=20`
+→ sổ cái mới nhất trước; dòng `session_debit` có `session_id` để mở bảng kê.
+
+Id của tài xế khác, key của tài xế khác và id không tồn tại đều trả 404 `not_found` như nhau.

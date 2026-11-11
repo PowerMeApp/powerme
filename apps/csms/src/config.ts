@@ -45,6 +45,14 @@ export interface CsmsConfig {
   /** Cổng HTTP của console (0 = cổng ngẫu nhiên, dùng trong test). */
   consolePort: number;
   /**
+   * WF-05 (T119): user id of the Admin the console acts as for `POST /api/admin/charge-points`.
+   * No default: not set → that route returns 503. Interim until RolesGuard (T103) uses the
+   * logged-in user instead; the service still checks the role of this id.
+   */
+  consoleActorAdminId?: number | null;
+  /** WF-05 (T119): user id of the operator staff for `POST /api/operator/charge-points/onboard`. */
+  consoleActorStaffId?: number | null;
+  /**
    * WF-05: public OCPP base URL given to the operator at onboarding (e.g.
    * `wss://staging.powerme.vn/ocpp`). Optional; default `ws://localhost:{ocppPort}/ocpp`.
    */
@@ -156,6 +164,16 @@ function positiveHoursEnv(env: NodeJS.ProcessEnv, key: string, fallback: number)
   return n;
 }
 
+/** Optional positive integer id; unset/empty → null. */
+function optionalIdEnv(env: NodeJS.ProcessEnv, key: string): number | null {
+  const raw = env[key]?.trim();
+  if (raw === undefined || raw === '') return null;
+  const n = Number(raw);
+  if (!/^\d+$/.test(raw) || !Number.isSafeInteger(n) || n < 1)
+    throw new Error(`Biến môi trường ${key} phải là số nguyên dương (user id): "${env[key]}"`);
+  return n;
+}
+
 /** Đọc cấu hình; ném lỗi sớm khi thiếu DATABASE_URL thay vì chết lúc query đầu tiên. */
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): CsmsConfig {
   const databaseUrl = env['DATABASE_URL'];
@@ -176,6 +194,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): CsmsConfig {
     consoleHost: env['CONSOLE_HOST'] || '127.0.0.1',
     consoleAllowNonLoopback: boolEnv(env, 'CONSOLE_ALLOW_NON_LOOPBACK', false),
     consolePort: intEnv(env, 'CONSOLE_PORT', 3000),
+    consoleActorAdminId: optionalIdEnv(env, 'CONSOLE_ACTOR_ADMIN_ID'),
+    consoleActorStaffId: optionalIdEnv(env, 'CONSOLE_ACTOR_STAFF_ID'),
     ...(env['OCPP_PUBLIC_URL'] ? { ocppPublicUrl: env['OCPP_PUBLIC_URL'] } : {}),
     allowLegacyNoCredential: boolEnv(env, 'ALLOW_LEGACY_NO_CREDENTIAL', false),
     reconciliationEnabled: boolEnv(env, 'RECONCILIATION_ENABLED', true),

@@ -21,7 +21,7 @@ Base HTTP console + `/api/driver/v1` (mặc định `http://127.0.0.1:3000`). M�
 
 `/stations/suggestions` đã loại khỏi implementation/OpenAPI; gọi trả 404. Gợi ý dùng `/stations`
 với `sort=smart&page_size=3&soc_percent=15&target_soc_percent=80&latitude=...&longitude=...`.
-Charge/stop/progress/statement/time-left HTTP trong OpenAPI vẫn là hợp đồng dự kiến.
+Charge/stop/progress/statement và credit có HTTP từ BE-22 (xem [hợp đồng §12](DRIVER-API-HOP-DONG.md)); time-left vẫn là hợp đồng dự kiến.
 
 JSON snake_case, ID bigint chuỗi, UTC ISO; kW/tọa độ dạng số. Page `{items,total,page,page_size,estimate}`.
 Thiếu SoC/vị trí/spec trả estimate null/lý do. Công thức/giả định công khai, không gọi Route/Matrix

@@ -215,8 +215,13 @@ async function main() {
     env: {
       DATABASE_URL: db.url,
       OCPP_PORT: String(PORTS.ocpp),
-      // Seed demo chưa đi qua onboard() nên trụ chưa có credential (review PR #33).
+      // Only for RH24D1-00001: seed.sql predates onboard(), so it has no credential (review PR #33).
+      // The switch never applies to a charge point that has one: SIM-0005 is onboarded through
+      // the console (DS-09, demo/onboard-sim.mjs) and must present its password.
       ALLOW_LEGACY_NO_CREDENTIAL: 'true',
+      // WF-05 (T119): who the console acts as until RolesGuard (T103) — the seed's demo users.
+      ...(db.actors?.admin ? { CONSOLE_ACTOR_ADMIN_ID: String(db.actors.admin) } : {}),
+      ...(db.actors?.staff ? { CONSOLE_ACTOR_STAFF_ID: String(db.actors.staff) } : {}),
       CONSOLE_PORT: String(PORTS.console),
       // Giá trị theo infra/.env.example
       OCPP_HEARTBEAT_INTERVAL_SECONDS: '300',
@@ -289,6 +294,10 @@ async function main() {
     [
       'Trụ kịch bản',
       `node apps/csms/demo/scripted-station.mjs ds-01a --url ws://localhost:${PORTS.ocpp}/ocpp`,
+    ],
+    [
+      'DS-09 onboard',
+      `node apps/csms/demo/onboard-sim.mjs --console http://127.0.0.1:${PORTS.console} --url ws://localhost:${PORTS.ocpp}/ocpp  (SIM-0005, Basic Auth)`,
     ],
     [
       'Trụ thử (lab)',

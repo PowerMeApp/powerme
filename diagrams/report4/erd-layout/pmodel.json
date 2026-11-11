@@ -6148,7 +6148,7 @@
     "ocpp_direction": ["in", "out"],
     "operator_status": ["active", "suspended", "closed"],
     "pause_cause": ["ev", "evse"],
-    "payment_mode": ["csms_billed", "station_wallet", "unattributed"],
+    "payment_mode": ["csms_billed", "unattributed"],
     "reconciliation_record_type": [
       "replay",
       "duplicate",
@@ -6170,7 +6170,7 @@
       "expired_no_show",
       "voided"
     ],
-    "rfid_card_kind": ["online", "wallet", "free_vend"],
+    "rfid_card_kind": ["online", "free_vend"],
     "rfid_card_status": ["unlinked", "active", "blocked"],
     "session_origin": ["app_qr", "rfid", "hmi_password", "free_vend"],
     "session_status": [

@@ -23,7 +23,7 @@ node simulator/d1-hmi/server.mjs
 | `STALE_METERSTOP` | tắt | `1` = sau một lần rớt mạng, `StopTransaction` mang `meterStop` **cũ** (chỉ số lúc rớt) dù trụ vẫn sạc tiếp — tái hiện hiện tượng 3 của EXP-01 để CSMS ra phiên `review`. `npm run demo` của CSMS bật sẵn (`STALE_METERSTOP=0` để tắt) |
 | `RETRY_MS` `REPLAY_LOSS` `METER_INTERVAL` `PING_SEC` `REBOOT_MS` `SPEED` | 30000 / 0.25 / 10 / 30 / 3000 / 1 | Chủ yếu cho kiểm thử; xem đầu `server.mjs` |
 
-Để CSMS chấp nhận, cần có sẵn trụ `RH24D1-00001` và các `idTag` mẫu: `DEMO-CARD-0001` (thẻ hợp lệ), `DEMO-WALLET-0001` (thẻ ví). `DEMO-UNKNOWN-999` cố tình không đăng ký. Mật khẩu HMI mẫu: `123456` (giả).
+Để CSMS chấp nhận, cần có sẵn trụ `RH24D1-00001` và các `idTag` mẫu: `DEMO-CARD-0001` (thẻ hợp lệ), `DEMO-CARD-0002` (thẻ hợp lệ 2, tài xế mẫu 2; thay thẻ ví `DEMO-WALLET-0001` đã bỏ ở T110 — PowerMe không hỗ trợ thẻ RFID ví). `DEMO-UNKNOWN-999` cố tình không đăng ký. Mật khẩu HMI mẫu: `123456` (giả).
 
 ## Kiểm thử
 
@@ -89,7 +89,7 @@ Thời gian mô phỏng (nút "Tăng tốc ×10") chỉ nhân đồng hồ sạc
 
 | # | Điểm | Chúng tôi chọn | Cần xác nhận |
 |---|---|---|---|
-| 1 | Thẻ ví trừ tiền offline | Offline, trụ chấp nhận thẻ hợp lệ + thẻ ví theo danh sách cục bộ (`DEMO-CARD`, `DEMO-WALLET`), từ chối thẻ lạ; không mô phỏng việc trừ tiền | Firmware có danh sách cục bộ / ví offline không, trừ tiền ở đâu |
+| 1 | Danh sách thẻ cục bộ khi offline | Offline, trụ chấp nhận hai thẻ hợp lệ theo danh sách cục bộ (`DEMO-CARD-0001`, `DEMO-CARD-0002`), từ chối thẻ lạ. Thẻ ví (trụ tự trừ tiền) ngoài phạm vi từ T109 | Firmware có danh sách cục bộ không |
 | 2 | `idTag` của free vend (mật khẩu HMI) | `HMI-FREEVEND`, gửi thẳng `StartTransaction`, không `Authorize` | idTag thật (hoặc rỗng/mặc định), có Authorize không |
 | 3 | Measurand thật trong MeterValues | `Energy.Active.Import.Register` (Wh), `SoC` (Percent), `Power.Active.Import` (W), `Voltage` (V), `Current.Import` (A) | Trụ Ruihua thật gửi measurand nào, đơn vị nào |
 | 4 | Config key hỗ trợ | `HeartbeatInterval`, `MeterValueSampleInterval` (=10), `AuthorizeRemoteTxRequests`, `WebSocketPingInterval`, `ConnectionTimeOut`, `NumberOfConnectors`, `SupportedFeatureProfiles` (`Core,RemoteTrigger`), `ConnectorPhaseRotation` | Tập key thật; có `TransactionMessageAttempts`/`RetryInterval` không (SAP không có) |

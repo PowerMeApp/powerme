@@ -26,7 +26,32 @@ import {
   InvalidFaultTransitionError,
   ResetType,
 } from '../stations/faults/fault.service.js';
-import { ConsoleError } from './console.http.js';
+import {
+  SessionReviewError,
+  SessionReviewErrorCode,
+  SessionReviewService,
+} from '../sessions/session-review.service.js';
+import {
+  UnattributedErrorCode,
+  UnattributedSessionError,
+  UnattributedSessionService,
+} from '../sessions/unattributed-session.service.js';
+import { AssignInput, CloseInput, ConsoleError, ResolveInput } from './console.http.js';
+
+/** Mô tả ngắn cho từng mã lỗi quyết định (BE-24). */
+const DECISION_DETAIL: Record<SessionReviewErrorCode | UnattributedErrorCode, string> = {
+  invalid_input:
+    'Tham số không hợp lệ (mã lý do: a-z, 0-9, _, tối đa 40 ký tự; ghi chú 1–500 ký tự)',
+  forbidden: 'Người gọi không phải nhân viên vận hành đang hoạt động',
+  not_found: 'Không có phiên này trong các trụ của operator',
+  not_in_review: 'Phiên không ở trạng thái review',
+  not_unattributed: 'Phiên không phải unattributed',
+  session_not_stopped: 'Phiên chưa có StopTransaction — chưa quyết định được',
+  free_vend_not_billable: 'Phiên free vend không bao giờ tính tiền (BR-P08) — chỉ đóng được',
+  wallet_card_not_billable: 'Phiên của thẻ ví đã trả tiền tại trụ (BR-P08) — chỉ đóng được',
+  driver_not_eligible: 'Tài xế không hoạt động hoặc không có Charging Credit đang mở',
+  already_resolved: 'Phiên đã có quyết định khác',
+};
 
 /** Trạng thái phiên còn "sống" — RemoteStop chỉ có nghĩa với các trạng thái này. */
 const STOPPABLE = new Set(['pending', 'active', 'paused', 'stopping']);
@@ -47,7 +72,118 @@ export class ConsoleCommands {
     private readonly registry: ConnectionRegistry,
     /** WF-04. Optional để test BE-08 cũ dựng console không cần nó (khi đó API sự cố trả 503). */
     @Optional() private readonly faultService?: FaultService,
+    /** BE-24. Optional cùng lý do; thiếu thì các API hàng đợi/quyết định trả 503. */
+    @Optional() private readonly review?: SessionReviewService,
+    @Optional() private readonly unattributed?: UnattributedSessionService,
   ) {}
+
+  // -------------------------------------------------------------------------------------------
+  // BE-24 — phiên unattributed (F-12, FR-13) và phiên review (STM-1 #17). operatorUserId tới từ
+  // thân JSON (TẠM, console chưa đăng nhập — F-13); quyền do service kiểm, console không bỏ qua.
+  // -------------------------------------------------------------------------------------------
+
+  async unattributedQueue(limit: number) {
+    return this.mapDecisionErrors(() => this.requireUnattributed().listPending(limit));
+  }
+
+  async reviewQueue(limit: number) {
+    return this.mapDecisionErrors(() => this.requireReview().listInReview(limit));
+  }
+
+  async assignUnattributed(sessionId: number, input: AssignInput) {
+    const r = await this.mapDecisionErrors(() =>
+      this.requireUnattributed().assign(
+        sessionId,
+        input.operatorUserId,
+        input.driverId,
+        input.note,
+      ),
+    );
+    return {
+      session_id: r.sessionId,
+      decision: r.decision,
+      driver_id: r.driverId,
+      payment_mode: r.paymentMode,
+      already_resolved: r.alreadyResolved,
+      records_reviewed: r.recordsReviewed,
+      settlement: r.settlement,
+    };
+  }
+
+  async closeUnattributed(sessionId: number, input: CloseInput) {
+    const r = await this.mapDecisionErrors(() =>
+      this.requireUnattributed().close(sessionId, input.operatorUserId, input.reason, input.note),
+    );
+    return {
+      session_id: r.sessionId,
+      decision: r.decision,
+      reason: r.reason,
+      payment_mode: r.paymentMode,
+      already_resolved: r.alreadyResolved,
+      records_reviewed: r.recordsReviewed,
+    };
+  }
+
+  async resolveReview(sessionId: number, input: ResolveInput) {
+    const r = await this.mapDecisionErrors(() =>
+      this.requireReview().resolveReview(
+        sessionId,
+        input.operatorUserId,
+        input.resolution,
+        input.note,
+      ),
+    );
+    return {
+      session_id: r.sessionId,
+      status: r.status,
+      records_reviewed: r.recordsReviewed,
+      settlement: r.settlement,
+    };
+  }
+
+  private requireReview(): SessionReviewService {
+    if (!this.review) {
+      throw new ConsoleError(503, 'review_unavailable', 'SessionReviewService chưa được nạp');
+    }
+    return this.review;
+  }
+
+  private requireUnattributed(): UnattributedSessionService {
+    if (!this.unattributed) {
+      throw new ConsoleError(
+        503,
+        'unattributed_unavailable',
+        'UnattributedSessionService chưa được nạp',
+      );
+    }
+    return this.unattributed;
+  }
+
+  /**
+   * Lỗi miền của SessionReviewService / UnattributedSessionService → mã HTTP: 400 tham số sai ·
+   * 403 không phải operator_staff active · 404 không có phiên hoặc phiên của operator khác ·
+   * 422 tài xế không nhận được phiên · 409 mọi quy tắc trạng thái còn lại.
+   */
+  private async mapDecisionErrors<T>(fn: () => Promise<T>): Promise<T> {
+    try {
+      return await fn();
+    } catch (err) {
+      if (err instanceof SessionReviewError || err instanceof UnattributedSessionError) {
+        const status =
+          err.code === 'invalid_input'
+            ? 400
+            : err.code === 'forbidden'
+              ? 403
+              : err.code === 'not_found'
+                ? 404
+                : err.code === 'driver_not_eligible'
+                  ? 422
+                  : 409;
+        throw new ConsoleError(status, err.code, DECISION_DETAIL[err.code]);
+      }
+      throw err;
+    }
+  }
 
   /** Đóng socket phía CSMS (mã 1001 "going away"). 404 nếu trụ không đang nối. */
   async disconnect(serial: string) {

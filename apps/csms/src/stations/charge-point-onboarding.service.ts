@@ -12,8 +12,9 @@
  *
  * The actor is passed as a user id and resolved from the DB (role, operator), never trusted from
  * the request body: an operator can only onboard onto its own sites (FR-09 scoping, NFR security
- * "operators see only their own data"). The HTTP controller + JWT guard come with the `users`
- * module; until then this service is driven by tests and the demo.
+ * "operators see only their own data"). Interim HTTP entry (T119): the console routes
+ * `POST /api/admin/charge-points` and `POST /api/operator/charge-points/onboard`, acting as the
+ * users in CONSOLE_ACTOR_*; the real controller + guard come with RolesGuard (T103).
  *
  * Not here (declared in the PR): audit-log table (rejections are logged with Logger.warn),
  * display-code province rules beyond the site-code prefix, disable/enable/decommission endpoints
@@ -39,7 +40,7 @@ export type OnboardingErrorCode =
   | 'serial_not_registered'
   | 'already_onboarded';
 
-/** HTTP status the future controller returns for each error (SD-5a: 403 / 409). */
+/** HTTP status for each error (SD-5a: 403 / 409); used by the console routes (T119). */
 export const ONBOARDING_ERROR_STATUS: Record<OnboardingErrorCode, 400 | 403 | 404 | 409> = {
   invalid_input: 400,
   forbidden_role: 403,

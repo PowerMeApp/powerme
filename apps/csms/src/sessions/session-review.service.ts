@@ -20,6 +20,7 @@ import { Inject, Injectable, Logger } from '@nestjs/common';
 import { DB, Db } from '../db/db.module.js';
 import { ChargeSettlementService } from './charge-settlement.service.js';
 import { chargeTransaction } from './charge-sql.js';
+import { lockOperatorSession } from './operator-session-access.js';
 import { SessionStateMachine, SessionStatus } from './session-state-machine.js';
 
 export type SessionReviewErrorCode = 'invalid_input' | 'forbidden' | 'not_found' | 'not_in_review';
@@ -75,26 +76,10 @@ export class SessionReviewService {
     const text = note.trim();
 
     const outcome = await chargeTransaction(this.db, async (c) => {
-      const staff = (
-        await c.query<{ operator_id: string }>(
-          `SELECT staff.operator_id FROM users u
-           JOIN operator_staff staff ON staff.user_id=u.id
-           JOIN operators o ON o.id=staff.operator_id AND o.status='active'
-           WHERE u.id=$1 AND u.role='operator_staff' AND u.account_status='active'`,
-          [operatorUserId],
-        )
-      ).rows[0];
-      if (!staff) throw new SessionReviewError('forbidden');
-      // Phiên của operator khác trả not_found như phiên không tồn tại: không lộ dữ liệu liên-operator.
-      const session = (
-        await c.query<{ status: string; received_stopped_at: Date | null }>(
-          `SELECT s.status,s.received_stopped_at FROM sessions s
-           JOIN charge_points cp ON cp.id=s.charge_point_id JOIN sites st ON st.id=cp.site_id
-           WHERE s.id=$1 AND st.operator_id=$2 FOR UPDATE OF s`,
-          [sessionId, staff.operator_id],
-        )
-      ).rows[0];
-      if (!session) throw new SessionReviewError('not_found');
+      // Quyền + khoá dòng: dùng chung với UnattributedSessionService (operator-session-access.ts).
+      const lock = await lockOperatorSession(c, sessionId, operatorUserId);
+      if (!lock.ok) throw new SessionReviewError(lock.code);
+      const { session } = lock;
       if (!this.stateMachine.canApply(session.status as SessionStatus, 'OPERATOR_RESOLVED'))
         throw new SessionReviewError('not_in_review');
 
@@ -129,4 +114,67 @@ export class SessionReviewService {
       settlement,
     };
   }
+
+  /**
+   * BE-24: hàng đợi phiên `review` cho console (mới nhất trước), kèm các bản ghi kết luận chưa duyệt.
+   * Chưa lọc theo operator — console chưa có đăng nhập (cùng mức với GET /api/admin/sessions);
+   * mỗi dòng mang `operator_id` để màn hình lọc. Quyền chỉ kiểm khi GHI (resolveReview).
+   */
+  async listInReview(limit: number): Promise<ReviewQueueItem[]> {
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 500)
+      throw new SessionReviewError('invalid_input');
+    const { rows } = await this.db.$client.query<ReviewQueueRow>(
+      `SELECT s.id,s.transaction_no,cp.serial_number,s.connector_no,s.id_tag,s.origin,s.payment_mode,
+         s.energy_wh,s.received_stopped_at,s.updated_at,st.operator_id,
+         coalesce((SELECT array_agg(r.resolution ORDER BY r.record_no) FROM reconciliation_records r
+           WHERE r.session_id=s.id AND r.reviewed_at IS NULL
+             AND r.record_type = ANY($2::reconciliation_record_type[])),'{}') AS open_records
+       FROM sessions s JOIN charge_points cp ON cp.id=s.charge_point_id JOIN sites st ON st.id=cp.site_id
+       WHERE s.status='review' ORDER BY s.updated_at DESC,s.id DESC LIMIT $1`,
+      [limit, VERDICT_TYPES],
+    );
+    return rows.map((r) => ({
+      session_id: Number(r.id),
+      transaction_no: r.transaction_no,
+      station: r.serial_number,
+      connector_no: r.connector_no,
+      id_tag: r.id_tag,
+      origin: r.origin,
+      payment_mode: r.payment_mode,
+      energy_wh: r.energy_wh === null ? null : Number(r.energy_wh),
+      stopped: r.received_stopped_at !== null,
+      operator_id: Number(r.operator_id),
+      open_records: r.open_records.filter((x): x is string => x !== null),
+    }));
+  }
+}
+
+interface ReviewQueueRow {
+  id: string;
+  transaction_no: number;
+  serial_number: string;
+  connector_no: number;
+  id_tag: string;
+  origin: string;
+  payment_mode: string;
+  energy_wh: string | null;
+  received_stopped_at: Date | null;
+  updated_at: Date;
+  operator_id: string;
+  open_records: (string | null)[];
+}
+
+export interface ReviewQueueItem {
+  session_id: number;
+  transaction_no: number;
+  station: string;
+  connector_no: number;
+  id_tag: string;
+  origin: string;
+  payment_mode: string;
+  energy_wh: number | null;
+  /** Đã có StopTransaction — giải quyết sẽ gọi quyết toán. */
+  stopped: boolean;
+  operator_id: number;
+  open_records: string[];
 }

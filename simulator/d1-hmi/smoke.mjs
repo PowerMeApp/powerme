@@ -23,7 +23,7 @@ const rx = []; // { action, params, conn, at }
 let connCount = 0;
 let cp = null; // RPCServerClient hiện tại
 let nextTx = 100;
-const known = new Set(['DEMO-CARD-0001', 'DEMO-WALLET-0001']);
+const known = new Set(['DEMO-CARD-0001', 'DEMO-CARD-0002']);
 const server = new RPCServer({ protocols: ['ocpp1.6'], strictMode: true });
 // Mô phỏng Security Profile 2: CSMS chỉ nhận khi Basic Auth có đúng mật khẩu (CP_PASSWORD của trụ).
 const CP_SECRET = `smoke-${randomBytes(12).toString('hex')}`; // sinh lúc chạy, không phải literal
@@ -216,7 +216,7 @@ try {
   );
   check('MeterValues mang transactionId của phiên', mv.params.transactionId === tx1);
 
-  // 3. Rớt mạng 5 s; trong lúc đó súng B tự mở phiên bằng thẻ ví (offline)
+  // 3. Rớt mạng 5 s; trong lúc đó súng B tự mở phiên bằng thẻ hợp lệ thứ hai (offline)
   const bootsBefore = count('Boot' + 'Notification');
   const connBefore = connCount;
   const dropAt = Date.now();
@@ -225,8 +225,12 @@ try {
   const st0 = await state();
   check('Trụ báo offline sau khi rớt mạng', st0.net.state === 'offline');
   await api('plug', { connector: 2 });
-  const swB = await api('swipe', { connector: 2, card: 'wallet' });
-  check('Offline: thẻ ví vẫn được nhận theo danh sách cục bộ (giả định)', swB.ok, swB.message);
+  const swB = await api('swipe', { connector: 2, card: 'valid2' });
+  check(
+    'Offline: thẻ đã đăng ký vẫn được nhận theo danh sách cục bộ (giả định)',
+    swB.ok,
+    swB.message,
+  );
   await sleep(3000);
   const st1 = await state();
   check(
