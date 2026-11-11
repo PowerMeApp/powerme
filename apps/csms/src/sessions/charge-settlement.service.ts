@@ -1,6 +1,8 @@
 import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import type { PoolClient } from 'pg';
+import { CONFIG, CsmsConfig, DEFAULT_REPLAY_SKEW_S } from '../config.js';
 import { DB, Db } from '../db/db.module.js';
+import { checkTariffTimeline, TARIFF_CLOCK_HOLD } from '../reconciliation/tariff-clock.js';
 import { ChargePolicy, validateChargePolicy } from './charge-start-policy.js';
 import { chargeTransaction } from './charge-sql.js';
 
@@ -8,6 +10,10 @@ export const CHARGE_POLICY = Symbol('WP3_T31_CHARGE_POLICY');
 
 interface BillableSession {
   id: string;
+  charge_point_id: string;
+  connector_no: number;
+  id_tag: string;
+  transaction_no: number;
   driver_id: string;
   energy_wh: string | null;
   meter_start_wh: string;
@@ -19,7 +25,6 @@ interface BillableSession {
   cp_started_at: Date;
   cp_stopped_at: Date | null;
   promotion_id: string | null;
-  delivered_offline: boolean;
   operator_id: string;
 }
 
@@ -146,6 +151,7 @@ export class ChargeSettlementService {
   constructor(
     @Inject(DB) private readonly db: Db,
     @Optional() @Inject(CHARGE_POLICY) private readonly policy?: ChargePolicy,
+    @Optional() @Inject(CONFIG) private readonly config?: CsmsConfig,
   ) {
     if (policy) validateChargePolicy(policy);
   }
@@ -192,6 +198,27 @@ export class ChargeSettlementService {
           .rowCount
       )
         return 'already_posted';
+      const clockHold = (
+        await c.query<{ reason: string }>(
+          `SELECT split_part(note,' ',1) AS reason FROM session_status_history
+           WHERE session_id=$1 AND event=$2 ORDER BY id LIMIT 1`,
+          [sessionId, TARIFF_CLOCK_HOLD],
+        )
+      ).rows[0];
+      if (clockHold) return pending(clockHold.reason);
+      if (session.received_stopped_at && session.cp_stopped_at && session.meter_stop_wh !== null) {
+        const issue = await checkTariffTimeline(
+          c,
+          {
+            ...session,
+            received_stopped_at: session.received_stopped_at,
+            cp_stopped_at: session.cp_stopped_at,
+            meter_stop_wh: session.meter_stop_wh,
+          },
+          (this.config?.replaySkewThresholdS ?? DEFAULT_REPLAY_SKEW_S) * 1000,
+        );
+        if (issue) return pending(issue);
+      }
       if (
         session.status !== 'reconciled' ||
         session.meter_stop_wh === null ||
@@ -200,8 +227,6 @@ export class ChargeSettlementService {
         !session.cp_stopped_at ||
         session.promotion_id
       )
-        // Phiên delivered_offline KHÔNG bị giữ lại: SRS §3.4.2 / BR-P20 — trụ offline hay dữ liệu tới
-        // muộn thì vẫn trừ một lần, số dư được âm. Giá tính theo đồng hồ trụ nên không lệch khung.
         return pending(
           session.status !== 'reconciled'
             ? 'awaiting_reconciliation'
@@ -327,9 +352,7 @@ export class ChargeSettlementService {
   }
 
   private async pricedSegments(c: PoolClient, session: BillableSession) {
-    // Trục thời gian là đồng hồ TRỤ (cp_*), không phải lúc CSMS nhận: phiên sạc lúc trụ offline có
-    // StopTransaction tới khi nối lại, received_stopped_at lệch hàng giờ và rơi sang khung giá khác.
-    // Đối soát (status = reconciled) đã kiểm chuỗi công tơ trên cùng trục cp_timestamp.
+    // BR-P02 uses the validated CP timeline for tariff boundaries, including offline replay.
     const start = session.cp_started_at;
     const end = session.cp_stopped_at!;
     if (end < start || end.getTime() - start.getTime() > 366 * 86400000) return undefined;

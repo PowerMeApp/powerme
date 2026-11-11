@@ -259,6 +259,21 @@ export class ReconciliationService {
     });
   }
 
+  async recordTariffClockConflict(
+    ex: DbExecutor,
+    sessionId: number,
+    frame: FrameRef,
+    reason: string,
+  ): Promise<number | null> {
+    return this.insert(ex, sessionId, {
+      recordType: 'conflict',
+      gapStart: null,
+      gapEnd: frame.receivedAt,
+      energyDifferenceWh: null,
+      resolution: `${reason}: message_log_id=${frame.messageLogId}`,
+    });
+  }
+
   /** StopTransaction tới cho phiên đã có meter_stop hoặc đã kết thúc. */
   async recordOrphanStop(
     ex: DbExecutor,

@@ -11,6 +11,8 @@ import { Global, Module } from '@nestjs/common';
 import { SmartSearchConfig, loadSmartSearchConfig } from './sessions/smart-search.js';
 import { DriverApiConfig, loadDriverApiConfig } from './driver/driver-auth.js';
 
+export const DEFAULT_REPLAY_SKEW_S = 5;
+
 export interface CsmsConfig {
   driverApi?: DriverApiConfig;
   smartSearch?: SmartSearchConfig;
@@ -186,7 +188,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): CsmsConfig {
     heartbeatIntervalS: intEnv(env, 'OCPP_HEARTBEAT_INTERVAL_SECONDS', 300),
     sessionStartTimeoutS: positiveSecondsEnv(env, 'SESSION_START_TIMEOUT_S', 120),
     sessionHardCapH: positiveHoursEnv(env, 'SESSION_HARD_CAP_H', 24),
-    replaySkewThresholdS: intEnv(env, 'REPLAY_SKEW_THRESHOLD_S', 5),
+    replaySkewThresholdS: intEnv(env, 'REPLAY_SKEW_THRESHOLD_S', DEFAULT_REPLAY_SKEW_S),
     meterValueSampleIntervalS: intEnv(env, 'METER_VALUE_SAMPLE_INTERVAL_S', 10),
     reconcileGapFactor: intEnv(env, 'RECONCILE_GAP_FACTOR', 3),
     reconcileEnergyToleranceWh: intEnv(env, 'RECONCILE_ENERGY_TOLERANCE_WH', 1),

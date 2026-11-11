@@ -22,6 +22,7 @@ import {
   EnergyStartInput,
 } from '../src/sessions/driver-charging.service.js';
 import { SessionStateMachine } from '../src/sessions/session-state-machine.js';
+import { SessionReviewService } from '../src/sessions/session-review.service.js';
 import { SessionsService } from '../src/sessions/sessions.service.js';
 import { ChargePointAuthService } from '../src/stations/charge-point-auth.service.js';
 import { hashChargePointPassword } from '../src/stations/charge-point-credential.js';
@@ -582,18 +583,17 @@ describeDb('WP3/T31 WF-01 service journey with real OCPP + Postgres', () => {
 
   it('T72 review exposes pending reason and resumes after reconciliation', async () => {
     const sid = await observedStart();
-    meterStop = 500;
+    meterStop = 6000;
+    await meter('6010');
     expect(await sendStop()).toEqual({ idTagInfo: { status: 'Accepted' } });
     expect(
       (await q('SELECT * FROM charge_settlement_jobs WHERE session_id=$1', [sid]))[0],
     ).toMatchObject({ state: 'pending', reason: 'awaiting_reconciliation' });
-    // WP3/T72: synthetic operator resolution, not an automatic override of the WP2 verdict.
-    await q(
-      "UPDATE sessions SET meter_stop_wh=11000,energy_wh=10000,status='reconciled' WHERE id=$1",
-      [sid],
-    );
-    expect(await settlement.retryPending()).toBe(1);
-    expect((await service.statement(driver, sid)).amount_vnd).toBe('50000');
+    const review = new SessionReviewService(db, settlement);
+    expect(
+      await review.resolveReview(sid, await operator(), 'meter_confirmed', 'Verified final meter'),
+    ).toMatchObject({ status: 'reconciled', settlement: 'posted' });
+    expect((await service.statement(driver, sid)).amount_vnd).toBe('25000');
   });
 
   it.each([
@@ -909,16 +909,78 @@ describeDb('WP3/T31 WF-01 service journey with real OCPP + Postgres', () => {
     },
   );
 
-  async function pricingFixture(from: Date, to: Date, energyWh: number) {
-    const sid = await observedStart();
-    meterStop = 500;
-    await sendStop();
-    // WP3/T72: explicit synthetic billing fixture, not measured production timestamps or outcomes.
+  async function pricingFixture(
+    from: Date,
+    to: Date,
+    energyWh: number,
+    options: { receivedStop?: Date; offline?: boolean; boundary?: Date; startRaw?: string } = {},
+  ) {
+    await service.start(driver, 'start', input);
+    const conn = registry.get('T31-CP')!;
+    const opened = new Date(Math.min(from.getTime(), to.getTime()) - 1000);
+    const startConn = { ...conn, epochOpenedAt: opened };
     await q(
-      `UPDATE sessions SET received_started_at=$2,received_stopped_at=$3,cp_started_at=$2,cp_stopped_at=$3,meter_stop_wh=$4,
-      energy_wh=$5,status='reconciled' WHERE id=$1`,
-      [sid, from, to, 1000 + energyWh, energyWh],
+      'UPDATE charge_point_connections SET opened_at=$2 WHERE charge_point_id=$1 AND epoch=$3',
+      [conn.chargePointId, opened, conn.epoch],
     );
+    const result = await server.processCall(
+      startConn,
+      {
+        action: 'StartTransaction',
+        messageId: 'pricing-start',
+        params: {
+          connectorId: 1,
+          idTag: tag,
+          meterStart: 1000,
+          timestamp: options.startRaw ?? from.toISOString(),
+        },
+      },
+      from,
+    );
+    transaction = Number(result.transactionId);
+    const sid = (await service.getStart(driver, 'start')).sessionId!;
+    await q('UPDATE driver_charge_intents SET billing_review_required=true WHERE session_id=$1', [
+      sid,
+    ]);
+    let stopConn = startConn;
+    if (options.offline && options.receivedStop) {
+      const closed = new Date(from.getTime() + 1000);
+      await q(
+        'UPDATE charge_point_connections SET closed_at=$2 WHERE charge_point_id=$1 AND epoch=$3',
+        [conn.chargePointId, closed, conn.epoch],
+      );
+      await q(
+        'INSERT INTO charge_point_connections(charge_point_id,epoch,opened_at) VALUES($1,$2,$3)',
+        [conn.chargePointId, conn.epoch + 1, options.receivedStop],
+      );
+      stopConn = { ...conn, epoch: conn.epoch + 1, epochOpenedAt: options.receivedStop };
+    }
+    await server.processCall(
+      stopConn,
+      {
+        action: 'StopTransaction',
+        messageId: 'pricing-stop',
+        params: {
+          transactionId: transaction,
+          meterStop: 1000 + energyWh,
+          timestamp: to.toISOString(),
+          ...(options.boundary
+            ? {
+                transactionData: [
+                  {
+                    timestamp: options.boundary.toISOString(),
+                    sampledValue: [{ value: '1400', unit: 'Wh' }],
+                  },
+                ],
+              }
+            : {}),
+        },
+      },
+      options.receivedStop ?? to,
+    );
+    await q('UPDATE driver_charge_intents SET billing_review_required=false WHERE session_id=$1', [
+      sid,
+    ]);
     return sid;
   }
   function utcTime(hour: number, minute: number) {
@@ -934,7 +996,7 @@ describeDb('WP3/T31 WF-01 service journey with real OCPP + Postgres', () => {
       [overlap ? '12:01' : gap ? '11:59' : '12:00'],
     );
     await q(`INSERT INTO tariff_periods(operator_id,band,time_start,time_end,price_per_kwh_vnd,effective_from)
-      SELECT operator_id,'normal','12:00','24:00',1,current_date-2 FROM sites LIMIT 1`);
+      SELECT operator_id,'peak','12:00','24:00',1,current_date-2 FROM sites LIMIT 1`);
   }
   it('T72 two 0.4 VND portions sum to 1 VND, not two independently rounded zeroes', async () => {
     await twoBands();
@@ -966,12 +1028,9 @@ describeDb('WP3/T31 WF-01 service journey with real OCPP + Postgres', () => {
   });
   it('T72 same daily tariff survives midnight as two distinct segments', async () => {
     await q('UPDATE tariff_periods SET price_per_kwh_vnd=1');
-    const sid = await pricingFixture(utcTime(16, 59), utcTime(17, 1), 800);
-    await q(
-      `INSERT INTO meter_values(session_id,cp_timestamp,received_at,measurand,value,unit)
-      VALUES($1,$2,$2,'Energy.Active.Import.Register',1400,'Wh')`,
-      [sid, utcTime(17, 0)],
-    );
+    const sid = await pricingFixture(utcTime(16, 59), utcTime(17, 1), 800, {
+      boundary: utcTime(17, 0),
+    });
     expect(await settlement.settle(sid)).toBe('posted');
     expect(
       await q('SELECT 1 FROM session_tariff_segments WHERE session_id=$1', [sid]),
@@ -983,16 +1042,226 @@ describeDb('WP3/T31 WF-01 service journey with real OCPP + Postgres', () => {
     // 13:00 (khung 1000 VND/kWh). Phải trừ tiền một lần theo khung lúc điện thật sự được giao.
     await twoBands();
     await q("UPDATE tariff_periods SET price_per_kwh_vnd=1000 WHERE time_start='12:00'");
-    const sid = await pricingFixture(utcTime(4, 0), utcTime(4, 30), 800);
-    await q('UPDATE sessions SET delivered_offline=true,received_stopped_at=$2 WHERE id=$1', [
-      sid,
-      utcTime(6, 0),
+    const sid = await pricingFixture(utcTime(4, 0), utcTime(4, 30), 800, {
+      receivedStop: utcTime(6, 0),
+      offline: true,
+    });
+    expect(
+      await q(`SELECT l.epoch,l.replayed,l.cp_timestamp,l.received_at
+      FROM ocpp_message_log l WHERE l.unique_id='pricing-stop'`),
+    ).toEqual([
+      {
+        epoch: 2,
+        replayed: true,
+        cp_timestamp: utcTime(4, 30),
+        received_at: utcTime(6, 0),
+      },
     ]);
     expect(await settlement.settle(sid)).toBe('posted');
     expect((await service.statement(driver, sid)).amount_vnd).toBe('1');
     expect(
       await q('SELECT 1 FROM session_tariff_segments WHERE session_id=$1', [sid]),
     ).toHaveLength(1);
+  });
+  it('T101 splits at an exact observed ICT boundary and settles once', async () => {
+    await twoBands();
+    await q("UPDATE tariff_periods SET price_per_kwh_vnd=3 WHERE band='peak'");
+    const boundary = utcTime(5, 0);
+    const sid = await pricingFixture(utcTime(4, 59), utcTime(5, 1), 800, { boundary });
+    expect(await Promise.all([settlement.settle(sid), settlement.settle(sid)])).toEqual(
+      expect.arrayContaining(['posted', 'already_posted']),
+    );
+    expect(
+      await q(`SELECT t.band,s.segment_start,s.segment_end,s.energy_wh,s.exact_amount_milli_vnd
+      FROM session_tariff_segments s JOIN tariff_periods t ON t.id=s.tariff_period_id
+      ORDER BY s.segment_start`),
+    ).toEqual([
+      {
+        band: 'normal',
+        segment_start: utcTime(4, 59),
+        segment_end: boundary,
+        energy_wh: '400',
+        exact_amount_milli_vnd: '400',
+      },
+      {
+        band: 'peak',
+        segment_start: boundary,
+        segment_end: utcTime(5, 1),
+        energy_wh: '400',
+        exact_amount_milli_vnd: '1200',
+      },
+    ]);
+    expect((await service.statement(driver, sid)).amount_vnd).toBe('2');
+    expect(
+      await q("SELECT 1 FROM credit_transactions WHERE transaction_type='session_debit'"),
+    ).toHaveLength(1);
+    expect(
+      await q("SELECT 1 FROM loyalty_transactions WHERE transaction_type='earn'"),
+    ).toHaveLength(1);
+  });
+
+  it('T101 does not interpolate a reading one millisecond from the tariff boundary', async () => {
+    await twoBands();
+    const near = new Date(utcTime(5, 0).getTime() - 1);
+    const sid = await pricingFixture(utcTime(4, 59), utcTime(5, 1), 800, { boundary: near });
+    await expectClockPending(sid, 'tariff_coverage_or_boundary_meter_required');
+  });
+
+  it('T101 holds a legacy boundary meter whose inbound clock evidence is missing', async () => {
+    await twoBands();
+    const sid = await pricingFixture(utcTime(4, 59), utcTime(5, 1), 800);
+    await q(
+      `INSERT INTO meter_values(session_id,cp_timestamp,received_at,epoch,measurand,value,unit)
+       VALUES($1,$2,$2,1,'Energy.Active.Import.Register',1400,'Wh')`,
+      [sid, utcTime(5, 0)],
+    );
+    await expectClockPending(sid, 'tariff_clock_sample_frame_unverified');
+  });
+
+  it('T101 validates the raw start clock even when JS normalizes an invalid date', async () => {
+    const at = new Date('2026-03-02T04:00:00Z');
+    await q("UPDATE tariff_periods SET effective_from='2026-01-01'");
+    const sid = await pricingFixture(at, new Date(at.getTime() + 30000), 800, {
+      startRaw: '2026-02-30T04:00:00Z',
+    });
+    await expectClockPending(sid, 'tariff_clock_invalid_timestamp');
+  });
+
+  async function expectClockPending(sid: number, reason: string) {
+    expect(await settlement.settle(sid)).toBe('pending');
+    expect(await service.progress(driver, sid)).toMatchObject({ settlement_reason: reason });
+    expect(await q('SELECT 1 FROM charging_statements')).toHaveLength(0);
+    expect(
+      await q("SELECT 1 FROM credit_transactions WHERE transaction_type='session_debit'"),
+    ).toHaveLength(0);
+  }
+
+  it.each([
+    [utcTime(4, 3), utcTime(4, 2), 'tariff_clock_future_timestamp'],
+    [utcTime(3, 59), utcTime(4, 0), 'tariff_clock_ambiguous_delay'],
+    [new Date(utcTime(4, 0).getTime() - 1), utcTime(4, 0), 'tariff_clock_reversed_session'],
+  ])('T101 holds an untrusted stop clock (%s, %s)', async (stop, receivedStop, reason) => {
+    const sid = await pricingFixture(utcTime(4, 0), stop, 800, { receivedStop });
+    await expectClockPending(sid, reason);
+  });
+
+  async function clockMeter(timestamp: string, value: string, received: Date, unit = 'Wh') {
+    const conn = registry.get('T31-CP')!;
+    await server.processCall(
+      conn,
+      {
+        action: 'MeterValues',
+        messageId: `clock-meter-${received.getTime()}-${value}`,
+        params: {
+          connectorId: 1,
+          transactionId: transaction,
+          meterValue: [{ timestamp, sampledValue: [{ value, unit }] }],
+        },
+      },
+      received,
+    );
+  }
+
+  async function stopAt(sid: number, at: Date) {
+    const conn = registry.get('T31-CP')!;
+    await server.processCall(
+      conn,
+      {
+        action: 'StopTransaction',
+        messageId: 'clock-stop',
+        params: { transactionId: transaction, meterStop: 1800, timestamp: at.toISOString() },
+      },
+      at,
+    );
+    return sid;
+  }
+
+  it.each(['invalid', 'future', 'outside', 'rollback'] as const)(
+    'T101 holds a %s aggregate sample',
+    async (kind) => {
+      const sid = await observedStart();
+      const from = new Date(startTimestamp).getTime();
+      if (kind === 'invalid')
+        await clockMeter('2026-02-30T04:00:00Z', '1400', new Date(from + 2000));
+      if (kind === 'future')
+        await clockMeter(new Date(from + 8000).toISOString(), '1400', new Date(from + 1000));
+      if (kind === 'outside')
+        await clockMeter(new Date(from + 4000).toISOString(), '1400', new Date(from + 1000));
+      if (kind === 'rollback') {
+        await clockMeter(new Date(from + 2000).toISOString(), '1400', new Date(from + 2000));
+        await clockMeter(new Date(from + 1000).toISOString(), '1300', new Date(from + 3000));
+      }
+      await stopAt(sid, new Date(from + (kind === 'future' ? 9000 : 3500)));
+      await expectClockPending(
+        sid,
+        {
+          invalid: 'tariff_clock_invalid_timestamp',
+          future: 'tariff_clock_future_timestamp',
+          outside: 'tariff_clock_sample_outside_session',
+          rollback: 'tariff_clock_sample_out_of_order',
+        }[kind],
+      );
+    },
+  );
+
+  it('T101 ignores an exact sample repeat and holds a conflicting repeat through review resolution', async () => {
+    const sid = await observedStart();
+    const from = new Date(startTimestamp).getTime();
+    const at = new Date(from + 1000);
+    await clockMeter(at.toISOString(), '1005', at);
+    await clockMeter(at.toISOString(), '1.005', new Date(from + 2000), 'kWh');
+    expect(await q('SELECT 1 FROM meter_values')).toHaveLength(1);
+    expect(
+      await q("SELECT 1 FROM reconciliation_records WHERE record_type='duplicate'"),
+    ).toHaveLength(1);
+    await clockMeter(at.toISOString(), '1500', new Date(from + 3000));
+    await stopAt(sid, new Date(from + 4000));
+    expect(await q('SELECT status FROM sessions WHERE id=$1', [sid])).toEqual([
+      { status: 'review' },
+    ]);
+    const review = new SessionReviewService(db, settlement);
+    expect(
+      await review.resolveReview(sid, await operator(), 'acknowledged', 'Duplicate reviewed'),
+    ).toMatchObject({ settlement: 'pending' });
+    await expectClockPending(sid, 'tariff_clock_conflicting_sample');
+  });
+
+  it.each([false, true])('T101 audits a conflicting repeated stop (posted=%s)', async (posted) => {
+    const sid = await observedStart();
+    const at = new Date(new Date(startTimestamp).getTime() + 4000);
+    if (!posted)
+      await q('UPDATE driver_charge_intents SET billing_review_required=true WHERE session_id=$1', [
+        sid,
+      ]);
+    await stopAt(sid, at);
+    const conn = registry.get('T31-CP')!;
+    const repeat = async (wh: number, lag: number) =>
+      server.processCall(
+        conn,
+        {
+          action: 'StopTransaction',
+          messageId: `clock-stop-repeat-${lag}`,
+          params: { transactionId: transaction, meterStop: wh, timestamp: at.toISOString() },
+        },
+        new Date(at.getTime() + lag),
+      );
+    await repeat(1800, 1);
+    expect(
+      await q('SELECT 1 FROM session_status_history WHERE event=$1', ['TARIFF_CLOCK_HOLD']),
+    ).toHaveLength(0);
+    await repeat(1900, 2);
+    expect(await q('SELECT status,meter_stop_wh FROM sessions WHERE id=$1', [sid])).toEqual([
+      { status: posted ? 'reconciled' : 'review', meter_stop_wh: '1800' },
+    ]);
+    if (posted) {
+      expect(await settlement.settle(sid)).toBe('already_posted');
+      expect((await service.statement(driver, sid)).energy_wh).toBe('800');
+      expect(
+        await q("SELECT 1 FROM credit_transactions WHERE transaction_type='session_debit'"),
+      ).toHaveLength(1);
+    } else {
+      await expectClockPending(sid, 'tariff_clock_conflicting_stop');
+    }
   });
   it.each(['suspended', 'closed'] as const)(
     'T72 inactive operator %s cannot submit tariff boundary evidence',
