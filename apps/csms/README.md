@@ -37,6 +37,8 @@ refuses non-loopback binds because the admin console still has no authentication
 
 `src/console/` — trang web một file + vài endpoint JSON để xem hệ thống đang chạy (demo Review 2). Mở `http://127.0.0.1:3000/` sau khi chạy CSMS. Cấu hình: `CONSOLE_ENABLED` (mặc định `true`), `CONSOLE_HOST` (mặc định `127.0.0.1`), `CONSOLE_PORT` (mặc định `3000`).
 
+WF-05 onboarding (T119): `POST /api/admin/charge-points` and `POST /api/operator/charge-points/onboard` (see [docs/api/CONSOLE-ONBOARDING-API.md](../../docs/api/CONSOLE-ONBOARDING-API.md)) act as the users in `CONSOLE_ACTOR_ADMIN_ID` and `CONSOLE_ACTOR_STAFF_ID` (integer user ids, no default; unset → 503). These two settings are interim and are replaced by RolesGuard (T103).
+
 - Chỉ đọc: `GET /api/admin/{stations,sessions,sessions/:id,reconciliation,messages,summary}`. Ngoài ra `GET /health` → `{"ok":true,"db":true}` (sau `select 1`), 503 `{"ok":false,"db":false}` nếu DB lỗi; không lộ phiên bản/chi tiết. Image Docker và staging dùng nó: xem `infra/staging/README.md`. Hai lệnh: `POST /api/admin/stations/:serial/disconnect` (đóng socket phía CSMS), `POST /api/admin/sessions/:id/remote-stop` (RemoteStopTransaction).
 - **Chưa có xác thực** (RolesGuard là việc sau — ADR-0011): đừng bind ra `0.0.0.0`. POST từ `Origin` không phải localhost bị từ chối 403.
 - **Chưa làm:** xác thực/phân quyền, realtime Socket.IO (trang poll mỗi 1 s), billing, hiển thị lịch sử chuyển trạng thái phiên (bảng `session_status_history` có từ migration 0001 nhưng chi tiết phiên của console chưa đọc nó).

@@ -115,6 +115,34 @@ INSERT INTO rfid_cards (card_identifier, card_kind, driver_id, status)
 VALUES ('DEMO-BLOCKED-01', 'online', NULL, 'blocked')
 ON CONFLICT ON CONSTRAINT rfid_cards_card_identifier_key DO NOTHING;
 
+-- WF-05 / T119: who the console acts as, and one charge point waiting to be onboarded ------------
+-- No login yet (RolesGuard is T103): the console calls ChargePointOnboardingService with the user
+-- ids in CONSOLE_ACTOR_ADMIN_ID / CONSOLE_ACTOR_STAFF_ID. These two users have no password_hash,
+-- so they cannot log in anywhere once login exists; they only give the service real role rows.
+INSERT INTO users (email, full_name, role, account_status)
+VALUES ('admin.demo@powerme.test', 'Admin Demo', 'admin', 'active'),
+       ('staff.demo@powerme.test', 'Staff Demo', 'operator_staff', 'active')
+ON CONFLICT ON CONSTRAINT users_email_key DO NOTHING;
+
+INSERT INTO admins (user_id)
+SELECT u.id FROM users u
+WHERE u.email = 'admin.demo@powerme.test'
+ON CONFLICT (user_id) DO NOTHING;
+
+-- Staff of the demo operator, i.e. the operator of site HCM-DEMO-01.
+INSERT INTO operator_staff (user_id, operator_id, staff_role)
+SELECT u.id, o.id, 'manager'
+FROM users u
+CROSS JOIN operators o
+WHERE u.email = 'staff.demo@powerme.test' AND o.tax_code = '0312345678'
+ON CONFLICT (user_id) DO NOTHING;
+
+-- SIM-0005: what registerDevice() writes (Admin registry step, STM-3 #1): lifecycle 'registered',
+-- no site, no display code, no credential, no connectors. DS-09 onboards it through the console.
+INSERT INTO charge_points (serial_number, model, rated_power_kw, lifecycle)
+VALUES ('SIM-0005', 'D1-120', 120, 'registered')
+ON CONFLICT ON CONSTRAINT charge_points_serial_number_key DO NOTHING;
+
 -- Bảng giá mẫu (giờ địa phương; khung qua nửa đêm tách hai dòng) ---------------------------
 INSERT INTO tariff_periods (operator_id, band, time_start, time_end, price_per_kwh_vnd, effective_from)
 SELECT o.id, v.band::tariff_band, v.t_start::time, v.t_end::time, v.price, DATE '2026-01-01'

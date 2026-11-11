@@ -11,9 +11,10 @@ Design: Report 4 §3.6 (CD-5, SD-5a, SD-5b), AD-8 v2.0, STM-3 v0.3 (ADR-0016) ·
 | `CredentialService` (CD-5) | `apps/csms/src/stations/charge-point-credential.ts` | 24-char random password, shown once; stored as scrypt hash (see decision below) |
 | `ChargePointOnboardingService` (SD-5a) | `apps/csms/src/stations/charge-point-onboarding.service.ts` | `registerDevice` (Admin only) → `registered`; `onboard` (operator staff, own site only) → `awaiting_connection`, 1–2 connectors `Unavailable`, display code `PM-{model}-{province}-{nnnn}` |
 | Credential check at upgrade (SD-5b) | `apps/csms/src/stations/charge-point-auth.service.ts`, hooked into `OcppServer.start()` | unknown 404 · `registered` / `decommissioned` 403 · wrong or missing Basic-auth password 401 |
+| HTTP entry, interim (T119, 10/11) | `apps/csms/src/console/console.router.ts`, `console.http.ts`, `console-page.ts` | `POST /api/admin/charge-points`, `POST /api/operator/charge-points/onboard` acting as `CONSOLE_ACTOR_*`; console form "Onboard Charge Point"; demo `demo/onboard-sim.mjs` (DS-09/DS-10). Replaced by the T98 contract + RolesGuard (T103) |
 | First connection (SD-5b) | unchanged WP2 code | `ConnectionRegistry.open()` sets `in_service`; Boot answered `Accepted` + interval; StatusNotification sets connectors `Available` |
 
-Error → HTTP status for the future controller: `ONBOARDING_ERROR_STATUS` (403 other operator's site, 404 site missing, 409 serial not registered / already onboarded, 400 bad connectors).
+Error → HTTP status (used by the interim console routes, T119 — see [api/CONSOLE-ONBOARDING-API.md](api/CONSOLE-ONBOARDING-API.md)): `ONBOARDING_ERROR_STATUS` (403 other operator's site, 404 site missing, 409 serial not registered / already onboarded, 400 bad connectors).
 
 ## Tests (27 new, all automated in CI)
 

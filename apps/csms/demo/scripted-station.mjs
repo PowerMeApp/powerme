@@ -19,10 +19,14 @@
  *   ds-03b   StartTransaction gửi lại sau khi nối lại → khử trùng, không tạo phiên thứ hai
  *   ds-03c   thẻ lạ khi trụ offline → phiên vẫn được ghi (ADR-0012) + bản ghi unknown_id_tag
  *   ds-03d   trụ nối lại khi phiên còn orphaned và vẫn đang sạc → orphaned → active
+ *   ds-09    WF-05 (T119): first connection of a newly onboarded charge point with the credential in
+ *            CP_PASSWORD → Boot, both connectors Available, then stays online for --hold-s seconds
+ *   ds-10    WF-05 (T119): connects with a WRONG password on purpose → success = CSMS answers 401
+ *            (ignores CP_PASSWORD). Usually run by demo/onboard-sim.mjs with --id SIM-0005
  *
  * Tuỳ chọn: --id RH24D1-00001  --url ws://localhost:9000/ocpp  --connector 1
  *           --interval-s 10 (nhịp MeterValues)  --offline-s 60 (độ dài đứt mạng)  --fast (3 s / 15 s)
- *           --tag <idTag>
+ *           --tag <idTag>  --hold-s 60 (ds-09: seconds to stay connected)
  * Biến môi trường: CP_PASSWORD (mật khẩu Basic Auth của trụ; cần khi nối vào staging)
  */
 import { createRequire } from 'node:module';
@@ -56,7 +60,7 @@ const connectorStatus = new Map([
 ]);
 let client = null;
 
-async function connect({ boot }) {
+async function connect({ boot, password = process.env.CP_PASSWORD }) {
   client = new RPCClient({
     endpoint: URL,
     identity: ID,
@@ -64,7 +68,7 @@ async function connect({ boot }) {
     strictMode: true,
     reconnect: false,
     // Staging bật Basic Auth theo từng trụ (ALLOW_LEGACY_NO_CREDENTIAL=false): đặt CP_PASSWORD để nối được.
-    ...(process.env.CP_PASSWORD ? { password: process.env.CP_PASSWORD } : {}),
+    ...(password ? { password } : {}),
   });
   // Sau khi nối lại, CSMS gửi TriggerMessage(StatusNotification) cho connector 0/1/2 để biết trụ đang
   // ở trạng thái nào (đây là cách phiên orphaned được kéo về active — T13 #18).
@@ -290,6 +294,31 @@ const SCENARIOS = {
     await stopTx(tx, tag, SAMPLE_WH, 'Local', stopTs);
     await notify(CONNECTOR, 'Available');
     return { tx };
+  },
+
+  async 'ds-09'() {
+    if (!process.env.CP_PASSWORD) {
+      throw new Error('ds-09 needs CP_PASSWORD = the password returned by the onboard route');
+    }
+    await connect({ boot: true });
+    const holdS = Number(opt('hold-s', 60));
+    log(`  online; staying connected ${holdS} s (Ctrl+C to stop earlier)`);
+    await sleep(holdS * 1000);
+    return { identity: ID };
+  },
+
+  async 'ds-10'() {
+    try {
+      await connect({ boot: false, password: 'wrong-password-ds10' });
+    } catch (err) {
+      if (/Unauthorized|401/.test(String(err?.message ?? err))) {
+        log('  ✓ wrong password rejected by the CSMS: HTTP 401');
+        client = null;
+        return { rejected: 401 };
+      }
+      throw err;
+    }
+    throw new Error('the CSMS accepted a wrong password');
   },
 
   async 'ds-03d'() {
