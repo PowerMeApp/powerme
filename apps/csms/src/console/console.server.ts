@@ -27,6 +27,7 @@ import { createOperatorApiListener, OPERATOR_API_PATH } from '../operator-api/op
 import { DB, Db } from '../db/db.module.js';
 import { DriverChargingService } from '../sessions/driver-charging.service.js';
 import { ChargePointOnboardingService } from '../stations/charge-point-onboarding.service.js';
+import { FaultService } from '../stations/faults/fault.service.js';
 
 @Injectable()
 export class ConsoleServer implements OnModuleInit, OnModuleDestroy {
@@ -42,6 +43,8 @@ export class ConsoleServer implements OnModuleInit, OnModuleDestroy {
     @Optional() private readonly onboarding?: ChargePointOnboardingService,
     /** T32 Phần 5: route top-up của tài xế (BillingModule). */
     @Optional() private readonly topUps?: TopUpService,
+    /** FE-17: driver fault reports (UC-CHG-05) on the Driver API. */
+    @Optional() private readonly faults?: FaultService,
   ) {}
 
   /** WF-05 (T119): the onboarding service, or 503 when this server was built without it (tests). */
@@ -134,6 +137,7 @@ export class ConsoleServer implements OnModuleInit, OnModuleDestroy {
             undefined,
             undefined,
             this.topUps,
+            this.faults,
           )
         : null;
     // FE-01a: /api/{auth,operator,admin}/v1 → operator-api (JWT, ADR-0018). Matched before the

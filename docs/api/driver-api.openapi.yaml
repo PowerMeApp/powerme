@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: PowerMe CSMS — Driver API
-  version: 0.9.0
+  version: 0.10.0
   summary: Hợp đồng REST cho app tài xế (T77, phiếu v1.3 §3.2g)
   description: |
     Hợp đồng giữa CSMS (WP2) và app tài xế Flutter (WP3) cho trạng thái súng sạc, thời gian còn lại,
@@ -600,6 +600,52 @@ paths:
         '503': { $ref: '#/components/responses/AuthUnavailable' }
         '500': { $ref: '#/components/responses/InternalError' }
         '404': { $ref: '#/components/responses/NotFound' }
+
+  /connectors/{connectorId}/fault-reports:
+    post:
+      tags: [stations]
+      operationId: reportConnectorFault
+      x-status: implemented — FE-17
+      summary: Tài xế báo lỗi một súng (UC-CHG-05)
+      description: |
+        Ánh xạ `FaultService.reportFromDriver`. Chỉ có mô tả (5–500 ký tự). BR-P42: 2 tài xế khác
+        nhau trong 2 giờ, hoặc 1 tài xế khi súng Faulted / Unavailable hoặc trụ Offline → sự cố
+        `driver_report`, súng bị ẩn khỏi tìm kiếm và mang nhãn "reported issue" (xem tra mã QR).
+        Súng đang có sự cố mở → báo cáo gắn vào đó. Cùng tài xế, cùng súng trong 60 s → 409.
+      parameters:
+        - name: connectorId
+          in: path
+          required: true
+          schema: { $ref: '#/components/schemas/Id' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/FaultReportRequest' }
+      responses:
+        '201':
+          description: Đã ghi báo cáo
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FaultReportCreated' }
+        '400':
+          description: '`invalid_description` (ngắn / dài / ký tự điều khiển) hoặc `invalid_input`'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '405': { $ref: '#/components/responses/PostOnly' }
+        '409':
+          description: '`duplicate_report` — cùng tài xế, cùng súng trong 60 s; không ghi gì'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '413': { $ref: '#/components/responses/PayloadTooLarge' }
+        '415': { $ref: '#/components/responses/UnsupportedMediaType' }
+        '503': { $ref: '#/components/responses/AuthUnavailable' }
+        '500': { $ref: '#/components/responses/InternalError' }
 
   /connectors/{connectorId}/time-left:
     get:
@@ -1583,6 +1629,31 @@ components:
         last_message_at: { oneOf: [{ $ref: '#/components/schemas/Timestamp' }, { type: 'null' }] }
         site_name: { type: string }
         vinfast_only: { type: boolean }
+        reported_issue:
+          type: boolean
+          description: |
+            FE-17, BR-P42: súng có báo cáo của tài xế gắn vào một sự cố đang mở. App hiện nhãn
+            "reported issue"; súng này không có trong `/stations`.
+
+    FaultReportRequest:
+      type: object
+      required: [description]
+      additionalProperties: false
+      properties:
+        description: { type: string, minLength: 5, maxLength: 500 }
+
+    FaultReportCreated:
+      type: object
+      required: [report_id, report_no, connector_id, reported_at, fault_event_id, reported_issue]
+      properties:
+        report_id: { $ref: '#/components/schemas/Id' }
+        report_no: { $ref: '#/components/schemas/Id' }
+        connector_id: { $ref: '#/components/schemas/Id' }
+        reported_at: { $ref: '#/components/schemas/Timestamp' }
+        fault_event_id:
+          oneOf: [{ $ref: '#/components/schemas/Id' }, { type: 'null' }]
+          description: null = chưa đủ điều kiện BR-P42, báo cáo chờ gộp (AD-7)
+        reported_issue: { type: boolean }
 
     TimeLeftEstimate:
       type: object

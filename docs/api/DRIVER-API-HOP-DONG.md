@@ -53,6 +53,7 @@ Tình huống chuỗi phải chạy được ở Review 3: HMI trụ đổi sún
 | `GET /billing/top-ups/quote` | `TopUpService.quote` (billing) | UC-PAY-01; BR-P35 | có (T32 Phần 5), **chưa dùng cho app** (§14) |
 | `POST /billing/top-ups` | `TopUpService.create` (billing) | UC-PAY-01; BR-P22, P35; WF-02 D2 | có (T32 Phần 5), **chưa dùng cho app** (§14) |
 | `GET /billing/top-ups/{id}` | `TopUpService.get` (billing) | UC-PAY-01 | có (T32 Phần 5), **chưa dùng cho app** (§14) |
+| `POST /connectors/{id}/fault-reports` | `FaultService.reportFromDriver` | UC-CHG-05; BR-P42 | có (FE-17) — xem §15 |
 
 Route tài xế nằm **cùng tiến trình/cổng HTTP** với console `/api/admin/*` (mặc định 3000),
 qua handler riêng `driver/driver.http.ts` (route sạc/credit ở `driver/charges.http.ts`, top-up ở
@@ -66,7 +67,7 @@ auth nên shared listener bắt buộc loopback.
 
 **Độ tươi** (BR-P39): `status_quality = stale` khi không có bản tin quá 2 chu kỳ heartbeat (mặc định 2 × 300 s, biến `CHARGE_STATION_STALE_MS`); `driver_status = offline` khi quá `OCPP_OFFLINE_THRESHOLD_SECONDS` (900 s). App hiện "có thể đã cũ" và thời điểm `status_updated_at`.
 
-**Súng đang lỗi bị ẩn** (WF-04, AD-7): `GET /stations` không trả súng có sự cố mở (`fault_events.status` khác `resolved`); sự cố cả trụ (`connector_id` null, vd. `Offline` sau 900 s) ẩn mọi súng của trụ. Trạm hết súng thì biến khỏi kết quả và `total`. Sự cố `resolved` → súng hiện lại, không cần app làm gì. Sự cố do tài xế báo (`driver_report`, khi đủ điều kiện BR-P42) cũng ẩn súng như vậy (STM-6, AD-7); nhãn "reported issue" hiện ở tra mã QR. Tra mã QR (`/connectors/by-code`) chưa áp luật này; bắt đầu sạc vẫn bị chặn vì súng lỗi không `Available`.
+**Súng đang lỗi bị ẩn** (WF-04, AD-7): `GET /stations` không trả súng có sự cố mở (`fault_events.status` khác `resolved`); sự cố cả trụ (`connector_id` null, vd. `Offline` sau 900 s) ẩn mọi súng của trụ. Trạm hết súng thì biến khỏi kết quả và `total`. Sự cố `resolved` → súng hiện lại, không cần app làm gì. Sự cố do tài xế báo (`driver_report`, khi đủ điều kiện BR-P42) cũng ẩn súng như vậy (STM-6, AD-7); nhãn "reported issue" hiện ở tra mã QR (`reported_issue: true`, §15). Tra mã QR (`/connectors/by-code`) không ẩn súng; bắt đầu sạc vẫn bị chặn khi súng lỗi không `Available`.
 
 **Thời gian còn lại** (BR-P32, BR-P40): luôn là **khoảng** `[min_minutes, max_minutes]` hoặc `kind = unknown`, không bao giờ là một mốc. `kind` nói ước tính dựa vào gì, theo thứ tự có dữ liệu:
 
@@ -342,3 +343,24 @@ Luật: WF-02 decisions D2, BR-P22 theo ADR-0013, BR-P35.
 5. **422** là lỗi luật nghiệp vụ (BR-P22: 50.000–2.000.000 ₫ mỗi lần, số dư sau nạp ≤ 5.000.000 ₫
    tính đủ `amount_vnd`; BR-P35: ≥ 500 điểm, không quá điểm còn hiệu lực, không quá 50 % số tiền).
    CSMS không tự hạ số điểm: gọi lại `quote` rồi để tài xế chọn.
+
+## 15. FE-17 — tài xế báo lỗi súng (UC-CHG-05, BR-P42)
+
+`POST /api/driver/v1/connectors/{connector_id}/fault-reports`, body `{"description": "…"}` (chỉ mô tả, 5–500 ký tự sau khi bỏ khoảng trắng hai đầu; không có loại lỗi — khớp ERD Report 4). Không cần `Idempotency-Key`: CSMS tự từ chối báo cáo trùng.
+
+| Trả về | Khi nào |
+|---|---|
+| **201** `{report_id, report_no, connector_id, reported_at, fault_event_id, reported_issue}` | Đã ghi. `fault_event_id` null = chưa đủ điều kiện, báo cáo chờ gộp (AD-7). `reported_issue: true` = súng đã mang nhãn và bị ẩn khỏi tìm kiếm. App hiện MSG11 "Thanks — the operator has been notified". |
+| 400 `invalid_description` / `invalid_input` | Mô tả ngắn / dài / có ký tự điều khiển; JSON hỏng hoặc có trường lạ; id súng sai dạng |
+| 401 / 403 | Như mọi route tài xế (§6) |
+| 404 `not_found` | Súng không có, hoặc trụ không `in_service`, hoặc operator không `active` |
+| 409 `duplicate_report` | Cùng tài xế, cùng súng trong 60 s (bấm hai lần); không ghi gì |
+| 415 / 413 / 405 | Không phải `application/json`; quá 16 KiB; method khác POST |
+
+Luật (WF-04-PLAN Q75–Q81, 11/11/2026):
+
+- Súng (hoặc cả trụ) đang có sự cố mở → báo cáo gắn vào sự cố đó.
+- **2 tài xế khác nhau trong 2 giờ**, hoặc **1 tài xế khi súng `Faulted` / `Unavailable` hoặc trụ Offline** → CSMS tạo sự cố `driver_report`, báo Operator, **ẩn súng** khỏi `/stations` (cả `sort=smart`) và gắn mọi báo cáo chờ trong 2 giờ.
+- Cùng một tài xế báo nhiều lần chỉ tính một.
+- Nhãn hiện ở `GET /connectors/by-code/{code}/{no}` (`reported_issue`). Nhãn xoá khi sự cố đóng: súng báo `Available`, Operator đóng, hoặc **một phiên trên súng hoàn tất bình thường** (bắt đầu sau khi có sự cố, > 0 Wh, không dừng vì EmergencyStop / PowerLoss / Other) — ADR-0019.
+

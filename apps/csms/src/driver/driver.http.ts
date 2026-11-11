@@ -22,6 +22,19 @@ import {
 import { handleTopUpRoute, isTopUpPath, topUpRouteMethod } from './top-ups.http.js';
 import { RoadDiscovery } from './road-discovery.js';
 import { ProviderUnavailable, VietmapAdapter } from './vietmap.js';
+import { DriverReportError, type DriverReportResult } from '../stations/faults/fault.service.js';
+
+/** FE-17 (UC-CHG-05): what the fault-report route needs from FaultService. */
+export interface DriverFaultReports {
+  reportFromDriver(
+    driverId: number,
+    connectorId: number,
+    description: string,
+  ): Promise<DriverReportResult>;
+}
+
+const FAULT_REPORT_PATH = /^\/api\/driver\/v1\/connectors\/([^/]+)\/fault-reports$/;
+const REPORT_ERROR_STATUS = { invalid_description: 400, not_found: 404, duplicate_report: 409 };
 
 const BASE = '/api/driver/v1';
 const LOCAL_ORIGIN = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/;
@@ -37,6 +50,7 @@ export function createDriverListener(
   accounts = new DriverAccounts(db, config),
   /** T32 Phần 5: route top-up; không có → 503 payment_unconfigured. */
   topUps?: TopUpService,
+  faults?: DriverFaultReports,
 ): RequestListener {
   return (req, res) => {
     void handle(req, res).catch(() => {
@@ -64,9 +78,12 @@ export function createDriverListener(
         // BE-22 / T32 Phần 5: route POST của charges/sessions/top-ups cần thêm Content-Type và
         // Idempotency-Key.
         // BE-34: route xe ghi (POST/PATCH/DELETE) cần Content-Type, không dùng Idempotency-Key.
+        // FE-17: POST báo lỗi súng là route ghi như charges.
         const preflightPath = new URL(req.url ?? '', 'http://driver.local').pathname;
         const write =
-          chargeRouteMethod(preflightPath) === 'POST' || topUpRouteMethod(preflightPath) === 'POST';
+          chargeRouteMethod(preflightPath) === 'POST' ||
+          topUpRouteMethod(preflightPath) === 'POST' ||
+          FAULT_REPORT_PATH.test(preflightPath);
         const vehicleAllow = vehicleRouteAllow(preflightPath);
         res.setHeader(
           'Access-Control-Allow-Methods',
@@ -89,6 +106,41 @@ export function createDriverListener(
       const url = new URL(req.url ?? '', 'http://driver.local');
       const q = url.searchParams;
       const path = url.pathname;
+      const reportPath = FAULT_REPORT_PATH.exec(path);
+      if (reportPath) {
+        // FE-17: POST /connectors/{connector_id}/fault-reports — description only (W5), BR-P42.
+        if (req.method !== 'POST') {
+          res.setHeader('Allow', 'POST, OPTIONS');
+          throw new DriverApiError(405, 'method_not_allowed');
+        }
+        if (url.search) throw new DriverApiError(400, 'invalid_input');
+        const connectorId = databaseId(decodeURIComponent(reportPath[1]!));
+        if (!faults) throw new DriverApiError(503, 'faults_unavailable');
+        const body = await readJsonObject(req, res);
+        if (Object.keys(body).some((k) => k !== 'description'))
+          throw new DriverApiError(400, 'invalid_input');
+        let report: DriverReportResult;
+        try {
+          report = await faults.reportFromDriver(
+            Number(driverId),
+            Number(connectorId),
+            typeof body['description'] === 'string' ? body['description'] : '',
+          );
+        } catch (error) {
+          if (error instanceof DriverReportError)
+            throw new DriverApiError(REPORT_ERROR_STATUS[error.code], error.code);
+          throw error;
+        }
+        send(res, 201, {
+          report_id: String(report.reportId),
+          report_no: String(report.reportNo),
+          connector_id: String(report.connectorId),
+          reported_at: report.reportedAt.toISOString(),
+          fault_event_id: report.faultEventId === null ? null : String(report.faultEventId),
+          reported_issue: report.reportedIssue,
+        });
+        return;
+      }
       if (isRoadPath(path)) {
         if (req.method !== 'GET') {
           res.setHeader('Allow', 'GET, OPTIONS');
