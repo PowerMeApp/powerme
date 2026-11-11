@@ -2,9 +2,11 @@
 
 Hạ tầng staging theo kiến trúc ARCH-2 (Report 4, Figure 2): **một VPS Ubuntu 24.04 ở Singapore, Docker Compose**, TLS tự cấp bởi Caddy, ảnh Docker build trên GitHub Actions và kéo từ GHCR.
 
-> **Trạng thái trung thực: đây là bộ cấu hình, CHƯA được chạy thử trên Docker hay VPS thật.** Máy của Trí không có Docker, nên Dockerfile chưa được `docker build`, Caddyfile chưa được Caddy đọc, `deploy.sh` chưa chạy trên Ubuntu 24.04, workflow chưa chạy trên GitHub. Phần đã kiểm (bằng mô phỏng trên máy Windows) và phần chưa kiểm nằm ở mục [Đã kiểm và chưa kiểm](#đã-kiểm-và-chưa-kiểm). Đừng coi `deploy.sh` đã được chứng minh cho tới khi có lần deploy thật đầu tiên — lần đó sẽ có lỗi vặt.
+> **Trạng thái (10/11/2026): đang chạy thật** tại `https://powerme-staging.japaneast.cloudapp.azure.com` (VM Azure Japan East, xem [`AZURE.md`](AZURE.md)). `deploy.sh` đã chạy thật từ `review-4`; từ `review-7` workflow `deploy-staging.yml` tự deploy khi đẩy tag. Kiến trúc ghi Singapore nhưng thực tế là Japan East (policy subscription chặn Singapore). Mục [Đã kiểm và chưa kiểm](#đã-kiểm-và-chưa-kiểm) bên dưới ghi trạng thái lúc viết cấu hình (trước khi có VM); phần đã chạy thật xem `AZURE.md` mục 11.
+>
+> **Deploy tay trên VM:** workflow để repo ở trạng thái `git checkout --detach <tag>`, nên đừng `git pull`; làm `git fetch --tags --force origin && git checkout --detach <tag>` rồi `./deploy.sh <tag>`.
 
-> **Đường nhanh để dựng staging trên Azure (Azure for Students, tên miền miễn phí): xem [`AZURE.md`](AZURE.md).** Có `cloud-init.yaml` (dán vào "Custom data" khi tạo VM: tự cài Docker, tạo user `deploy`, clone repo) và `init-env.sh` (sinh `.env` với mật khẩu ngẫu nhiên). Cả hai chưa chạy trên Azure thật.
+> **Đường nhanh để dựng staging trên Azure (Azure for Students, tên miền miễn phí): xem [`AZURE.md`](AZURE.md).** Có `cloud-init.yaml` (dán vào "Custom data" khi tạo VM: tự cài Docker, tạo user `deploy`, clone repo) và `init-env.sh` (sinh `.env` với mật khẩu ngẫu nhiên). Cả hai đã chạy trên Azure thật (04/11).
 
 ## Những gì có trong thư mục này
 
