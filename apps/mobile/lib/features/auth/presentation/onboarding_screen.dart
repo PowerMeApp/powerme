@@ -18,10 +18,13 @@ class OnboardingScreen extends ConsumerStatefulWidget {
 }
 
 class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
+  static final _emailPattern = RegExp(r'^[^\s@]+@[^\s@]+\.[^\s@]+$');
+  static final _controlCharacters = RegExp(r'[\x00-\x1f\x7f]');
   final _form = GlobalKey<FormState>();
   final _name = TextEditingController();
   final _email = TextEditingController();
   final _password = TextEditingController();
+  final _confirmPassword = TextEditingController();
   VehicleDraft _vehicle = const VehicleDraft(
     brand: '',
     model: '',
@@ -31,15 +34,17 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
   bool _consent = false;
   bool _consentError = false;
   bool _visible = false;
+  bool _confirmVisible = false;
   @override
   void dispose() {
     _name.dispose();
     _email.dispose();
     _password.dispose();
+    _confirmPassword.dispose();
     super.dispose();
   }
 
-  void _next() {
+  void _next(bool needsVehicle) {
     if (_step == 0) {
       if (!_consent) {
         setState(() => _consentError = true);
@@ -48,7 +53,7 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
     } else if (!_form.currentState!.validate()) {
       return;
     }
-    if (_step < 2) {
+    if (_step < (needsVehicle ? 2 : 1)) {
       setState(() => _step++);
       return;
     }
@@ -59,7 +64,7 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
             displayName: _name.text,
             email: _email.text,
             password: _password.text,
-            vehicle: _vehicle,
+            vehicle: needsVehicle ? _vehicle : null,
             consent: _consent,
           ),
         );
@@ -68,6 +73,11 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
   @override
   Widget build(BuildContext context) {
     final auth = ref.watch(authControllerProvider);
+    final needsVehicle = ref.watch(registrationOptionsProvider).needsVehicle;
+    final stepCount = needsVehicle ? 3 : 2;
+    final lastStep = _step == stepCount - 1;
+    final registrationUnconfirmed =
+        auth.failure == AuthFailure.registrationUnconfirmed;
     final text = Theme.of(context).textTheme;
     return PopScope(
       canPop: false,
@@ -102,14 +112,14 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
             Align(
               alignment: Alignment.centerLeft,
               child: StatusBadge(
-                'Bước ${_step + 1} / 3',
+                'Bước ${_step + 1} / $stepCount',
                 color: _step == 2 ? PowerMeColors.teal : PowerMeColors.gold,
               ),
             ),
             const SizedBox(height: 10),
             Row(
               children: [
-                for (var i = 0; i < 3; i++) ...[
+                for (var i = 0; i < stepCount; i++) ...[
                   if (i > 0) const SizedBox(width: 6),
                   Expanded(
                     child: Container(
@@ -198,15 +208,17 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
                           color: PowerMeColors.outline.withValues(alpha: .6),
                         ),
                       ),
-                      child: const Column(
+                      child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text(
+                          const Text(
                             'PowerMe xử lý thông tin tài khoản và xe để cung cấp dịch vụ sạc. Khi bạn sử dụng dịch vụ, thông tin phiên sạc, thanh toán và tín dụng sạc được dùng để vận hành, đối soát và hỗ trợ tài khoản.',
                           ),
-                          SizedBox(height: 12),
+                          const SizedBox(height: 12),
                           Text(
-                            'Bạn có thể xem và cập nhật hồ sơ trong Tài khoản. Chỉ tiếp tục nếu bạn đồng ý với mục đích xử lý dữ liệu trên.',
+                            needsVehicle
+                                ? 'Bạn có thể xem và cập nhật hồ sơ trong Tài khoản. Chỉ tiếp tục nếu bạn đồng ý với mục đích xử lý dữ liệu trên.'
+                                : 'Bạn có thể xem hồ sơ trong Tài khoản. Chỉ tiếp tục nếu bạn đồng ý với mục đích xử lý dữ liệu trên.',
                           ),
                         ],
                       ),
@@ -260,7 +272,7 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
                               key: const Key('register-name'),
                               controller: _name,
                               enabled: !auth.busy,
-                              maxLength: 80,
+                              maxLength: needsVehicle ? 80 : 100,
                               textInputAction: TextInputAction.next,
                               decoration: const InputDecoration(
                                 labelText: 'Họ và tên',
@@ -268,10 +280,16 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
                                 prefixIcon: Icon(Icons.person_outline_rounded),
                                 counterText: '',
                               ),
-                              validator: (value) =>
-                                  value == null || value.trim().isEmpty
-                                  ? 'Nhập họ và tên.'
-                                  : null,
+                              validator: (value) {
+                                final name = value?.trim() ?? '';
+                                if (name.isEmpty) return 'Nhập họ và tên.';
+                                if (!needsVehicle &&
+                                    (name.runes.length > 100 ||
+                                        _controlCharacters.hasMatch(name))) {
+                                  return 'Nhập họ và tên hợp lệ, tối đa 100 ký tự.';
+                                }
+                                return null;
+                              },
                             ),
                             const SizedBox(height: 16),
                             TextFormField(
@@ -285,18 +303,28 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
                                 fillColor: PowerMeColors.black,
                                 prefixIcon: Icon(Icons.mail_outline_rounded),
                               ),
-                              validator: (value) =>
-                                  RegExp(
-                                    r'^[^\s@]+@[^\s@]+\.[^\s@]+$',
-                                  ).hasMatch(value?.trim() ?? '')
-                                  ? null
-                                  : 'Nhập email hợp lệ.',
+                              validator: (value) {
+                                final email = value?.trim() ?? '';
+                                if (!_emailPattern.hasMatch(email)) {
+                                  return 'Nhập email hợp lệ.';
+                                }
+                                if (needsVehicle) return null;
+                                final normalized = email.toLowerCase();
+                                if (normalized.length > 254 ||
+                                    normalized.indexOf('@') > 64 ||
+                                    normalized.endsWith('.') ||
+                                    _controlCharacters.hasMatch(normalized)) {
+                                  return 'Nhập email hợp lệ.';
+                                }
+                                return null;
+                              },
                             ),
                             const SizedBox(height: 16),
                             TextFormField(
                               key: const Key('register-password'),
                               controller: _password,
                               enabled: !auth.busy,
+                              textInputAction: TextInputAction.next,
                               obscureText: !_visible,
                               autocorrect: false,
                               enableSuggestions: false,
@@ -311,8 +339,11 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
                                   tooltip: _visible
                                       ? 'Ẩn mật khẩu'
                                       : 'Hiện mật khẩu',
-                                  onPressed: () =>
-                                      setState(() => _visible = !_visible),
+                                  onPressed: auth.busy
+                                      ? null
+                                      : () => setState(
+                                          () => _visible = !_visible,
+                                        ),
                                   icon: Icon(
                                     _visible
                                         ? Icons.visibility_off_outlined
@@ -320,9 +351,59 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
                                   ),
                                 ),
                               ),
-                              validator: (value) => (value?.length ?? 0) < 8
-                                  ? 'Mật khẩu cần ít nhất 8 ký tự.'
-                                  : null,
+                              validator: (value) {
+                                final length = needsVehicle
+                                    ? value?.length ?? 0
+                                    : value?.runes.length ?? 0;
+                                if (length < 8) {
+                                  return 'Mật khẩu cần ít nhất 8 ký tự.';
+                                }
+                                if (!needsVehicle && length > 128) {
+                                  return 'Mật khẩu tối đa 128 ký tự.';
+                                }
+                                return null;
+                              },
+                            ),
+                            const SizedBox(height: 16),
+                            TextFormField(
+                              key: const Key('register-confirm-password'),
+                              controller: _confirmPassword,
+                              enabled: !auth.busy,
+                              obscureText: !_confirmVisible,
+                              autocorrect: false,
+                              enableSuggestions: false,
+                              decoration: InputDecoration(
+                                labelText: 'Nhập lại mật khẩu',
+                                fillColor: PowerMeColors.black,
+                                prefixIcon: const Icon(
+                                  Icons.lock_outline_rounded,
+                                ),
+                                suffixIcon: IconButton(
+                                  tooltip: _confirmVisible
+                                      ? 'Ẩn mật khẩu nhập lại'
+                                      : 'Hiện mật khẩu nhập lại',
+                                  onPressed: auth.busy
+                                      ? null
+                                      : () => setState(
+                                          () => _confirmVisible =
+                                              !_confirmVisible,
+                                        ),
+                                  icon: Icon(
+                                    _confirmVisible
+                                        ? Icons.visibility_off_outlined
+                                        : Icons.visibility_outlined,
+                                  ),
+                                ),
+                              ),
+                              validator: (value) {
+                                if (value == null || value.isEmpty) {
+                                  return 'Vui lòng nhập lại mật khẩu.';
+                                }
+                                if (value != _password.text) {
+                                  return 'Mật khẩu nhập lại không khớp.';
+                                }
+                                return null;
+                              },
                             ),
                           ] else
                             VehicleFields(
@@ -341,15 +422,31 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
                       ),
                     ),
                   if (auth.failure != null)
-                    FailureNotice(authFailureText(auth.failure!)),
+                    FailureNotice(
+                      !needsVehicle &&
+                              auth.failure == AuthFailure.invalidRegistration
+                          ? 'Vui lòng kiểm tra thông tin tài khoản.'
+                          : authFailureText(auth.failure!),
+                    ),
                   const SizedBox(height: 20),
                   FilledButton(
                     key: const Key('onboarding-next'),
-                    onPressed: auth.busy ? null : _next,
+                    onPressed: auth.busy
+                        ? null
+                        : registrationUnconfirmed
+                        ? () {
+                            ref
+                                .read(authControllerProvider.notifier)
+                                .clearFailure();
+                            context.go('/login');
+                          }
+                        : () => _next(needsVehicle),
                     child: Text(
                       auth.busy
                           ? 'Đang tạo tài khoản…'
-                          : _step == 2
+                          : registrationUnconfirmed
+                          ? 'Về đăng nhập'
+                          : lastStep
                           ? 'Tạo tài khoản'
                           : 'Tiếp tục',
                     ),

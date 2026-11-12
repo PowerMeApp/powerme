@@ -4,7 +4,7 @@ import '../test/scanner_platform_fake.dart';
 import 'dart:convert';
 import 'dart:ui' as ui;
 
-import 'package:driver_app/app/composition/demo_app.dart';
+import '../test/support/driver_app_test_harness.dart';
 import 'package:driver_app/app/powerme_app.dart';
 import 'package:driver_app/app/router.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -59,7 +59,7 @@ void main() {
     await tester.pumpWidget(
       RepaintBoundary(
         key: boundaryKey,
-        child: DemoApp(clock: () => now),
+        child: DriverAppTestHarness(clock: () => now),
       ),
     );
     await tester.pumpAndSettle();
@@ -117,7 +117,12 @@ void main() {
       find.byKey(const Key('register-password')),
       'PowerMe123!',
     );
-    await tester.tap(find.byKey(const Key('onboarding-next')));
+    final confirmation = find.byKey(const Key('register-confirm-password'));
+    await tester.ensureVisible(confirmation);
+    await tester.enterText(confirmation, 'PowerMe123!');
+    final next = find.byKey(const Key('onboarding-next'));
+    await tester.ensureVisible(next);
+    await tester.tap(next);
     await tester.pumpAndSettle();
     await capture('onboarding-vehicle-vi');
     router.go('/login');

@@ -4,11 +4,13 @@ class Vehicle {
     required this.brand,
     required this.model,
     required List<String> connectors,
+    this.plateNumber,
   }) : connectors = List.unmodifiable(connectors);
   final String id;
   final String brand;
   final String model;
   final List<String> connectors;
+  final String? plateNumber;
   bool get isVinFast => brand.trim().toLowerCase() == 'vinfast';
   String get label => '$brand $model';
 }

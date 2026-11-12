@@ -1,6 +1,6 @@
 import 'dart:io';
 import 'dart:ui' as ui;
-import 'package:driver_app/app/composition/demo_app.dart';
+import '../test/support/driver_app_test_harness.dart';
 import 'package:driver_app/app/composition/vietmap_config.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
@@ -39,7 +39,7 @@ void main() {
       await tester.pumpWidget(
         RepaintBoundary(
           key: key,
-          child: const DemoApp(mapConfig: VietmapConfig('')),
+          child: const DriverAppTestHarness(mapConfig: VietmapConfig('')),
         ),
       );
       await tester.pumpAndSettle();

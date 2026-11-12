@@ -46,3 +46,6 @@ app.*.map.json
 
 # Local Vietmap client credential; never commit.
 /config/vietmap.local.json
+
+# Local Driver API endpoint and consent configuration.
+/config/api.local.json

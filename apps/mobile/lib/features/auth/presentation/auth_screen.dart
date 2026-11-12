@@ -17,6 +17,14 @@ String authFailureText(AuthFailure failure) => switch (failure) {
     'Vui lòng kiểm tra thông tin tài khoản và xe.',
   AuthFailure.expired => 'Phiên đăng nhập đã kết thúc. Vui lòng đăng nhập lại.',
   AuthFailure.unavailable => 'Chưa thể đăng nhập. Vui lòng thử lại.',
+  AuthFailure.accessDenied => 'Tài khoản hiện không có quyền truy cập.',
+  AuthFailure.connection => 'Không kết nối được PowerMe. Vui lòng thử lại.',
+  AuthFailure.rateLimited => 'Bạn đã thử quá nhiều lần. Vui lòng thử lại sau.',
+  AuthFailure.profileUnavailable =>
+    'Chưa tải được thông tin tài khoản. Vui lòng đăng nhập lại.',
+  AuthFailure.registrationUnavailable => 'Đăng ký hiện chưa khả dụng.',
+  AuthFailure.registrationUnconfirmed =>
+    'Chưa xác nhận được kết quả đăng ký. Hãy thử đăng nhập trước khi đăng ký lại.',
 };
 
 class AuthScreen extends ConsumerStatefulWidget {
@@ -48,6 +56,7 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
   @override
   Widget build(BuildContext context) {
     final auth = ref.watch(authControllerProvider);
+    final registration = ref.watch(registrationOptionsProvider);
     final text = Theme.of(context).textTheme;
     return Scaffold(
       body: AppPage(
@@ -133,15 +142,21 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
             ),
           ),
           const SizedBox(height: 16),
-          OutlinedButton(
-            onPressed: auth.busy
-                ? null
-                : () {
-                    ref.read(authControllerProvider.notifier).clearFailure();
-                    context.go('/register');
-                  },
-            child: const Text('Chưa có tài khoản? Đăng ký'),
-          ),
+          if (registration.enabled)
+            OutlinedButton(
+              onPressed: auth.busy
+                  ? null
+                  : () {
+                      ref.read(authControllerProvider.notifier).clearFailure();
+                      context.go('/register');
+                    },
+              child: const Text('Chưa có tài khoản? Đăng ký'),
+            )
+          else
+            const Text(
+              'Đăng ký hiện chưa khả dụng.',
+              textAlign: TextAlign.center,
+            ),
         ],
       ),
     );

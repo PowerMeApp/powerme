@@ -1,4 +1,4 @@
-import 'package:driver_app/app/composition/demo_app.dart';
+import 'support/driver_app_test_harness.dart';
 import 'package:driver_app/app/powerme_app.dart';
 import 'package:driver_app/app/router.dart';
 import 'package:driver_app/features/auth/application/auth_controller.dart';
@@ -52,7 +52,7 @@ void main() {
     'Login validation, private route guard, allowlisted station continuation and logout/back',
     (tester) async {
       size(tester);
-      await tester.pumpWidget(const DemoApp());
+      await tester.pumpWidget(const DriverAppTestHarness());
       await tester.pumpAndSettle();
       final container = appContainer(tester);
       final router = container.read(routerProvider);
@@ -101,7 +101,7 @@ void main() {
     'Three-step onboarding consent validation, account, vehicle and register/login round trip',
     (tester) async {
       size(tester);
-      await tester.pumpWidget(const DemoApp());
+      await tester.pumpWidget(const DriverAppTestHarness());
       await tester.pumpAndSettle();
       await tap(tester, find.text('Chưa có tài khoản? Đăng ký'));
       await tap(tester, find.byKey(const Key('onboarding-next')));
@@ -125,6 +125,9 @@ void main() {
         find.byKey(const Key('register-password')),
         'PowerMe123!',
       );
+      final confirmation = find.byKey(const Key('register-confirm-password'));
+      await tester.ensureVisible(confirmation);
+      await tester.enterText(confirmation, 'PowerMe123!');
       await tap(tester, find.byKey(const Key('onboarding-next')));
       expect(find.text('Bước 3 / 3'), findsOneWidget);
       await tap(tester, find.byKey(const Key('onboarding-next')));
@@ -152,7 +155,7 @@ void main() {
     'Profile edit and vehicle add/edit/select/remove with empty recovery',
     (tester) async {
       size(tester);
-      await tester.pumpWidget(const DemoApp());
+      await tester.pumpWidget(const DriverAppTestHarness());
       await tester.pumpAndSettle();
       await signIn(tester);
       await tap(tester, find.byKey(const Key('nav-account')));
@@ -202,7 +205,7 @@ void main() {
     tester,
   ) async {
     size(tester, width: 320, scale: 2);
-    await tester.pumpWidget(const DemoApp());
+    await tester.pumpWidget(const DriverAppTestHarness());
     await tester.pumpAndSettle();
     cleanCopy(tester);
     await tap(tester, find.text('Chưa có tài khoản? Đăng ký'));
@@ -220,6 +223,9 @@ void main() {
       find.byKey(const Key('register-password')),
       'PowerMe123!',
     );
+    final confirmation = find.byKey(const Key('register-confirm-password'));
+    await tester.ensureVisible(confirmation);
+    await tester.enterText(confirmation, 'PowerMe123!');
     await tap(tester, find.byKey(const Key('onboarding-next')));
     await tester.ensureVisible(find.byKey(const Key('vehicle-brand')));
     await tester.enterText(find.byKey(const Key('vehicle-brand')), 'BYD');

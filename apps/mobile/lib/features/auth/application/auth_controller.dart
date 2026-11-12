@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../domain/auth_repository.dart';
 import '../domain/auth_scope.dart';
@@ -8,6 +10,10 @@ final authRepositoryProvider = Provider<AuthRepository>(
 final authControllerProvider = NotifierProvider<AuthController, AuthState>(
   AuthController.new,
 );
+final registrationOptionsProvider =
+    Provider<({bool enabled, bool needsVehicle})>(
+      (ref) => (enabled: true, needsVehicle: true),
+    );
 const signedOutScope = AuthScope(principalId: '', generation: -1);
 final authScopeProvider = Provider<AuthScope>(
   (ref) => ref.watch(authControllerProvider).scope ?? signedOutScope,
@@ -30,7 +36,15 @@ class AuthController extends Notifier<AuthState> {
   int _generation = 0;
   @override
   AuthState build() {
-    ref.watch(authRepositoryProvider);
+    final repository = ref.watch(authRepositoryProvider);
+    if (repository case AuthSessionEvents events) {
+      final subscription = events.sessionEnded.listen((failure) {
+        if (!ref.mounted || state.scope == null) return;
+        ++_generation;
+        state = AuthState(failure: failure);
+      });
+      ref.onDispose(() => unawaited(subscription.cancel()));
+    }
     final generation = ++_generation;
     Future.microtask(() => _restore(generation));
     return const AuthState(restoring: true);

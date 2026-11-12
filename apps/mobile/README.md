@@ -5,7 +5,11 @@
 | Chủ sở hữu | WP3 — Mobile Developer (Sơn) |
 | Cột mốc | **M3 — 18/10/2026** (giao diện + mock local, PR #70) |
 | Stack | Flutter 3.44.2 / Dart 3.12.2, flutter_riverpod 3.4.3, go_router 16.3.0, vietmap_flutter_gl 4.1.1, geolocator 14.0.2, mobile_scanner 7.4.2; ngoài npm workspaces (ADR-0001, phụ lục 10/2026) |
-| Hợp đồng API | [`docs/api/driver-api.openapi.yaml`](../../docs/api/driver-api.openapi.yaml) + [`docs/api/DRIVER-API-HOP-DONG.md`](../../docs/api/DRIVER-API-HOP-DONG.md) (#69, base `/api/driver/v1`); app hiện **chưa gọi HTTP**, toàn bộ dữ liệu là mock trong bộ nhớ |
+| Hợp đồng API | [Driver OpenAPI](../../docs/api/driver-api.openapi.yaml) · T96 slice 1 hỗ trợ auth và hồ sơ đọc với Dio 5.9.2 |
+
+**T96 slice 1.** App lấy `API_BASE_URL` từ `config/api.local.json`. Để test trên Android Emulator với backend staging, mở [tunnel API](docs/api-tunnel.md) rồi bấm **Run** với `lib/main.dart` hoặc chạy `flutter run`. Các màn chưa nối API được kiểm tra bằng widget test và công cụ chụp ảnh ở mục bên dưới. Xem [cấu hình và cách retest](docs/t96-driver-api.md).
+
+Người dùng đã xác nhận đăng nhập, đăng xuất và đăng ký trên staging. App dùng Driver API cho các luồng này. Fake đăng nhập và cấu hình ghép các màn chưa tích hợp nằm trong `test/support`. Sau khi dọn mock, 106 test Flutter và 2 test chụp ảnh pass. Analyzer sạch, format kiểm 104 file không cần sửa.
 
 Đọc [screen/function reference](docs/screens.md) và [architecture reference](docs/architecture.md) trước khi code. Đây là hai tài liệu chuẩn của mobile; [AGENTS.md](AGENTS.md) bắt buộc đọc chúng. SRS/registration và sơ đồ hiện hành dẫn từ đó thay thế các bản tóm tắt MB cũ.
 
@@ -23,19 +27,22 @@
 - Backend hiện chỉ nhận **một chế độ bắt đầu phiên: hạn mức kWh** (`mode: energy_kwh`, hợp đồng #69, D4). Mock trong app có thêm `autoFull`, `timed`, `cost`; ba chế độ này chưa có backend và phải được xem là hướng phát triển cho tới khi hợp đồng đổi.
 - Có hai đường bắt đầu phiên **không đi qua app** (quẹt thẻ RFID, thao tác trên trụ). App phải xử lý được việc thấy một phiên mà nó không tạo ra; hợp đồng mô tả ở `DRIVER-API-HOP-DONG.md` §5.
 - Ngưỡng M3: SoC và kWh cập nhật **trong vòng vài giây** kể từ khi simulator gửi `MeterValues`. Giai đoạn mock: polling 5 s theo hợp đồng; SSE dự kiến tuần 10.
-- Giao diện tài xế không hiển thị nhãn demo/mock; ranh giới mock chỉ ghi ở README và `docs/mock-scenarios.md`.
+- Các luồng chưa tích hợp dùng dữ liệu mock trong kiểm thử. Giao diện tài xế không hiển thị nhãn demo/mock.
 
 ## Chạy trên clone mới
 
 ```bash
 cd apps/mobile
-cp config/vietmap.example.json config/vietmap.local.json   # điền apiKey nếu muốn xem bản đồ thật; để rỗng vẫn chạy được
+cp config/api.example.json config/api.local.json           # cấu hình API cho Android Emulator
+cp config/vietmap.example.json config/vietmap.local.json   # nếu dùng bản đồ Vietmap
 flutter pub get
 dart format --output=none --set-exit-if-changed .
 flutter analyze
 flutter test
-flutter run -d chrome        # hoặc thiết bị Android API 24+
+flutter run                  # chọn Android Emulator API 24+ khi được hỏi
 ```
+
+Sửa `API_BASE_URL` theo môi trường, rồi Stop và Run lại khi đổi file. Các file JSON trong `config/` được đóng gói vào app. Chỉ đưa cấu hình client công khai vào thư mục này.
 
 CI (`.github/workflows/ci.yml`, job `Flutter · Format · Analyze · Test`) chạy đúng bốn lệnh kiểm tra trên với Flutter 3.44.2 cho mọi PR chạm `apps/mobile`. Kết quả 01/11 trên mã PR #70: analyze sạch, **85/85 test**, format sạch sau commit `dart format`.
 
@@ -150,7 +157,6 @@ Set-Location E:/Project/PowerMe/powerme/apps/mobile
 $env:TMP = 'E:/Project/PowerMe/.review'
 $env:TEMP = $env:TMP
 $env:PUB_CACHE = 'E:/MobileDev/PubCache'
-& E:/MobileDev/Flutter/bin/flutter.bat run -d chrome --no-pub
 & E:/MobileDev/Flutter/bin/dart.bat format --output=none --set-exit-if-changed lib test tool
 & E:/MobileDev/Flutter/bin/flutter.bat analyze --no-pub
 & E:/MobileDev/Flutter/bin/flutter.bat test --no-pub
@@ -174,7 +180,7 @@ Research, pinned URLs, licenses and adaptations: [research record](docs/mb-01-fo
 
 ## 30/10 — Vietmap map và định vị
 
-Điền key tại **config/vietmap.local.json** (đã ignore), chạy `lib/main.dart` trên Android Studio/API 24+. Clone mới: copy config/vietmap.example.json thành config/vietmap.local.json trước build. Stop/Run lại sau đổi key. [Hướng dẫn đầy đủ và research](docs/vietmap-setup.md). Bấm Vị trí của tôi để xin quyền foreground; search/list vẫn dùng local data. Không GPS nền, không BE/navigation/traffic thật hoặc marker địa lý suy từ sơ đồ.
+Phần Vietmap dưới đây là ghi nhận lịch sử. Widget test và công cụ chụp ảnh dùng cấu hình riêng trong `test/support`. [Thiết lập và nghiên cứu Vietmap của slice trước](docs/vietmap-setup.md).
 
 79/79 tests pass; analyzer sạch. Chưa có key để xác minh live style/tiles; chưa kiểm GPS/permission trên thiết bị. Android debug APK build thành công (147.1 s), file build/app/outputs/flutter-apk/app-debug.apk. Có warning KGP của Vietmap trên Flutter mới; chưa disable check hoặc đổi SDK. Preview missing-key riêng đã pass; live tiles/GPS vẫn cần key và thiết bị. Không commit/push.
 
