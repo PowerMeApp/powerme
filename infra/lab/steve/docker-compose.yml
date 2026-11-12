@@ -1,6 +1,6 @@
 # SteVe cho thí nghiệm RQ1 (cấu hình đối chứng thứ ba của NFR-02) — chạy trên VM có Docker.
 #
-# ⚠️ CHƯA AI CHẠY FILE NÀY (máy dev không có Docker). Mọi tên/đường dẫn dưới đây đối chiếu với mã
+# Đã chạy thật 12/11/2026 trên máy dev (Docker Desktop 29.9.3): dựng được, 90 lần chạy RQ1 hoàn tất. Tên/đường dẫn đối chiếu với mã
 #    nguồn SteVe tag `steve-3.14.1` (commit 3fd8cda4722822214f744329bc48dba349456514, đọc 12/11/2026):
 #    Dockerfile, docker-compose.yml, src/main/resources/application-docker.properties.
 #    Cách chạy và danh sách việc phải kiểm khi bật lần đầu: README.md cùng thư mục.

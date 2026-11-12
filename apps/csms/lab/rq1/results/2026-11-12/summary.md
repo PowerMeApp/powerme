@@ -1,4 +1,4 @@
-# Kết quả RQ1 / NFR-02 — PowerMe và PowerMe tắt đối soát (12/11/2026)
+# Kết quả RQ1 / NFR-02
 
 ## Lần chạy
 
@@ -6,6 +6,7 @@
 | --- | --- | --- | --- | --- | --- | --- |
 | powerme | 90 | 20261112 | `885b38e` | 2026-11-12T08:46:54.019Z | 189.6 s | 10 |
 | powerme-off | 90 | 20261112 | `885b38e` | 2026-11-12T08:50:11.367Z | 188.6 s | 10 |
+| steve | 90 | 20261112 | `c7b18bd` | 2026-11-12T09:43:04.773Z | 1869.6 s | 1 |
 
 Tham số thời gian ĐÃ RÚT NGẮN (mối đe doạ tính hợp lệ, xem README): nhịp MeterValues 2 s (sản phẩm 10 s), `OFFLINE_GRACE_S` = 5 s (sản phẩm 120 s), độ dài đứt 6–15 s, ngưỡng khe hở 6 s. Dung sai tol = 1 Wh.
 
@@ -19,8 +20,12 @@ Tham số thời gian ĐÃ RÚT NGẮN (mối đe doạ tính hợp lệ, xem RE
 | powerme-off | S1 | 30 | 30 | 0 | 0 | 0 | 0 | 0 | 100.0% | 88.6% – 100.0% | KHÔNG |
 | powerme-off | S2 | 30 | 0 | 0 | 0 | 30 | 0 | 0 | 0.0% | 0.0% – 11.4% | KHÔNG |
 | powerme-off | S3 | 30 | 30 | 0 | 0 | 0 | 0 | 0 | 100.0% | 88.6% – 100.0% | KHÔNG |
+| steve | S1 | 30 | 30 | 0 | 0 | 0 | 0 | 0 | 100.0% | 88.6% – 100.0% | KHÔNG |
+| steve | S2 | 30 | 0 | 0 | 0 | 30 | 0 | 0 | 0.0% | 0.0% – 11.4% | KHÔNG |
+| steve | S3 | 30 | 30 | 0 | 0 | 0 | 0 | 0 | 100.0% | 88.6% – 100.0% | KHÔNG |
 | powerme | **gộp** | 90 | 60 | 30 | 0 | 0 | 0 | 0 | 100.0% | 95.9% – 100.0% | đạt |
 | powerme-off | **gộp** | 90 | 60 | 0 | 0 | 30 | 0 | 0 | 66.7% | 56.4% – 75.5% | KHÔNG |
+| steve | **gộp** | 90 | 60 | 0 | 0 | 30 | 0 | 0 | 66.7% | 56.4% – 75.5% | KHÔNG |
 
 "Khác" = `unresolved` + `harness_error` (ngoài 5 nhóm của NFR-02, tính là sai). Với n = 30, kể cả 30/30 đúng thì cận dưới Wilson chỉ là 88,6%: ngưỡng 95% chỉ đạt được trên mẫu gộp lớn hơn (90/90 → 95,9%).
 
@@ -34,8 +39,12 @@ Tham số thời gian ĐÃ RÚT NGẮN (mối đe doạ tính hợp lệ, xem RE
 | powerme-off | S1 | 0 | 0 | — | — |
 | powerme-off | S2 | 30 | 0 | — | 0.0% (0/30) |
 | powerme-off | S3 | 0 | 0 | — | — |
+| steve | S1 | 0 | 0 | — | — |
+| steve | S2 | 30 | 0 | — | 0.0% (0/30) |
+| steve | S3 | 0 | 0 | — | — |
 | powerme | **gộp** | 30 | 30 | 100.0% (30/30) | 100.0% (30/30) |
 | powerme-off | **gộp** | 30 | 0 | — | 0.0% (0/30) |
+| steve | **gộp** | 30 | 0 | — | 0.0% (0/30) |
 
 ## Số đo SRS NFR-REC-01
 
@@ -47,8 +56,12 @@ Tham số thời gian ĐÃ RÚT NGẮN (mối đe doạ tính hợp lệ, xem RE
 | powerme-off | S1 | 30 | 0.0 | 0.0 – 0.0 | 0.0 | 0 | 0 | 11 | — | 0.0% (0/11) |
 | powerme-off | S2 | 30 | 117.3 | 91.4 – 143.2 | -117.3 | 0 | 0 | 0 | — | — |
 | powerme-off | S3 | 30 | 0.0 | 0.0 – 0.0 | 0.0 | 0 | 0 | 0 | — | — |
+| steve | S1 | 30 | 0.0 | 0.0 – 0.0 | 0.0 | 0 | 0 | 11 | — | 0.0% (0/11) |
+| steve | S2 | 30 | 117.3 | 91.4 – 143.2 | -117.3 | 0 | 0 | 0 | — | — |
+| steve | S3 | 30 | 0.0 | 0.0 – 0.0 | 0.0 | 0 | 0 | 0 | — | — |
 | powerme | **gộp** | 60 | 0.0 | 0.0 – 0.0 | 0.0 | 0 | 0 | 11 | 47.8% (11/23) | 100.0% (11/11) |
 | powerme-off | **gộp** | 90 | 39.1 | 25.0 – 53.2 | -39.1 | 0 | 0 | 11 | — | 0.0% (0/11) |
+| steve | **gộp** | 90 | 39.1 | 25.0 – 53.2 | -39.1 | 0 | 0 | 11 | — | 0.0% (0/11) |
 
 Sai số Wh chỉ tính trên phiên đã tính tiền (phiên bị giữ không có `E_bill`). "Khe hở thật" = chuỗi mẫu trụ ĐÃ GIAO (kể cả mốc bắt đầu và mốc dừng) có khoảng trống lớn hơn ngưỡng khe hở.
 

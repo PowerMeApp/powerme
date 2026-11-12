@@ -2,7 +2,7 @@
 
 SteVe là CSMS mã nguồn mở (Java + MariaDB) dùng làm cấu hình đối chứng thứ ba của RQ1. Thư mục này chỉ chứa cách **chạy** SteVe ở một phiên bản ghim; mã SteVe không nằm trong repo PowerMe.
 
-> **Chưa kiểm chứng.** Máy dev không có Docker nên **chưa ai chạy** `docker-compose.yml` này và adapter `apps/csms/lab/rq1/adapters/steve.mjs` chưa từng nối vào SteVe thật. Phần đã kiểm là **đọc mã nguồn SteVe tag `steve-3.14.1`** trên GitHub ngày 12/11/2026 (xem bảng dưới) và unit test adapter bằng dữ liệu giả. Lần chạy đầu trên VM phải đi hết mục "Việc phải kiểm khi bật lần đầu".
+> **Đã chạy thật 12/11/2026** trên máy dev có Docker Desktop: `docker compose up -d --build` dựng được SteVe 3.14.1 (Jetty lên sau ~100 s), `--register-only` đăng ký 90 trụ + thẻ bằng SQL là đủ để SteVe nhận kết nối, adapter đọc được kết quả từ MariaDB, và 90 lần chạy (3 kịch bản × 30) hoàn tất. **Phải chạy `--concurrency 1`**: nhiều trụ mới nối cùng lúc làm SteVe deadlock khi chèn bảng `evse` và trả lỗi nội bộ. Danh sách "việc phải kiểm" bên dưới giữ lại làm tham khảo; các mục build từ URL git, đăng ký bằng SQL và nối lại không Boot đã qua trong lần chạy này.
 
 ## Phiên bản ghim
 
