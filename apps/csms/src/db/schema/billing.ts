@@ -107,7 +107,10 @@ export const topUps = pgTable(
      * refunds.requestedBy (kind top_up) — cột refunded_by bỏ ở 0015 (B5).
      */
     refundedAt: timestamp('refunded_at', { withTimezone: true }),
-    /** Thanh toán sau cửa sổ 1 giờ (BR-P13, SD-2c D): ba cột late_* ghi cùng lúc, chỉ khi expired. */
+    /**
+     * Khoản trễ (BR-P13, SD-2d): thanh toán thành công tới sau khi top-up đã `expired` (hoặc
+     * `failed`, D4 ⊕), không cộng ví, chờ Admin hoàn. Ba cột late_* ghi cùng lúc.
+     */
     lateGatewayRef: varchar('late_gateway_ref', { length: 100 }),
     latePaidAt: timestamp('late_paid_at', { withTimezone: true }),
     lateAmountVnd: bigint('late_amount_vnd', { mode: 'number' }),
@@ -149,7 +152,7 @@ export const topUps = pgTable(
       'top_ups_late_refunded_check',
       sql`${t.lateRefundedAt} IS NULL OR (${t.latePaidAt} IS NOT NULL AND ${t.lateRefundedAt} >= ${t.latePaidAt})`,
     ),
-    // Chỉ top-up expired nhận khoản muộn (SD-2c D). Cửa sổ 1 giờ do service kiểm (tham số cấu hình).
+    // Hiện CHECK chỉ cho khoản trễ trên `expired`; migration Phần 6 (0017) nới thêm `failed` (D4 ⊕).
     check(
       'top_ups_late_payment_status_check',
       sql`${t.lateGatewayRef} IS NULL OR ${t.status} = 'expired'`,

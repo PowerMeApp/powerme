@@ -80,7 +80,7 @@ Decisions khác diagram thì theo diagram và sửa decisions. Diagram mâu thu�
 | Tạo top-up | SD-2a | D2 | STM-4 #1 | TC-STM4-01/11/16/18 |
 | IPN cộng tiền | SD-2b | D3 | STM-4 #2 #3, STM-5 | TC-STM4-02/03/08/09/10, TC-STM5-* |
 | Xuất hoá đơn, retry | SD-2c | D5 | STM-7 | TC-STM7-* |
-| Timeout, thanh toán trễ | SD-2d | D4 | STM-4 #4–#6 | TC-STM4-04/05/06/07/15 |
+| Timeout, thanh toán trễ | SD-2d | D4 | STM-4 #4, #6 | TC-STM4-04/05/06/07/15 |
 | Admin hoàn, gửi refund, retry | SD-2e | D1 | STM-4 #7, STM-10 | TC-STM4-12/13/14, TC-STM10-* |
 | Đóng tài khoản (tài xế đóng, hệ thống tự hoàn) | SD-2f | D6 | STM-5, STM-10 | (theo test case của nhóm) |
 | Worker quét DB | (không vẽ) | D7 | | |

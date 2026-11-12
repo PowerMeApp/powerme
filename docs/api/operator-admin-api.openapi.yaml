@@ -2121,7 +2121,7 @@ paths:
       x-status: planned
       x-owner: Khang
       x-refs: [UC-ADM-08, BR-P13, 'Table 7 #19']
-      summary: Khoản thanh toán đến sau cửa sổ 1 giờ, chờ hoàn
+      summary: Khoản thanh toán thành công tới sau khi top-up đã expired hoặc failed, chờ hoàn
       parameters:
         - $ref: '#/components/parameters/page'
         - $ref: '#/components/parameters/pageSize'
