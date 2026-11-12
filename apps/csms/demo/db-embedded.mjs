@@ -35,15 +35,20 @@ const DB_PASSWORD = 'powerme';
 const DB_NAME = 'powerme_demo';
 const TEST_DB_NAME = 'powerme_test';
 
-/** Cấu hình kết nối cho một độ lệch cổng (--port-offset). */
-export function dbConfig(portOffset = 0) {
-  const port = BASE_PORT + portOffset;
+/**
+ * Cấu hình kết nối cho một độ lệch cổng (--port-offset). `port` / `database` chỉ dùng bởi harness
+ * RQ1 (lab/rq1): cụm Postgres riêng, không đụng DB demo.
+ */
+export function dbConfig(
+  portOffset = 0,
+  { port = BASE_PORT + portOffset, database = DB_NAME } = {},
+) {
   return {
     port,
     user: DB_USER,
     password: DB_PASSWORD,
-    database: DB_NAME,
-    url: `postgresql://${DB_USER}:${DB_PASSWORD}@127.0.0.1:${port}/${DB_NAME}`,
+    database,
+    url: `postgresql://${DB_USER}:${DB_PASSWORD}@127.0.0.1:${port}/${database}`,
     testUrl: `postgresql://${DB_USER}:${DB_PASSWORD}@127.0.0.1:${port}/${TEST_DB_NAME}`,
   };
 }
@@ -92,17 +97,27 @@ export async function resetDataDir() {
 }
 
 /**
- * Khởi động cụm Postgres nhúng. Trả về `{ url, port, stop }`.
+ * Khởi động cụm Postgres nhúng. Trả về `{ url, port, stopSync }`.
  * Lần đầu (chưa có PG_VERSION) sẽ chạy initdb.
+ * `dataDir` / `port` / `database` (tuỳ chọn): cụm riêng cho harness RQ1; mặc định là cụm demo.
  */
-export async function startEmbeddedDb({ portOffset = 0, log = () => {} } = {}) {
-  const cfg = dbConfig(portOffset);
+export async function startEmbeddedDb({
+  portOffset = 0,
+  log = () => {},
+  dataDir = PG_DATA_DIR,
+  port,
+  database,
+} = {}) {
+  const cfg = dbConfig(portOffset, {
+    ...(port ? { port } : {}),
+    ...(database ? { database } : {}),
+  });
   const { default: EmbeddedPostgres } = await import('embedded-postgres');
 
-  await mkdir(DEMO_DATA_DIR, { recursive: true });
+  await mkdir(path.dirname(dataDir), { recursive: true });
 
   const server = new EmbeddedPostgres({
-    databaseDir: PG_DATA_DIR,
+    databaseDir: dataDir,
     port: cfg.port,
     user: cfg.user,
     password: cfg.password,
@@ -115,7 +130,7 @@ export async function startEmbeddedDb({ portOffset = 0, log = () => {} } = {}) {
     onError: (msg) => log(String(msg instanceof Error ? msg.message : msg).trimEnd()),
   });
 
-  if (!existsSync(path.join(PG_DATA_DIR, 'PG_VERSION'))) {
+  if (!existsSync(path.join(dataDir, 'PG_VERSION'))) {
     log('initdb lần đầu (vài giây)…');
     await server.initialise();
   }
@@ -149,7 +164,7 @@ export async function startEmbeddedDb({ portOffset = 0, log = () => {} } = {}) {
     stopped = true;
     const pgCtl = findPgCtl();
     if (pgCtl) {
-      spawnSync(pgCtl, ['stop', '-D', PG_DATA_DIR, '-m', 'fast', '-w', '-t', '20'], {
+      spawnSync(pgCtl, ['stop', '-D', dataDir, '-m', 'fast', '-w', '-t', '20'], {
         stdio: 'ignore',
       });
     }
