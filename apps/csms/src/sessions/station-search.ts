@@ -126,7 +126,7 @@ export async function searchStations(
   const vehicle = (
     await c.query(
       `SELECT m.connector_type,m.is_vinfast,m.battery_capacity_kwh::float8,m.rated_range_km,m.max_dc_kw::float8 FROM vehicles v
-    JOIN vehicle_models m ON m.id=v.vehicle_model_id WHERE v.id=$1 AND v.driver_id=$2`,
+    JOIN vehicle_models m ON m.id=v.vehicle_model_id WHERE v.id=$1 AND v.driver_id=$2 AND v.removed_at IS NULL`,
       [vehicleId, driverId],
     )
   ).rows[0];

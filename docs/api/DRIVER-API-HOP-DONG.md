@@ -20,6 +20,9 @@ không suy ra OTP/login đã hoàn thành. Thay đổi chưa merge/commit/push k
 **BE-30 (12/11/2026, OpenAPI 0.7.0):** đăng nhập bằng email **hoặc** số điện thoại + mật khẩu;
 `phone_number` khi đăng ký được chuẩn hoá về E.164 và duy nhất (409 `phone_taken`, migration 0017)
 — xem §6 và §6a. OTP/SMS và Google/Firebase vẫn ngoài phạm vi.
+**BE-34 (12/11/2026, OpenAPI 0.8.0):** quản lý xe (F-01, UC-ACC-03): `GET /vehicle-models`,
+`POST /vehicles`, `PATCH /vehicles/{id}` (đặt mặc định), `DELETE /vehicles/{id}` (xoá mềm,
+migration 0018) — xem §13.
 
 ---
 
@@ -43,6 +46,7 @@ Tình huống chuỗi phải chạy được ở Review 3: HMI trụ đổi sún
 | `GET /sessions/{id}/statement` | `statement` | BR-P45, P34 | có (BE-22) |
 | `GET /credit` | — (đọc `credit_accounts`, `driver/driver-credit.ts`) | UC-PAY-02; BR-P18 | có (BE-22) |
 | `GET /credit/transactions` | — (đọc `credit_transactions`) | UC-PAY-02 | có (BE-22) |
+| `GET /vehicle-models`, `POST /vehicles`, `PATCH`/`DELETE /vehicles/{id}` | — (`driver/vehicles.http.ts`) | UC-ACC-03; BR-P03, BR-P17 | có (BE-34), §13 |
 
 Route tài xế nằm **cùng tiến trình/cổng HTTP** với console `/api/admin/*` (mặc định 3000),
 qua handler riêng `driver/driver.http.ts` (route sạc/credit ở `driver/charges.http.ts`) do
@@ -167,6 +171,7 @@ Content-Type: application/json
 | 404 | `not_found` (không phân biệt "không có" và "không của bạn") |
 | 405 / 413 / 415 (charges) | `method_not_allowed` (+ `Allow`); `payload_too_large` (> 16 KiB); `unsupported_media_type` (`POST /charges` không phải `application/json`) |
 | 409 | `idempotency_conflict`, `credit_unavailable` (chưa có ví hoặc ví không `active`), `connector_unavailable`, `connector_busy_or_unknown`, `tariff_unavailable`, `session_not_stoppable`, `stop_pending_or_unknown` |
+| 400 / 409 (xe, BE-34) | `invalid_plate_number`, `unknown_vehicle_model`; `plate_taken`, `vehicle_in_use` — §13 |
 | 503 | `policy_unconfigured` |
 
 Các mã `recovery_*`, `start_not_recoverable`, `stop_attempt_not_current` thuộc đường operator (T72), không có trong API tài xế; nếu lọt ra thì route trả 500 `internal_error` đã làm sạch. Ánh xạ nằm ở `chargingErrorStatus` (`driver/charges.http.ts`).
@@ -241,3 +246,52 @@ hiện `available_vnd` là số có thể dùng để sạc, `held_vnd` là "đa
 → sổ cái mới nhất trước; dòng `session_debit` có `session_id` để mở bảng kê.
 
 Id của tài xế khác, key của tài xế khác và id không tồn tại đều trả 404 `not_found` như nhau.
+
+## 13. BE-34 — quản lý xe (cho Sơn, màn hình 13 Profile & Vehicles)
+
+Bốn route, cùng đảm bảo chung như các route khác: `Authorization: Bearer`, id là **chuỗi**, lỗi
+`{error, detail}`, body `application/json` ≤ 16 KiB (415 / 413), method sai → 405 + `Allow`, query
+lạ → 400 `invalid_input`. Phần tử xe trả về **cùng hình dạng** phần tử `vehicles[]` của `/me`.
+
+| Route | Body | Thành công | Lỗi |
+|---|---|---|---|
+| `GET /vehicle-models` | — | 200 `{items: [{vehicle_model_id, brand, model_name, connector_type, is_vinfast, battery_capacity_kwh, rated_range_km, max_dc_kw}]}` sắp theo hãng, tên mẫu | — |
+| `POST /vehicles` | `{plate_number, vehicle_model_id, is_default?}` | 201 + xe vừa thêm | 400 `invalid_input`, `invalid_plate_number`, `unknown_vehicle_model`; 409 `plate_taken` |
+| `PATCH /vehicles/{id}` | đúng `{"is_default": true}` | 200 + xe | 400 `invalid_input`; 404 `not_found` |
+| `DELETE /vehicles/{id}` | — | 204 (không body) | 404 `not_found`; 409 `vehicle_in_use` |
+
+```http
+POST /api/driver/v1/vehicles
+Authorization: Bearer <access_token>
+Content-Type: application/json
+
+{"plate_number": "51k-901.01", "vehicle_model_id": "4", "is_default": true}
+→ 201 {"vehicle_id":"6","plate_number":"51K-901.01","is_default":true,"vehicle_model_id":"4",
+       "brand":"VinFast","model_name":"VF 8 Plus","connector_type":"ccs2","is_vinfast":true,
+       "battery_capacity_kwh":87.7,"rated_range_km":457,"max_dc_kw":150}
+```
+
+- **Biển số.** NFKC, in hoa, bỏ mọi khoảng trắng; `-` và `.` giữ nguyên để hiển thị. Chỉ A–Z, 0–9,
+  `-`/`.` nằm giữa (không đầu/cuối, không hai dấu liền nhau), dạng lưu ≤ 12 ký tự, phần chữ + số
+  5–10 ký tự; sai → 400 `invalid_plate_number`. Không kiểm mẫu biển VN theo tỉnh (biển quân đội,
+  ngoại giao khác mẫu). **So trùng bỏ dấu**: `51K-901.01`, `51k 901.01`, `51K90101` là một biển.
+- **Biển đã có** trên một xe chưa gỡ của bất kỳ ai (kể cả chính mình) → 409 `plate_taken`, không
+  nói xe của ai. App hiện "Biển số này đã được đăng ký"; nếu là người mua xe cũ thì người bán phải gỡ
+  xe trước (hoặc liên hệ hỗ trợ).
+- **Không có `Idempotency-Key`**: biển số là khoá tự nhiên. Mất phản hồi rồi gửi lại → 409
+  `plate_taken`, không tạo xe thứ hai; app tải lại `/me` để thấy xe.
+- **Xe mặc định.** Xe đầu tiên (tài xế chưa có xe mặc định) luôn thành mặc định, bất kể
+  `is_default`. `is_default: true` ở POST, hoặc `PATCH {"is_default": true}`, chuyển cờ trong một
+  transaction — luôn đúng một xe mặc định. Không có cách "bỏ mặc định" (PATCH `false` → 400).
+- **Gỡ xe = xoá mềm** (migration 0018, `vehicles.removed_at`): lịch sử phiên và yêu cầu sạc giữ
+  nguyên (BR-P17), xe biến khỏi `/me`, biển được giải phóng (đăng ký lại được). `vehicle_id` đã gỡ ở
+  `/stations`, `/connectors/by-code`, `/places/*`, `/stations/{id}/route`, `PATCH`/`DELETE` → 404
+  `not_found`; ở `POST /charges` → 400 `vehicle_not_owned_or_incompatible`.
+- **409 `vehicle_in_use`**: xe có yêu cầu sạc chưa xong (chưa `rejected`/`settled`/`released` —
+  gồm phiên đã dừng nhưng chưa quyết toán) hoặc phiên chưa kết thúc. App hiện "Xe đang sạc / đang
+  quyết toán, thử lại sau".
+- **Gỡ xe mặc định**: còn xe khác → xe còn lại **thêm sớm nhất** thành mặc định; gỡ xe cuối cùng →
+  `vehicles[]` rỗng. App: sau 204 luôn tải lại `/me`; nếu đang dùng `vehicle_id` vừa gỡ cho tìm trạm
+  thì chuyển sang xe mặc định mới, không còn xe thì đưa về màn hình thêm xe.
+- Xe của tài xế khác, xe không tồn tại và xe đã gỡ đều 404 `not_found` như nhau.
+- Chưa có: sửa biển / đổi mẫu xe (gỡ rồi thêm lại), khôi phục xe đã gỡ, giới hạn số xe mỗi tài xế.

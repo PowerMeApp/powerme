@@ -68,12 +68,12 @@ try {
   ).rows[0];
   if (!model) throw new Error('Existing vehicle model does not match local seed');
   await client.query(
-    "INSERT INTO vehicles(driver_id,vehicle_model_id,plate_number,is_default) VALUES($1,$2,'MB03-LOCAL',true) ON CONFLICT(plate_number) DO NOTHING",
+    "INSERT INTO vehicles(driver_id,vehicle_model_id,plate_number,is_default) VALUES($1,$2,'MB03-LOCAL',true) ON CONFLICT DO NOTHING",
     [user.id, model.id],
   );
   const vehicle = (
     await client.query(
-      "SELECT id,driver_id,vehicle_model_id FROM vehicles WHERE plate_number='MB03-LOCAL'",
+      "SELECT id,driver_id,vehicle_model_id FROM vehicles WHERE plate_number='MB03-LOCAL' AND removed_at IS NULL",
       [],
     )
   ).rows[0];

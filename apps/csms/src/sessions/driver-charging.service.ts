@@ -191,8 +191,11 @@ export class DriverChargingService {
 
       const vehicle = (
         await c.query(
+          // BE-34: xe đã gỡ (removed_at) không dùng được; FOR SHARE để route gỡ xe (khoá FOR UPDATE)
+          // chờ intent này commit rồi mới đếm yêu cầu sạc đang mở → 409 vehicle_in_use.
           `SELECT 1 FROM vehicles v JOIN vehicle_models m ON m.id=v.vehicle_model_id
-        JOIN connectors c ON c.connector_type=m.connector_type WHERE v.id=$1 AND v.driver_id=$2 AND c.id=$3`,
+        JOIN connectors c ON c.connector_type=m.connector_type
+        WHERE v.id=$1 AND v.driver_id=$2 AND v.removed_at IS NULL AND c.id=$3 FOR SHARE OF v`,
           [input.vehicleId, driverId, input.connectorId],
         )
       ).rowCount;
@@ -1270,7 +1273,8 @@ export class DriverChargingService {
         cp.serial_number,cp.lifecycle,cp.is_online,cp.online_changed_at,cp.last_message_at,st.site_name,st.vinfast_only
         FROM connectors c JOIN charge_points cp ON cp.id=c.charge_point_id
         JOIN sites st ON st.id=cp.site_id JOIN operators o ON o.id=st.operator_id AND o.status='active'
-        JOIN vehicles v ON v.id=$1 AND v.driver_id=$2 JOIN vehicle_models m ON m.id=v.vehicle_model_id
+        JOIN vehicles v ON v.id=$1 AND v.driver_id=$2 AND v.removed_at IS NULL
+        JOIN vehicle_models m ON m.id=v.vehicle_model_id
         WHERE m.connector_type=c.connector_type AND cp.lifecycle='in_service' AND cp.display_code=$3 AND c.connector_no=$4`,
           [vehicleId, driverId, displayCode, connectorNo],
         )

@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: PowerMe CSMS — Driver API
-  version: 0.7.0
+  version: 0.8.0
   summary: Hợp đồng REST cho app tài xế (T77, phiếu v1.3 §3.2g)
   description: |
     Hợp đồng giữa CSMS (WP2) và app tài xế Flutter (WP3) cho trạng thái súng sạc, thời gian còn lại,
@@ -19,13 +19,15 @@ info:
       đường `sessions/*` trả cả phiên đó nếu `driver_id` khớp; `charges/*` chỉ có với phiên bắt đầu
       từ app.
   x-owner: Trí (WP2) — hợp đồng; Sơn (WP3) — route và client Dart
-  x-status: MB03 — brief 07/11 smart station search, address search and canonical road routes implemented locally; BE-21 email/password register, login and refresh implemented; BE-30 login by email or phone number (E.164); BE-22 charges, sessions (progress/stop/statement) and credit implemented; time-left remains planned
+  x-status: MB03 — brief 07/11 smart station search, address search and canonical road routes implemented locally; BE-21 email/password register, login and refresh implemented; BE-30 login by email or phone number (E.164); BE-22 charges, sessions (progress/stop/statement) and credit implemented; BE-34 vehicle models and add/set-default/remove vehicles (soft delete) implemented; time-left remains planned
 servers:
   - url: http://localhost:3000/api/driver/v1
     description: CSMS cục bộ (cùng tiến trình với console /api/admin)
 tags:
   - name: auth
     description: UC-ACC-01 đăng ký (kèm consent BR-P05), đăng nhập email hoặc số điện thoại + mật khẩu (BE-21, BE-30), làm mới access token
+  - name: vehicles
+    description: UC-ACC-03 / màn hình 13 Profile & Vehicles — danh mục mẫu xe, thêm / đặt mặc định / gỡ xe của chính tài xế (BE-34)
   - name: stations
     description: UC-CHG-01 tìm trạm, trạng thái từng súng (BR-P38, BR-P39)
   - name: time-left
@@ -289,8 +291,9 @@ paths:
       x-status: implemented — MB03 backend discovery slice
       description: |
         Chỉ đọc tài xế từ JWT và DB, không nhận identity từ query. Token lấy từ `/auth/login`,
-        `/auth/register` hoặc `/auth/refresh` (BE-21). Không có OTP, cập nhật profile/xe hoặc
-        truy vấn phiên trong slice này.
+        `/auth/register` hoặc `/auth/refresh` (BE-21). Không có OTP, cập nhật profile hoặc
+        truy vấn phiên trong slice này. `vehicles[]` chỉ gồm xe **chưa gỡ** (BE-34), xe mặc định
+        đứng đầu rồi theo thứ tự thêm; thêm / gỡ / đổi mặc định qua `/vehicles` (BE-34).
       responses:
         '200':
           description: Own driver and vehicles
@@ -303,6 +306,172 @@ paths:
         '405': { $ref: '#/components/responses/MethodNotAllowed' }
         '503': { $ref: '#/components/responses/AuthUnavailable' }
         '500': { $ref: '#/components/responses/InternalError' }
+  /vehicle-models:
+    get:
+      tags: [vehicles]
+      operationId: listVehicleModels
+      x-status: implemented — BE-34
+      summary: Danh mục mẫu xe để chọn khi thêm xe
+      description: |
+        Mọi mẫu trong `vehicle_models`, sắp theo hãng rồi tên mẫu. Không nhận query (có → 400
+        `invalid_input`). `is_vinfast` quyết định bộ lọc trạm VinFast-only (BR-P03);
+        `connector_type` quyết định súng tương thích. Số đo có thể null (mẫu thiếu thông số →
+        gợi ý trạm trả `smart_unavailable_reason = missing_vehicle_specs`).
+      responses:
+        '200':
+          description: Danh mục mẫu xe
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/VehicleModel' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+        '503': { $ref: '#/components/responses/AuthUnavailable' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /vehicles:
+    post:
+      tags: [vehicles]
+      operationId: addVehicle
+      x-status: implemented — BE-34
+      summary: Thêm xe cho tài xế đang đăng nhập
+      description: |
+        Body `application/json` ≤ 16 KiB, trường lạ → 400 `invalid_input`; `vehicle_model_id` là
+        **chuỗi** số. Không có query.
+
+        **Biển số:** NFKC, in hoa, bỏ mọi khoảng trắng; giữ `-` và `.` để hiển thị
+        (`" 51k-901.01 "` → `"51K-901.01"`). Chỉ chữ A–Z, số, `-`/`.` ở giữa (không hai dấu liền
+        nhau); dạng lưu ≤ 12 ký tự; phần chữ + số 5–10 ký tự. Sai → 400 `invalid_plate_number`.
+        So trùng theo phần chữ + số: `51K-901.01`, `51k 901.01`, `51K90101` là MỘT biển. Biển đang
+        thuộc một xe chưa gỡ của **bất kỳ ai** (kể cả chính tài xế) → 409 `plate_taken` (không cho
+        biết xe của ai). Biển của xe đã gỡ đăng ký lại được.
+
+        **Xe mặc định:** tài xế chưa có xe mặc định (xe đầu tiên) → xe mới là mặc định bất kể
+        `is_default`; `is_default: true` → xe mới thành mặc định, xe mặc định cũ thôi (một
+        transaction, luôn đúng một xe mặc định).
+
+        **Không có `Idempotency-Key`:** biển số là khoá tự nhiên. Mất phản hồi rồi gửi lại → 409
+        `plate_taken`, không tạo xe thứ hai; app tải lại `GET /me` để thấy xe đã thêm.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AddVehicleRequest' }
+            examples:
+              vf8:
+                value: { plate_number: '51K-901.01', vehicle_model_id: '4', is_default: true }
+      responses:
+        '201':
+          description: Xe vừa thêm — cùng hình dạng phần tử `vehicles[]` của `/me`
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OwnVehicle' }
+        '400':
+          description: |
+            `invalid_input` (JSON hỏng, không phải object, trường lạ, `vehicle_model_id` không phải
+            chuỗi số, `is_default` không phải boolean, có query); `invalid_plate_number`;
+            `unknown_vehicle_model` (không có mẫu xe với id đó)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '405': { $ref: '#/components/responses/PostOnly' }
+        '409':
+          description: '`plate_taken` — biển đã thuộc một xe chưa gỡ (của bất kỳ ai)'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '413': { $ref: '#/components/responses/PayloadTooLarge' }
+        '415': { $ref: '#/components/responses/UnsupportedMediaType' }
+        '503': { $ref: '#/components/responses/AuthUnavailable' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /vehicles/{vehicle_id}:
+    parameters:
+      - name: vehicle_id
+        in: path
+        required: true
+        description: Chuỗi số; sai dạng → 400 `invalid_input`
+        schema: { $ref: '#/components/schemas/Id' }
+    patch:
+      tags: [vehicles]
+      operationId: setDefaultVehicle
+      x-status: implemented — BE-34
+      summary: Đặt xe làm xe mặc định
+      description: |
+        Body đúng `{"is_default": true}` (gì khác, kể cả `false`, → 400 `invalid_input`; muốn bỏ
+        cờ mặc định thì đặt xe khác làm mặc định). Xe mặc định cũ thôi trong cùng transaction. Xe
+        đã là mặc định → 200, không đổi gì. Xe không có / của tài xế khác / đã gỡ → 404 như nhau.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SetDefaultVehicleRequest' }
+      responses:
+        '200':
+          description: Xe sau khi đặt mặc định
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OwnVehicle' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '405':
+          description: '`method_not_allowed`, Allow PATCH, DELETE, OPTIONS'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '413': { $ref: '#/components/responses/PayloadTooLarge' }
+        '415': { $ref: '#/components/responses/UnsupportedMediaType' }
+        '500': { $ref: '#/components/responses/InternalError' }
+    delete:
+      tags: [vehicles]
+      operationId: removeVehicle
+      x-status: implemented — BE-34
+      summary: Gỡ xe (xoá mềm, giữ lịch sử phiên)
+      description: |
+        Không body. Xe không bị xoá khỏi DB: `removed_at` được ghi (migration 0018), lịch sử phiên
+        và yêu cầu sạc vẫn trỏ tới xe (BR-P17). Sau khi gỡ, xe biến khỏi `/me`; dùng `vehicle_id`
+        đó ở `/stations`, `/connectors/by-code`, `/places/*`, `/stations/{site_id}/route`,
+        `PATCH`/`DELETE /vehicles/{id}` → 404 `not_found`, ở `POST /charges` → 400
+        `vehicle_not_owned_or_incompatible`. Biển số được giải phóng.
+
+        Xe còn yêu cầu sạc chưa xong (intent chưa `rejected`/`settled`/`released`, gồm cả phiên đã
+        dừng nhưng chưa quyết toán) hoặc phiên chưa kết thúc (`pending`, `active`, `paused`,
+        `stopping`, `orphaned`) → 409 `vehicle_in_use`.
+
+        Gỡ xe mặc định mà còn xe khác → xe còn lại **thêm sớm nhất** thành mặc định. Gỡ xe cuối
+        cùng → `vehicles[]` rỗng; xe thêm sau đó tự thành mặc định. App: sau 204 tải lại `/me`; nếu
+        đang lưu `vehicle_id` đã gỡ để tìm trạm thì chuyển sang xe mặc định mới (hoặc yêu cầu thêm
+        xe nếu không còn xe).
+      responses:
+        '204': { description: Đã gỡ }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '405':
+          description: '`method_not_allowed`, Allow PATCH, DELETE, OPTIONS'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '409':
+          description: '`vehicle_in_use` — xe đang có yêu cầu sạc chưa xong hoặc phiên chưa kết thúc'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '413': { $ref: '#/components/responses/PayloadTooLarge' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
   /stations:
     get:
       tags: [stations]
@@ -1008,6 +1177,40 @@ components:
         vehicles:
           type: array
           items: { $ref: '#/components/schemas/OwnVehicle' }
+
+    VehicleModel:
+      type: object
+      required: [vehicle_model_id, brand, model_name, connector_type, is_vinfast, battery_capacity_kwh, rated_range_km, max_dc_kw]
+      properties:
+        vehicle_model_id: { $ref: '#/components/schemas/Id' }
+        brand: { type: string }
+        model_name: { type: string }
+        connector_type: { $ref: '#/components/schemas/ConnectorType' }
+        is_vinfast: { type: boolean }
+        battery_capacity_kwh: { type: [number, 'null'] }
+        rated_range_km: { type: [integer, 'null'] }
+        max_dc_kw: { type: [number, 'null'] }
+
+    AddVehicleRequest:
+      type: object
+      additionalProperties: false
+      required: [plate_number, vehicle_model_id]
+      properties:
+        plate_number:
+          type: string
+          description: Biển số; chuẩn hoá NFKC, in hoa, bỏ khoảng trắng; dạng lưu ≤ 12 ký tự
+          examples: ['51K-901.01']
+        vehicle_model_id: { $ref: '#/components/schemas/Id' }
+        is_default:
+          type: boolean
+          description: true → xe mới thành mặc định. Xe đầu tiên luôn mặc định.
+
+    SetDefaultVehicleRequest:
+      type: object
+      additionalProperties: false
+      required: [is_default]
+      properties:
+        is_default: { type: boolean, const: true }
 
     OwnVehicle:
       type: object

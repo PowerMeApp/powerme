@@ -17,6 +17,7 @@ const suites = [
   'test/driver-smart.integration.test.ts',
   'test/driver-auth.integration.test.ts',
   'test/driver-charges.integration.test.ts',
+  'test/driver-vehicles.integration.test.ts',
 ];
 for (const suite of suites) {
   const name = `powerme_mb03_driver_test_${Date.now()}_${randomBytes(4).toString('hex')}`;
