@@ -166,7 +166,7 @@ describeDb('WF-05 — onboard a charge point and bring it into service (SD-5a, S
 
   // ---- SD-5a: registry + onboarding ------------------------------------------------------
 
-  it('only an Admin can register a serial; it starts as registered (STM-3 #1)', async () => {
+  it('TC-F14-01 only an Admin can register a serial; it starts as registered (STM-3 #1)', async () => {
     await expectOnboardingError(
       onboarding.registerDevice(staffAId, { serialNumber: SERIAL }),
       'forbidden_role',
@@ -187,7 +187,7 @@ describeDb('WF-05 — onboard a charge point and bring it into service (SD-5a, S
     await expect(c.connect()).rejects.toThrow(/Forbidden/); // HTTP 403;
   });
 
-  it('rejects: not operator staff (403), site of another operator (403), unknown serial (409), bad connectors (400)', async () => {
+  it('TC-F09-03 rejects: not operator staff (403), site of another operator (403), unknown serial (409), bad connectors (400)', async () => {
     const ok = { serialNumber: SERIAL, siteId: siteAId, connectors: [{ connectorNo: 1 }] };
     await expectOnboardingError(onboarding.onboard(driverId, ok), 'forbidden_role', 403);
     await expectOnboardingError(
@@ -225,7 +225,7 @@ describeDb('WF-05 — onboard a charge point and bring it into service (SD-5a, S
     expect(cp).toEqual({ lifecycle: 'registered', siteId: null }); // nothing written
   });
 
-  it("onboards onto the operator's own site → awaiting_connection, 2 connectors Unavailable, credential once (STM-3 #2)", async () => {
+  it("TC-F09-01 onboards onto the operator's own site → awaiting_connection, 2 connectors Unavailable, credential once (STM-3 #2)", async () => {
     const res = await onboarding.onboard(staffAId, {
       serialNumber: SERIAL,
       siteId: siteAId,
@@ -268,7 +268,7 @@ describeDb('WF-05 — onboard a charge point and bring it into service (SD-5a, S
     );
   });
 
-  it('charge points onboarded at the same time in one province get distinct display codes', async () => {
+  it('TC-F09-02 charge points onboarded at the same time in one province get distinct display codes', async () => {
     const serials = [78, 79, 80, 81, 82, 83].map((n) => `RH24D1-000${n}`);
     for (const s of serials) {
       await onboarding.registerDevice(adminId, { serialNumber: s, model: 'D1-120' });
@@ -328,7 +328,7 @@ describeDb('WF-05 — onboard a charge point and bring it into service (SD-5a, S
     expect(cp?.lifecycle).toBe('awaiting_connection');
   });
 
-  it('right credential → Boot Accepted, in_service (STM-3 #3), connectors Available (STM-2)', async () => {
+  it('TC-WF05 right credential → Boot Accepted, in_service (STM-3 #3), connectors Available (STM-2)', async () => {
     const c = chargePointClient(SERIAL, password);
     clients.push(c);
     c.handle('TriggerMessage', async () => ({ status: 'Accepted' }));

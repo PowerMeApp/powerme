@@ -273,11 +273,11 @@ một đăng nhập chung, **không có refresh** (ADR-0018 #3 loại "access 15
 | Endpoint | Role | UC / FR / BR | Trạng thái · người làm | Ghi chú |
 |---|---|---|---|---|
 | `GET /operator/v1/sites` | operator_staff | UC-OPS-01, BR-P11 | planned · Ân | ô chọn site trong sheet onboarding |
-| `POST /operator/v1/charge-points` | operator_staff | UC-OPS-01, FR-09, STM-3 #2, SD-5a | **service** `ChargePointOnboardingService.onboard` · Ân (T119) | 201, mật khẩu hiện **một lần**, `no-store`; gọi lại → 409 `already_onboarded` |
+| `POST /operator/v1/charge-points` | operator_staff | UC-OPS-01, FR-09, STM-3 #2, SD-5a | **console (interim, T119)** `POST /api/operator/charge-points/onboard` · Ân | 201, mật khẩu hiện **một lần**, `no-store`; gọi lại → 409 `already_onboarded` |
 | `POST /operator/v1/charge-points/{id}/disable` | operator_staff | STM-3 #4, ADR-0016 | planned · Ân | chỉ có `ChargePointLifecyclePolicy`, chưa có service ghi DB |
 | `POST /operator/v1/charge-points/{id}/enable` | operator_staff | STM-3 #5 | planned · Ân | |
 | `GET /admin/v1/charge-points` | admin | UC-ADM-03, UC-ADM-07, FR-15 | **console** (một phần) · Ân | console thiếu model, firmware, bảo hành, operator |
-| `POST /admin/v1/charge-points` | admin | UC-ADM-03, FR-15, STM-3 #1 | **service** `registerDevice` · Ân (T119) | 409 `serial_already_registered` |
+| `POST /admin/v1/charge-points` | admin | UC-ADM-03, FR-15, STM-3 #1 | **console (interim, T119)** `POST /api/admin/charge-points` · Ân | 409 `serial_already_registered` |
 | `GET /admin/v1/charge-points/{id}` | admin | UC-ADM-03 | planned · Ân | |
 | `PATCH /admin/v1/charge-points/{id}` | admin | UC-ADM-03 | planned · Ân | model, firmware, kW, bảo hành; không đổi serial |
 | `PUT /admin/v1/charge-points/{id}/free-vend-tag` | admin | UC-ADM-05, BR-P09, ADR-0012 | planned · Ân | null = tắt; chỉ áp cho phiên bắt đầu sau đó (BR-P08) |
