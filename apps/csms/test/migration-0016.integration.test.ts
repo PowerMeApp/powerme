@@ -252,8 +252,10 @@ describeDb('migration 0016 — bỏ thẻ wallet và payment_mode station_wallet
       }
     });
 
-    it('migrate() chỉ áp 0016 và in số dòng sẽ đổi (3 phiên, 2 thẻ; 2 phiên đã dừng được đóng sẵn)', () => {
-      expect(applied).toEqual([M0016]);
+    it('migrate() áp 0016 (rồi các migration sau) và in số dòng sẽ đổi (3 phiên, 2 thẻ; 2 phiên đã dừng được đóng sẵn)', () => {
+      // 0017 (BE-30) trở đi áp tiếp sau 0016.
+      expect(applied[0]).toBe(M0016);
+      expect(applied).toEqual(listMigrations().slice(BEFORE_0016.length));
       expect(notices).toContain(
         '0016: 3 phiên station_wallet → unattributed, 2 thẻ wallet → online',
       );

@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: PowerMe CSMS — Driver API
-  version: 0.6.0
+  version: 0.7.0
   summary: Hợp đồng REST cho app tài xế (T77, phiếu v1.3 §3.2g)
   description: |
     Hợp đồng giữa CSMS (WP2) và app tài xế Flutter (WP3) cho trạng thái súng sạc, thời gian còn lại,
@@ -19,13 +19,13 @@ info:
       đường `sessions/*` trả cả phiên đó nếu `driver_id` khớp; `charges/*` chỉ có với phiên bắt đầu
       từ app.
   x-owner: Trí (WP2) — hợp đồng; Sơn (WP3) — route và client Dart
-  x-status: MB03 — brief 07/11 smart station search, address search and canonical road routes implemented locally; BE-21 email/password register, login and refresh implemented; BE-22 charges, sessions (progress/stop/statement) and credit implemented; time-left remains planned
+  x-status: MB03 — brief 07/11 smart station search, address search and canonical road routes implemented locally; BE-21 email/password register, login and refresh implemented; BE-30 login by email or phone number (E.164); BE-22 charges, sessions (progress/stop/statement) and credit implemented; time-left remains planned
 servers:
   - url: http://localhost:3000/api/driver/v1
     description: CSMS cục bộ (cùng tiến trình với console /api/admin)
 tags:
   - name: auth
-    description: UC-ACC-01 đăng ký (kèm consent BR-P05), đăng nhập email + mật khẩu, làm mới access token (BE-21)
+    description: UC-ACC-01 đăng ký (kèm consent BR-P05), đăng nhập email hoặc số điện thoại + mật khẩu (BE-21, BE-30), làm mới access token
   - name: stations
     description: UC-CHG-01 tìm trạm, trạng thái từng súng (BR-P38, BR-P39)
   - name: time-left
@@ -50,7 +50,10 @@ paths:
       description: |
         Không cần bearer. Thiếu `consent: true` hoặc `consent_version` → 400 `consent_required`,
         không ghi dòng nào. Email được trim + lowercase; trùng (không phân biệt hoa/thường) → 409
-        `email_taken`. Mật khẩu 8–128 ký tự, không ép quy tắc độ phức tạp. Một transaction tạo
+        `email_taken`. `phone_number` tuỳ chọn (BE-30): chuẩn hoá về E.164 theo quy tắc ở schema
+        `PhoneNumberInput`, không nhận ra → 400 `invalid_input`; số đã có tài khoản (so sau chuẩn
+        hoá, mọi định dạng) → 409 `phone_taken`. Email trùng được báo trước số trùng.
+        Mật khẩu 8–128 ký tự, không ép quy tắc độ phức tạp. Một transaction tạo
         `users` (role driver, active, mật khẩu băm scrypt) và `drivers` (consent_version,
         consent_given_at = now). Không tạo ví credit/loyalty ở bước này. Trả token như login.
       security: []
@@ -70,10 +73,15 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
         '405': { $ref: '#/components/responses/AuthMethodNotAllowed' }
         '409':
-          description: '`email_taken` — email đã có tài khoản (không phân biệt hoa/thường)'
+          description: |
+            `email_taken` — email đã có tài khoản (không phân biệt hoa/thường);
+            `phone_taken` — số điện thoại (sau chuẩn hoá E.164) đã có tài khoản (BE-30)
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
+              examples:
+                email_taken: { value: { error: email_taken, detail: email_taken } }
+                phone_taken: { value: { error: phone_taken, detail: phone_taken } }
         '413': { $ref: '#/components/responses/PayloadTooLarge' }
         '415': { $ref: '#/components/responses/UnsupportedMediaType' }
         '429': { $ref: '#/components/responses/TooManyAttempts' }
@@ -84,21 +92,31 @@ paths:
     post:
       tags: [auth]
       operationId: loginDriver
-      x-status: implemented — BE-21
-      summary: Đăng nhập email + mật khẩu, nhận access token (900 s) và refresh token
+      x-status: implemented — BE-21 (email), BE-30 (số điện thoại)
+      summary: Đăng nhập bằng email HOẶC số điện thoại + mật khẩu, nhận access token (900 s) và refresh token
       description: |
-        Sai email và sai mật khẩu trả cùng 401 `invalid_credentials` (không phân biệt; khi không có
-        user CSMS vẫn băm một lần để thời gian tương đương). User không phải driver hoặc chưa có
-        dòng `drivers` cũng là `invalid_credentials`. Tài khoản `suspended`/`closed` (F-13) → 403
-        `account_locked`, chỉ trả khi mật khẩu đúng. 5 lần sai / 60 s theo email + IP (hoặc 20 lần
-        theo IP) → 429 `too_many_attempts` trong 15 phút, kể cả khi mật khẩu đúng; bộ đếm trong
-        bộ nhớ một tiến trình.
+        Body có đúng MỘT định danh: `{email, password}` (như BE-21, không đổi) hoặc
+        `{phone_number, password}` (BE-30). Có cả hai khoá (kể cả giá trị null) hoặc không có khoá
+        nào → 400 `invalid_input`. Số điện thoại được chuẩn hoá như khi đăng ký (`PhoneNumberInput`),
+        nên `0901234567`, `+84 901 234 567`, `84901234567` cùng là một tài khoản.
+
+        Sai định danh và sai mật khẩu trả cùng 401 `invalid_credentials` (không phân biệt; khi không
+        có user — kể cả số không chuẩn hoá được — CSMS vẫn băm một lần để thời gian tương đương).
+        User không phải driver hoặc chưa có dòng `drivers` cũng là `invalid_credentials`. Tài khoản
+        `suspended`/`closed` (F-13) → 403 `account_locked`, chỉ trả khi mật khẩu đúng. 5 lần sai /
+        60 s theo định danh đã chuẩn hoá + IP (hoặc 20 lần theo IP) → 429 `too_many_attempts` trong
+        15 phút, kể cả khi mật khẩu đúng; email và số của cùng một tài khoản đếm riêng; bộ đếm trong
+        bộ nhớ một tiến trình. Không có OTP/SMS hay đăng nhập Google (ngoài phạm vi, ADR-0017).
       security: []
       requestBody:
         required: true
         content:
           application/json:
             schema: { $ref: '#/components/schemas/LoginRequest' }
+            examples:
+              email: { value: { email: app.ds01@powerme.test, password: '<mật khẩu>' } }
+              phone_e164: { value: { phone_number: '+84900000101', password: '<mật khẩu>' } }
+              phone_local: { value: { phone_number: '0900 000 101', password: '<mật khẩu>' } }
       responses:
         '200':
           description: Access + refresh token
@@ -107,7 +125,7 @@ paths:
               schema: { $ref: '#/components/schemas/LoginTokens' }
         '400': { $ref: '#/components/responses/AuthBadRequest' }
         '401':
-          description: '`invalid_credentials` — sai email hoặc mật khẩu (cùng một mã)'
+          description: '`invalid_credentials` — sai email / số điện thoại hoặc mật khẩu (cùng một mã)'
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
@@ -764,7 +782,8 @@ components:
       description: |
         `consent_required` (thiếu `consent: true` hoặc `consent_version`, BR-P05), `invalid_email`,
         `invalid_password` (ngoài 8–128 ký tự), `invalid_input` (JSON hỏng, không phải object,
-        trường lạ, tên/điện thoại sai, có query string)
+        trường lạ, tên/điện thoại sai, có query string; login gửi cả `email` lẫn `phone_number`
+        hoặc không có cái nào)
       content:
         application/json:
           schema: { $ref: '#/components/schemas/Error' }
@@ -923,17 +942,38 @@ components:
         password: { type: string, minLength: 8, maxLength: 128, writeOnly: true }
         full_name: { type: string, minLength: 1, maxLength: 100 }
         phone_number:
-          type: [string, 'null']
-          pattern: '^\+[1-9][0-9]{6,14}$'
-          description: E.164, tối đa 16 ký tự
+          oneOf:
+            - $ref: '#/components/schemas/PhoneNumberInput'
+            - type: 'null'
         consent_version: { type: string, pattern: '^[A-Za-z0-9._-]{1,20}$', examples: ['tos-2026-11'] }
         consent: { type: boolean, const: true, description: 'BR-P05: đồng ý xử lý dữ liệu trước khi lưu' }
+    PhoneNumberInput:
+      type: string
+      maxLength: 32
+      examples: ['0901234567', '+84 901 234 567', '84901234567', '+14155550123']
+      description: |
+        BE-30. CSMS chuẩn hoá về E.164 rồi mới lưu / so sánh (`src/driver/phone-number.ts`):
+        1. Bỏ khoảng trắng, `.`, `-`, `(`, `)`; chuỗi gốc dài hơn 32 ký tự → không nhận.
+        2. Còn lại phải là `+` (tuỳ chọn, chỉ ở đầu) rồi toàn chữ số ASCII.
+        3. Việt Nam: `0` + NSN, `84` + NSN, `+84` + NSN hoặc `+840` + NSN, với NSN 9–10 chữ số không
+           bắt đầu bằng 0 → `+84` + NSN (vd `0901234567` → `+84901234567`).
+        4. Nước khác: `+` + 7–15 chữ số, chữ số đầu khác 0, mã nước khác 84 → giữ nguyên E.164
+           (không kiểm độ dài theo từng nước).
+        5. Còn lại (vd `901234567` không có 0 / 84 đầu) → register 400 `invalid_input`;
+           login coi như không có tài khoản (401 `invalid_credentials`).
+        Kết quả luôn khớp `^\+[1-9][0-9]{6,14}$` (≤ 16 ký tự) và là duy nhất trong `users`.
     LoginRequest:
       type: object
       additionalProperties: false
-      required: [email, password]
+      description: 'Đúng một trong `email` / `phone_number` (BE-30); cả hai hoặc không có → 400 `invalid_input`.'
+      oneOf:
+        - required: [email, password]
+          not: { required: [phone_number] }
+        - required: [phone_number, password]
+          not: { required: [email] }
       properties:
         email: { type: string, maxLength: 254 }
+        phone_number: { $ref: '#/components/schemas/PhoneNumberInput' }
         password: { type: string, maxLength: 128, writeOnly: true }
     RefreshRequest:
       type: object

@@ -118,14 +118,31 @@ ON CONFLICT ON CONSTRAINT vehicle_models_brand_model_name_key DO NOTHING;
 --   app.ds01@powerme.test  DS-01  200.000 VND, VF 8 Plus (mặc định) + Nissan Leaf
 --   app.ds02@powerme.test  DS-02   30.000 VND (dưới CHARGE_MINIMUM_START_VND 50.000), VF e34
 --   app.ds03@powerme.test  DS-03  100.000 VND + 600 điểm (>= 500 điểm tối thiểu để dùng), Ioniq 5 + MiniEV
+-- Số điện thoại GIẢ dạng E.164 để đăng nhập bằng SĐT (BE-30; users_phone_number_key UNIQUE từ 0017).
+-- Số đã có người khác dùng thì tài xế mẫu không có số, thay vì làm hỏng cả seed.
 INSERT INTO users (email, full_name, phone_number, role, account_status)
-SELECT v.email, v.full_name, v.phone, 'driver', 'active'
+SELECT v.email, v.full_name,
+       CASE WHEN EXISTS (SELECT 1 FROM users x WHERE x.phone_number = v.phone) THEN NULL ELSE v.phone END,
+       'driver', 'active'
 FROM (VALUES
   ('app.ds01@powerme.test', 'Tran Van Du Tien', '+84900000101'),
   ('app.ds02@powerme.test', 'Le Thi It Tien',   '+84900000102'),
   ('app.ds03@powerme.test', 'Pham Van Co Diem', '+84900000103')
 ) AS v(email, full_name, phone)
 ON CONFLICT ON CONSTRAINT users_email_key DO NOTHING;
+
+-- Tài xế mẫu đã có từ trước mà chưa có số (vd số bị chiếm lúc tạo): điền số nếu số còn trống.
+-- Không bao giờ ghi đè một số đã có (app / người vận hành có thể đã đổi).
+UPDATE users u
+SET phone_number = v.phone, updated_at = now()
+FROM (VALUES
+  ('app.ds01@powerme.test', '+84900000101'),
+  ('app.ds02@powerme.test', '+84900000102'),
+  ('app.ds03@powerme.test', '+84900000103')
+) AS v(email, phone)
+WHERE u.email = v.email
+  AND u.phone_number IS NULL
+  AND NOT EXISTS (SELECT 1 FROM users x WHERE x.phone_number = v.phone);
 
 INSERT INTO drivers (user_id, consent_version, consent_given_at)
 SELECT u.id, '2026-09', now()
