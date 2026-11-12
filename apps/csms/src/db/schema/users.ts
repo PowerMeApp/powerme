@@ -18,7 +18,7 @@ export const users = pgTable(
     phoneNumber: varchar('phone_number', { length: 16 }),
     role: userRoleEnum('role').notNull(),
     accountStatus: userAccountStatusEnum('account_status').notNull().default('active'),
-    /** Băm argon2; null với tài khoản chưa đặt mật khẩu (đăng nhập OTP / social). */
+    /** Băm scrypt (`scrypt$N$r$p$salt$hash`, ADR-0011); null khi chưa đặt mật khẩu. */
     passwordHash: text('password_hash'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
