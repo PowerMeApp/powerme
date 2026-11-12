@@ -9,11 +9,26 @@ info:
     (quản trị nền tảng, role `admin`). Văn bản giải thích, ma trận role × endpoint, ánh xạ từ
     console hiện tại và câu hỏi mở nằm ở `OPERATOR-ADMIN-API-HOP-DONG.md` cùng thư mục.
 
+    Đăng nhập là một route chung `/api/auth/v1/login` cho cả hai bề mặt (ADR-0018). Mọi
+    `/api/operator/v1/*` và `/api/admin/v1/*` đi qua RolesGuard **trước khi khớp route**: đường
+    dẫn chưa có route mà không có token hợp lệ nhận 401, không phải 404.
+
+    Hành vi hiện tại của listener (`operator-api.http.ts`, main 9c90f34), áp cho mọi route kể cả
+    route chưa viết:
+    - Request có header `Origin` không phải `http(s)://localhost|127.0.0.1|[::1]` (cổng bất kỳ)
+      → 403 `forbidden_origin` trước mọi thứ khác. Preflight `OPTIONS` từ localhost → 204.
+    - Có query string (kể cả `?` rỗng) → 400 `invalid_input` **trước** guard. Sẽ đổi khi viết
+      route đầu tiên có tham số query (danh sách); các tham số query trong file này là hợp đồng
+      cho lúc đó.
+    - Lỗi của tầng xác thực trả `{error, detail}` với `detail` = chính mã lỗi (chưa có câu tiếng
+      Việt); 500 trả `internal_error`.
+    - Chưa cấu hình `DASHBOARD_JWT_*` → mọi route 503 `auth_unavailable`.
+
     Mỗi operation có bốn khoá mở rộng:
     - `x-roles`: role được gọi (nguồn sinh ma trận NFR-05). Role khác có token hợp lệ → 403.
-    - `x-status`: `console` (logic đã chạy ở console `/api/admin/*` chưa xác thực, phải chuyển
-      sang đây), `service` (service/hàm có trong code, route chưa), `in_progress` (đang làm ở
-      nhánh khác), `planned` (chưa có code).
+    - `x-status`: `implemented` (route chạy trên main, có JWT), `console` (logic đã chạy ở
+      console `/api/admin/*` chưa xác thực, phải chuyển sang đây), `service` (service/hàm có
+      trong code, route chưa), `in_progress` (đang làm ở nhánh khác), `planned` (chưa có code).
     - `x-owner`: người làm route (theo WP; BM04 không có trong repo — Trí sửa nếu lệch).
     - `x-refs`: UC / FR / BR / STM trong SRS (report3-srs.md), phiếu v1.3 và thiết kế.
 
@@ -27,13 +42,15 @@ info:
     - Phiên chỉ có `payment_mode` ∈ {`csms_billed`, `unattributed`} và thẻ RFID chỉ có
       `card_kind` ∈ {`online`, `free_vend`} (theo T110).
   x-owner: Trí (WP2) — hợp đồng; route theo `x-owner` từng operation
-  x-status: v0.1 — hợp đồng; chưa route nào trong file này có xác thực JWT trên main 59eb4ba
+  x-status: >-
+    v0.1 — hợp đồng; trên main 9c90f34 chỉ có `POST /auth/v1/login`, `GET /operator/v1/me`,
+    `GET /admin/v1/me` (FE-01a #118, ADR-0018); các route còn lại chưa có
 servers:
   - url: http://localhost:3000/api
     description: CSMS cục bộ (cùng tiến trình, cùng cổng với console và Driver API)
 tags:
   - name: auth
-    description: Đăng nhập nhân viên operator và admin (F-13)
+    description: Đăng nhập nhân viên operator và admin, hồ sơ người gọi (F-13, ADR-0018)
   - name: onboarding
     description: UC-OPS-01, UC-ADM-03, UC-ADM-05 — đăng ký serial, onboard trụ, vòng đời STM-3
   - name: monitoring
@@ -60,23 +77,44 @@ security:
 
 paths:
   # ============================================================================================
-  # AUTH
+  # AUTH (FE-01a #118, ADR-0018 — đã chạy trên main 9c90f34)
   # ============================================================================================
-  /operator/v1/auth/login:
+  /auth/v1/login:
     post:
       tags: [auth]
-      operationId: operatorLogin
+      operationId: dashboardLogin
       x-roles: [public]
-      x-status: planned
-      x-owner: Trí
-      x-refs: [F-13, BR-P16, ADR-0017]
-      summary: Nhân viên operator đăng nhập email + mật khẩu
+      x-status: implemented
+      x-owner: Nghĩa (FE-01a, #118)
+      x-refs: [F-13, UC-ACC-04, UC-ACC-05, BR-P16, NFR-SEC-01, ADR-0018]
+      summary: Nhân viên operator và Admin đăng nhập email + mật khẩu (một endpoint, màn 16 và 26)
       description: |
-        Cùng cơ chế BE-21 của tài xế (scrypt, 5 lần sai / 60 s theo email + IP → 429 15 phút),
-        khác ở chỗ user phải có `role = operator_staff`, dòng `operator_staff` và operator
-        `active`. User role khác → 401 `invalid_credentials` (không lộ email nào là nhân viên).
-        Tài khoản `suspended`/`closed` → 403 `account_locked`; operator bị đình chỉ → 403
-        `operator_inactive`; cả hai chỉ trả khi mật khẩu đúng.
+        Một endpoint cho cả hai vai trò (ADR-0018 #1). Token mang `role`; màn đăng nhập của mỗi
+        khu vực (dashboard `/operator/login`, `/admin/login`) tự từ chối vai trò còn lại, không lưu
+        token. Code: `apps/csms/src/users/auth.ts` (`StaffAccounts.login`), route ở
+        `apps/csms/src/operator-api/operator-api.http.ts`.
+
+        - Body đúng hai khoá `email`, `password` (chuỗi). Thiếu, sai kiểu hoặc có khoá lạ
+          (vd `role`) → 400 `invalid_input`. Content-Type phải là `application/json` (tuỳ chọn
+          `; charset=utf-8`), không thì 415; body tối đa 16 KiB, quá thì 413; JSON hỏng → 400.
+        - `email` được `trim()` + chữ thường rồi so `lower(users.email)`; không kiểm định dạng.
+          `email` > 254 ký tự hoặc `password` > 128 code point → 401 `invalid_credentials`
+          (không phải 400, không tính vào bộ đếm thử sai).
+        - Sai email, sai mật khẩu, user là tài xế, `operator_staff` không có dòng
+          `operator_staff`, `admin` không có dòng `admins`: cùng **401** `invalid_credentials`;
+          email không tồn tại vẫn băm giả một lần để thời gian như nhau.
+        - Chỉ **sau khi mật khẩu đúng**: `account_status ≠ active` → 403 `account_locked`;
+          nhân viên có Operator `status ≠ active` → 403 `operator_inactive`.
+        - Thử sai (bộ đếm riêng của dashboard, cùng số BR-P49 / BE-21): 5 lần / 60 s theo email +
+          IP, hoặc 20 lần / 60 s theo IP → khoá 15 phút, mọi lần thử trong lúc khoá (kể cả mật
+          khẩu đúng) → 429 `too_many_attempts` + `Retry-After` (giây). Quá 20 lần đang băm song
+          song từ một IP → 429 với `Retry-After: 1`. Đăng nhập đúng xoá bộ đếm email + IP. IP là
+          `req.socket.remoteAddress` — chưa đọc `X-Forwarded-For` (xem §2.7 của hợp đồng).
+        - Chưa cấu hình `DASHBOARD_JWT_*` (cả ba trống) → 503 `auth_unavailable`.
+        - Token: JWT HS256 `typ: JWT`, khoá `DASHBOARD_JWT_SECRET_BASE64`, `iss` / `aud` theo
+          `DASHBOARD_JWT_ISSUER` / `_AUDIENCE`; claim `sub` (users.id), `role`, `iat`, `exp` =
+          `iat` + 28 800 s (8 giờ), `jti` (UUID); nhân viên thêm `operator_id`, `staff_role`.
+          **Không có refresh token**: hết 8 giờ thì đăng nhập lại.
       security: []
       requestBody:
         required: true
@@ -85,41 +123,20 @@ paths:
             schema: { $ref: '#/components/schemas/LoginRequest' }
       responses:
         '200':
-          description: Access + refresh token
+          description: Access token 8 giờ và người dùng (cùng hình dạng với `/me`)
+          headers:
+            Cache-Control:
+              schema: { type: string, const: no-store }
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/LoginTokens' }
+              schema: { $ref: '#/components/schemas/LoginResponse' }
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/InvalidCredentials' }
         '403': { $ref: '#/components/responses/AccountLocked' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+        '413': { $ref: '#/components/responses/PayloadTooLarge' }
+        '415': { $ref: '#/components/responses/UnsupportedMediaType' }
         '429': { $ref: '#/components/responses/TooManyAttempts' }
-        '503': { $ref: '#/components/responses/AuthUnavailable' }
-
-  /operator/v1/auth/refresh:
-    post:
-      tags: [auth]
-      operationId: operatorRefresh
-      x-roles: [public]
-      x-status: planned
-      x-owner: Trí
-      x-refs: [F-13, ADR-0017]
-      summary: Đổi refresh token lấy access token mới
-      description: Kiểm lại DB như login; khoá tài khoản có hiệu lực ngay ở lần refresh kế tiếp.
-      security: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { $ref: '#/components/schemas/RefreshRequest' }
-      responses:
-        '200':
-          description: Access token mới
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/AccessToken' }
-        '400': { $ref: '#/components/responses/BadRequest' }
-        '401': { $ref: '#/components/responses/InvalidRefreshToken' }
-        '403': { $ref: '#/components/responses/AccountLocked' }
         '503': { $ref: '#/components/responses/AuthUnavailable' }
 
   /operator/v1/me:
@@ -127,71 +144,37 @@ paths:
       tags: [auth]
       operationId: operatorMe
       x-roles: [operator_staff]
-      x-status: planned
-      x-owner: Trí
-      x-refs: [BR-P16, 'Table 5 #17']
-      summary: Hồ sơ nhân viên và operator đang đăng nhập (đầu trang Operator Dashboard)
+      x-status: implemented
+      x-owner: Nghĩa (FE-01a, #118)
+      x-refs: [BR-P16, 'Table 5 #17', ADR-0018]
+      summary: Nhân viên và Operator đang đăng nhập (đầu trang Operator Dashboard, khôi phục phiên)
+      description: |
+        Trả `DashboardUser` có `operator_id`, `operator_name`, `staff_role`. Ba trường này lấy từ
+        lần đọc DB của RolesGuard ở chính request này, không từ token — nhân viên vừa bị chuyển
+        Operator nhận 401 (đăng nhập lại), không thấy Operator cũ.
       responses:
         '200':
           description: Người gọi
+          headers:
+            Cache-Control:
+              schema: { type: string, const: no-store }
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/StaffProfile' }
+              schema: { $ref: '#/components/schemas/DashboardUser' }
+              examples:
+                staff:
+                  value:
+                    user_id: '42'
+                    email: tech@operator-a.vn
+                    full_name: Nguyễn Văn A
+                    role: operator_staff
+                    operator_id: '3'
+                    operator_name: Công ty TNHH Trạm Sạc A
+                    staff_role: technician
+        '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
-
-  /admin/v1/auth/login:
-    post:
-      tags: [auth]
-      operationId: adminLogin
-      x-roles: [public]
-      x-status: planned
-      x-owner: Trí
-      x-refs: [F-13, BR-P16, ADR-0017]
-      summary: Admin đăng nhập email + mật khẩu
-      description: Như `operatorLogin` nhưng user phải có `role = admin` và dòng `admins`.
-      security: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { $ref: '#/components/schemas/LoginRequest' }
-      responses:
-        '200':
-          description: Access + refresh token
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/LoginTokens' }
-        '400': { $ref: '#/components/responses/BadRequest' }
-        '401': { $ref: '#/components/responses/InvalidCredentials' }
-        '403': { $ref: '#/components/responses/AccountLocked' }
-        '429': { $ref: '#/components/responses/TooManyAttempts' }
-        '503': { $ref: '#/components/responses/AuthUnavailable' }
-
-  /admin/v1/auth/refresh:
-    post:
-      tags: [auth]
-      operationId: adminRefresh
-      x-roles: [public]
-      x-status: planned
-      x-owner: Trí
-      x-refs: [F-13, ADR-0017]
-      summary: Đổi refresh token lấy access token mới
-      security: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { $ref: '#/components/schemas/RefreshRequest' }
-      responses:
-        '200':
-          description: Access token mới
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/AccessToken' }
-        '400': { $ref: '#/components/responses/BadRequest' }
-        '401': { $ref: '#/components/responses/InvalidRefreshToken' }
-        '403': { $ref: '#/components/responses/AccountLocked' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
         '503': { $ref: '#/components/responses/AuthUnavailable' }
 
   /admin/v1/me:
@@ -199,18 +182,34 @@ paths:
       tags: [auth]
       operationId: adminMe
       x-roles: [admin]
-      x-status: planned
-      x-owner: Trí
-      x-refs: [BR-P16, 'Table 5 #27']
-      summary: Hồ sơ admin đang đăng nhập
+      x-status: implemented
+      x-owner: Nghĩa (FE-01a, #118)
+      x-refs: [BR-P16, 'Table 5 #27', ADR-0018]
+      summary: Admin đang đăng nhập
+      description: |
+        Trả `DashboardUser` **không có** `operator_id`, `operator_name`, `staff_role` (khoá vắng
+        mặt, không phải `null`). Guard đòi user còn `role = admin`, `active` và còn dòng `admins`.
       responses:
         '200':
-          description: Người gọi (`operator` = null, `staff_role` = null)
+          description: Người gọi
+          headers:
+            Cache-Control:
+              schema: { type: string, const: no-store }
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/StaffProfile' }
+              schema: { $ref: '#/components/schemas/DashboardUser' }
+              examples:
+                admin:
+                  value:
+                    user_id: '7'
+                    email: admin@powerme.vn
+                    full_name: Trần Thị B
+                    role: admin
+        '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+        '503': { $ref: '#/components/responses/AuthUnavailable' }
 
   # ============================================================================================
   # ONBOARDING (operator) + REGISTRY (admin)
@@ -1466,9 +1465,13 @@ paths:
         `status = reconciled`, mỗi phiên tính đúng một lần (unique index
         `credit_transactions_one_debit_per_session`), chỉ trụ của operator người gọi. Phiên
         `unattributed` là dòng riêng, chỉ đếm phiên và Wh, không có tiền. Không tính phí nền tảng,
-        không chia doanh thu. Phiên được xếp vào kỳ theo `ended_at` (đồng hồ CSMS) quy về ngày
-        Asia/Ho_Chi_Minh. Phiên csms_billed đã dừng nhưng chưa reconciled được đếm ở
-        `pending_reconciliation` để người xem biết số còn có thể đổi.
+        không chia doanh thu (K1 đóng). Xếp kỳ (K3, Trí chốt 12/11): phiên `reconciled` xếp theo
+        **đúng mốc giờ quyết toán đã dùng để tính giá** (giờ trụ đã kiểm, hoặc giờ CSMS khi rơi về
+        — cách lưu mốc chờ #120 / T101); khi chưa có mốc lưu thì dùng
+        `COALESCE(cp_stopped_at, received_stopped_at)`. Phiên `closed` / `review` xếp theo
+        `received_stopped_at`. Ngày chia theo UTC+7 (Asia/Ho_Chi_Minh). Phiên csms_billed đã dừng
+        nhưng chưa reconciled được đếm ở `pending_reconciliation`; số của kỳ cũ có thể đổi khi
+        một phiên đối soát muộn, nên màn hình và CSV ghi "tính đến lúc `generated_at`".
       parameters:
         - $ref: '#/components/parameters/fromDate'
         - $ref: '#/components/parameters/toDate'
@@ -2271,13 +2274,34 @@ components:
       scheme: bearer
       bearerFormat: JWT
       description: |
-        Đề xuất (chưa code): cùng khoá HS256, issuer và audience với Driver API (ADR-0017), `typ:
-        JWT`, `sub` = users.id chuỗi, `role` ∈ {`operator_staff`, `admin`} (giá trị enum
-        `user_role` trong DB), iat/exp, tối đa 900 s. Mỗi request kiểm DB: role khớp, account
-        `active`, có dòng `operator_staff` (operator `active`) hoặc `admins`. Phạm vi operator lấy
-        từ DB (`operator_staff.operator_id`), không từ token hay query. Token hợp lệ nhưng role
-        không được phép (kể cả token tài xế) → 403 `forbidden` (F-13). Token thiếu/sai/hết hạn →
-        401. Không có header dev kiểu `X-Driver-Id` cho bề mặt này.
+        Đã chạy (FE-01a #118, ADR-0018; `apps/csms/src/users/roles-guard.ts`). Token lấy từ
+        `POST /auth/v1/login`: JWT HS256, `typ: JWT`, ký bằng khoá **riêng của dashboard**
+        `DASHBOARD_JWT_SECRET_BASE64` với `iss` = `DASHBOARD_JWT_ISSUER`, `aud` =
+        `DASHBOARD_JWT_AUDIENCE` — không dùng chung khoá, issuer hay audience với Driver API.
+        Claim bắt buộc `sub` (users.id, bigint dạng chuỗi), `role` ∈ {`operator_staff`, `admin`}
+        (enum `user_role`), `iat`, `exp`; nhân viên có thêm `operator_id`, `staff_role`; có `jti`.
+        Sống 8 giờ, kiểm cả `exp` lẫn tuổi tính từ `iat` ≤ 28 800 s, không có dung sai đồng hồ.
+        Không có refresh token.
+
+        Header: đúng **một** `Authorization: Bearer <jwt>` (≤ 8 192 ký tự); hai header hoặc sai
+        dạng → 401.
+
+        Thứ tự kiểm (mọi `/operator/v1/*`, `/admin/v1/*`, trước khi khớp route):
+        1. Thiếu / sai chữ ký / sai iss-aud / hết hạn → 401 `unauthorized`. Nếu chữ ký sai nhưng
+           token xác minh được bằng khoá Driver API và có `role = driver` → 403 `forbidden`
+           (F-13: token tài xế là token hợp lệ của vai trò khác). Khi Driver API chưa cấu hình
+           khoá, token tài xế nhận 401.
+        2. `role` trong token khác bề mặt (token admin gọi `/operator/v1`, hoặc ngược lại) → 403
+           `forbidden`.
+        3. Đọc lại DB ở mỗi request: không còn user → 401; `users.role` khác bề mặt → 403
+           `forbidden`; `account_status ≠ active` → 403 `account_locked`. Admin: thiếu dòng
+           `admins` → 403 `forbidden`. Nhân viên: không còn dòng `operator_staff` hoặc
+           `operator_id` khác claim (bị chuyển Operator) → 401 (đăng nhập lại); Operator không
+           `active` → 403 `operator_inactive`.
+
+        Phạm vi Operator của request lấy từ lần đọc DB ở bước 3, không bao giờ từ token, query
+        hay body. Ngược lại, token dashboard gửi tới `/api/driver/v1` bị Driver API trả 401
+        `unauthorized` (sai khoá; Driver API không thử khoá dashboard nên không trả 403). Không có header dev kiểu `X-Driver-Id` cho bề mặt này.
 
   parameters:
     page:
@@ -2370,19 +2394,44 @@ components:
 
   responses:
     BadRequest:
-      description: '`invalid_input` — tham số/body sai, trường lạ, id không phải bigint dương'
+      description: |
+        `invalid_input` — tham số/body sai, trường lạ, id không phải bigint dương. Hiện tại mọi
+        request có query string cũng nhận 400 này, trước RolesGuard (sẽ đổi khi có route danh sách)
       content:
         application/json:
           schema: { $ref: '#/components/schemas/Error' }
     Unauthorized:
-      description: '`unauthorized` — thiếu, sai hoặc hết hạn token; kèm WWW-Authenticate Bearer'
+      description: |
+        `unauthorized` — thiếu, sai, hết hạn token, hai header Authorization; user không còn;
+        nhân viên đã bị chuyển sang Operator khác (đăng nhập lại). Hiện chưa gửi header
+        `WWW-Authenticate`
       content:
         application/json:
           schema: { $ref: '#/components/schemas/Error' }
     Forbidden:
       description: |
-        `forbidden` — role không được phép ở endpoint này (F-13); `account_locked` — tài khoản bị
-        khoá sau khi token được cấp; `forbidden_origin` — Origin không nằm trong danh sách cho phép
+        `forbidden` — token hợp lệ của vai trò khác, kể cả token tài xế (F-13), hoặc Admin không
+        còn dòng `admins`; `account_locked` — tài khoản không còn `active` (có hiệu lực ở request
+        kế tiếp, không chờ token hết hạn); `operator_inactive` — Operator của nhân viên không còn
+        `active`; `forbidden_origin` — header Origin không phải localhost
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    MethodNotAllowed:
+      description: '`method_not_allowed` — kèm header `Allow`'
+      headers:
+        Allow:
+          schema: { type: string, examples: ['POST, OPTIONS', 'GET, OPTIONS'] }
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    PayloadTooLarge:
+      description: '`payload_too_large` — body quá 16 KiB; kèm `Connection: close`'
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    UnsupportedMediaType:
+      description: '`unsupported_media_type` — Content-Type không phải `application/json`'
       content:
         application/json:
           schema: { $ref: '#/components/schemas/Error' }
@@ -2407,22 +2456,24 @@ components:
         application/json:
           schema: { $ref: '#/components/schemas/Error' }
     InvalidCredentials:
-      description: '`invalid_credentials` — sai email, sai mật khẩu hoặc không phải role của bề mặt này'
-      content:
-        application/json:
-          schema: { $ref: '#/components/schemas/Error' }
-    InvalidRefreshToken:
-      description: '`invalid_refresh_token`'
+      description: |
+        `invalid_credentials` — sai email, sai mật khẩu, user là tài xế, thiếu dòng
+        `operator_staff` / `admins`, email > 254 ký tự hoặc mật khẩu > 128 ký tự. Một mã chung để
+        không lộ email nào là nhân viên
       content:
         application/json:
           schema: { $ref: '#/components/schemas/Error' }
     AccountLocked:
-      description: '`account_locked` (F-13), `operator_inactive` (operator bị đình chỉ / đóng)'
+      description: |
+        Chỉ trả khi mật khẩu đúng: `account_locked` (UC-ACC-04, F-13 — `account_status` là
+        `suspended` / `closed`…), `operator_inactive` (Operator của nhân viên bị đình chỉ / đóng)
       content:
         application/json:
           schema: { $ref: '#/components/schemas/Error' }
     TooManyAttempts:
-      description: '`too_many_attempts`; Retry-After là số giây còn khoá'
+      description: |
+        `too_many_attempts`; Retry-After là số giây còn khoá (15 phút sau 5 lần sai / 60 s theo
+        email + IP hoặc 20 lần / 60 s theo IP; 1 s khi quá 20 lần đang chạy song song từ một IP)
       headers:
         Retry-After:
           schema: { type: string, pattern: '^[1-9][0-9]*$' }
@@ -2430,7 +2481,9 @@ components:
         application/json:
           schema: { $ref: '#/components/schemas/Error' }
     AuthUnavailable:
-      description: '`auth_unavailable` — JWT chưa cấu hình'
+      description: |
+        `auth_unavailable` — `DASHBOARD_JWT_*` để trống cả ba (hoặc CSMS chạy không có DB). Đặt
+        thiếu một trong ba thì CSMS không khởi động, nên không có trạng thái "nửa cấu hình"
       content:
         application/json:
           schema: { $ref: '#/components/schemas/Error' }
@@ -2511,43 +2564,49 @@ components:
       type: object
       additionalProperties: false
       required: [email, password]
+      description: |
+        Đúng hai khoá; khoá lạ → 400. Không có giới hạn độ dài ở tầng 400: email > 254 ký tự
+        hoặc mật khẩu > 128 code point → 401 `invalid_credentials`. Type TS:
+        `packages/shared/src/api/auth.ts` `LoginRequest`.
       properties:
-        email: { type: string, format: email, maxLength: 254 }
-        password: { type: string, minLength: 1, maxLength: 128, writeOnly: true }
-    RefreshRequest:
+        email:
+          type: string
+          description: So khớp sau `trim()` + chữ thường với `lower(users.email)`; không kiểm định dạng
+        password: { type: string, writeOnly: true }
+    LoginResponse:
       type: object
-      additionalProperties: false
-      required: [refresh_token]
+      description: '`packages/shared/src/api/auth.ts` `LoginResponse`'
+      required: [access_token, token_type, expires_in, user]
       properties:
-        refresh_token: { type: string, minLength: 1, maxLength: 4096 }
-    AccessToken:
-      type: object
-      required: [access_token, token_type, expires_in]
-      properties:
-        access_token: { type: string }
+        access_token: { type: string, description: 'JWT HS256, khoá DASHBOARD_JWT_*' }
         token_type: { type: string, const: Bearer }
-        expires_in: { type: integer, const: 900 }
-    LoginTokens:
-      allOf:
-        - $ref: '#/components/schemas/AccessToken'
-        - type: object
-          required: [refresh_token, refresh_expires_in]
-          properties:
-            refresh_token: { type: string }
-            refresh_expires_in: { type: integer, minimum: 3600 }
-    StaffProfile:
+        expires_in: { type: integer, const: 28800, description: 'Giây (8 giờ). Không có refresh token' }
+        user: { $ref: '#/components/schemas/DashboardUser' }
+    DashboardUser:
       type: object
-      required: [user_id, email, full_name, role, operator, staff_role]
+      description: |
+        `packages/shared/src/api/auth.ts` `DashboardUser` (= `DashboardMe`). Phẳng, không lồng
+        object `operator`. Với `role = operator_staff` luôn có đủ `operator_id`, `operator_name`,
+        `staff_role` (không null — cột DB `NOT NULL`, Operator đã được guard kiểm tồn tại); với
+        `role = admin` ba khoá này **vắng mặt**, không phải `null`.
+      required: [user_id, email, full_name, role]
       properties:
         user_id: { $ref: '#/components/schemas/Id' }
-        email: { type: string, format: email }
+        email: { type: string, description: 'Như lưu trong `users.email`' }
         full_name: { type: string }
         role: { type: string, enum: [operator_staff, admin] }
-        operator:
-          oneOf:
-            - $ref: '#/components/schemas/OperatorRef'
-            - type: 'null'
-        staff_role: { type: [string, 'null'], enum: [manager, technician, null] }
+        operator_id: { $ref: '#/components/schemas/Id' }
+        operator_name: { type: string, description: '`operators.legal_name`' }
+        staff_role: { type: string, enum: [manager, technician] }
+      oneOf:
+        - properties: { role: { const: operator_staff } }
+          required: [operator_id, operator_name, staff_role]
+        - properties: { role: { const: admin } }
+          not:
+            anyOf:
+              - required: [operator_id]
+              - required: [operator_name]
+              - required: [staff_role]
 
     # ---- trụ / súng -----------------------------------------------------------------------------
     ChargePointLifecycle:
@@ -3189,7 +3248,9 @@ components:
           required: [session_count]
           properties:
             session_count: { type: integer, minimum: 0 }
-        generated_at: { $ref: '#/components/schemas/Timestamp' }
+        generated_at:
+          allOf: [{ $ref: '#/components/schemas/Timestamp' }]
+          description: 'Lúc chạy truy vấn; hiển thị "tính đến lúc …" vì kỳ cũ còn đổi khi có phiên đối soát muộn (K3)'
 
     # ---- tài khoản / operator / thẻ -----------------------------------------------------------
     UserRole:
