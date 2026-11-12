@@ -5,6 +5,7 @@ Mục tiêu: Sơn (app Flutter) và dev khác làm việc với **dữ liệu th
 | Đường | Trên VM | Trên máy dev | Dùng để |
 |---|---|---|---|
 | Driver API | `127.0.0.1:3000` (csms) | `127.0.0.1:3000` | app gọi `/api/driver/v1/...` như với CSMS local |
+| Dashboard API (T128) | `127.0.0.1:3000` (csms, cùng cổng) | `127.0.0.1:3000` | dashboard (Vite trên máy dev) đăng nhập `/api/auth/v1/login`, gọi `/api/operator/v1/*`, `/api/admin/v1/*` |
 | Postgres | `127.0.0.1:5432` (container postgres) | `127.0.0.1:5433` | **xem / sửa dữ liệu** bằng DBeaver, `psql`… |
 
 NSG của Azure vẫn chỉ mở 22/80/443. Compose publish `3000` và `5432` **chỉ ra loopback của VM** (`127.0.0.1:…`), nên từ internet không tới được; muốn tới phải SSH vào VM trước. User SSH của dev là `devtunnel`: không có shell, chỉ được forward tới đúng hai đích trên.
@@ -13,7 +14,7 @@ NSG của Azure vẫn chỉ mở 22/80/443. Compose publish `3000` và `5432` **
 >
 > 1. **Không chạy một CSMS thứ hai trỏ vào DB staging** (kể cả `npm run demo`, `node dist/main.js` với `DATABASE_URL` của staging). CSMS staging đã chạy các bộ quét nền: hết giờ phiên (`SESSION_START_TIMEOUT_S`), trần 24 h (`SESSION_HARD_CAP_H`), gửi lại RemoteStop (BE-17), cảnh báo trụ offline, hết hạn top-up. Hai CSMS cùng quét một DB sẽ đóng phiên hai lần, gửi lệnh trùng, làm hỏng dữ liệu demo của cả nhóm. Muốn gọi API: dùng tunnel tới cổng **3000**. DB chỉ để xem/sửa dữ liệu.
 > 2. **Sửa DB tay là sửa dữ liệu của cả nhóm.** Sổ cái credit/điểm là append-only theo nghiệp vụ: đừng `UPDATE balance_vnd` hay xoá dòng `credit_transactions`; sai thì nhờ Trí `./seed.sh` hoặc khôi phục bản sao lưu.
-> 3. **Mật khẩu nhận qua kênh riêng** (tin nhắn trực tiếp), **không dán chat nhóm, không commit**, không để trong `.env` được commit (repo public). Gồm: mật khẩu role `app_dev`, mật khẩu tài xế mẫu (`DEMO_DRIVER_PASSWORD`).
+> 3. **Mật khẩu nhận qua kênh riêng** (tin nhắn trực tiếp), **không dán chat nhóm, không commit**, không để trong `.env` được commit (repo public). Gồm: mật khẩu role `app_dev`, mật khẩu tài xế mẫu (`DEMO_DRIVER_PASSWORD`), mật khẩu admin/staff mẫu của dashboard (`DEMO_STAFF_PASSWORD`).
 > 4. Cổng 3000 cũng là **console vận hành chưa có xác thực** (có nút ngắt kết nối trụ, RemoteStop). Tunnel cho bạn quyền đó: chỉ mở `http://127.0.0.1:3000/` khi cần xem, đừng bấm lệnh lên trụ demo khi người khác đang demo.
 
 ## 1. Việc của Trí trên VM (một lần cho mỗi dev)
@@ -98,6 +99,20 @@ curl -s -X POST http://127.0.0.1:3000/api/driver/v1/auth/login -H 'content-type:
 ```
 
 Chỉ trụ demo `RH24D1-00001` (`PM-D1-HCM-0001`, trạm `HCM-DEMO-01`) có trạng thái sống và bắt đầu sạc được — khi simulator đang chạy (`./deploy.sh <tag> --sim`, HMI ở `127.0.0.1:8100` của VM; user `devtunnel` không forward cổng này, nhờ Trí cắm súng hoặc mở thêm `permitopen`). Các trạm `HCM-APP-*` hiện `offline` (chưa từng kết nối OCPP).
+
+### d. Đăng nhập dashboard (T128)
+
+Cùng tunnel cổng 3000 (không cần mở thêm `permitopen`). Tài khoản: `staff.demo@powerme.test` (staff `manager` của operator mẫu, màn 16) và `admin.demo@powerme.test` (Admin, màn 26); mật khẩu chung (`DEMO_STAFF_PASSWORD`) nhận riêng từ Trí.
+
+```bash
+TOKEN=$(curl -s -X POST http://127.0.0.1:3000/api/auth/v1/login -H 'content-type: application/json' \
+  -d '{"email":"staff.demo@powerme.test","password":"<mật khẩu nhận riêng>"}' | sed -E 's/.*"access_token":"([^"]+)".*/\1/')
+curl -s http://127.0.0.1:3000/api/operator/v1/me -H "authorization: Bearer $TOKEN"
+# → 200 {user_id, email, role: "operator_staff", operator_id, operator_name, staff_role}
+# admin.demo@powerme.test: thay bằng /api/admin/v1/me. Token sai vai trò → 403; 503 auth_unavailable = staging chưa có DASHBOARD_JWT_* (báo Trí)
+```
+
+Chạy dashboard trên máy bạn với CSMS staging: `CSMS_URL=http://127.0.0.1:3000 npm run dev -w @powerme/dashboard` rồi mở `http://127.0.0.1:5173` (đổi cổng nếu tunnel dùng vế trái khác). **CORS không chặn**: CSMS chỉ nhận `Origin` là `localhost` / `127.0.0.1` / `[::1]` (mọi cổng) — đúng với Vite và tunnel; `curl` không gửi `Origin` nên cũng chạy. Dashboard **không** được mở qua `https://<DOMAIN>` (Caddy không proxy `/api`, và origin đó sẽ bị 403 `forbidden_origin`).
 
 ## 3. Phương án B: mở 5432 theo IP (kiểu MongoDB Atlas) — dự phòng, CHƯA bật
 

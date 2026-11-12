@@ -35,6 +35,7 @@ internet ──443/80──▶ Caddy ──/ocpp/*──▶ csms:9000 (OCPP-J, B
 VPS 127.0.0.1:3000 ──▶ console vận hành (KHÔNG ra internet; xem bằng SSH tunnel)
 VPS 127.0.0.1:8100 ──▶ HMI simulator   (profile sim; cũng chỉ qua SSH tunnel)
 VPS 127.0.0.1:3000/api/driver/v1 ──▶ Driver API cho app tài xế (cùng listener console; dev vào bằng tunnel, DEV-ACCESS.md)
+VPS 127.0.0.1:3000/api/{auth,operator,admin}/v1 ──▶ đăng nhập dashboard (T128, FE-01a; cùng listener, chỉ qua tunnel)
 VPS 127.0.0.1:5432 ──▶ postgres     (BE-27; chỉ loopback, dev vào bằng tunnel với role app_dev)
 ```
 
@@ -52,6 +53,7 @@ VPS 127.0.0.1:5432 ──▶ postgres     (BE-27; chỉ loopback, dev vào bằn
 | `postgres:16.4` | `postgres:16.4-alpine` | Khớp `infra/docker-compose.yml` và CI |
 | Seed không có credential | `DEMO_CHARGE_POINT_PASSWORD` bắt buộc | `ALLOW_LEGACY_NO_CREDENTIAL=false` ⇒ trụ không credential bị 401 |
 | `JWT_SECRET` chung | `DRIVER_API_JWT_*` chỉ cho csms, `DRIVER_API_DEV_AUTH` cố định `false` (BE-27) | Driver API (BE-21/22) đọc đúng các biến này; dev auth (`X-Driver-Id`) là giả danh, không được bật trên staging |
+| `JWT_SECRET` chung cho dashboard | `DASHBOARD_JWT_*` riêng, chỉ cho csms (T128) | ADR-0018: khoá/issuer/audience riêng của dashboard; token tài xế bị RolesGuard trả 403 |
 
 ## Việc phải làm BẰNG TAY (không có gì trong repo tự làm được)
 
@@ -107,6 +109,8 @@ Chạy trong `infra/staging` trên VPS.
 | Như trên nhưng không nạp dữ liệu app tài xế | `./seed.sh --no-app` |
 | `.env` cũ thiếu biến mới (khoá JWT Driver API, mật khẩu tài xế mẫu) — không đổi mật khẩu cũ | `./init-env.sh --add-missing` rồi `./deploy.sh <tag> --seed` |
 | Xoay mật khẩu tài xế mẫu | sửa `DEMO_DRIVER_PASSWORD` trong `.env` rồi `./seed.sh` |
+| Bật đăng nhập dashboard trên `.env` cũ (T128) | `./init-env.sh --add-missing` rồi `./deploy.sh <tag> --seed` ([mục Dashboard](#đăng-nhập-dashboard-t128-fe-01a)) |
+| Xoay mật khẩu admin/staff mẫu | sửa `DEMO_STAFF_PASSWORD` trong `.env` rồi `./seed.sh` |
 | Cho dev vào DB/Driver API | [`DEV-ACCESS.md`](DEV-ACCESS.md) |
 | Về trạng thái đầu cho kịch bản DS-01..DS-10 (**xoá toàn bộ DB**) | `./seed.sh --reset` |
 | Lùi ảnh (chỉ khi an toàn, xem dưới) | `./rollback.sh` |
@@ -162,6 +166,10 @@ Compose chỉ truyền cho `csms` những biến mà `apps/csms/src/config.ts` �
 
 `DEMO_DRIVER_PASSWORD` (≥ 12 ký tự, `init-env.sh` sinh 16 hex) **không** vào container csms; chỉ vào lệnh seed (`run_csms_script`). Trống thì seed bỏ qua đặt mật khẩu và cảnh báo.
 
+**Dashboard (T128, FE-01a, ADR-0018).** `DASHBOARD_JWT_SECRET_BASE64` (base64 chuẩn của ≥ 32 byte, khoá **riêng**, khác Driver API), `DASHBOARD_JWT_ISSUER` (`powerme-staging-dashboard`), `DASHBOARD_JWT_AUDIENCE` (`powerme-dashboard`) đi từ `.env` vào csms (mặc định trống). Cùng luật với Driver API (`loadDashboardAuthConfig`, `apps/csms/src/users/auth.ts`): trống cả ba → CSMS chạy, `/api/auth/v1/login` trả 503 `auth_unavailable`; thiếu một hoặc khoá sai dạng → CSMS **không khởi động**. Vì vậy `check_env` **cảnh báo** khi trống cả ba (deploy tự động bằng `.env` cũ vẫn xanh) và **dừng** khi thiếu một, khoá không phải base64 chuẩn ≥ 32 byte, issuer/audience có ký tự lạ, khoá trùng `DRIVER_API_JWT_SECRET_BASE64`, hoặc `DEMO_STAFF_PASSWORD` ngoài 12..128 ký tự. `init-env.sh` sinh cả bộ cho `.env` mới; `--add-missing` chỉ thêm biến còn trống.
+
+`DEMO_STAFF_PASSWORD` (12..128 ký tự, `init-env.sh` sinh 16 hex, giá trị riêng) **không** vào container csms; chỉ vào lệnh seed. Seed băm nó bằng đúng hàm scrypt mà `StaffAccounts.login` dùng để kiểm rồi ghi cho hai tài khoản dashboard mẫu (mục dưới). Trống thì seed bỏ qua và cảnh báo.
+
 `VIETMAP_SEARCH_API_KEY` và `SMART_SEARCH_*` chưa truyền vào compose: smart search dùng mặc định trong code; `/places/*` trả 503 `provider_unavailable` trên staging.
 
 ## Dữ liệu mẫu cho app tài xế (BE-27)
@@ -194,6 +202,39 @@ Tổng: 9 trạm, 12 trụ, 22 súng; 8 mẫu xe (VinFast VF 3 / VF 5 Plus / VF 
 
 **Trạng thái súng:** trụ `PMAPP-*` ở `in_service` nhưng **không có credential và chưa từng kết nối OCPP**, nên app thấy `driver_status = offline` và không bắt đầu sạc được ở đó. Trạng thái súng chỉ đến từ OCPP (StatusNotification), seed không giả. Chỉ trụ demo `RH24D1-00001` (`HCM-DEMO-01`, Q1) có trạng thái sống khi simulator chạy. Trụ chưa từng kết nối không sinh cảnh báo Offline (OfflineAlertService bỏ qua `last_message_at` và `online_changed_at` cùng NULL).
 
+## Đăng nhập dashboard (T128, FE-01a)
+
+Màn 16 (staff Operator) và 26 (Admin) gọi `POST /api/auth/v1/login`, rồi `GET /api/operator/v1/me` hoặc `GET /api/admin/v1/me` với `Authorization: Bearer <token>` (8 giờ, không refresh; hợp đồng: [`docs/api/OPERATOR-ADMIN-API-HOP-DONG.md`](../../docs/api/OPERATOR-ADMIN-API-HOP-DONG.md)). Các route này nằm trên **cùng listener cổng 3000 với console chưa xác thực**, nên chỉ vào bằng SSH tunnel như console và Driver API. **Không thêm `/api/*` vào Caddyfile**: proxy `/api` ra internet là mở luôn `/api/admin/*` của console (ngắt kết nối trụ, RemoteStop, onboarding) cho mọi người — chờ tới khi console có xác thực hoặc tách listener.
+
+**Bật trên VM có `.env` cũ** (người có quyền `deploy`):
+
+```bash
+cd ~/powerme/infra/staging
+./init-env.sh --add-missing        # thêm DASHBOARD_JWT_* + DEMO_STAFF_PASSWORD; không đổi mật khẩu cũ, không in giá trị
+./deploy.sh <tag> --seed           # csms nhận ba biến mới; seed đặt mật khẩu cho hai tài khoản mẫu
+```
+
+Tag phải chứa #118 (FE-01a) và PR T128 này. Chưa chạy `--add-missing` thì deploy vẫn xanh (chỉ cảnh báo) và đăng nhập trả 503 `auth_unavailable`.
+
+**Tài khoản mẫu** (`seed.sql`, cũng là người thao tác WF-05 `CONSOLE_ACTOR_*`):
+
+| Email | Vai trò | Vào |
+|---|---|---|
+| `admin.demo@powerme.test` | `admin` | màn 26, `/api/admin/v1/*` |
+| `staff.demo@powerme.test` | `operator_staff`, `manager` của operator mẫu `0312345678` (Cong ty PowerMe Demo) | màn 16, `/api/operator/v1/*` |
+
+Mật khẩu chung = `DEMO_STAFF_PASSWORD` trong `.env` trên VM. **Không ghi ở đây, không có trong repo**; Trí gửi riêng. Tài xế (`app.ds0x@…`) đăng nhập dashboard nhận 401 như sai mật khẩu.
+
+**Kiểm qua tunnel** (`ssh -N -L 3000:127.0.0.1:3000 …`, xem [`DEV-ACCESS.md`](DEV-ACCESS.md#d-đăng-nhập-dashboard-t128)):
+
+```bash
+TOKEN=$(curl -s -X POST http://127.0.0.1:3000/api/auth/v1/login -H 'content-type: application/json' \
+  -d '{"email":"staff.demo@powerme.test","password":"<mật khẩu nhận riêng>"}' | sed -E 's/.*"access_token":"([^"]+)".*/\1/')
+curl -s http://127.0.0.1:3000/api/operator/v1/me -H "authorization: Bearer $TOKEN"   # 200; /api/admin/v1/me với token này → 403
+```
+
+**CORS qua tunnel: không bị chặn.** `operator-api.http.ts` chỉ nhận header `Origin` khớp `http(s)://localhost|127.0.0.1|[::1]` với **mọi cổng**, và bỏ qua kiểm khi không có `Origin`. Qua tunnel: `curl`/Postman không gửi `Origin` → chạy; dashboard chạy Vite trên máy dev (`CSMS_URL=http://127.0.0.1:3000 npm run dev -w @powerme/dashboard`, hoặc cổng tunnel khác) gọi `/api` cùng origin qua proxy của Vite, `Origin` là `http://127.0.0.1:5173`/`http://localhost:5173` → hợp lệ; gọi thẳng `http://127.0.0.1:3000` từ trang `localhost:<cổng bất kỳ>` cũng hợp lệ. Chỉ origin thật như `https://<DOMAIN>` bị 403 `forbidden_origin` — việc của FE-01d khi dashboard được host thật, không phải của staging hiện tại.
+
 ## Bảo mật: những điều thật
 
 - **Basic Auth qua wss nhờ Caddy TLS** — đây mới là chỗ OCPP Security Profile 2 trở thành thật: mật khẩu trụ (hash scrypt trong DB) được kiểm lúc nâng cấp WebSocket và đi trong TLS. Trước đó (CSMS chạy `ws://`) mật khẩu đi trần. Profile 3 (chứng chỉ máy khách) chưa làm.
@@ -206,7 +247,7 @@ Tổng: 9 trạm, 12 trụ, 22 súng; 8 mẫu xe (VinFast VF 3 / VF 5 Plus / VF 
 ## Rủi ro và giới hạn thật
 
 1. **Console vận hành không xác thực.** Ai có SSH vào VPS (hoặc chạy được container trong mạng compose) là ngắt được kết nối trụ và gửi RemoteStop. Chỉ chấp nhận được vì không ra internet.
-2. **Chưa có dashboard.** Driver API cho app có (BE-21/22) nhưng **không** ra internet: cùng listener với console chưa xác thực, nên chỉ vào bằng SSH tunnel (DEV-ACCESS.md). Ra internet cho app thật cần tách listener hoặc xác thực console trước.
+2. **Chưa host dashboard.** Đăng nhập dashboard (FE-01a, T128) chỉ có ở API và chỉ qua tunnel; bản build dashboard chưa có dịch vụ/route Caddy. Driver API cho app có (BE-21/22) nhưng **không** ra internet: cùng listener với console chưa xác thực, nên chỉ vào bằng SSH tunnel (DEV-ACCESS.md). Ra internet cho app thật cần tách listener hoặc xác thực console trước.
 3. **Một máy, không HA.** Postgres và CSMS cùng VPS; VPS chết là staging chết. CSMS giữ trạng thái kết nối trong RAM nên mỗi lần restart trụ nối lại (ân hạn `OFFLINE_GRACE_S`).
 4. **Sao lưu chỉ nằm trên cùng VPS** (`backups/`, 10 bản, chụp trước mỗi deploy). Mất VPS là mất cả dữ liệu lẫn sao lưu. Chưa có sao lưu định kỳ hay ngoài máy.
 5. **Chưa có giám sát/cảnh báo.** `/health` công khai cho phép gắn dịch vụ giám sát ngoài (ví dụ UptimeRobot) — chưa gắn. Chưa gom log; Docker giữ 5×10 MB mỗi dịch vụ.
@@ -228,6 +269,8 @@ Tổng: 9 trạm, 12 trụ, 22 súng; 8 mẫu xe (VinFast VF 3 / VF 5 Plus / VF 
 - Logic `deploy.sh`/`rollback.sh`/`seed.sh` với `docker`, `curl`, `sleep` **giả**: từ chối `.env` mẫu, tag lạ, thiếu mật khẩu seed; deploy thành công; từ chối lùi ảnh sau migration; tự lùi khi không có migration; không tự lùi khi có migration; migrate lỗi giữa chừng trả `TAG` về cũ; `--restore-db`; `set_env` với ký tự đặc biệt; mật khẩu không xuất hiện trên argv của `docker`.
 
 **BE-27 (Driver API, tunnel, dữ liệu app) — đã kiểm trên Windows, Postgres 17 nhúng:** `init-env.sh` tạo mới / từ chối ghi đè / `--add-missing` trên `.env` đầy đủ (không đổi byte nào) và trên `.env` trước BE-27 (thêm 4 biến, giữ `POSTGRES_PASSWORD` và `DEMO_PILLAR_PASSWORD`); `check_env` cảnh báo khi thiếu cả ba biến JWT, dừng khi thiếu một/khoá ngắn/không chuẩn/TTL sai; seed app chạy 3 lần không nhân đôi dòng; CSMS chạy với env như compose: đăng nhập tài xế mẫu, `/me`, `/stations` gần Q1, bắt đầu và dừng phiên trên trụ demo (simulator), DS-02 nhận `topuprequired`. Số liệu ở mô tả PR. **Chưa:** `docker compose up` với publish `127.0.0.1:5432`, `ssh -N` thật qua `devtunnel`, psql 16 thật chạy `create-dev-db-role.sh`.
+
+**T128 (đăng nhập dashboard) — đã kiểm trên Windows, Postgres 17 nhúng:** `init-env.sh` tạo mới sinh đủ bộ `DASHBOARD_JWT_*` + `DEMO_STAFF_PASSWORD` (khoá 44 ký tự, khác khoá Driver API, `loadDashboardAuthConfig` nhận: 32 byte); `--add-missing` trên `.env` trước T128 thêm đúng 4 biến, giữ nguyên `POSTGRES_PASSWORD`, biến Driver API và mật khẩu trụ; chạy lần 2 không đổi byte nào; `check_env` cảnh báo khi trống cả ba, dừng khi thiếu issuer/khoá, khoá 16 byte, thiếu `=`, base64url, trùng khoá Driver API, audience có khoảng trắng, `DEMO_STAFF_PASSWORD` 8 ký tự. Seed: không biến → cảnh báo, không đặt; 8 ký tự → thoát 2; có biến chạy 2 lần (và `--no-app`) → 2/2 tài khoản có hash, số user/admin/staff không đổi. CSMS chạy với env như compose: staff đăng nhập → `/api/operator/v1/me` 200, token staff vào `/api/admin/v1/me` 403; admin → `/api/admin/v1/me` 200; sai mật khẩu 401; `Origin: http://localhost:5173` 200, preflight `http://127.0.0.1:5173` 204; `Origin: https://<DOMAIN>` 403. **Chưa:** chạy trên VM.
 
 **CHƯA kiểm được (cần Docker/VPS/GitHub thật):**
 - `docker build` thật của hai Dockerfile (lỗi cú pháp Dockerfile, lớp cache, quyền file, `HEALTHCHECK` chạy trong alpine, user `node`).

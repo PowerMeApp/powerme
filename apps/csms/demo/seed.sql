@@ -124,8 +124,9 @@ ON CONFLICT ON CONSTRAINT rfid_cards_card_identifier_key DO NOTHING;
 
 -- WF-05 / T119: who the console acts as, and one charge point waiting to be onboarded ------------
 -- No login yet (RolesGuard is T103): the console calls ChargePointOnboardingService with the user
--- ids in CONSOLE_ACTOR_ADMIN_ID / CONSOLE_ACTOR_STAFF_ID. These two users have no password_hash,
--- so they cannot log in anywhere once login exists; they only give the service real role rows.
+-- ids in CONSOLE_ACTOR_ADMIN_ID / CONSOLE_ACTOR_STAFF_ID. This file gives them no password_hash (the
+-- repo is public); on staging scripts/seed-demo.mjs sets one from DEMO_STAFF_PASSWORD (T128) so they
+-- can sign in to the dashboard (FE-01a). Without that variable they cannot log in anywhere.
 INSERT INTO users (email, full_name, role, account_status)
 VALUES ('admin.demo@powerme.test', 'Admin Demo', 'admin', 'active'),
        ('staff.demo@powerme.test', 'Staff Demo', 'operator_staff', 'active')
