@@ -45,9 +45,16 @@ ON CONFLICT ON CONSTRAINT connectors_charge_point_id_connector_no_key DO NOTHING
 
 -- Hai tài xế mẫu, mỗi người Charging Credit 500.000 VND -----------------------------------
 -- Tài xế thứ hai (T110) giữ thẻ DEMO-CARD-0002 cho súng B, thay thẻ ví DEMO-WALLET-0001 đã bỏ.
+-- BE-30: số GIẢ dạng E.164 (users_phone_number_key UNIQUE từ 0017). Số đã có người khác dùng thì
+-- tạo tài xế mẫu không có số, thay vì làm hỏng cả seed.
 INSERT INTO users (email, full_name, phone_number, role, account_status)
-VALUES ('driver.demo@powerme.test', 'Nguyen Van Demo', '0900000001', 'driver', 'active'),
-       ('driver2.demo@powerme.test', 'Tran Thi Demo', '0900000002', 'driver', 'active')
+SELECT v.email, v.full_name,
+       CASE WHEN EXISTS (SELECT 1 FROM users x WHERE x.phone_number = v.phone) THEN NULL ELSE v.phone END,
+       'driver', 'active'
+FROM (VALUES
+  ('driver.demo@powerme.test', 'Nguyen Van Demo', '+84900000001'),
+  ('driver2.demo@powerme.test', 'Tran Thi Demo', '+84900000002')
+) AS v(email, full_name, phone)
 ON CONFLICT ON CONSTRAINT users_email_key DO NOTHING;
 
 INSERT INTO drivers (user_id, consent_version, consent_given_at)

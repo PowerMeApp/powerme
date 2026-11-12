@@ -168,13 +168,13 @@ Compose chỉ truyền cho `csms` những biến mà `apps/csms/src/config.ts` �
 
 `./deploy.sh <tag> --seed` và `./seed.sh` chạy `seed-demo.mjs`: `apps/csms/demo/seed.sql` (trụ demo `RH24D1-00001`, như trước) rồi `apps/csms/demo/seed-app.sql`, sau đó băm `DEMO_DRIVER_PASSWORD` bằng đúng hàm scrypt của BE-21 và ghi cho ba tài xế mẫu. Idempotent: chạy lại không nhân đôi dòng, không đụng phiên, sổ cái, trạng thái súng, lifecycle; số dư chỉ được đặt khi ví chưa có dòng sổ cái nào. `--no-app` bỏ phần này.
 
-| Email | Kịch bản BM04 | Credit | Điểm | Xe (★ mặc định) |
-|---|---|---|---|---|
-| `app.ds01@powerme.test` | DS-01 đủ tiền, sạc được | 200.000 VND | 0 | ★ VinFast VF 8 Plus (CCS2) `51K-901.01`; Nissan Leaf (CHAdeMO) `51K-901.02` |
-| `app.ds02@powerme.test` | DS-02 thiếu tiền (< `CHARGE_MINIMUM_START_VND` 50.000) → `topuprequired` | 30.000 VND | 0 | ★ VinFast VF e34 (CCS2) `51K-902.01` |
-| `app.ds03@powerme.test` | DS-03 có điểm (≥ 500 điểm tối thiểu để dùng khi nạp) | 100.000 VND | 600 (hạn 12 tháng từ lần seed đầu) | ★ Hyundai Ioniq 5 (CCS2, không VinFast) `51K-903.01`; Wuling HongGuang MiniEV (Type2) `51K-903.02` |
+| Email | SĐT (giả, BE-30) | Kịch bản BM04 | Credit | Điểm | Xe (★ mặc định) |
+|---|---|---|---|---|---|
+| `app.ds01@powerme.test` | `+84900000101` | DS-01 đủ tiền, sạc được | 200.000 VND | 0 | ★ VinFast VF 8 Plus (CCS2) `51K-901.01`; Nissan Leaf (CHAdeMO) `51K-901.02` |
+| `app.ds02@powerme.test` | `+84900000102` | DS-02 thiếu tiền (< `CHARGE_MINIMUM_START_VND` 50.000) → `topuprequired` | 30.000 VND | 0 | ★ VinFast VF e34 (CCS2) `51K-902.01` |
+| `app.ds03@powerme.test` | `+84900000103` | DS-03 có điểm (≥ 500 điểm tối thiểu để dùng khi nạp) | 100.000 VND | 600 (hạn 12 tháng từ lần seed đầu) | ★ Hyundai Ioniq 5 (CCS2, không VinFast) `51K-903.01`; Wuling HongGuang MiniEV (Type2) `51K-903.02` |
 
-Mật khẩu: một mật khẩu chung = `DEMO_DRIVER_PASSWORD` trong `.env` trên VM. **Không ghi ở đây, không có trong repo**; Trí gửi riêng. Hai tài xế `driver.demo@powerme.test`, `driver2.demo@powerme.test` của `seed.sql` không có mật khẩu và không có xe (giữ cho demo thẻ RFID `DEMO-CARD-0001`/`0002`, không đăng nhập app được).
+Mật khẩu: một mật khẩu chung = `DEMO_DRIVER_PASSWORD` trong `.env` trên VM. **Không ghi ở đây, không có trong repo**; Trí gửi riêng. Đăng nhập bằng email hoặc SĐT (BE-30: `{"phone_number": "0900000101", "password": ...}` — `0900 000 101`, `+84900000101` đều được). SĐT là số giả, không gọi / nhắn được; số đã có người khác dùng thì seed để trống thay vì lỗi. Hai tài xế `driver.demo@powerme.test` (`+84900000001`), `driver2.demo@powerme.test` (`+84900000002`) của `seed.sql` không có mật khẩu và không có xe (giữ cho demo thẻ RFID `DEMO-CARD-0001`/`0002`, không đăng nhập app được).
 
 Trạm (operator mẫu `0312345678`, biểu giá theo khung giờ của `seed.sql`: 2.800 / 3.800 / 5.500 VND/kWh). Toạ độ là vị trí gần đúng của địa danh thật; tên, công suất là giả.
 

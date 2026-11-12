@@ -1,5 +1,6 @@
 /**
  * BE-21 — đăng ký / đăng nhập / làm mới token tài xế qua HTTP thật trên Postgres riêng.
+ * BE-30 — đăng ký có số điện thoại (chuẩn hoá E.164, 409 `phone_taken`) và đăng nhập bằng số.
  * Chạy bằng `npm run test:driver-discovery -w @powerme/csms` (runner tạo DB mới cho mỗi suite).
  */
 import { randomBytes } from 'node:crypto';
@@ -194,7 +195,9 @@ describeDb('BE-21 driver register / login / refresh over HTTP and dedicated Post
       [registration('short@example.invalid', { password: 'ngan7ky' }), 'invalid_password'],
       [registration('long@example.invalid', { password: 'x'.repeat(129) }), 'invalid_password'],
       [registration('khong-co-a-cong'), 'invalid_email'],
-      [registration('phone@example.invalid', { phone_number: '0901234567' }), 'invalid_input'],
+      [registration('phone@example.invalid', { phone_number: '901234567' }), 'invalid_input'],
+      [registration('phone@example.invalid', { phone_number: 'goi-cho-toi' }), 'invalid_input'],
+      [registration('phone@example.invalid', { phone_number: 84901234567 }), 'invalid_input'],
       [
         registration('phone@example.invalid', { phone_number: '+8490123456789012' }),
         'invalid_input',
@@ -335,6 +338,178 @@ describeDb('BE-21 driver register / login / refresh over HTTP and dedicated Post
     ).toBe(200);
   });
 
+  describe('BE-30 — số điện thoại', () => {
+    const PHONE_PASSWORD = 'Demo-password-0001';
+    let phoneDriverId: string;
+
+    it('đăng ký với số ở nhiều dạng → lưu E.164', async () => {
+      const cases: [string, string, string][] = [
+        ['sdt.a@example.invalid', '0912 345 678', '+84912345678'],
+        ['sdt.b@example.invalid', '84912.345.679', '+84912345679'],
+        ['sdt.c@example.invalid', '+84-912-345-670', '+84912345670'],
+        ['sdt.d@example.invalid', '+1 415 555 0123', '+14155550123'],
+      ];
+      for (const [email, phone, stored] of cases) {
+        const res = await post(
+          'register',
+          registration(email, { phone_number: phone, password: PHONE_PASSWORD }),
+        );
+        expect(res.response.status).toBe(201);
+        const [row] = await q('SELECT id::text AS id, phone_number FROM users WHERE email=$1', [
+          email,
+        ]);
+        expect(row!.phone_number).toBe(stored);
+        if (email === 'sdt.a@example.invalid') phoneDriverId = String(row!.id);
+      }
+      // null và không gửi đều là "không có số".
+      expect(
+        (await post('register', registration('sdt.null@example.invalid', { phone_number: null })))
+          .response.status,
+      ).toBe(201);
+      expect(
+        (await q("SELECT phone_number FROM users WHERE email='sdt.null@example.invalid'"))[0]!
+          .phone_number,
+      ).toBeNull();
+    });
+
+    it('số đã có người dùng (khác định dạng) → 409 phone_taken, không ghi gì', async () => {
+      const before = (await q('SELECT count(*)::int AS n FROM users'))[0]!.n;
+      for (const phone of ['0912345678', '+84 912 345 678', '84912345678', '+840912345678']) {
+        const res = await post(
+          'register',
+          registration('sdt.trung@example.invalid', { phone_number: phone }),
+        );
+        expect([res.response.status, res.body]).toEqual([
+          409,
+          { error: 'phone_taken', detail: 'phone_taken' },
+        ]);
+      }
+      // Email trùng được báo trước số trùng.
+      const both = await post(
+        'register',
+        registration('SDT.A@example.invalid', { phone_number: '0912345678' }),
+      );
+      expect([both.response.status, both.body.error]).toEqual([409, 'email_taken']);
+      expect((await q('SELECT count(*)::int AS n FROM users'))[0]!.n).toBe(before);
+    });
+
+    it('hai đăng ký cùng số chạy song song: đúng một 201, bên kia 409 phone_taken', async () => {
+      const results = await Promise.all(
+        ['sdt.song1@example.invalid', 'sdt.song2@example.invalid'].map((email) =>
+          post('register', registration(email, { phone_number: '0987 654 321' })),
+        ),
+      );
+      expect(results.map((r) => r.response.status).sort()).toEqual([201, 409]);
+      expect(results.find((r) => r.response.status === 409)!.body.error).toBe('phone_taken');
+      expect(await q("SELECT 1 FROM users WHERE phone_number='+84987654321'")).toHaveLength(1);
+    });
+
+    it('đăng nhập bằng số ở mọi dạng → 200 và /me đúng tài khoản; email vẫn đăng nhập như cũ', async () => {
+      for (const phone of ['0912345678', '+84912345678', '84912345678', ' 091.234.5678 ']) {
+        const res = await post('login', { phone_number: phone, password: PHONE_PASSWORD });
+        expect(res.response.status).toBe(200);
+        expect(Object.keys(res.body).sort()).toEqual(
+          [
+            'access_token',
+            'expires_in',
+            'refresh_expires_in',
+            'refresh_token',
+            'token_type',
+          ].sort(),
+        );
+        const profile = await me(res.body.access_token);
+        expect([profile.response.status, profile.body.user_id]).toEqual([200, phoneDriverId]);
+      }
+      const byEmail = await post('login', {
+        email: 'sdt.a@example.invalid',
+        password: PHONE_PASSWORD,
+      });
+      expect((await me(byEmail.body.access_token)).body.user_id).toBe(phoneDriverId);
+      const intl = await post('login', { phone_number: '+14155550123', password: PHONE_PASSWORD });
+      expect(intl.response.status).toBe(200);
+    });
+
+    it('sai mật khẩu, số không có tài khoản, số không chuẩn hoá được → cùng 401 invalid_credentials', async () => {
+      const responses = [
+        await post('login', { phone_number: '0912345678', password: 'Sai-password-0001' }),
+        await post('login', { phone_number: '0999999999', password: PHONE_PASSWORD }),
+        await post('login', { phone_number: 'goi-cho-toi', password: PHONE_PASSWORD }),
+        await post('login', { phone_number: '1'.repeat(40), password: PHONE_PASSWORD }),
+      ];
+      for (const res of responses) {
+        expect(res.response.status).toBe(401);
+        expect(res.body).toEqual({ error: 'invalid_credentials', detail: 'invalid_credentials' });
+        expect(res.response.headers.get('www-authenticate')).toBe('Bearer');
+      }
+    });
+
+    it('gửi cả email lẫn số, không gửi cái nào, hoặc sai kiểu → 400 invalid_input', async () => {
+      const bodies: Record<string, unknown>[] = [
+        { email: 'sdt.a@example.invalid', phone_number: '0912345678', password: PHONE_PASSWORD },
+        { email: 'sdt.a@example.invalid', phone_number: null, password: PHONE_PASSWORD },
+        { password: PHONE_PASSWORD },
+        { phone_number: 912345678, password: PHONE_PASSWORD },
+        { phone_number: null, password: PHONE_PASSWORD },
+        { phone_number: '0912345678' },
+        { phone_number: '0912345678', password: PHONE_PASSWORD, otp: '123456' },
+      ];
+      for (const body of bodies) {
+        const res = await post('login', body);
+        expect([res.response.status, res.body.error]).toEqual([400, 'invalid_input']);
+      }
+    });
+
+    it('tài khoản bị khoá: 403 account_locked chỉ khi mật khẩu đúng (đăng nhập bằng số)', async () => {
+      await q("UPDATE users SET account_status='suspended' WHERE id=$1", [phoneDriverId]);
+      try {
+        const ok = await post('login', { phone_number: '0912345678', password: PHONE_PASSWORD });
+        expect([ok.response.status, ok.body.error]).toEqual([403, 'account_locked']);
+        const wrong = await post('login', {
+          phone_number: '0912345678',
+          password: 'Sai-password-0002',
+        });
+        expect([wrong.response.status, wrong.body.error]).toEqual([401, 'invalid_credentials']);
+      } finally {
+        await q("UPDATE users SET account_status='active' WHERE id=$1", [phoneDriverId]);
+      }
+    });
+
+    it('giới hạn thử sai tính theo số ĐÃ chuẩn hoá + IP: 5 lần sai ở các dạng khác nhau → 429 kể cả mật khẩu đúng', async () => {
+      // Instance riêng (bộ đếm riêng, IP giả) để không cộng vào trần 20 lần / IP của các test HTTP.
+      const accounts = new DriverAccounts(db, config.driverApi!);
+      const ip = '203.0.113.30';
+      const forms = [
+        '0912345678',
+        '+84912345678',
+        '84 912 345 678',
+        '091.234.5678',
+        '+840912345678',
+      ];
+      for (const [i, phone] of forms.entries())
+        await expect(
+          accounts.login({ phone_number: phone, password: `Sai-password-000${i}` }, ip),
+        ).rejects.toMatchObject({ status: 401, code: 'invalid_credentials' });
+      await expect(
+        accounts.login({ phone_number: '0912345678', password: PHONE_PASSWORD }, ip),
+      ).rejects.toMatchObject({ status: 429, code: 'too_many_attempts' });
+      // Số khác cùng IP và IP khác cùng số vẫn đăng nhập được.
+      await expect(
+        accounts.login({ phone_number: '0912345679', password: PHONE_PASSWORD }, ip),
+      ).resolves.toMatchObject({ token_type: 'Bearer' });
+      await expect(
+        accounts.login({ phone_number: '0912345678', password: PHONE_PASSWORD }, '203.0.113.31'),
+      ).resolves.toMatchObject({ token_type: 'Bearer' });
+      // Số không chuẩn hoá được cũng bị đếm (theo chuỗi đã trim) và khoá như thường.
+      for (let i = 0; i < 5; i++)
+        await expect(
+          accounts.login({ phone_number: ' goi-cho-toi ', password: PHONE_PASSWORD }, ip),
+        ).rejects.toMatchObject({ status: 401 });
+      await expect(
+        accounts.login({ phone_number: 'goi-cho-toi', password: PHONE_PASSWORD }, ip),
+      ).rejects.toMatchObject({ status: 429 });
+    });
+  });
+
   it('enforces POST, JSON content type, body size and known routes', async () => {
     const get = await post('login', null, {}, 'GET');
     expect([get.response.status, get.body.error]).toEqual([405, 'method_not_allowed']);
@@ -390,6 +565,8 @@ describeDb('BE-21 driver register / login / refresh over HTTP and dedicated Post
     const log = output.join('\n');
     expect(log).not.toContain(PASSWORD);
     expect(log).not.toContain('sai-mat-khau');
+    expect(log).not.toContain('Demo-password-0001');
+    expect(log).not.toContain('Sai-password-000');
     for (const hash of hashes) expect(log).not.toContain(hash.split('$')[5]);
     expect(log).not.toMatch(/eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\./);
   });

@@ -17,6 +17,9 @@ không suy ra OTP/login đã hoàn thành. Thay đổi chưa merge/commit/push k
 **BE-22 (10/11/2026, OpenAPI 0.6.0, T95):** nối HTTP cho `POST /charges`, `GET /charges/{key}`,
 `GET /sessions/{id}/progress`, `POST /sessions/{id}/stop`, `GET /sessions/{id}/statement` và thêm
 `GET /credit`, `GET /credit/transactions` — xem §2, §7 và §12 (cách app gọi). Còn lại: `time-left`.
+**BE-30 (12/11/2026, OpenAPI 0.7.0):** đăng nhập bằng email **hoặc** số điện thoại + mật khẩu;
+`phone_number` khi đăng ký được chuẩn hoá về E.164 và duy nhất (409 `phone_taken`, migration 0017)
+— xem §6 và §6a. OTP/SMS và Google/Firebase vẫn ngoài phạm vi.
 
 ---
 
@@ -92,8 +95,8 @@ bearer, chỉ nhận `application/json` ≤ 16 KiB, trường lạ → 400:
 
 | Route | Body | Thành công | Lỗi chính |
 |---|---|---|---|
-| `/auth/register` | `email`, `password` (8–128), `full_name`, `phone_number?` (E.164), `consent_version`, `consent: true` | 201 + token như login | 400 `consent_required` (không ghi gì, BR-P05), `invalid_email`, `invalid_password`, `invalid_input`; 409 `email_taken` |
-| `/auth/login` | `email`, `password` | 200 `{access_token, token_type: Bearer, expires_in: 900, refresh_token, refresh_expires_in}` | 401 `invalid_credentials` (sai email = sai mật khẩu); 403 `account_locked`; 429 `too_many_attempts` |
+| `/auth/register` | `email`, `password` (8–128), `full_name`, `phone_number?` (chuẩn hoá E.164, §6a), `consent_version`, `consent: true` | 201 + token như login | 400 `consent_required` (không ghi gì, BR-P05), `invalid_email`, `invalid_password`, `invalid_input`; 409 `email_taken`, `phone_taken` |
+| `/auth/login` | `email` **hoặc** `phone_number` (đúng một), `password` | 200 `{access_token, token_type: Bearer, expires_in: 900, refresh_token, refresh_expires_in}` | 400 `invalid_input` (cả hai / không có định danh); 401 `invalid_credentials` (sai định danh = sai mật khẩu); 403 `account_locked`; 429 `too_many_attempts` |
 | `/auth/refresh` | `refresh_token` | 200 `{access_token, token_type, expires_in}` | 401 `invalid_refresh_token`; 403 `account_locked` / `forbidden` |
 
 - Access token đúng chuẩn verify ở trên (HS256, `typ: JWT`, `role: driver`, 900 s), nên dùng ngay với
@@ -104,8 +107,9 @@ bearer, chỉ nhận `application/json` ≤ 16 KiB, trường lạ → 400:
   (`account_status` ≠ `active`) có hiệu lực ngay vì refresh và mọi request đều kiểm DB.
 - Tài khoản khoá: 403 `account_locked` (F-13 "tài khoản khoá không đăng nhập được"), chỉ trả khi mật
   khẩu đúng — để app hiện "tài khoản bị khoá, liên hệ hỗ trợ" mà người dò mật khẩu không biết được.
-- Giới hạn thử sai: 5 lần / 60 s theo email + IP, 20 lần / 60 s theo IP → khoá 15 phút (Retry-After).
-  Trong bộ nhớ một tiến trình: restart là mất, nhiều instance thì mỗi cái đếm riêng.
+- Giới hạn thử sai: 5 lần / 60 s theo định danh đã chuẩn hoá (email lowercase, hoặc số E.164) + IP,
+  20 lần / 60 s theo IP → khoá 15 phút (Retry-After). Email và số của cùng tài khoản đếm riêng (trần
+  theo IP vẫn chung). Trong bộ nhớ một tiến trình: restart là mất, nhiều instance thì mỗi cái đếm riêng.
 - Đăng ký tạo `users` (role driver, active, mật khẩu băm scrypt) + `drivers` (consent) trong một
   transaction; **không** tạo ví credit/loyalty (SRS không yêu cầu; `ensureAccounts` tạo khi cần).
 - Chưa cấu hình JWT → 503 `auth_unavailable`. Không log mật khẩu, hash, token; response không có hash.
@@ -116,9 +120,41 @@ qua SSH tunnel: `ssh -N -L 5433:127.0.0.1:5432 -L 3000:127.0.0.1:3000 devtunnel@
 `http://127.0.0.1:3000/api/driver/v1` (Android Emulator: `http://10.0.2.2:3000/api/driver/v1`).
 JWT: issuer `powerme-staging`, audience `powerme-driver-app`, refresh 30 ngày; `X-Driver-Id` tắt.
 Tài xế mẫu `app.ds01/ds02/ds03@powerme.test` (DS-01 200.000 VND, DS-02 30.000 VND, DS-03 600 điểm),
-mật khẩu nhận riêng. Chỉ trụ demo `PM-D1-HCM-0001` bắt đầu sạc được; trạm `HCM-APP-*` luôn
+SĐT giả `+84900000101` / `+84900000102` / `+84900000103` (BE-30, đăng nhập bằng SĐT được), mật khẩu
+nhận riêng. Chỉ trụ demo `PM-D1-HCM-0001` bắt đầu sạc được; trạm `HCM-APP-*` luôn
 `offline`. Hướng dẫn, cảnh báo: [infra/staging/DEV-ACCESS.md](../../infra/staging/DEV-ACCESS.md);
 dữ liệu mẫu: [infra/staging/README.md](../../infra/staging/README.md#dữ-liệu-mẫu-cho-app-tài-xế-be-27).
+
+### 6a. Đăng nhập bằng số điện thoại (BE-30)
+
+```http
+POST /api/driver/v1/auth/login
+Content-Type: application/json
+
+{"phone_number": "0901234567", "password": "<mật khẩu>"}
+```
+
+- Body có **đúng một** định danh: `{email, password}` (như BE-21, app đang gọi kiểu này vẫn chạy y
+  nguyên) hoặc `{phone_number, password}`. Gửi cả hai khoá (kể cả `null`) hoặc không khoá nào → 400
+  `invalid_input`. Không có trường `identifier` chung: app biết người dùng gõ email hay số.
+- Mọi đảm bảo của BE-21 giữ cho cả hai đường: cùng 401 `invalid_credentials` khi sai định danh hoặc
+  sai mật khẩu (số không chuẩn hoá được cũng là 401, vẫn băm giả để thời gian như nhau), 403
+  `account_locked` chỉ sau mật khẩu đúng, giới hạn thử sai theo định danh đã chuẩn hoá + IP (gõ
+  `0901…` rồi `+84901…` vẫn là một bộ đếm).
+- **Quy tắc chuẩn hoá** (`apps/csms/src/driver/phone-number.ts`; dùng cho cả register, login và dữ
+  liệu cũ trong migration 0017):
+  1. Bỏ khoảng trắng, `.`, `-`, `(`, `)`. Chuỗi gốc > 32 ký tự → không nhận.
+  2. Còn lại: `+` tuỳ chọn ở đầu rồi toàn chữ số ASCII.
+  3. Việt Nam — NSN 9–10 chữ số không bắt đầu bằng 0: `0`+NSN, `84`+NSN, `+84`+NSN, `+840`+NSN → `+84`+NSN.
+     Ví dụ `0901234567`, `090.123.4567`, `84901234567`, `+84 901 234 567` → `+84901234567`.
+  4. Nước khác: `+` + 7–15 chữ số, chữ số đầu khác 0 → giữ E.164 (vd `+14155550123`), không kiểm
+     độ dài theo từng nước.
+  5. Còn lại (vd `901234567` — thiếu 0/84 nên không biết nước nào) → register 400 `invalid_input`.
+- Một số chỉ thuộc một tài khoản (UNIQUE `users_phone_number_key`, mọi role). Register với số đã có
+  (bất kể định dạng) → 409 `phone_taken`; email trùng được báo trước (`email_taken`).
+- **Ngoài phạm vi:** OTP/SMS (không có nhà cung cấp SMS, không xác minh số là của người đăng ký) và
+  Google/Firebase — để sau Defense 1.1 (ADR-0017). Số điện thoại hiện chỉ là định danh đăng nhập
+  thay email, không chứng minh sở hữu số. Chưa có route đổi số / đổi mật khẩu.
 
 ## 7. Lỗi: từ `ChargingError.code` sang HTTP
 
@@ -163,7 +199,7 @@ hoặc generated Dart client trong slice này. Không tự tải thêm công c�
 | 1 | Đường cong sạc DC theo mẫu xe lấy từ đâu cho `soc_curve` | bảng `vehicle_models` thêm 3 điểm (kW tại 20/50/80 % SoC), Admin nhập | Trí + Khang |
 | 2 | `estimated_cost_vnd` khi đang sạc tính theo biểu giá lúc nào | giá của đoạn hiện tại × Wh đã sạc, ghi rõ "ước tính" (BR-P02) | Trí + Khang |
 | 3 | Chế độ sạc ngoài `energy_kwh` (tiền, thời gian) | giữ ngoài hợp đồng đến khi OCPP có lệnh đặt hạn mức; app làm hạn mức mềm | Sơn |
-| 4 | Login/OTP/refresh cho tài xế | BE-21 có đăng ký/đăng nhập email + mật khẩu và refresh không bảng (§6). OTP/Google/Firebase ngoài phạm vi, để sau Defense 1.1; hướng dự kiến: đổi token Firebase → JWT CSMS qua một route mới | Sơn + Trí |
+| 4 | Login/OTP/refresh cho tài xế | BE-21 có đăng ký/đăng nhập email + mật khẩu và refresh không bảng (§6); BE-30 thêm đăng nhập số điện thoại + mật khẩu (§6a). OTP/SMS/Google/Firebase ngoài phạm vi, để sau Defense 1.1; hướng dự kiến: đổi token Firebase → JWT CSMS qua một route mới | Sơn + Trí |
 
 ## 12. BE-22 — cách app gọi route sạc và credit (cho Sơn, T96)
 
