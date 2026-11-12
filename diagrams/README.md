@@ -9,7 +9,7 @@ Each diagram has its own folder with the **source** and a **PNG render** (open t
 | Source type | Diagrams | Command |
 |---|---|---|
 | PlantUML `.puml` (+ shared `_style.iuml`) | AD, PKG, CD, SD, STM | `java -DPLANTUML_LIMIT_SIZE=16384 -jar plantuml-1.2024.7.jar -tpng <file>.puml` (needs Graphviz) |
-| Python layout script `.py` | BCD, UCD, Screen Flow, ARCH-1, AD-4 | `python3 <script>.py` → SVG, then `rsvg-convert`. UCD scripts import the helper `vpuc` (`use-case/vpuc.py`) and screen flows import `sfdraw` (`screen-flow/driver/`): run from the figure folder with `PYTHONPATH=..` (UCD) or `PYTHONPATH=../driver` (screen flows); needs Pillow + DejaVu Sans. `vpuc` was rebuilt on 07/11/2026 from the committed UCD PNGs (same size, ~1 % anti-aliasing difference); the committed PNGs stay the reference |
+| Python layout script `.py` | BCD, UCD, Screen Flow, ARCH-1, AD-4 | `python3 <script>.py` → SVG, then `rsvg-convert`. UCD scripts import the helper `vpuc` (`use-case/vpuc.py`) and screen flows import `sfdraw` (one identical copy in each `screen-flow/<actor>/` folder): run from the figure folder with `PYTHONPATH=..` (UCD; screen flows need nothing); needs Pillow + DejaVu Sans. `vpuc` was rebuilt on 07/11/2026 from the committed UCD PNGs (same size, ~1 % anti-aliasing difference); the committed PNGs stay the reference |
 | draw.io `.drawio` | ARCH-2, Logical ERD v1.1 (Refund) | open in diagrams.net or the VS Code Draw.io extension |
 | ELK layout (`report4/erd-layout/`) | Conceptual, Logical, Physical ERD | `sh build_all.sh` (needs node + `elkjs@0.9.3`, Pillow, `rsvg-convert`); data in `model.py` + `pmodel.json` |
 | DBML | Physical ERD | `report4/erd-physical/powerme_physical.dbml` → paste into dbdiagram.io |

@@ -16,10 +16,10 @@ class SF:
                       f'<line x1="{x}" y1="{y+32}" x2="{x+w}" y2="{y+32}" stroke="#333" stroke-width="1"/>')
         s.bb += [(x, y), (x+w, y+h)]
         return dict(kind="box", x=x+w/2, y=y+h/2, w=w, h=h)
-    def state(s, cx, cy, name, kind="screen", note=None, w=None):
+    def state(s, cx, cy, name, kind="screen", note=None, w=None, h=None):
         lines = [name] + ([note] if note else [])
         w = w or max(max(tw(l, 13, i == 0) for i, l in enumerate(lines)) + 34, 150)
-        h = 40 + 16*(len(lines)-1)
+        h = h or 40 + 16*(len(lines)-1)
         fill = {"screen": BLUE, "sheet": SHEET, "ext": EXT}[kind]
         dash = ' stroke-dasharray="5 3"' if kind == "ext" else ""
         t = [f'<rect x="{cx-w/2:.1f}" y="{cy-h/2:.1f}" width="{w:.1f}" height="{h}" rx="12" fill="{fill}" stroke="#222" stroke-width="1.4"{dash}/>']

@@ -529,7 +529,7 @@ trụ; hợp đồng trả id **chuỗi** và `charge_point_id` + `serial_number
 | A2 | `disable`/`enable` có gửi `ChangeAvailability` xuống trụ không, hay chỉ chặn ở CSMS? | Chỉ CSMS trong v0.1; BR-P07 cho phần cấu hình |
 | A3 | Ai tạo operator, site? | Seed đến khi có UC |
 | A4 | Free-vend tag trùng `card_identifier` thẻ đã đăng ký → 409? | Có (`tag_conflicts_with_card`) |
-| A5 | Sửa bản vẽ Revenue Share / Platform Fee theo K1 | — |
+| ~~A5~~ | ~~Sửa bản vẽ Revenue Share / Platform Fee theo K1~~ | Done in T126 (#124): Report 3 diagram sources no longer show Revenue Share / Platform Fee. |
 
 **Trí (tự giữ)**: T1 `remote_start` của operator có cần thật cho Review 3 không; ~~T2 xác thực nhân viên
 dùng chung bộ đếm thử sai với tài xế hay riêng~~ — đã trả lời bằng code FE-01a: **riêng** (một
