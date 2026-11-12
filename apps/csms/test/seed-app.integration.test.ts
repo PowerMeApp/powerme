@@ -228,4 +228,43 @@ describeDb('demo/seed-app.sql — dữ liệu mẫu cho app tài xế (BE-27)', 
     const mini = (await search(DS03, '51K-903.02')).items.map((s) => s.site_code).sort();
     expect(mini).toEqual(['HCM-APP-Q1-01', 'HCM-APP-Q10-01', 'HCM-APP-TD-01']);
   });
+
+  it('BE-30: tài xế mẫu có số điện thoại E.164 khác nhau (cả hai tài xế demo của seed.sql)', async () => {
+    const rows = await q(
+      `SELECT email, phone_number FROM users
+       WHERE email = ANY($1) OR email LIKE '%.demo@powerme.test' AND role = 'driver' ORDER BY email`,
+      [EMAILS],
+    );
+    expect(rows).toEqual([
+      { email: DS01, phone_number: '+84900000101' },
+      { email: DS02, phone_number: '+84900000102' },
+      { email: DS03, phone_number: '+84900000103' },
+      { email: 'driver.demo@powerme.test', phone_number: '+84900000001' },
+      { email: 'driver2.demo@powerme.test', phone_number: '+84900000002' },
+    ]);
+  });
+
+  // Chạy cuối: dựng lại DB.
+  it('BE-30: số mẫu đã có người khác dùng → tài xế mẫu không có số, seed không lỗi; số trống lại thì seed lần sau điền vào', async () => {
+    await resetAndMigrate(db.$client);
+    await q(
+      `INSERT INTO users (email, full_name, phone_number, role) VALUES ('nguoi-khac@example.invalid', 'Nguoi Khac', '+84900000102', 'driver')`,
+    );
+    await seedAll();
+    const phones = async () =>
+      (
+        await q<{ email: string; phone_number: string | null }>(
+          'SELECT email, phone_number FROM users WHERE email = ANY($1) ORDER BY email',
+          [EMAILS],
+        )
+      ).map((r) => r.phone_number);
+    expect(await phones()).toEqual(['+84900000101', null, '+84900000103']);
+    await q(`UPDATE users SET phone_number = NULL WHERE email = 'nguoi-khac@example.invalid'`);
+    await seedAll();
+    expect(await phones()).toEqual(['+84900000101', '+84900000102', '+84900000103']);
+    // Không ghi đè số đã có.
+    await q(`UPDATE users SET phone_number = '+84911111111' WHERE email = $1`, [DS01]);
+    await seedAll();
+    expect(await phones()).toEqual(['+84911111111', '+84900000102', '+84900000103']);
+  });
 });

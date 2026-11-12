@@ -92,6 +92,9 @@ Mật khẩu chung của ba tài xế mẫu (`DEMO_DRIVER_PASSWORD`) nhận riê
 curl -s -X POST http://127.0.0.1:3000/api/driver/v1/auth/login -H 'content-type: application/json' \
   -d '{"email":"app.ds01@powerme.test","password":"<mật khẩu nhận riêng>"}'
 # → 200 {access_token, expires_in: 900, refresh_token, ...}; 503 auth_unavailable = staging chưa có khoá JWT (báo Trí)
+# BE-30: hoặc bằng số điện thoại (giả) của tài xế mẫu — mọi dạng 0900000101 / +84900000101 / 84900000101
+curl -s -X POST http://127.0.0.1:3000/api/driver/v1/auth/login -H 'content-type: application/json' \
+  -d '{"phone_number":"0900000101","password":"<mật khẩu nhận riêng>"}'
 ```
 
 Chỉ trụ demo `RH24D1-00001` (`PM-D1-HCM-0001`, trạm `HCM-DEMO-01`) có trạng thái sống và bắt đầu sạc được — khi simulator đang chạy (`./deploy.sh <tag> --sim`, HMI ở `127.0.0.1:8100` của VM; user `devtunnel` không forward cổng này, nhờ Trí cắm súng hoặc mở thêm `permitopen`). Các trạm `HCM-APP-*` hiện `offline` (chưa từng kết nối OCPP).

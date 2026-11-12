@@ -116,7 +116,7 @@ Trả lời T10 §2: tên bảng thật, module chủ theo `PACKAGE-DIAGRAM-CSMS
 
 **`users`** — mọi người dùng, phân biệt bằng `role` (`driver` · `operator_staff` · `admin`).
 Cột: `email` (BK), `full_name`, `phone_number`, `role`, `account_status` (`active` · `suspended` · `closed`), `password_hash` (argon2, null nếu chưa đặt).
-Khoá: PK `id`; UNIQUE `email`; index `phone_number`.
+Khoá: PK `id`; UNIQUE `email`; UNIQUE `phone_number` (`users_phone_number_key`, từ 0017 / BE-30 — thay index thường; NULL không đụng nhau; giá trị E.164 do Driver API chuẩn hoá).
 
 **`drivers`** — mở rộng của `users` khi `role = driver`. Chỉ tồn tại vì Driver có thuộc tính riêng.
 Cột: `user_id` (PK, FK → `users`, `ON DELETE CASCADE`), `consent_version`, `consent_given_at`.
