@@ -27,6 +27,8 @@ docker build -t steve:3.14.1 steve
 
 Lưu ý chưa kiểm: `Dockerfile` của SteVe 3.14.1 chờ DB ở host `mariadb` và build với profile Maven `mariadb`, còn compose của PowerMe dùng `mysql:8.0` ở host `steve-db`. Chưa ai chạy profile `reference` trên repo này (máy không có Docker), nên cấu hình DB cần được kiểm khi lần đầu bật. Tag và commit nói trên đã xác minh bằng `ls-remote`.
 
+Cho thí nghiệm RQ1 (NFR-02) dùng compose riêng [lab/steve/](lab/steve/) thay cho profile `reference`: nó bám đúng compose gốc của SteVe 3.14.1 (MariaDB ở host `mariadb`, build từ tag đã ghim, cổng chỉ bind 127.0.0.1). Cũng chưa được chạy lần nào.
+
 ## Bàn thí nghiệm OCPP
 
 ```

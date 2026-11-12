@@ -1,0 +1,62 @@
+# SteVe cho thí nghiệm RQ1 (cấu hình đối chứng thứ ba của NFR-02) — chạy trên VM có Docker.
+#
+# ⚠️ CHƯA AI CHẠY FILE NÀY (máy dev không có Docker). Mọi tên/đường dẫn dưới đây đối chiếu với mã
+#    nguồn SteVe tag `steve-3.14.1` (commit 3fd8cda4722822214f744329bc48dba349456514, đọc 12/11/2026):
+#    Dockerfile, docker-compose.yml, src/main/resources/application-docker.properties.
+#    Cách chạy và danh sách việc phải kiểm khi bật lần đầu: README.md cùng thư mục.
+#
+# Vì sao khác profile `reference` trong infra/docker-compose.yml: profile đó giả định có image
+# `steve:3.14.1` build tay và dùng mysql:8.0 ở host `steve-db`, trong khi Dockerfile của SteVe chờ
+# DB ở host `mariadb` và build bằng profile Maven `mariadb`. File này bám đúng compose gốc của SteVe.
+#
+#   docker compose -f infra/lab/steve/docker-compose.yml up -d --build
+#   docker compose -f infra/lab/steve/docker-compose.yml logs -f steve    # chờ "Started" (vài phút)
+#   docker compose -f infra/lab/steve/docker-compose.yml down             # giữ dữ liệu
+#   docker compose -f infra/lab/steve/docker-compose.yml down -v          # xoá sạch giữa hai lượt đo
+
+name: powerme-rq1-steve
+
+services:
+  # Tên service PHẢI là `mariadb`: Dockerfile của SteVe chờ `tcp://mariadb:3306` và
+  # application-docker.properties đặt `db.ip = mariadb`.
+  mariadb:
+    # Cùng phiên bản với compose gốc của SteVe 3.14.1 và ma trận CI của họ.
+    image: mariadb:10.11.16
+    restart: unless-stopped
+    environment:
+      MYSQL_RANDOM_ROOT_PASSWORD: 'yes'
+      TZ: '+00:00'
+      MYSQL_DATABASE: stevedb
+      MYSQL_USER: steve
+      # Giá trị mặc định CÔNG KHAI của SteVe, ghi cứng trong application-docker.properties của tag
+      # này (db.password). Đổi ở đây mà không đổi ở đó thì SteVe không nối được DB. Chấp nhận được
+      # vì DB không publish cổng nào ra ngoài mạng compose.
+      MYSQL_PASSWORD: changeme
+    volumes:
+      - steve-db:/var/lib/mysql
+    healthcheck:
+      test: ['CMD', 'healthcheck.sh', '--connect', '--innodb_initialized']
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    # Không `ports`: harness đọc DB bằng `docker compose exec mariadb mariadb …`.
+
+  steve:
+    # Không có image công khai của SteVe: build từ mã nguồn ở ĐÚNG tag đã ghim (không fork, không
+    # copy code vào repo PowerMe). Docker tự clone tag này làm build context.
+    build:
+      context: https://github.com/steve-community/steve.git#steve-3.14.1
+    image: powerme-lab/steve:3.14.1
+    restart: unless-stopped
+    depends_on:
+      mariadb:
+        condition: service_healthy
+    ports:
+      # Chỉ loopback của VM: giao diện web http://127.0.0.1:8180/steve/manager và điểm cuối OCPP-J
+      # ws://127.0.0.1:8180/steve/websocket/CentralSystemService/<chargeBoxId>.
+      # Tài khoản web mặc định của SteVe (auth.user / auth.password trong properties) là giá trị
+      # công khai — KHÔNG mở cổng này ra internet.
+      - '127.0.0.1:8180:8180'
+
+volumes:
+  steve-db:

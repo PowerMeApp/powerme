@@ -1,0 +1,49 @@
+{
+  "config": "powerme",
+  "seed": 20261112,
+  "batch": "X1",
+  "scenarios": ["s2"],
+  "runsPerScenario": 10,
+  "concurrency": 10,
+  "timing": {
+    "intervalS": 2,
+    "graceS": 5,
+    "offlineExtraMaxS": 9,
+    "retransmitGapS": 1,
+    "gapFactor": 3,
+    "gapThresholdS": 6
+  },
+  "exploratory": {
+    "s2QueueLostP": 1
+  },
+  "target": {
+    "kind": "local",
+    "endpoint": "ws://127.0.0.1:9190/ocpp",
+    "env": {
+      "OCPP_PORT": "9190",
+      "CONSOLE_ENABLED": "false",
+      "ALLOW_LEGACY_NO_CREDENTIAL": "true",
+      "RECONCILIATION_ENABLED": "true",
+      "OFFLINE_GRACE_S": "5",
+      "METER_VALUE_SAMPLE_INTERVAL_S": "2",
+      "RECONCILE_GAP_FACTOR": "3",
+      "RECONCILE_ENERGY_TOLERANCE_WH": "1",
+      "REPLAY_SKEW_THRESHOLD_S": "5",
+      "SESSION_START_TIMEOUT_S": "120",
+      "SESSION_HARD_CAP_H": "24",
+      "OCPP_HEARTBEAT_INTERVAL_SECONDS": "300"
+    }
+  },
+  "rows": 10,
+  "startedAt": "2026-11-12T08:53:40.206Z",
+  "finishedAt": "2026-11-12T08:54:03.335Z",
+  "wallClockS": 23.1,
+  "git": {
+    "commit": "885b38eb8a7f976a9c6812b256ba24f071e0e9d9",
+    "branch": "feat/be-35-rq1-harness",
+    "dirty": false
+  },
+  "node": "v24.18.1",
+  "platform": "win32-x64",
+  "tolWh": 1
+}
