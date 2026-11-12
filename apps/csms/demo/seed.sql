@@ -123,7 +123,7 @@ VALUES ('DEMO-BLOCKED-01', 'online', NULL, 'blocked')
 ON CONFLICT ON CONSTRAINT rfid_cards_card_identifier_key DO NOTHING;
 
 -- WF-05 / T119: who the console acts as, and one charge point waiting to be onboarded ------------
--- No login yet (RolesGuard is T103): the console calls ChargePointOnboardingService with the user
+-- Console routes, no login (interim, D-D 12/11): the console calls ChargePointOnboardingService with the user
 -- ids in CONSOLE_ACTOR_ADMIN_ID / CONSOLE_ACTOR_STAFF_ID. These two users have no password_hash,
 -- so they cannot log in anywhere once login exists; they only give the service real role rows.
 INSERT INTO users (email, full_name, role, account_status)

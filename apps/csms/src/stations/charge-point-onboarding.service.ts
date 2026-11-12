@@ -14,7 +14,8 @@
  * the request body: an operator can only onboard onto its own sites (FR-09 scoping, NFR security
  * "operators see only their own data"). Interim HTTP entry (T119): the console routes
  * `POST /api/admin/charge-points` and `POST /api/operator/charge-points/onboard`, acting as the
- * users in CONSOLE_ACTOR_*; the real controller + guard come with RolesGuard (T103).
+ * users in CONSOLE_ACTOR_*; removed when these routes move to `/api/admin/v1/charge-points` and
+ * `/api/operator/v1/charge-points` with the dashboard JWT (D-D, 12/11).
  *
  * Not here (declared in the PR): audit-log table (rejections are logged with Logger.warn),
  * display-code province rules beyond the site-code prefix, disable/enable/decommission endpoints

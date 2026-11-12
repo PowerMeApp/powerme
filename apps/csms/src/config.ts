@@ -49,8 +49,9 @@ export interface CsmsConfig {
   consolePort: number;
   /**
    * WF-05 (T119): user id of the Admin the console acts as for `POST /api/admin/charge-points`.
-   * No default: not set → that route returns 503. Interim until RolesGuard (T103) uses the
-   * logged-in user instead; the service still checks the role of this id.
+   * No default: not set → that route returns 503. Interim: removed when these routes move to
+   * `/api/admin/v1/charge-points` and `/api/operator/v1/charge-points` with the dashboard JWT
+   * (D-D, 12/11); the service still checks the role of this id.
    */
   consoleActorAdminId?: number | null;
   /** WF-05 (T119): user id of the operator staff for `POST /api/operator/charge-points/onboard`. */

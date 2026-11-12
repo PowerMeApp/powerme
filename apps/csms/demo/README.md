@@ -39,7 +39,7 @@ Một operator, một site ở TP.HCM, trụ `RH24D1-00001` (D1-120, lifecycle `
 
 ## DS-09 / DS-10 — onboard SIM-0005 qua HTTP (WF-05, T119)
 
-`seed.sql` có thêm hai user demo (`admin.demo@powerme.test` = Admin, `staff.demo@powerme.test` = staff của operator site `HCM-DEMO-01`) và trụ `SIM-0005` ở lifecycle `registered` (chưa site, chưa credential, chưa súng). Seed in id hai user; `run-demo.mjs` đặt chúng vào `CONSOLE_ACTOR_ADMIN_ID` / `CONSOLE_ACTOR_STAFF_ID` để console gọi `ChargePointOnboardingService` thay cho người đăng nhập (tạm, tới RolesGuard T103).
+`seed.sql` có thêm hai user demo (`admin.demo@powerme.test` = Admin, `staff.demo@powerme.test` = staff của operator site `HCM-DEMO-01`) và trụ `SIM-0005` ở lifecycle `registered` (chưa site, chưa credential, chưa súng). Seed in id hai user; `run-demo.mjs` đặt chúng vào `CONSOLE_ACTOR_ADMIN_ID` / `CONSOLE_ACTOR_STAFF_ID` để console gọi `ChargePointOnboardingService` thay cho người đăng nhập (tạm, bỏ khi các route này chuyển sang `/api/admin/v1/charge-points` và `/api/operator/v1/charge-points` với JWT dashboard — D-D, 12/11).
 
 ```bash
 npm run demo -w @powerme/csms -- --no-hmi     # cửa sổ 1

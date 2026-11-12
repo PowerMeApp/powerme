@@ -219,7 +219,7 @@ async function main() {
       // The switch never applies to a charge point that has one: SIM-0005 is onboarded through
       // the console (DS-09, demo/onboard-sim.mjs) and must present its password.
       ALLOW_LEGACY_NO_CREDENTIAL: 'true',
-      // WF-05 (T119): who the console acts as until RolesGuard (T103) — the seed's demo users.
+      // WF-05 (T119): who the console acts as until the routes move to the dashboard JWT (D-D) — the seed's demo users.
       ...(db.actors?.admin ? { CONSOLE_ACTOR_ADMIN_ID: String(db.actors.admin) } : {}),
       ...(db.actors?.staff ? { CONSOLE_ACTOR_STAFF_ID: String(db.actors.staff) } : {}),
       CONSOLE_PORT: String(PORTS.console),

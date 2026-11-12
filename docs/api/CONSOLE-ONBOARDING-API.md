@@ -1,6 +1,6 @@
 # Operator/Admin console API — Charge Point onboarding (interim)
 
-> **Interim** console routes until RolesGuard (T103). The final routes are in the T98 contract
+> **Interim** console routes, to be removed when these routes move to `/api/admin/v1/charge-points` and `/api/operator/v1/charge-points` with the dashboard JWT (D-D, 12/11). The final routes are in the T98 contract
 > ([OPERATOR-ADMIN-API-HOP-DONG.md](OPERATOR-ADMIN-API-HOP-DONG.md) §3.2): `POST /admin/v1/charge-points` and
 > `POST /operator/v1/charge-points`, with JWT. These console routes already use the contract's body and
 > result shape (snake_case, `RegisterDeviceRequest` / `OnboardRequest` / `OnboardResult`); only ids stay
@@ -26,7 +26,7 @@ The service still checks that the configured user is an active Admin / active op
 
 Two interim actor patterns exist side by side: the BE-24 console routes (unattributed / review
 queues) take the actor from the request body (`operator_user_id`), these T119 routes take it from
-`CONSOLE_ACTOR_*`. Both are removed when the JWT routes of the T98 contract replace the console (T103).
+`CONSOLE_ACTOR_*`. Both are removed when these routes move to `/api/admin/v1/charge-points` and `/api/operator/v1/charge-points` with the dashboard JWT (D-D, 12/11).
 
 ## `POST /api/admin/charge-points`
 

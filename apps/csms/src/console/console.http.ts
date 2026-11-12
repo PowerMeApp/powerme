@@ -18,7 +18,8 @@
  * the service's own role and operator checks still run; not configured → 503. The onboard response
  * carries the Charge Point password once: request/response bodies and error messages of these two
  * routes are never logged (a DB error message can carry query parameters such as the hash).
- * Interim until RolesGuard (T103) replaces the configured actor with the logged-in user.
+ * Interim: removed when these routes move to `/api/admin/v1/charge-points` and
+ * `/api/operator/v1/charge-points` with the dashboard JWT (D-D, 12/11).
  */
 import type { IncomingMessage, RequestListener, ServerResponse } from 'node:http';
 import { Logger } from '@nestjs/common';
@@ -143,7 +144,7 @@ function textField(body: Record<string, unknown>, name: string): string {
   return v;
 }
 
-/** Who the console acts as until RolesGuard (T103). `null` = not configured → 503. */
+/** Who the console acts as until the routes move to the dashboard JWT (D-D). `null` = not configured → 503. */
 export interface ConsoleActors {
   adminUserId: number | null;
   staffUserId: number | null;
@@ -240,7 +241,7 @@ export function createConsoleListener(
           503,
           {
             error: 'actor_not_configured',
-            detail: 'Set CONSOLE_ACTOR_ADMIN_ID / CONSOLE_ACTOR_STAFF_ID (interim until T103)',
+            detail: 'Set CONSOLE_ACTOR_ADMIN_ID / CONSOLE_ACTOR_STAFF_ID (interim console routes)',
           },
           cors,
         );
