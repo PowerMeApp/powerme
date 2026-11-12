@@ -2,11 +2,7 @@
   "config": "steve",
   "seed": 20261112,
   "batch": "72",
-  "scenarios": [
-    "s1",
-    "s2",
-    "s3"
-  ],
+  "scenarios": ["s1", "s2", "s3"],
   "runsPerScenario": 30,
   "concurrency": 1,
   "timing": {
