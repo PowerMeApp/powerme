@@ -86,6 +86,9 @@ services:
       # Là id user lấy từ log seed ("WF-05 console actors: ..."), KHÔNG lấy từ body. Trống → 503.
       CONSOLE_ACTOR_ADMIN_ID: ${CONSOLE_ACTOR_ADMIN_ID:-}
       CONSOLE_ACTOR_STAFF_ID: ${CONSOLE_ACTOR_STAFF_ID:-}
+      # MB-03: khoá Vietmap phía server cho /places/* và /stations/{id}/route (khác khoá tile của app).
+      # Secret: chỉ nằm trong .env trên VM. Trống → các route đó báo lỗi nhà cung cấp, phần còn lại vẫn chạy.
+      VIETMAP_SEARCH_API_KEY: ${VIETMAP_SEARCH_API_KEY:-}
     ports:
       - '127.0.0.1:3000:3000' # console — chỉ loopback của VPS, truy cập bằng SSH tunnel
     expose:
