@@ -139,13 +139,18 @@ describeDb(
     }
 
     let topUpSeq = 0;
-    /** Top-up dùng `points` điểm (giảm `points × 10` VND), như `TopUpService.create` sẽ ghi. */
+    /**
+     * Top-up dùng `points` điểm (giảm `points × 10` VND), như `TopUpService.create` ghi. Trạng thái
+     * `credited` (redeem / restore chạy lúc / sau khi cộng tiền, không đọc `status`): từ 0019 mỗi
+     * tài khoản chỉ có một `pending` (`top_ups_one_pending_per_account_key`), mà các ca ở đây tạo
+     * nhiều top-up trên cùng tài khoản.
+     */
     async function newTopUp(creditAccountId: number, points: number, amount = 500000) {
       topUpSeq++;
       return id(
         `INSERT INTO top_ups(gateway_reference,credit_account_id,amount_vnd,points_redeemed,
-         points_discount_vnd,amount_paid_vnd,idempotency_key,expires_at)
-       VALUES($1,$2,$3,$4,$5,$6,$7,now()+interval '15 minutes') RETURNING id`,
+         points_discount_vnd,amount_paid_vnd,status,idempotency_key,expires_at)
+       VALUES($1,$2,$3,$4,$5,$6,'credited',$7,now()+interval '15 minutes') RETURNING id`,
         [
           `GW-T32P4-${topUpSeq}`,
           creditAccountId,

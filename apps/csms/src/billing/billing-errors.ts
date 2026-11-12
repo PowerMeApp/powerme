@@ -63,6 +63,44 @@ export class RedemptionRejected extends Error {
   }
 }
 
+/**
+ * Mã từ chối tạo / đọc top-up (T32 Phần 5, SD-2a, D2). Route đổi sang HTTP
+ * (`driver/top-ups.http.ts`); mã là giá trị `error` của hợp đồng driver (snake_case).
+ */
+export type TopUpRejectCode =
+  /** Cùng Idempotency-Key, body khác (hoặc dòng không tạo qua API, `request_hash` NULL). → 409 */
+  | 'idempotency_conflict'
+  /** Tài khoản credit đã đóng (D6). → 409 */
+  | 'account_closed'
+  /** Còn top-up pending chưa quá `expires_at`; kèm `topUpId`, `paymentUrl`. → 409 */
+  | 'top_up_pending'
+  /** Còn top-up pending đã quá `expires_at`, đang chờ querydr chốt (D4 ⊕); kèm `topUpId`. → 409 */
+  | 'pending_top_up_confirming'
+  /** BR-P22: mỗi lần nạp 50.000–2.000.000 VND. → 422 */
+  | 'amount_out_of_range'
+  /** BR-P22: số dư + số nạp > 5.000.000 VND. → 422 */
+  | 'balance_limit_exceeded'
+  /** BR-P35: điểm còn sống < 500 hoặc số điểm xin < 500. → 422 */
+  | 'points_below_minimum'
+  /** BR-P35: xin nhiều hơn điểm còn sống. → 422 */
+  | 'points_unavailable'
+  /** BR-P35: vượt trần 50 % số tiền nạp. → 422 */
+  | 'points_exceed_cap'
+  /** Thiếu VNPAY_TMN_CODE / VNPAY_HASH_SECRET. → 503 */
+  | 'payment_unconfigured'
+  /** Không có top-up này, hoặc của tài xế khác. → 404 */
+  | 'not_found';
+
+export class TopUpRejected extends Error {
+  constructor(
+    readonly code: TopUpRejectCode,
+    readonly extra: { topUpId?: number; paymentUrl?: string } = {},
+  ) {
+    super(`top_up_rejected: ${code}`);
+    this.name = 'TopUpRejected';
+  }
+}
+
 /** Lý do sổ điểm không phát lại được theo lô (`loyalty-lots.ts`). */
 export type LoyaltyCorruptReason =
   /** Sai dấu theo loại dòng (earn ≥ 0, redeem < 0, restore > 0, expire < 0). */

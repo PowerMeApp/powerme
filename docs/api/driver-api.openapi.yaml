@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: PowerMe CSMS — Driver API
-  version: 0.8.0
+  version: 0.9.0
   summary: Hợp đồng REST cho app tài xế (T77, phiếu v1.3 §3.2g)
   description: |
     Hợp đồng giữa CSMS (WP2) và app tài xế Flutter (WP3) cho trạng thái súng sạc, thời gian còn lại,
@@ -19,7 +19,7 @@ info:
       đường `sessions/*` trả cả phiên đó nếu `driver_id` khớp; `charges/*` chỉ có với phiên bắt đầu
       từ app.
   x-owner: Trí (WP2) — hợp đồng; Sơn (WP3) — route và client Dart
-  x-status: MB03 — brief 07/11 smart station search, address search and canonical road routes implemented locally; BE-21 email/password register, login and refresh implemented; BE-30 login by email or phone number (E.164); BE-22 charges, sessions (progress/stop/statement) and credit implemented; BE-34 vehicle models and add/set-default/remove vehicles (soft delete) implemented; time-left remains planned
+  x-status: MB03 — brief 07/11 smart station search, address search and canonical road routes implemented locally; BE-21 email/password register, login and refresh implemented; BE-30 login by email or phone number (E.164); BE-22 charges, sessions (progress/stop/statement) and credit implemented; BE-34 vehicle models and add/set-default/remove vehicles (soft delete) implemented; T32 Phần 5 billing/top-ups implemented but not for app use until T32 Phần 6 and 8 merge; time-left remains planned
 servers:
   - url: http://localhost:3000/api/driver/v1
     description: CSMS cục bộ (cùng tiến trình với console /api/admin)
@@ -38,6 +38,11 @@ tags:
     description: UC-CHG-03 dừng, UC-CHG-04 theo dõi, bảng kê sau phiên
   - name: credit
     description: UC-PAY-02 / màn hình 9 — số dư Charging Credit và lịch sử sổ cái của chính tài xế (BE-22)
+  - name: top-ups
+    description: |
+      UC-PAY-01 nạp Charging Credit qua VNPay (WF-02 SD-2a, T32 Phần 5). CHƯA DÙNG CHO APP tới khi
+      T32 Phần 6 (IPN cộng tiền, trang return `/billing/vnpay/return`) và Phần 8 (quét top-up quá hạn)
+      merge — xem mô tả từng đường dẫn.
 
 security:
   - bearerAuth: []
@@ -842,7 +847,217 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '405': { $ref: '#/components/responses/MethodNotAllowed' }
 
+  /billing/top-ups/quote:
+    get:
+      tags: [top-ups]
+      operationId: quoteTopUp
+      x-status: implemented — T32 Phần 5; chưa dùng cho app tới khi T32 Phần 6 và 8 merge
+      summary: Báo giá dùng điểm cho một số tiền nạp (BR-P35)
+      description: |
+        Chỉ đọc, không tạo gì. App gọi trước khi tạo top-up để hiện số được giảm. `points_available`
+        là điểm còn sống (lô chưa hết hạn), không phải `points_balance`. `max_points` =
+        min(điểm còn sống, trần 50 % số tiền nạp, tính theo 1 điểm = 10 ₫); dưới 500 điểm thì
+        `max_points = 0`, `max_discount_vnd = 0` (không phải lỗi). Giá chỉ để hiển thị: lúc tạo,
+        CSMS kiểm lại; điểm **không** bị trừ lúc tạo (chỉ trừ khi tiền được cộng).
+
+        **Chưa dùng cho app** tới khi T32 Phần 6 (IPN cộng tiền; trang return
+        `/billing/vnpay/return` — trước đó thanh toán sandbox xong sẽ quay về 404) và Phần 8 (quét
+        top-up quá hạn) merge.
+      parameters:
+        - name: amount_vnd
+          in: query
+          required: true
+          description: Số tiền nạp định tạo (BR-P22 50.000–2.000.000)
+          schema: { type: string, pattern: '^[0-9]{1,15}$' }
+      responses:
+        '200':
+          description: Báo giá
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TopUpQuote' }
+              examples:
+                du_diem: { value: { points_available: 3000, max_points: 3000, max_discount_vnd: 30000 } }
+                thieu_diem: { value: { points_available: 499, max_points: 0, max_discount_vnd: 0 } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+        '422':
+          description: '`amount_out_of_range`'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              examples:
+                amount_out_of_range:
+                  value: { error: amount_out_of_range, detail: 'Mỗi lần nạp từ 50.000 ₫ đến 2.000.000 ₫' }
+        '503': { $ref: '#/components/responses/PaymentUnconfigured' }
+
+  /billing/top-ups:
+    post:
+      tags: [top-ups]
+      operationId: createTopUp
+      x-status: implemented — T32 Phần 5; chưa dùng cho app tới khi T32 Phần 6 và 8 merge
+      summary: Tạo top-up VNPay (SD-2a) và nhận URL thanh toán
+      description: |
+        Ánh xạ `TopUpService.create`. Tạo top-up `pending`, `expires_at = created_at + 15 phút`, trả
+        `payment_url` đã ký (VNPay 2.1.0, `vnp_Amount = amount_paid_vnd × 100`). Không cộng tiền,
+        không trừ điểm: tiền chỉ được cộng khi VNPay báo đã trả qua IPN có chữ ký (Phần 6) hoặc
+        querydr (Phần 8). Return URL chỉ để hiển thị — app poll `GET /billing/top-ups/{id}` để biết
+        kết quả.
+
+        Gửi lại cùng `Idempotency-Key` + cùng body → **200** cùng top-up (không báo giá lại); tạo mới
+        → **201**. Cùng key khác body → 409 `idempotency_conflict`. Key theo từng tài xế.
+
+        Body `application/json` ≤ 16 KiB, trường lạ → 400 `invalid_input`. `points_to_redeem`:
+        số nguyên ≥ 0, bỏ trống hoặc `null` = 0 (không dùng điểm).
+
+        Mỗi tài khoản tối đa **một** top-up `pending`. Bị chặn thì phân biệt bằng `error`, **không**
+        dựa vào việc có hay không có `payment_url`:
+        - `top_up_pending` (pending chưa quá `expires_at`): hỏi "tiếp tục thanh toán?" và mở lại
+          `payment_url` kèm theo;
+        - `pending_top_up_confirming` (pending đã quá `expires_at`, CSMS đang chờ VNPay xác nhận): báo
+          "giao dịch trước đang được xác nhận, thử lại sau ít phút". Không có `payment_url`.
+
+        **Chưa dùng cho app** tới khi T32 Phần 6 (IPN cộng tiền; trang return
+        `/billing/vnpay/return` — trước đó thanh toán sandbox xong sẽ quay về 404) và Phần 8 (quét
+        top-up quá hạn) merge: trước Phần 8 không có gì chuyển top-up bỏ dở sang `expired`, nên tài
+        xế bị chặn `pending_top_up_confirming` mãi.
+      parameters:
+        - $ref: '#/components/parameters/idempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateTopUpRequest' }
+            examples:
+              khong_diem: { value: { amount_vnd: 200000 } }
+              dung_diem: { value: { amount_vnd: 200000, points_to_redeem: 600 } }
+      responses:
+        '201':
+          description: Đã tạo top-up `pending`
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TopUp' }
+              examples:
+                tao_moi: { $ref: '#/components/examples/TopUpPending' }
+        '200':
+          description: Gửi lại cùng key cùng body — top-up đã tạo trước đó (trạng thái hiện tại)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TopUp' }
+              examples:
+                gui_lai_da_het_han: { $ref: '#/components/examples/TopUpExpired' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '405': { $ref: '#/components/responses/PostOnly' }
+        '409':
+          description: |
+            `idempotency_conflict` (cùng key khác body); `account_closed`; `top_up_pending` (kèm
+            `top_up_id`, `payment_url`); `pending_top_up_confirming` (kèm `top_up_id`)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TopUpConflict' }
+              examples:
+                idempotency_conflict:
+                  value: { error: idempotency_conflict, detail: 'Idempotency-Key này đã dùng cho một yêu cầu nạp khác' }
+                account_closed:
+                  value: { error: account_closed, detail: 'Tài khoản đã đóng' }
+                top_up_pending:
+                  value:
+                    error: top_up_pending
+                    detail: 'Còn giao dịch nạp chưa thanh toán; có thể tiếp tục thanh toán giao dịch đó'
+                    top_up_id: '41'
+                    payment_url: 'https://sandbox.vnpayment.vn/paymentv2/vpcpay.html?vnp_Amount=20000000&…&vnp_SecureHash=…'
+                pending_top_up_confirming:
+                  value:
+                    error: pending_top_up_confirming
+                    detail: 'Giao dịch trước đang được xác nhận, thử lại sau ít phút'
+                    top_up_id: '41'
+        '413': { $ref: '#/components/responses/PayloadTooLarge' }
+        '415': { $ref: '#/components/responses/UnsupportedMediaType' }
+        '422':
+          description: |
+            Lỗi luật nghiệp vụ. BR-P22 (ADR-0013): `amount_out_of_range` (mỗi lần 50.000–2.000.000 ₫),
+            `balance_limit_exceeded` (số dư + `amount_vnd` > 5.000.000 ₫; tính đủ `amount_vnd` dù trả
+            bớt bằng điểm). BR-P35: `points_below_minimum` (< 500 điểm), `points_unavailable` (nhiều
+            hơn điểm còn hiệu lực), `points_exceed_cap` (vượt 50 % số tiền nạp). CSMS không tự hạ số
+            điểm — app gọi lại `quote`.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              examples:
+                amount_out_of_range:
+                  value: { error: amount_out_of_range, detail: 'Mỗi lần nạp từ 50.000 ₫ đến 2.000.000 ₫' }
+                balance_limit_exceeded:
+                  value: { error: balance_limit_exceeded, detail: 'Số dư sau khi nạp không được vượt 5.000.000 ₫' }
+                points_below_minimum:
+                  value: { error: points_below_minimum, detail: 'Cần dùng ít nhất 500 điểm' }
+                points_unavailable:
+                  value: { error: points_unavailable, detail: 'Không đủ điểm còn hiệu lực' }
+                points_exceed_cap:
+                  value: { error: points_exceed_cap, detail: 'Điểm dùng không được vượt 50 % số tiền nạp' }
+        '503': { $ref: '#/components/responses/PaymentUnconfigured' }
+
+  /billing/top-ups/{topUpId}:
+    get:
+      tags: [top-ups]
+      operationId: getTopUp
+      x-status: implemented — T32 Phần 5; chưa dùng cho app tới khi T32 Phần 6 và 8 merge
+      summary: Trạng thái một top-up của tài xế (poll sau khi thanh toán)
+      description: |
+        App poll sau khi quay về từ trang VNPay. `payment_url` chỉ có khi `status = pending` và chưa
+        quá `expires_at`; còn lại `null`. Top-up của tài xế khác hoặc không có → 404 `not_found`.
+
+        **Chưa dùng cho app** tới khi T32 Phần 6 (IPN cộng tiền; trang return
+        `/billing/vnpay/return` — trước đó thanh toán sandbox xong sẽ quay về 404) và Phần 8 (quét
+        top-up quá hạn) merge: trước Phần 6 trạng thái không rời `pending`.
+      parameters:
+        - name: topUpId
+          in: path
+          required: true
+          schema: { $ref: '#/components/schemas/Id' }
+      responses:
+        '200':
+          description: Top-up
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TopUp' }
+              examples:
+                pending: { $ref: '#/components/examples/TopUpPending' }
+                expired: { $ref: '#/components/examples/TopUpExpired' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+        '503': { $ref: '#/components/responses/PaymentUnconfigured' }
+
 components:
+  examples:
+    TopUpPending:
+      value:
+        top_up_id: '41'
+        status: pending
+        amount_vnd: 200000
+        points_redeemed: 600
+        points_discount_vnd: 6000
+        amount_paid_vnd: 194000
+        created_at: '2026-11-12T17:30:00.000Z'
+        expires_at: '2026-11-12T17:45:00.000Z'
+        payment_url: 'https://sandbox.vnpayment.vn/paymentv2/vpcpay.html?vnp_Amount=19400000&…&vnp_SecureHash=…'
+    TopUpExpired:
+      value:
+        top_up_id: '40'
+        status: expired
+        amount_vnd: 100000
+        points_redeemed: 0
+        points_discount_vnd: 0
+        amount_paid_vnd: 100000
+        created_at: '2026-11-11T08:00:00.000Z'
+        expires_at: '2026-11-11T08:15:00.000Z'
+        payment_url: null
+
   securitySchemes:
     bearerAuth:
       type: http
@@ -1006,6 +1221,17 @@ components:
       content:
         application/json:
           schema: { $ref: '#/components/schemas/Error' }
+    PaymentUnconfigured:
+      description: |
+        `payment_unconfigured` — tạo top-up khi CSMS chưa có VNPAY_TMN_CODE / VNPAY_HASH_SECRET
+        (không ghi dòng nào); hoặc server chạy không kèm module billing (mọi route top-up). `quote`
+        và GET vẫn trả 200 khi chỉ thiếu mã VNPay.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          examples:
+            payment_unconfigured:
+              value: { error: payment_unconfigured, detail: 'Cổng thanh toán chưa được cấu hình' }
 
   schemas:
     AddressCandidate:
@@ -1547,3 +1773,64 @@ components:
         total: { type: integer, minimum: 0 }
         page: { type: integer, minimum: 1 }
         page_size: { type: integer, minimum: 1, maximum: 100 }
+
+    CreateTopUpRequest:
+      type: object
+      additionalProperties: false
+      required: [amount_vnd]
+      description: Trường lạ → 400 `invalid_input`. Ngoài khoảng BR-P22 là 422, không phải 400.
+      properties:
+        amount_vnd:
+          type: integer
+          description: Số tiền nạp (VND, số nguyên). Ví được cộng đủ số này dù trả bớt bằng điểm.
+          examples: [200000]
+        points_to_redeem:
+          type: [integer, 'null']
+          minimum: 0
+          default: 0
+          description: Số điểm muốn dùng (BR-P35, 1 điểm = 10 ₫); số nguyên ≥ 0, bỏ trống hoặc `null` = 0
+          examples: [600]
+
+    TopUp:
+      type: object
+      additionalProperties: false
+      required: [top_up_id, status, amount_vnd, points_redeemed, points_discount_vnd, amount_paid_vnd, created_at, expires_at, payment_url]
+      properties:
+        top_up_id: { $ref: '#/components/schemas/Id' }
+        status:
+          type: string
+          enum: [pending, credited, failed, expired, refunded]
+          description: STM-4. Phần 5 chỉ tạo `pending`; các trạng thái khác do Phần 6–9 ghi
+        amount_vnd: { type: integer, description: Số được cộng vào ví khi thanh toán thành công }
+        points_redeemed: { type: integer, minimum: 0 }
+        points_discount_vnd: { type: integer, minimum: 0 }
+        amount_paid_vnd: { type: integer, description: '= amount_vnd − points_discount_vnd; số trả trên VNPay' }
+        created_at: { $ref: '#/components/schemas/Timestamp' }
+        expires_at:
+          allOf: [{ $ref: '#/components/schemas/Timestamp' }]
+          description: created_at + 15 phút (= vnp_ExpireDate)
+        payment_url:
+          type: [string, 'null']
+          format: uri
+          description: URL VNPay đã ký; chỉ có khi `status = pending` và chưa quá `expires_at`, còn lại null
+
+    TopUpQuote:
+      type: object
+      additionalProperties: false
+      required: [points_available, max_points, max_discount_vnd]
+      properties:
+        points_available: { type: integer, minimum: 0, description: Điểm còn sống (lô chưa hết hạn) }
+        max_points: { type: integer, minimum: 0, description: 0 khi dưới 500 điểm }
+        max_discount_vnd: { type: integer, minimum: 0 }
+
+    TopUpConflict:
+      description: Error, thêm `top_up_id` (top_up_pending, pending_top_up_confirming) và `payment_url` (chỉ top_up_pending)
+      type: object
+      required: [error, detail]
+      properties:
+        error:
+          type: string
+          enum: [idempotency_conflict, account_closed, top_up_pending, pending_top_up_confirming]
+        detail: { type: string }
+        top_up_id: { $ref: '#/components/schemas/Id' }
+        payment_url: { type: string, format: uri }

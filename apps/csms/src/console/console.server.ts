@@ -21,6 +21,7 @@ import { CONFIG, CsmsConfig } from '../config.js';
 import { ConsoleCommands } from './console.commands.js';
 import { ConsoleError, createConsoleListener } from './console.http.js';
 import { ConsoleQueries } from './console.queries.js';
+import { TopUpService } from '../billing/top-up.service.js';
 import { createDriverListener } from '../driver/driver.http.js';
 import { createOperatorApiListener, OPERATOR_API_PATH } from '../operator-api/operator-api.http.js';
 import { DB, Db } from '../db/db.module.js';
@@ -39,6 +40,8 @@ export class ConsoleServer implements OnModuleInit, OnModuleDestroy {
     @Optional() @Inject(DB) private readonly db?: Db,
     @Optional() private readonly driver?: DriverChargingService,
     @Optional() private readonly onboarding?: ChargePointOnboardingService,
+    /** T32 Phần 5: route top-up của tài xế (BillingModule). */
+    @Optional() private readonly topUps?: TopUpService,
   ) {}
 
   /** WF-05 (T119): the onboarding service, or 503 when this server was built without it (tests). */
@@ -124,7 +127,14 @@ export class ConsoleServer implements OnModuleInit, OnModuleDestroy {
     );
     const driver =
       this.db && this.driver
-        ? createDriverListener(this.db, this.driver, this.config.driverApi ?? { devAuth: false })
+        ? createDriverListener(
+            this.db,
+            this.driver,
+            this.config.driverApi ?? { devAuth: false },
+            undefined,
+            undefined,
+            this.topUps,
+          )
         : null;
     // FE-01a: /api/{auth,operator,admin}/v1 → operator-api (JWT, ADR-0018). Matched before the
     // console so `/api/admin/v1/*` never reaches the unauthenticated `/api/admin/*` routes.

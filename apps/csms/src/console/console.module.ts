@@ -7,6 +7,7 @@
  * Không module nào nhập ngược lại console.
  */
 import { Module } from '@nestjs/common';
+import { BillingModule } from '../billing/billing.module.js';
 import { DbModule } from '../db/db.module.js';
 import { OcppGatewayModule } from '../ocpp-gateway/ocpp-gateway.module.js';
 import { StationsModule } from '../stations/stations.module.js';
@@ -15,7 +16,8 @@ import { ConsoleQueries } from './console.queries.js';
 import { ConsoleServer } from './console.server.js';
 
 @Module({
-  imports: [DbModule, OcppGatewayModule, StationsModule],
+  // BillingModule (T32 Phần 5): TopUpService cho route top-up của tài xế.
+  imports: [DbModule, OcppGatewayModule, StationsModule, BillingModule],
   providers: [ConsoleQueries, ConsoleCommands, ConsoleServer],
 })
 export class ConsoleModule {}

@@ -1,4 +1,5 @@
 import type { IncomingMessage, RequestListener, ServerResponse } from 'node:http';
+import type { TopUpService } from '../billing/top-up.service.js';
 import type { Db } from '../db/db.module.js';
 import type { DriverChargingService } from '../sessions/driver-charging.service.js';
 import { ChargingError } from '../sessions/charging-error.js';
@@ -18,6 +19,7 @@ import {
   VEHICLE_JSON,
   vehicleRouteAllow,
 } from './vehicles.http.js';
+import { handleTopUpRoute, isTopUpPath, topUpRouteMethod } from './top-ups.http.js';
 import { RoadDiscovery } from './road-discovery.js';
 import { ProviderUnavailable, VietmapAdapter } from './vietmap.js';
 
@@ -33,6 +35,8 @@ export function createDriverListener(
   config: DriverApiConfig,
   road = new RoadDiscovery(db, new VietmapAdapter(config.searchKey), undefined),
   accounts = new DriverAccounts(db, config),
+  /** T32 Phần 5: route top-up; không có → 503 payment_unconfigured. */
+  topUps?: TopUpService,
 ): RequestListener {
   return (req, res) => {
     void handle(req, res).catch(() => {
@@ -57,10 +61,12 @@ export function createDriverListener(
         return;
       }
       if (req.method === 'OPTIONS') {
-        // BE-22: route POST của charges/sessions cần thêm Content-Type và Idempotency-Key.
+        // BE-22 / T32 Phần 5: route POST của charges/sessions/top-ups cần thêm Content-Type và
+        // Idempotency-Key.
         // BE-34: route xe ghi (POST/PATCH/DELETE) cần Content-Type, không dùng Idempotency-Key.
         const preflightPath = new URL(req.url ?? '', 'http://driver.local').pathname;
-        const write = chargeRouteMethod(preflightPath) === 'POST';
+        const write =
+          chargeRouteMethod(preflightPath) === 'POST' || topUpRouteMethod(preflightPath) === 'POST';
         const vehicleAllow = vehicleRouteAllow(preflightPath);
         res.setHeader(
           'Access-Control-Allow-Methods',
@@ -124,6 +130,19 @@ export function createDriverListener(
           db,
           readBody: () => readJsonObject(req, res),
           drainBody: () => drainBody(req, res),
+          setAllow: (methods) => res.setHeader('Allow', methods),
+        });
+        send(res, result.status, result.body);
+        return;
+      }
+      if (isTopUpPath(path)) {
+        const result = await handleTopUpRoute({
+          req,
+          path,
+          q,
+          driverId,
+          topUps,
+          readBody: () => readJsonObject(req, res),
           setAllow: (methods) => res.setHeader('Allow', methods),
         });
         send(res, result.status, result.body);

@@ -198,7 +198,8 @@ FROM (VALUES
 JOIN users u ON u.email = v.email
 JOIN credit_accounts ca ON ca.driver_id = u.id
 WHERE NOT EXISTS (SELECT 1 FROM credit_transactions ct WHERE ct.credit_account_id = ca.id)
-ON CONFLICT ON CONSTRAINT top_ups_idempotency_key_key DO NOTHING;
+-- Không chỉ tên constraint (đổi tên ở 0019; seed còn chạy trên DB trước 0019, xem seed.sql).
+ON CONFLICT DO NOTHING;
 
 INSERT INTO credit_transactions (
   credit_account_id, entry_no, transaction_type, amount_vnd, balance_after_vnd, top_up_id

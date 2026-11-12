@@ -461,9 +461,10 @@ describeDb('migration 0003 — billing WF-02 (nâng cấp DB đã có 0002)', ()
     it('điểm ⇔ giảm giá (BR-P35): 500 điểm + 5.000 VND được; lệch một bên hoặc điểm âm bị từ chối', async () => {
       const ins = (ref: string, points: number, discount: number) =>
         q(
+          // status credited: từ 0019 mỗi tài khoản chỉ một pending (top_ups_one_pending_per_account_key).
           `INSERT INTO top_ups (gateway_reference, credit_account_id, amount_vnd, points_redeemed,
-                                points_discount_vnd, amount_paid_vnd, idempotency_key, expires_at)
-           VALUES ($1, $2, 50000, $3, $4, 50000 - $4::bigint, $1, now() + interval '15 minutes')
+                                points_discount_vnd, amount_paid_vnd, idempotency_key, expires_at, status)
+           VALUES ($1, $2, 50000, $3, $4, 50000 - $4::bigint, $1, now() + interval '15 minutes', 'credited')
            RETURNING points_redeemed, amount_paid_vnd`,
           [ref, accountId, points, discount],
         );
