@@ -24,6 +24,10 @@ If the matching value is not set, the route answers `503 {"error": "actor_not_co
 The service still checks that the configured user is an active Admin / active operator staff
 (`403 forbidden_role` otherwise). `npm run demo` sets both from the users in `demo/seed.sql`.
 
+Two interim actor patterns exist side by side: the BE-24 console routes (unattributed / review
+queues) take the actor from the request body (`operator_user_id`), these T119 routes take it from
+`CONSOLE_ACTOR_*`. Both are removed when the JWT routes of the T98 contract replace the console (T103).
+
 ## `POST /api/admin/charge-points`
 
 Request (`Content-Type: application/json`, at most 8 KB; unknown fields → 400):

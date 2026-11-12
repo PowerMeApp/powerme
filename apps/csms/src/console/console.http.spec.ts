@@ -365,7 +365,7 @@ describe('WF-05 — onboarding routes (T119)', () => {
     });
   const ONBOARD = '/api/operator/charge-points/onboard';
 
-  it('POST /api/admin/charge-points → 201 snake_case registry row, acting as the configured Admin', async () => {
+  it('TC-F14-04 POST /api/admin/charge-points → 201 snake_case registry row, acting as the configured Admin', async () => {
     const res = await postJson(actorBase, '/api/admin/charge-points', {
       serial_number: 'SIM-0005',
       model: 'D1-120',
@@ -382,7 +382,7 @@ describe('WF-05 — onboarding routes (T119)', () => {
     ]);
   });
 
-  it('POST onboard → 201 with the whole result and Cache-Control: no-store', async () => {
+  it('TC-F09-04 POST onboard → 201 with the whole result and Cache-Control: no-store', async () => {
     const res = await postJson(actorBase, ONBOARD, onboardBody, {
       Origin: 'http://localhost:3000',
     });
@@ -401,14 +401,14 @@ describe('WF-05 — onboarding routes (T119)', () => {
     ]);
   });
 
-  it('the acting user id never comes from the request: an extra field is rejected (400)', async () => {
+  it('TC-F09-05 the acting user id never comes from the request: an extra field is rejected (400)', async () => {
     const res = await postJson(actorBase, ONBOARD, { ...onboardBody, staff_user_id: 1 });
     expect(res.status).toBe(400);
     expect(((await res.json()) as { error: string }).error).toBe('invalid_input');
     expect(calls).toEqual([]);
   });
 
-  it('actor not configured → 503 actor_not_configured, backend not called', async () => {
+  it('TC-F09-06 actor not configured → 503 actor_not_configured, backend not called', async () => {
     for (const path of ['/api/admin/charge-points', ONBOARD]) {
       const res = await postJson(base, path, onboardBody);
       expect(res.status).toBe(503);
@@ -423,7 +423,7 @@ describe('WF-05 — onboarding routes (T119)', () => {
     ['an array', {}, '[1]', 400],
     ['malformed serial', {}, { ...onboardBody, serial_number: 'a:b' }, 400],
     ['body > 8 KB', {}, { ...onboardBody, pad: 'x'.repeat(9000) }, 413],
-  ])('onboard: %s → %i, backend not called', async (_n, headers, body, status) => {
+  ])('TC-F09-05 onboard: %s → %i, backend not called', async (_n, headers, body, status) => {
     const res = await postJson(actorBase, ONBOARD, body, headers);
     expect(res.status).toBe(status);
     expect(Object.keys((await res.json()) as object).sort()).toEqual(['detail', 'error']);
@@ -453,7 +453,7 @@ describe('WF-05 — onboarding routes (T119)', () => {
     },
   );
 
-  it('an unexpected error → 500 and the log line carries no message (no hash, no body)', async () => {
+  it('TC-F09-07 an unexpected error → 500 and the log line carries no message (no hash, no body)', async () => {
     const lines: string[] = [];
     Logger.overrideLogger({
       log: () => undefined,

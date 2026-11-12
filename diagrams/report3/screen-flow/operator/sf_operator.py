@@ -7,7 +7,7 @@ DW = 230
 dash = s.state(400, 330, "Operator Dashboard", note="counts by status · open alerts", w=DW, h=700)
 R = 400 + DW/2
 rows = [("Charge Point List / Map", 30, None), ("Fault Alerts", 200, None), ("Unattributed Sessions", 370, None),
-        ("Pricing & Promotions", 500, None), ("Revenue Share", 630, "charged · platform fee · own share")]
+        ("Pricing & Promotions", 500, None), ("Station Revenue", 630, "charged · sessions · energy")]
 kids = {}
 for name, y, note in rows:
     kids[name] = s.state(840, y, name, note=note, w=250)

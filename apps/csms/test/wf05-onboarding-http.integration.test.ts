@@ -190,7 +190,7 @@ describeDb('WF-05 through the console HTTP routes (T119, DS-09 / DS-10)', () => 
     Logger.overrideLogger(['error']);
   });
 
-  it('the service role check still runs: an actor that is not an Admin gets 403 forbidden_role', async () => {
+  it('TC-F14-04 the service role check still runs: an actor that is not an Admin gets 403 forbidden_role', async () => {
     // Admin id pointed at the staff user → registerDevice refuses it.
     const wrongActor = await startConsole({ admin: staffId, staff: staffId });
     const res = await post(wrongActor, '/api/admin/charge-points', { serial_number: SERIAL });
@@ -198,7 +198,7 @@ describeDb('WF-05 through the console HTTP routes (T119, DS-09 / DS-10)', () => 
     expect(((await res.json()) as { error: string }).error).toBe('forbidden_role');
   });
 
-  it('DS-10: onboarding a serial that is not in the registry → 409 serial_not_registered', async () => {
+  it('TC-F09-05 DS-10: onboarding a serial that is not in the registry → 409 serial_not_registered', async () => {
     const res = await post(base, '/api/operator/charge-points/onboard', {
       serial_number: SERIAL,
       site_id: siteAId,
@@ -208,7 +208,7 @@ describeDb('WF-05 through the console HTTP routes (T119, DS-09 / DS-10)', () => 
     expect(((await res.json()) as { error: string }).error).toBe('serial_not_registered');
   });
 
-  it('DS-09 step 1: Admin registers the serial → 201 registered (STM-3 #1, TC-STM3-01)', async () => {
+  it('TC-F14-04 DS-09 step 1: Admin registers the serial → 201 registered (STM-3 #1, TC-STM3-01)', async () => {
     const res = await post(base, '/api/admin/charge-points', {
       serial_number: SERIAL,
       model: 'D1-120',
@@ -219,7 +219,7 @@ describeDb('WF-05 through the console HTTP routes (T119, DS-09 / DS-10)', () => 
     expect(body).toMatchObject({ serial_number: SERIAL, lifecycle: 'registered' });
   });
 
-  it("another operator's site → 403 site_of_other_operator", async () => {
+  it("TC-F09-05 another operator's site → 403 site_of_other_operator", async () => {
     const res = await post(base, '/api/operator/charge-points/onboard', {
       serial_number: SERIAL,
       site_id: siteBId,
@@ -229,7 +229,7 @@ describeDb('WF-05 through the console HTTP routes (T119, DS-09 / DS-10)', () => 
     expect(((await res.json()) as { error: string }).error).toBe('site_of_other_operator');
   });
 
-  it('DS-09 step 2: staff onboards it → 201 with the credential once, no-store (STM-3 #2, TC-STM3-02)', async () => {
+  it('TC-F09-04 DS-09 step 2: staff onboards it → 201 with the credential once, no-store (STM-3 #2, TC-STM3-02)', async () => {
     const res = await post(base, '/api/operator/charge-points/onboard', {
       serial_number: SERIAL,
       site_id: siteAId,
@@ -265,11 +265,11 @@ describeDb('WF-05 through the console HTTP routes (T119, DS-09 / DS-10)', () => 
     expect(((await again.json()) as { error: string }).error).toBe('already_onboarded');
   });
 
-  it('the password never reaches the log', () => {
+  it('TC-F09-07 the password never reaches the log', () => {
     expect(warnings.join('\n')).not.toContain(password);
   });
 
-  it('DS-10: the wrong password → 401 and a log line; the charge point stays awaiting_connection', async () => {
+  it('TC-F09-07 DS-10: the wrong password → 401 and a log line; the charge point stays awaiting_connection', async () => {
     const wrong = chargePointClient(SERIAL, 'wrong-password-123456');
     clients.push(wrong);
     await expect(wrong.connect()).rejects.toThrow(/Unauthorized/);
