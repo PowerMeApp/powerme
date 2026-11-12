@@ -1,60 +1,67 @@
-# NFR-02: chốt chỉ số và dung sai cho thí nghiệm đối soát (RQ1)
+# NFR-02: chỉ số và dung sai cho thí nghiệm đối soát (RQ1)
 
-> Task T121 (Trí). Trạng thái: **đề xuất, chờ Ân (chủ NFR-02) duyệt**. Viết 10/11/2026.
+> Task T121 (Trí). **Đã chốt** theo quyết định của Ân (PM) ngày 12/11/2026. Thay bản đề xuất 10/11.
 
-## 1. Vấn đề
+## 1. Quyết định
 
-Commitment BM04 ghi NFR-02 là "Reconciled rate, cận dưới CI 95% ≥ 95%, tốt hơn khi tắt đối soát và SteVe". Có ba chỗ hở:
+- **Giữ nguyên BM04:** một ngưỡng chung cho cả 3 kịch bản đứt kết nối. Tỉ lệ phiên **đúng** của PowerMe phải có cận dưới khoảng tin cậy 95% **≥ 95%**, và tốt hơn cấu hình tắt đối soát và SteVe.
+- **`review` chỉ được tính là đúng khi dữ liệu của trụ thật sự sai** so với sự thật nền. Giữ phiên lại trong khi lẽ ra tính tiền được thì tính là **sai**. Nhờ vậy, đẩy mọi phiên vào `review` không còn là cách "ăn gian" chỉ số.
+- **Tính tiền sai im lặng phải bằng 0.**
+- Báo thêm **precision** và **recall** của việc giữ phiên lại.
 
-1. **Đếm `review` là đúng thì chỉ số vô nghĩa.** Một CSMS đẩy mọi phiên vào `review` sẽ đạt 100% mà không đối soát gì.
-2. **Không so được với SteVe và bản tắt đối soát.** Hai hệ đó không có trạng thái `reconciled` hay `review`; chúng luôn tính tiền theo `meterStop − meterStart`.
-3. **Lệch SRS.** NFR-REC-01 (RQ1) đo sai số năng lượng (Wh), giao dịch trùng/mất, precision/recall phát hiện khe hở. Commitment chỉ có "reconciled rate".
+## 2. Định nghĩa
 
-## 2. Đề xuất định nghĩa
+Đơn vị đo là **một phiên trong một lần chạy**: 3 kịch bản × 30 lần × 3 cấu hình (PowerMe, PowerMe với `RECONCILIATION_ENABLED=false`, SteVe).
 
-Đơn vị đo là **một phiên trong một lần chạy** (3 kịch bản × 30 lần × 3 cấu hình: PowerMe, PowerMe tắt đối soát `RECONCILIATION_ENABLED=false`, SteVe).
-
-- `truth_wh`: năng lượng thật trụ giả lập đã cấp, lấy từ bộ đếm nội bộ của simulator lúc dừng (sự thật nền, CSMS không thấy).
-- `billed_wh`: năng lượng hệ thống dùng để tính tiền. PowerMe: `sessions.energy_wh` khi phiên `reconciled`. Tắt đối soát và SteVe: `meterStop − meterStart`.
-- `tol`: dung sai, xem mục 3.
-
-Mỗi phiên rơi vào đúng một nhóm:
-
-| Nhóm | Điều kiện | Ý nghĩa |
+| Ký hiệu | Ý nghĩa | Lấy từ đâu |
 |---|---|---|
-| **Đúng** | Đã tính tiền và `abs(billed_wh − truth_wh) ≤ tol` | Thành công |
-| **Giữ lại** | Không tính tiền, đưa vào `review` cho operator | An toàn nhưng chưa tự động |
-| **Sai im lặng** | Đã tính tiền và `abs(billed_wh − truth_wh) > tol` | Nguy hiểm nhất: tính sai mà không ai biết |
-| **Mất / trùng** | Phiên không được ghi, hoặc ghi hai lần | Đo riêng theo SRS |
+| `E_true` | Năng lượng trụ giả lập thật sự đã cấp | Bộ đếm nội bộ của simulator lúc dừng (sự thật nền; CSMS không thấy) |
+| `E_stop` | Năng lượng theo dữ liệu trụ báo | `meterStop − meterStart` của `StopTransaction` |
+| `E_bill` | Năng lượng hệ thống dùng để tính tiền | PowerMe: `sessions.energy_wh` khi phiên `reconciled`; tắt đối soát và SteVe: `meterStop − meterStart`; phiên không tính tiền: không có |
+| `tol` | Dung sai | **1 Wh** (bộ đếm OCPP là số nguyên Wh; trùng `RECONCILE_ENERGY_TOLERANCE_WH=1`) |
 
-**Chỉ số chính NFR-02 = tỉ lệ Đúng** (Đúng ÷ tổng phiên), báo kèm khoảng tin cậy 95% (Wilson) theo từng kịch bản. **`review` không tính là Đúng.**
+**Dữ liệu trụ sai** khi `abs(E_stop − E_true) > tol`.
 
-Ràng buộc đi kèm để chặn "đẩy hết vào review":
+## 3. Phân loại mỗi phiên
 
-- **Sai im lặng = 0** ở PowerMe trong cả 90 lần chạy (đây mới là lời hứa cốt lõi: không bao giờ tính sai tiền mà không báo).
-- **Tỉ lệ Giữ lại** báo cáo riêng, không ẩn vào chỉ số chính.
-
-Các số đo của SRS (sai số Wh trung bình và CI, mất/trùng, precision/recall phát hiện khe hở) vẫn báo cáo đủ trong Report 7; chỉ số chính chỉ là cách tóm gọn.
-
-## 3. Dung sai `tol`
-
-Bộ đếm năng lượng OCPP là số nguyên Wh. Khi `meterStop` hợp lệ, CSMS biết chính xác năng lượng, nên dung sai **1 Wh** (trùng `RECONCILE_ENERGY_TOLERANCE_WH=1` đang cấu hình).
-
-Khi `meterStop` bị hỏng (kịch bản phát lại `meterStop` cũ), CSMS chỉ biết tới mẫu `MeterValues` cuối cùng; phần năng lượng giữa mẫu cuối và lúc dừng không có bằng chứng. Phương án: dung sai cho kịch bản đó bằng **năng lượng của một chu kỳ lấy mẫu** ở công suất kịch bản (ví dụ 60 kW, 10 s ≈ 167 Wh), ghi rõ trong bảng kết quả. Ngoài dung sai này không nới thêm.
-
-## 4. Hệ quả cần quyết trước khi chạy 90 lần
-
-Với code hiện tại, kịch bản phát lại `meterStop` cũ kết thúc ở `review` (đã kiểm trên staging 09/11: phiên #2, `diff=2550`). Theo định nghĩa trên, kịch bản đó cho **tỉ lệ Đúng ≈ 0%**, nên ngưỡng "≥ 95%" không đạt nếu áp chung cho cả ba kịch bản. Hai lựa chọn:
-
-| Phương án | Làm gì | Đánh đổi |
+| Nhóm | Điều kiện | Tính là |
 |---|---|---|
-| **A. Đặt ngưỡng theo kịch bản** (đề xuất) | Ngưỡng ≥ 95% Đúng cho hai kịch bản `meterStop` hợp lệ; kịch bản `meterStop` hỏng thì ngưỡng là **Sai im lặng = 0 và Giữ lại = 100%**, và so sánh với SteVe/tắt đối soát ở chỉ số Sai im lặng (hai hệ đó sẽ tính sai im lặng gần 100%). | Trung thực với thiết kế hiện tại (không đoán tiền khi bằng chứng mâu thuẫn); cần sửa câu chữ NFR-02 trong BM04 ở lần cập nhật tới. |
-| B. Tự giải quyết bằng chuỗi đo | Khi `meterStop` < mẫu cuối và chuỗi đơn điệu, tính tiền theo mẫu cuối thay vì giữ lại | Thêm logic quyết toán (Trí), có rủi ro tính thiếu phần sau mẫu cuối; đổi hành vi đã trình bày ở DS-06 ("billing held"). |
+| **Tính tiền đúng** | Đã tính tiền và `abs(E_bill − E_true) ≤ tol` | Đúng |
+| **Giữ lại đúng** | Ở `review`, không tính tiền, và dữ liệu trụ sai | Đúng |
+| **Giữ lại thừa** | Ở `review` trong khi dữ liệu trụ đúng (lẽ ra tính tiền được) | **Sai** |
+| **Tính tiền sai im lặng** | Đã tính tiền và `abs(E_bill − E_true) > tol` | **Sai, phải bằng 0** |
+| **Mất / trùng** | Phiên không được ghi, hoặc ghi hai lần | Sai (đo riêng theo SRS NFR-REC-01) |
 
-Đề xuất chọn **A**: giữ đúng lời hứa "không tính sai im lặng", và cho thấy rõ ưu thế so với SteVe ở đúng chỗ SteVe tính sai.
+**Chỉ số chính NFR-02** = (Tính tiền đúng + Giữ lại đúng) ÷ tổng phiên, báo theo từng kịch bản và từng cấu hình, kèm khoảng tin cậy 95% (Wilson). Đạt khi cận dưới ≥ 95% ở cả 3 kịch bản.
 
-## 5. Việc tiếp theo
+**Ràng buộc đi kèm:** Tính tiền sai im lặng = 0 ở PowerMe trên toàn bộ 90 lần chạy.
 
-1. Ân duyệt định nghĩa và chọn A hoặc B.
-2. Ghi `truth_wh` từ simulator vào log của mỗi lần chạy (script thí nghiệm, Trí).
-3. Cập nhật câu chữ NFR-02 trong BM04 và Report 7 theo định nghĩa đã duyệt.
+## 4. Precision và recall của việc giữ phiên lại
+
+Coi "giữ lại" (`review`) là một bộ phát hiện dữ liệu trụ sai:
+
+- **Precision** = Giữ lại đúng ÷ (Giữ lại đúng + Giữ lại thừa): trong các phiên bị giữ, bao nhiêu phần đáng giữ.
+- **Recall** = Giữ lại đúng ÷ (số phiên có dữ liệu trụ sai): trong các phiên có dữ liệu sai, bao nhiêu phần bị bắt.
+
+Recall thấp nghĩa là có phiên dữ liệu sai đã lọt qua. Phiên đó sẽ rơi vào "tính tiền sai im lặng" nếu đã bị tính tiền. Cấu hình tắt đối soát và SteVe không bao giờ giữ phiên lại, nên recall của chúng bằng 0 theo định nghĩa. Điểm so sánh với hai cấu hình này nằm ở số phiên tính tiền sai im lặng.
+
+Báo cáo vẫn kèm các số đo của SRS NFR-REC-01: sai số Wh (trung bình và CI), giao dịch trùng/mất, precision/recall phát hiện khe hở theo bản ghi `meter_gap`.
+
+## 5. Harness phải ghi cho mỗi lần chạy
+
+Một dòng cho mỗi phiên, đủ để tính lại mọi chỉ số mà không chạy lại:
+
+| Trường | Ghi chú |
+|---|---|
+| `run_id`, `scenario`, `config`, `seed` | Định danh lần chạy (30 lần/kịch bản, seed cố định) |
+| `session_id`, `transaction_id` | Liên kết sang DB |
+| `E_true`, `E_stop`, `E_bill` | Wh, số nguyên; `E_bill` để trống nếu không tính tiền |
+| `status` | Trạng thái cuối của phiên (`reconciled`, `review`, …) |
+| `injected_fault` | Lỗi đã gây ra trong lần chạy (đứt kết nối bao lâu, phát lại `meterStop` cũ, gửi lại `StartTransaction`, …) |
+| `class` | Một trong các nhóm ở mục 3 |
+
+## 6. Hệ quả cần biết trước khi chạy
+
+- Ở kịch bản phát lại `meterStop` cũ, dữ liệu trụ sai, nên phiên ở `review` là **Giữ lại đúng**. Đã kiểm trên staging 09/11 (DS-06, phiên #2: `review`, `diff=2550`).
+- Ở hai kịch bản còn lại, nếu `meterStop` hợp lệ mà phiên vẫn bị giữ (ví dụ do ngưỡng khe hở quá chặt) thì đó là **Giữ lại thừa** và kéo chỉ số xuống. Cần đo trước vài lần để chỉnh ngưỡng trước khi chạy đủ 90 lần.
+- Liên quan PR #120 (đồng hồ trụ): nếu quyết toán giữ phiên chờ vô thời hạn khi đồng hồ trụ lệch, phiên đó không bao giờ có `E_bill`. Cần chốt hướng xử lý ở #120 trước khi chạy, để phân loại không mơ hồ.
