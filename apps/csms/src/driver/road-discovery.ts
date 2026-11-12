@@ -13,7 +13,7 @@ export class RoadDiscovery {
   private async ownedVehicle(driver: string, vehicle: string) {
     const result = await this.db.$client.query(
       `SELECT v.id FROM vehicles v JOIN users u ON u.id=v.driver_id
-       JOIN drivers d ON d.user_id=u.id WHERE v.id=$1 AND v.driver_id=$2
+       JOIN drivers d ON d.user_id=u.id WHERE v.id=$1 AND v.driver_id=$2 AND v.removed_at IS NULL
        AND u.role='driver' AND u.account_status='active'`,
       [vehicle, driver],
     );
@@ -44,7 +44,7 @@ export class RoadDiscovery {
        JOIN operators o ON o.id=st.operator_id AND o.status='active'
        WHERE st.id=$1 AND EXISTS(SELECT 1 FROM charge_points cp
          JOIN connectors c ON c.charge_point_id=cp.id
-         JOIN vehicles v ON v.id=$2 AND v.driver_id=$3
+         JOIN vehicles v ON v.id=$2 AND v.driver_id=$3 AND v.removed_at IS NULL
          JOIN vehicle_models m ON m.id=v.vehicle_model_id
          WHERE cp.site_id=st.id AND cp.lifecycle='in_service' AND m.connector_type=c.connector_type
          AND (NOT st.vinfast_only OR m.is_vinfast OR $4))`,
