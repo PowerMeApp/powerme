@@ -52,6 +52,8 @@ auth nên shared listener bắt buộc loopback.
 
 **Độ tươi** (BR-P39): `status_quality = stale` khi không có bản tin quá 2 chu kỳ heartbeat (mặc định 2 × 300 s, biến `CHARGE_STATION_STALE_MS`); `driver_status = offline` khi quá `OCPP_OFFLINE_THRESHOLD_SECONDS` (900 s). App hiện "có thể đã cũ" và thời điểm `status_updated_at`.
 
+**Súng đang lỗi bị ẩn** (WF-04, AD-7): `GET /stations` không trả súng có sự cố mở (`fault_events.status` khác `resolved`); sự cố cả trụ (`connector_id` null, vd. `Offline` sau 900 s) ẩn mọi súng của trụ. Trạm hết súng thì biến khỏi kết quả và `total`. Sự cố `resolved` → súng hiện lại, không cần app làm gì. Sự cố do tài xế báo (`driver_report`) chỉ gắn nhãn, không ẩn (BR-P41/P42). Tra mã QR (`/connectors/by-code`) chưa áp luật này; bắt đầu sạc vẫn bị chặn vì súng lỗi không `Available`.
+
 **Thời gian còn lại** (BR-P32, BR-P40): luôn là **khoảng** `[min_minutes, max_minutes]` hoặc `kind = unknown`, không bao giờ là một mốc. `kind` nói ước tính dựa vào gì, theo thứ tự có dữ liệu:
 
 | `kind` | Dữ liệu | Có trong CSMS? |

@@ -2,15 +2,16 @@
  * TopUpStateMachine — STM-4 TopUp (`top_ups.status`), lớp THUẦN (không DB, không Nest, không đồng hồ).
  *
  * Vì sao tồn tại: bất biến của billing "mọi chuyển trạng thái top-up đi qua TopUpStateMachine".
- * Đây là nơi DUY NHẤT biết bảng chuyển của STM-4 (`diagrams/report4/state/STM-4/STM-4.puml`, v1.0
- * 01/11/2026; số chuyển `#n` bên dưới theo bản v0.3 trước đó, xem lịch sử git); TopUpService
- * (Phần 5–9 của WF-02) chỉ gọi `apply()` rồi ghi kết quả xuống DB. Cùng mẫu với FaultStateMachine
- * (STM-6) và SessionStateMachine (STM-1).
+ * Đây là nơi DUY NHẤT biết bảng chuyển của STM-4 (`diagrams/report4/state/STM-4/STM-4.puml`, v1.1
+ * 10/11/2026: `expired` là trạng thái cuối, bỏ cửa sổ trả trễ, T117); TopUpService (Phần 5–9 của
+ * WF-02) chỉ gọi `apply()` rồi ghi kết quả xuống DB. Cùng mẫu với FaultStateMachine (STM-6) và
+ * SessionStateMachine (STM-1).
  *
- * Số `no` là số chuyển STM-4 dùng trong `billing/CLAUDE.md` và decisions:
+ * Số `no` là số chuyển STM-4 dùng trong `billing/CLAUDE.md` và decisions (giữ số cũ, #5 đã bỏ ở
+ * T117 nên không còn):
  *   #1 ● → pending (tạo, `initial()`) · #2 pending → credited · #3 pending → failed
- *   #4 pending → expired · #5 expired → credited (trả trễ, trong cửa sổ 1 giờ)
- *   #6 expired: trả trễ ngoài cửa sổ → khoản trễ, vẫn expired (ghi chú ở `expired` của STM-4)
+ *   #4 pending → expired
+ *   #6 thành công sau khi đã expired → khoản trễ, vẫn expired (ghi chú ở `expired` của STM-4)
  *   #7 credited → refunded (Admin hoàn, UC-ADM-08)
  *
  * Guard do service tính rồi truyền vào (`TopUpGuards`); máy không đọc DB hay đồng hồ, giống guard
@@ -31,8 +32,8 @@
  *   - Thành công tới khi đã `failed` → `late_payment`, giữ `failed` (cần nới CHECK
  *     `top_ups_late_payment_status_check` ở migration của Phần 6).
  *   - Đã có khoản trễ (`recordedLateRef`): cùng transactionNo → `already_applied`, khác →
- *     `conflicting_result`. Kiểm TRƯỚC guard cửa sổ, vì khoản trễ có thể đã ghi ngay trong cửa sổ
- *     khi vượt hạn mức (`!limitsOk`).
+ *     `conflicting_result`. Kiểm khoản trễ đã ghi TRƯỚC, để IPN lặp trả 02 thay vì ghi khoản trễ
+ *     lần hai.
  *
  * Bộ 5 × 4 = 20 cặp (trạng thái, event): 16 được nhận · 4 ném InvalidTransition.
  */
@@ -46,7 +47,10 @@ export const TOP_UP_EVENTS = [
   'PAYMENT_SUCCEEDED',
   /** Thanh toán lỗi hoặc tài xế huỷ (SD-2b). */
   'PAYMENT_FAILED',
-  /** Hết 15 phút, querydr báo chưa trả (SD-2d). querydr lỗi thì KHÔNG gửi event này (D4 ⊕). */
+  /**
+   * Vòng quét lúc `expires_at + 2 phút`, querydr trả lời DỨT KHOÁT là chưa trả / thất bại (SD-2d).
+   * Kết quả chưa ngã ngũ (đang xử lý, lỗi, timeout, sai chữ ký) thì KHÔNG gửi event này (D4 ⊕).
+   */
   'TIMEOUT_NOT_PAID',
   /** Admin hoàn top-up (SD-2e, UC-ADM-08). */
   'ADMIN_REFUND',
@@ -61,10 +65,6 @@ export interface TopUpGuards {
   appliedTransactionNo?: string;
   /** PAYMENT_SUCCEEDED: `top_ups.late_gateway_ref` hiện tại; `null` = chưa có khoản trễ. */
   recordedLateRef?: string | null;
-  /** PAYMENT_SUCCEEDED trên expired: chưa quá LATE_WINDOW (1 giờ) kể từ `expires_at`. */
-  withinLateWindow?: boolean;
-  /** PAYMENT_SUCCEEDED trên expired (D4 ⊕): tài khoản chưa đóng và số dư sau nạp ≤ 5.000.000. */
-  limitsOk?: boolean;
   /** ADMIN_REFUND (#7): số dư ≥ số tiền top-up (không hoàn một phần). */
   balanceCoversAmount?: boolean;
 }
@@ -93,7 +93,6 @@ export const TOP_UP_TRANSITIONS: readonly TopUpTransition[] = [
   { no: '#2', from: 'pending', event: 'PAYMENT_SUCCEEDED', to: 'credited' },
   { no: '#3', from: 'pending', event: 'PAYMENT_FAILED', to: 'failed' },
   { no: '#4', from: 'pending', event: 'TIMEOUT_NOT_PAID', to: 'expired' },
-  { no: '#5', from: 'expired', event: 'PAYMENT_SUCCEEDED', to: 'credited' },
   { no: '#7', from: 'credited', event: 'ADMIN_REFUND', to: 'refunded' },
 ];
 
@@ -160,10 +159,7 @@ export class TopUpStateMachine {
         if (late !== null)
           return stay(from, late === txn ? 'already_applied' : 'conflicting_result');
         if (from === 'failed') return stay(from, 'late_payment');
-        const within = need(g, 'withinLateWindow', from, event);
-        const limitsOk = need(g, 'limitsOk', from, event);
-        if (within && limitsOk) return this.step(from, event);
-        return { to: from, outcome: 'late_payment', no: '#6' };
+        return { to: 'expired', outcome: 'late_payment', no: '#6' };
       }
     }
   }
