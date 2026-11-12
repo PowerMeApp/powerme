@@ -9,7 +9,8 @@ info:
     (quản trị nền tảng, role `admin`). Văn bản giải thích, ma trận role × endpoint, ánh xạ từ
     console hiện tại và câu hỏi mở nằm ở `OPERATOR-ADMIN-API-HOP-DONG.md` cùng thư mục.
 
-    Đăng nhập là một route chung `/api/auth/v1/login` cho cả hai bề mặt (ADR-0018). Mọi
+    Đăng nhập là một route chung `/api/auth/v1/login` cho cả hai bề mặt (ADR-0018), làm mới
+    access token qua `/api/auth/v1/refresh` (quyết định 12/11, T125 — chưa có code). Mọi
     `/api/operator/v1/*` và `/api/admin/v1/*` đi qua RolesGuard **trước khi khớp route**: đường
     dẫn chưa có route mà không có token hợp lệ nhận 401, không phải 404.
 
@@ -31,6 +32,8 @@ info:
       trong code, route chưa), `in_progress` (đang làm ở nhánh khác), `planned` (chưa có code).
     - `x-owner`: người làm route (theo WP; BM04 không có trong repo — Trí sửa nếu lệch).
     - `x-refs`: UC / FR / BR / STM trong SRS (report3-srs.md), phiếu v1.3 và thiết kế.
+    Riêng hai route đăng nhập / refresh có thêm `x-target`: trạng thái đích theo T125 khi code
+    hiện tại khác hợp đồng.
 
     Quy ước chung giống Driver API (`driver-api.openapi.yaml`):
     - JSON snake_case. Tiền là số nguyên VND, điện năng là số nguyên Wh, thời gian ISO 8601 UTC;
@@ -44,7 +47,9 @@ info:
   x-owner: Trí (WP2) — hợp đồng; route theo `x-owner` từng operation
   x-status: >-
     v0.1 — hợp đồng; trên main 9c90f34 chỉ có `POST /auth/v1/login`, `GET /operator/v1/me`,
-    `GET /admin/v1/me` (FE-01a #118, ADR-0018); các route còn lại chưa có
+    `GET /admin/v1/me` (FE-01a #118, ADR-0018); các route còn lại chưa có. Từ 12/11 (Ân chốt,
+    T125) hợp đồng là **đích**: access token 900 s + `POST /auth/v1/refresh`; code hiện vẫn phát
+    token 8 giờ, không refresh — chỗ nào khác nhau có ghi "hiện tại" trong mô tả
 servers:
   - url: http://localhost:3000/api
     description: CSMS cục bộ (cùng tiến trình, cùng cổng với console và Driver API)
@@ -85,8 +90,11 @@ paths:
       operationId: dashboardLogin
       x-roles: [public]
       x-status: implemented
-      x-owner: Nghĩa (FE-01a, #118)
-      x-refs: [F-13, UC-ACC-04, UC-ACC-05, BR-P16, NFR-SEC-01, ADR-0018]
+      x-target: >-
+        implemented (8 h, không refresh) — đích 900 s + refresh theo T125 (quyết định Ân 12/11;
+        owner chờ phân công, đề xuất Nghĩa)
+      x-owner: Nghĩa (FE-01a, #118); thay đổi T125 chờ phân công
+      x-refs: [F-13, UC-ACC-04, UC-ACC-05, BR-P16, NFR-SEC-01, ADR-0018, T125]
       summary: Nhân viên operator và Admin đăng nhập email + mật khẩu (một endpoint, màn 16 và 26)
       description: |
         Một endpoint cho cả hai vai trò (ADR-0018 #1). Token mang `role`; màn đăng nhập của mỗi
@@ -111,10 +119,14 @@ paths:
           song từ một IP → 429 với `Retry-After: 1`. Đăng nhập đúng xoá bộ đếm email + IP. IP là
           `req.socket.remoteAddress` — chưa đọc `X-Forwarded-For` (xem §2.7 của hợp đồng).
         - Chưa cấu hình `DASHBOARD_JWT_*` (cả ba trống) → 503 `auth_unavailable`.
-        - Token: JWT HS256 `typ: JWT`, khoá `DASHBOARD_JWT_SECRET_BASE64`, `iss` / `aud` theo
-          `DASHBOARD_JWT_ISSUER` / `_AUDIENCE`; claim `sub` (users.id), `role`, `iat`, `exp` =
-          `iat` + 28 800 s (8 giờ), `jti` (UUID); nhân viên thêm `operator_id`, `staff_role`.
-          **Không có refresh token**: hết 8 giờ thì đăng nhập lại.
+        - Access token: JWT HS256 `typ: JWT`, khoá `DASHBOARD_JWT_SECRET_BASE64`, `iss` / `aud`
+          theo `DASHBOARD_JWT_ISSUER` / `_AUDIENCE`; claim `sub` (users.id), `role`, `iat`, `exp`,
+          `jti` (UUID); nhân viên thêm `operator_id`, `staff_role`.
+        - **Đích (T125, Ân chốt 12/11):** `exp` = `iat` + **900 s**, response thêm
+          `refresh_token` + `refresh_expires_in` (xem `POST /auth/v1/refresh`). **Hiện tại (main,
+          #118):** `exp` = `iat` + 28 800 s (8 giờ), `expires_in: 28800`, không có hai trường
+          refresh — dashboard phải chịu được cả hai cho tới khi T125 merge (đọc `expires_in`,
+          không gán cứng; thiếu `refresh_token` thì hết hạn là đăng nhập lại).
       security: []
       requestBody:
         required: true
@@ -123,7 +135,7 @@ paths:
             schema: { $ref: '#/components/schemas/LoginRequest' }
       responses:
         '200':
-          description: Access token 8 giờ và người dùng (cùng hình dạng với `/me`)
+          description: Access token (đích 900 s; hiện 8 giờ), refresh token (đích) và người dùng (cùng hình dạng với `/me`)
           headers:
             Cache-Control:
               schema: { type: string, const: no-store }
@@ -137,6 +149,72 @@ paths:
         '413': { $ref: '#/components/responses/PayloadTooLarge' }
         '415': { $ref: '#/components/responses/UnsupportedMediaType' }
         '429': { $ref: '#/components/responses/TooManyAttempts' }
+        '503': { $ref: '#/components/responses/AuthUnavailable' }
+
+  /auth/v1/refresh:
+    post:
+      tags: [auth]
+      operationId: dashboardRefresh
+      x-roles: [public]
+      x-status: planned
+      x-target: planned · T125 (Ân chốt 12/11) — owner chờ phân công; đề xuất Nghĩa vì #118 là của Nghĩa
+      x-owner: chờ phân công (đề xuất Nghĩa, T125)
+      x-refs: [F-13, UC-ACC-04, UC-ACC-05, BR-P16, NFR-SEC-01, ADR-0018, T125, BE-21]
+      summary: Đổi refresh token lấy access token 900 s mới (không phát refresh token mới)
+      description: |
+        **Chưa có code** — hiện route này nhận 404 `not_found` như mọi đường dẫn chưa có dưới
+        `/api/auth/v1`. Thiết kế theo Driver API `/auth/refresh` (BE-21,
+        `apps/csms/src/driver/driver-account.ts` `refresh()`), chỉ khác khoá ký và thời hạn:
+
+        - Công khai (không cần access token — access token đã hết hạn là lúc gọi route này).
+          Cùng luật vào như đăng nhập: `Content-Type: application/json` (415), body ≤ 16 KiB (413),
+          chỉ `POST` (405 + `Allow`), body đúng **một** khoá `refresh_token` (khoá lạ → 400).
+        - Refresh token là JWT HS256 **riêng loại**: header `typ: refresh+jwt`, claim
+          `token_use: refresh`, `sub`, `iat`, `exp`, `jti`, **không có `role`**; nhân viên có thêm
+          `operator_id` (để phát hiện bị chuyển Operator). Ký cùng `DASHBOARD_JWT_SECRET_BASE64`,
+          cùng `iss` / `aud` dashboard — không dùng khoá Driver API.
+        - Không dùng thay nhau: RolesGuard đòi `typ: JWT` + claim `role` nên refresh token gọi
+          `/operator/v1/*`, `/admin/v1/*` → 401 `unauthorized`; route này đòi `typ: refresh+jwt` +
+          `token_use: refresh` nên access token gửi vào đây → 401 `invalid_refresh_token`. Refresh
+          token của tài xế (khoá khác) → 401 `invalid_refresh_token`.
+        - **Mỗi lần refresh kiểm lại DB** như bước 3 của RolesGuard: user không còn → 401
+          `invalid_refresh_token`; `users.role` không phải `operator_staff` / `admin`, hoặc thiếu
+          dòng `operator_staff` / `admins` → 403 `forbidden`; role trong DB khác role lúc đăng
+          nhập (token có `operator_id` ⇔ lúc đăng nhập là nhân viên) hoặc `operator_id` trong DB
+          khác claim → 401 `invalid_refresh_token` (đăng nhập lại); `account_status ≠ active` →
+          403 `account_locked`; Operator ≠ `active` → 403 `operator_inactive`. Access token mới
+          mang `role`, `operator_id`, `staff_role` đọc từ DB ở chính lần refresh này.
+        - **Không xoay vòng**: response chỉ có access token mới, không có refresh token mới. Thời
+          hạn refresh tính từ lúc đăng nhập; hết hạn thì đăng nhập lại — phiên không kéo dài vô
+          hạn khi chưa thu hồi được từng token (không có bảng refresh token, như BE-21).
+        - Thời hạn refresh cấu hình bằng `DASHBOARD_JWT_REFRESH_TTL_S`. **Đề xuất** mặc định
+          43 200 s (12 giờ — một ca làm việc kể cả giao ca), giới hạn 3 600 … 86 400; ngoài
+          khoảng → CSMS không khởi động (như `DRIVER_API_REFRESH_TTL_S`). Con số do Nghĩa chốt
+          (câu hỏi N14 trong hợp đồng).
+        - Không có bộ đếm thử sai (Driver API cũng không): refresh token sai không đoán được vì có
+          chữ ký. `DASHBOARD_JWT_*` trống cả ba → 503 `auth_unavailable`.
+        - Đăng xuất vẫn là dashboard xoá cả hai token; không có `logout` phía server.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RefreshRequest' }
+      responses:
+        '200':
+          description: Access token mới (900 s); không có refresh token mới
+          headers:
+            Cache-Control:
+              schema: { type: string, const: no-store }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DashboardAccessToken' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/InvalidRefreshToken' }
+        '403': { $ref: '#/components/responses/RefreshForbidden' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+        '413': { $ref: '#/components/responses/PayloadTooLarge' }
+        '415': { $ref: '#/components/responses/UnsupportedMediaType' }
         '503': { $ref: '#/components/responses/AuthUnavailable' }
 
   /operator/v1/me:
@@ -1579,6 +1657,95 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
 
+  /admin/v1/transactions:
+    get:
+      tags: [revenue]
+      operationId: listPlatformTransactions
+      x-roles: [admin]
+      x-status: planned
+      x-owner: Khang (T108)
+      x-refs: [UC-ADM-10, BR-P46, F-16, 'Table 5 #35', K3]
+      summary: Danh sách giao dịch sạc của nền tảng theo kỳ, Operator, trạm, loại (màn 35)
+      description: |
+        Một dòng = **một phiên sạc đã dừng** (một OCPP transaction), không phải một dòng sổ cái:
+        top-up, hoàn tiền, hoá đơn điện tử thuộc tài xế, không thuộc Operator nào nên không có
+        trong danh sách này (xem câu hỏi K7 của hợp đồng). Phiên đang chạy không có.
+
+        - `kind` (loại) chia đúng ba nhóm của báo cáo doanh thu: `csms_billed` = phiên
+          `payment_mode = csms_billed` **và** `status = reconciled` (vào doanh thu, BR-P46);
+          `pending_reconciliation` = phiên csms_billed đã dừng nhưng chưa reconciled (chưa có
+          tiền); `unattributed` = phiên `payment_mode = unattributed` (không có tiền, chỉ Wh).
+        - Xếp kỳ theo K3 đã chốt trong hợp đồng (§4): phiên `reconciled` theo mốc giờ quyết toán
+          đã dùng để tính giá (dự phòng `COALESCE(cp_stopped_at, received_stopped_at)` tới khi
+          #120 chốt cách lưu), phiên còn lại theo `received_stopped_at`; ngày chia theo UTC+7,
+          `[from 00:00, to + 1 ngày 00:00)` giờ VN, kỳ ≤ 366 ngày.
+        - `totals` tính trên **toàn bộ** kết quả lọc (không chỉ trang đang xem). Không lọc
+          `kind`, `site_id`, `charge_point_id`, `origin` thì `totals` bằng đúng `totals` của
+          `GET /admin/v1/revenue` cùng `from`, `to`, `operator_id` — mỗi phiên tính một lần
+          (BR-P46). Không có trường phí nền tảng hay phần chia.
+        - Thứ tự cố định: `period_at` giảm dần rồi `session_id` giảm dần; CSV dùng đúng thứ tự
+          này.
+        - **Cột của `TransactionRow` là đề xuất — Khang và Nghĩa chốt** (§4.1 của hợp đồng).
+      parameters:
+        - $ref: '#/components/parameters/fromDate'
+        - $ref: '#/components/parameters/toDate'
+        - $ref: '#/components/parameters/txOperatorId'
+        - $ref: '#/components/parameters/txSiteId'
+        - $ref: '#/components/parameters/txChargePointId'
+        - $ref: '#/components/parameters/txKind'
+        - $ref: '#/components/parameters/txOrigin'
+        - $ref: '#/components/parameters/page'
+        - $ref: '#/components/parameters/pageSize'
+      responses:
+        '200':
+          description: Một trang giao dịch và tổng của toàn bộ kết quả lọc
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TransactionPage' }
+        '400': { $ref: '#/components/responses/TransactionsBadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /admin/v1/transactions.csv:
+    get:
+      tags: [revenue]
+      operationId: exportPlatformTransactionsCsv
+      x-roles: [admin]
+      x-status: planned
+      x-owner: Khang (T108)
+      x-refs: [UC-ADM-10, BR-P46, F-16, 'Table 5 #35']
+      summary: Cùng danh sách giao dịch, dạng CSV — khớp màn hình, cho công ty khách hàng tự quyết toán
+      description: |
+        Cùng cách đặt đường dẫn với `revenue.csv` (đuôi `.csv`, không dùng `?format=csv`). Cùng
+        tham số lọc và cùng truy vấn với `GET /admin/v1/transactions`, **không phân trang**: xuất
+        mọi dòng của kết quả lọc, đúng thứ tự của màn hình, dòng cuối `TOTAL` bằng `totals` của
+        JSON. Quá ngưỡng số dòng → 400 `export_too_large` (ngưỡng chờ chốt — K10).
+
+        Định dạng đề xuất (giống `revenue.csv`, Khang/Nghĩa xác nhận — K9): UTF-8 có BOM (Excel đọc
+        đúng tiếng Việt), dấu phẩy, dòng đầu là tên cột snake_case như JSON, tiền VND số nguyên
+        không dấu nghìn, Wh số nguyên, ô trống cho `null`. Thời điểm ghi theo UTC+7 có offset
+        (`2026-11-03T16:20:00+07:00`) — khác JSON (UTC `Z`) để người đọc Excel thấy giờ VN.
+      parameters:
+        - $ref: '#/components/parameters/fromDate'
+        - $ref: '#/components/parameters/toDate'
+        - $ref: '#/components/parameters/txOperatorId'
+        - $ref: '#/components/parameters/txSiteId'
+        - $ref: '#/components/parameters/txChargePointId'
+        - $ref: '#/components/parameters/txKind'
+        - $ref: '#/components/parameters/txOrigin'
+      responses:
+        '200':
+          description: Tệp CSV
+          headers:
+            Content-Disposition:
+              schema: { type: string, examples: ['attachment; filename="transactions_2026-11-01_2026-11-30.csv"'] }
+          content:
+            text/csv:
+              schema: { type: string }
+        '400': { $ref: '#/components/responses/TransactionsBadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
   # ============================================================================================
   # ACCOUNTS & ROLES (admin)
   # ============================================================================================
@@ -2280,8 +2447,10 @@ components:
         `DASHBOARD_JWT_AUDIENCE` — không dùng chung khoá, issuer hay audience với Driver API.
         Claim bắt buộc `sub` (users.id, bigint dạng chuỗi), `role` ∈ {`operator_staff`, `admin`}
         (enum `user_role`), `iat`, `exp`; nhân viên có thêm `operator_id`, `staff_role`; có `jti`.
-        Sống 8 giờ, kiểm cả `exp` lẫn tuổi tính từ `iat` ≤ 28 800 s, không có dung sai đồng hồ.
-        Không có refresh token.
+        Đích (T125, Ân chốt 12/11): sống **900 s**, kiểm cả `exp` lẫn tuổi tính từ `iat` ≤ 900 s,
+        không có dung sai đồng hồ; hết hạn thì dashboard gọi `POST /auth/v1/refresh`. Hiện tại
+        (main, #118): sống 8 giờ (`iat` ≤ 28 800 s), không có refresh token. Refresh token
+        (`typ: refresh+jwt`) không bao giờ được nhận ở đây → 401.
 
         Header: đúng **một** `Authorization: Bearer <jwt>` (≤ 8 192 ký tự); hai header hoặc sai
         dạng → 401.
@@ -2343,6 +2512,31 @@ components:
       required: true
       description: Ngày cuối kỳ (bao gồm), Asia/Ho_Chi_Minh; kỳ tối đa 366 ngày
       schema: { type: string, format: date }
+    txOperatorId:
+      name: operator_id
+      in: query
+      description: Chỉ phiên ở trụ của Operator này
+      schema: { $ref: '#/components/schemas/Id' }
+    txSiteId:
+      name: site_id
+      in: query
+      description: Chỉ phiên ở trạm (site) này
+      schema: { $ref: '#/components/schemas/Id' }
+    txChargePointId:
+      name: charge_point_id
+      in: query
+      description: Chỉ phiên ở trụ này
+      schema: { $ref: '#/components/schemas/Id' }
+    txKind:
+      name: kind
+      in: query
+      description: Loại giao dịch; bỏ trống = cả ba loại
+      schema: { $ref: '#/components/schemas/TransactionKind' }
+    txOrigin:
+      name: origin
+      in: query
+      description: Cách bắt đầu phiên (enum DB `session_origin`)
+      schema: { type: string, enum: [app_qr, rfid, hmi_password, free_vend] }
     revenueGroupBy:
       name: group_by
       in: query
@@ -2487,6 +2681,22 @@ components:
       content:
         application/json:
           schema: { $ref: '#/components/schemas/Error' }
+    InvalidRefreshToken:
+      description: |
+        `invalid_refresh_token` — thiếu, sai dạng, sai chữ ký / iss / aud, hết hạn, sai loại
+        (access token gửi vào đây), user không còn, role trong DB khác role lúc đăng nhập, hoặc
+        nhân viên đã bị chuyển Operator. Dashboard xoá token và đưa về màn đăng nhập (T125)
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    RefreshForbidden:
+      description: |
+        Refresh token hợp lệ nhưng DB không còn cho phép: `forbidden` (role không còn là
+        `operator_staff` / `admin`, hoặc thiếu dòng `operator_staff` / `admins`), `account_locked`
+        (`account_status ≠ active`), `operator_inactive`; `forbidden_origin` như mọi route (T125)
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
     RecoveryBadRequest:
       description: '`invalid_input`, `recovery_evidence_required`, `invalid_recovery_retry`, `invalid_boundary_evidence`'
       content:
@@ -2498,6 +2708,14 @@ components:
         `recovery_evidence_incomplete`, `recovery_not_completed`, `stop_attempt_not_current`,
         `stop_effect_observed_or_not_recoverable`, `session_not_stoppable` (mã của
         `ChargingError`, giữ nguyên văn)
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    TransactionsBadRequest:
+      description: |
+        `invalid_input` (tham số lạ / trùng / sai kiểu), `invalid_period` (from > to hoặc dài hơn
+        366 ngày); riêng CSV: `export_too_large` — kết quả vượt ngưỡng số dòng (ngưỡng chờ chốt,
+        K10)
       content:
         application/json:
           schema: { $ref: '#/components/schemas/Error' }
@@ -2575,13 +2793,43 @@ components:
         password: { type: string, writeOnly: true }
     LoginResponse:
       type: object
-      description: '`packages/shared/src/api/auth.ts` `LoginResponse`'
-      required: [access_token, token_type, expires_in, user]
+      description: |
+        `packages/shared/src/api/auth.ts` `LoginResponse`. **Đích T125**: `expires_in: 900` và có
+        `refresh_token`, `refresh_expires_in`. **Hiện tại (main, #118)**: `expires_in: 28800`, không
+        có hai trường refresh; type TS shared đổi cùng PR T125.
+      required: [access_token, token_type, expires_in, refresh_token, refresh_expires_in, user]
       properties:
-        access_token: { type: string, description: 'JWT HS256, khoá DASHBOARD_JWT_*' }
+        access_token: { type: string, description: 'JWT HS256, typ JWT, khoá DASHBOARD_JWT_*' }
         token_type: { type: string, const: Bearer }
-        expires_in: { type: integer, const: 28800, description: 'Giây (8 giờ). Không có refresh token' }
+        expires_in: { type: integer, const: 900, description: 'Giây. Hiện tại code trả 28800 (8 giờ) cho tới T125' }
+        refresh_token:
+          type: string
+          maxLength: 8192
+          description: 'JWT HS256, typ refresh+jwt, token_use refresh, không có role; chỉ dùng cho POST /auth/v1/refresh (T125 — chưa có)'
+        refresh_expires_in:
+          type: integer
+          minimum: 3600
+          maximum: 86400
+          description: 'Giây, theo DASHBOARD_JWT_REFRESH_TTL_S — đề xuất mặc định 43200 (12 giờ), Nghĩa chốt (N14)'
         user: { $ref: '#/components/schemas/DashboardUser' }
+    RefreshRequest:
+      type: object
+      additionalProperties: false
+      required: [refresh_token]
+      description: Đúng một khoá; khoá lạ → 400 (như Driver API `RefreshRequest`)
+      properties:
+        refresh_token: { type: string, maxLength: 8192, writeOnly: true }
+    DashboardAccessToken:
+      type: object
+      description: |
+        Response của `POST /auth/v1/refresh` (T125) — như Driver API `AccessToken`: không có
+        refresh token mới, không có `user` (dashboard đã có từ lúc đăng nhập; cần làm mới hồ sơ
+        thì gọi `/me`)
+      required: [access_token, token_type, expires_in]
+      properties:
+        access_token: { type: string, description: 'JWT HS256, typ JWT, role đọc lại từ DB, sống 900 s' }
+        token_type: { type: string, const: Bearer }
+        expires_in: { type: integer, const: 900 }
     DashboardUser:
       type: object
       description: |
@@ -3251,6 +3499,74 @@ components:
         generated_at:
           allOf: [{ $ref: '#/components/schemas/Timestamp' }]
           description: 'Lúc chạy truy vấn; hiển thị "tính đến lúc …" vì kỳ cũ còn đổi khi có phiên đối soát muộn (K3)'
+
+    # ---- giao dịch Admin (UC-ADM-10, T108) — cột là ĐỀ XUẤT, Khang và Nghĩa chốt -------------
+    TransactionKind:
+      type: string
+      enum: [csms_billed, pending_reconciliation, unattributed]
+      description: |
+        `csms_billed` = csms_billed + reconciled (vào doanh thu) · `pending_reconciliation` =
+        csms_billed đã dừng, chưa reconciled · `unattributed` = không có người trả
+    TransactionRow:
+      type: object
+      description: |
+        Một phiên sạc đã dừng. **Danh sách cột là đề xuất, Khang và Nghĩa chốt** (§4.1 hợp đồng);
+        nguồn cột ghi trong từng mô tả. Không có `platform_fee`, `owner_share` (BR-P46)
+      required: [session_id, transaction_no, kind, session_status, payment_mode, origin, operator_id, operator_name, site_id, site_code, site_name, charge_point_id, serial_number, connector_no, started_at, stopped_at, period_at, period_day, energy_wh, amount_vnd, driver_id, promotion_code, delivered_offline]
+      properties:
+        session_id: { $ref: '#/components/schemas/Id' }
+        transaction_no: { type: integer, description: '`sessions.transaction_no` — transactionId OCPP trụ đã nhận' }
+        kind: { $ref: '#/components/schemas/TransactionKind' }
+        session_status: { $ref: '#/components/schemas/SessionStatus' }
+        payment_mode: { $ref: '#/components/schemas/PaymentMode' }
+        origin: { type: string, enum: [app_qr, rfid, hmi_password, free_vend], description: '`sessions.origin`' }
+        operator_id: { $ref: '#/components/schemas/Id' }
+        operator_name: { type: string, description: '`operators.legal_name`' }
+        site_id: { oneOf: [{ $ref: '#/components/schemas/Id' }, { type: 'null' }] }
+        site_code: { type: [string, 'null'], description: '`sites.site_code`; null nếu trụ chưa gắn site' }
+        site_name: { type: [string, 'null'] }
+        charge_point_id: { $ref: '#/components/schemas/Id' }
+        serial_number: { type: string, description: '`charge_points.serial_number`' }
+        connector_no: { type: integer, minimum: 1 }
+        started_at:
+          allOf: [{ $ref: '#/components/schemas/Timestamp' }]
+          description: '`sessions.received_started_at` (đồng hồ CSMS, tin cậy — ADR-0009)'
+        stopped_at:
+          allOf: [{ $ref: '#/components/schemas/Timestamp' }]
+          description: '`sessions.received_stopped_at`'
+        period_at:
+          allOf: [{ $ref: '#/components/schemas/Timestamp' }]
+          description: 'Mốc dùng để xếp kỳ theo K3 (§4) — cột cho người xem hiểu vì sao phiên nằm ở ngày này'
+        period_day: { type: string, format: date, description: 'Ngày của `period_at` theo UTC+7' }
+        energy_wh: { type: integer, minimum: 0, description: '`sessions.energy_wh`' }
+        amount_vnd:
+          type: [integer, 'null']
+          minimum: 0
+          description: '|`credit_transactions.amount_vnd`| của dòng `session_debit` duy nhất; null khi `kind` ≠ `csms_billed`'
+        driver_id: { oneOf: [{ $ref: '#/components/schemas/Id' }, { type: 'null' }], description: '`sessions.driver_id`; null với unattributed. Không xuất email / điện thoại (K8)' }
+        promotion_code: { type: [string, 'null'], description: '`promotions.promotion_code` nếu phiên có khuyến mãi (K6)' }
+        delivered_offline: { type: boolean, description: '`sessions.delivered_offline` — phiên trụ gửi bù sau khi nối lại' }
+    TransactionPage:
+      allOf:
+        - $ref: '#/components/schemas/PageMeta'
+        - type: object
+          required: [from, to, currency, items, totals, pending_reconciliation, generated_at]
+          properties:
+            from: { type: string, format: date }
+            to: { type: string, format: date }
+            currency: { type: string, const: VND }
+            items: { type: array, items: { $ref: '#/components/schemas/TransactionRow' } }
+            totals:
+              allOf: [{ $ref: '#/components/schemas/RevenueBucket' }]
+              description: 'Tổng của toàn bộ kết quả lọc, không chỉ trang này; không lọc thêm thì bằng `totals` của /admin/v1/revenue'
+            pending_reconciliation:
+              type: object
+              required: [session_count]
+              properties:
+                session_count: { type: integer, minimum: 0 }
+            generated_at:
+              allOf: [{ $ref: '#/components/schemas/Timestamp' }]
+              description: 'Hiển thị "tính đến lúc …" (K3: kỳ cũ còn đổi khi có phiên đối soát muộn)'
 
     # ---- tài khoản / operator / thẻ -----------------------------------------------------------
     UserRole:
