@@ -7,7 +7,7 @@ Dụng cụ đo, không phải sản phẩm. Không sửa mã CSMS, không chỉ
 | Trạng thái (12/11/2026) | |
 |---|---|
 | PowerMe, PowerMe tắt đối soát | **Đã chạy thật** 30 × 3 mỗi cấu hình trên máy dev — xem `results/2026-11-12/` |
-| SteVe | **Chưa chạy** (máy dev không có Docker). Đã viết adapter + compose + hướng dẫn; test bằng dữ liệu giả. Xem [`infra/lab/steve/README.md`](../../../../infra/lab/steve/README.md) |
+| SteVe | **Đã chạy 12/11/2026** trên máy dev (Docker Desktop, SteVe 3.14.1 + MariaDB 10.11.16): 90 lần, `--concurrency 1` (xem mối đe doạ 8). Kết quả trong `results/2026-11-12/steve/`. Cách dựng: [`infra/lab/steve/README.md`](../../../../infra/lab/steve/README.md) |
 | Ba kịch bản | Tiêu đề **chính thức** (phiếu đăng ký v1.3); tham số hoá chi tiết là **đề xuất, chờ Ân duyệt** |
 
 ## Các file
@@ -145,7 +145,7 @@ Dữ liệu thô và báo cáo: [`results/2026-11-12/`](results/2026-11-12/) (`s
 5. **Postgres nhúng 17 beta, một máy, một tiến trình CSMS.** Staging và CI dùng Postgres 16. Trụ và CSMS chạy trên cùng máy qua loopback: không có trễ mạng, không mất gói, đồng hồ trụ và CSMS trùng nhau.
 6. **Chạy song song 10 trụ.** Mỗi lần chạy có trụ, thẻ, tài xế riêng nên không đụng dữ liệu của nhau, nhưng CSMS chịu tải của 10 trụ cùng lúc; chưa đo lại với `--concurrency 1` để so.
 7. **Cỡ mẫu.** Với n = 30, kể cả 30/30 đúng thì cận dưới Wilson 95% là 88,6%: ngưỡng "cận dưới ≥ 95% ở cả 3 kịch bản" của NFR-02 **không thể đạt** với 30 lần mỗi kịch bản. Gộp 90 lần thì 90/90 cho 95,9%. Cần Ân xác nhận ngưỡng áp cho từng kịch bản hay cho mẫu gộp (hoặc tăng số lần chạy lên ≥ 73 mỗi kịch bản).
-8. **SteVe chưa chạy**, nên chưa có so sánh ba cấu hình; "tài nguyên máy như nhau" (phiếu đăng ký) cũng chưa bảo đảm được vì PowerMe đo trên máy dev còn SteVe sẽ đo trên VM.
+8. **SteVe chạy tuần tự, PowerMe chạy song song.** Khi nhiều trụ mới cùng gửi `StatusNotification` đầu tiên, SteVe 3.14.1 trả lỗi nội bộ (`Deadlock found when trying to get lock` lúc chèn bảng `evse`, thấy trong log SteVe; lần chạy thử 3 trụ song song hỏng 2/3). Vì vậy cấu hình SteVe chạy `--concurrency 1` (1869,6 s cho 90 lần), còn hai cấu hình PowerMe chạy 10 trụ song song. Cả ba cấu hình chạy trên cùng một máy dev (không còn khác máy như dự định ban đầu), nhưng tải đồng thời khác nhau; chưa đo lại PowerMe với `--concurrency 1` để so.
 
 ## Chỗ phải đoán
 
