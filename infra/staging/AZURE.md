@@ -69,7 +69,7 @@ cd ~/powerme/infra/staging
 ./init-env.sh <FQDN> <TAG>        # ví dụ: ./init-env.sh powerme-staging.japaneast.cloudapp.azure.com review-4
 ```
 
-Script sinh `POSTGRES_PASSWORD`, `DEMO_CHARGE_POINT_PASSWORD`, khoá JWT Driver API (`DRIVER_API_JWT_SECRET_BASE64` + issuer `powerme-staging` + audience `powerme-driver-app`) và `DEMO_DRIVER_PASSWORD` (mật khẩu tài xế mẫu cho app), ghi vào `.env` (chmod 600), **không in ra**. Chạy lại sẽ bị từ chối (tránh làm lệch mật khẩu DB đã tạo); chỉ dùng `--force` khi chấp nhận mất mật khẩu cũ.
+Script sinh `POSTGRES_PASSWORD`, `DEMO_CHARGE_POINT_PASSWORD`, khoá JWT Driver API (`DRIVER_API_JWT_SECRET_BASE64` + issuer `powerme-staging` + audience `powerme-driver-app`), `DEMO_DRIVER_PASSWORD` (mật khẩu tài xế mẫu cho app), khoá JWT dashboard (`DASHBOARD_JWT_*`, T128) và `DEMO_STAFF_PASSWORD` (mật khẩu admin/staff mẫu), ghi vào `.env` (chmod 600), **không in ra**. Chạy lại sẽ bị từ chối (tránh làm lệch mật khẩu DB đã tạo); chỉ dùng `--force` khi chấp nhận mất mật khẩu cũ.
 
 **`.env` đã có từ trước BE-27** (VM hiện tại): đừng `--force`. Chạy
 
@@ -79,6 +79,8 @@ Script sinh `POSTGRES_PASSWORD`, `DEMO_CHARGE_POINT_PASSWORD`, khoá JWT Driver 
 ```
 
 Chưa chạy `--add-missing` thì deploy vẫn chạy (chỉ cảnh báo), nhưng app nhận 503 `auth_unavailable`.
+
+**Đăng nhập dashboard (T128, FE-01a).** `.env` tạo trước T128 thiếu `DASHBOARD_JWT_SECRET_BASE64` / `DASHBOARD_JWT_ISSUER` / `DASHBOARD_JWT_AUDIENCE` và `DEMO_STAFF_PASSWORD`: cùng hai lệnh trên (`./init-env.sh --add-missing` rồi `./deploy.sh <TAG> --seed`) bổ sung khoá riêng của dashboard (issuer `powerme-staging-dashboard`, audience `powerme-dashboard`) và đặt mật khẩu cho `admin.demo@powerme.test` / `staff.demo@powerme.test`. Thiếu thì deploy vẫn xanh nhưng `/api/auth/v1/login` trả 503. Kiểm và đăng nhập qua tunnel: [README.md › Đăng nhập dashboard](README.md#đăng-nhập-dashboard-t128-fe-01a). **Không** thêm `/api/*` vào Caddyfile.
 
 ## 5. Deploy lần đầu (tay)
 

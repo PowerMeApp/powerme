@@ -18,10 +18,17 @@
  * qua bước đặt mật khẩu và cảnh báo (tài xế mẫu chưa đăng nhập được); hash luôn được ghi lại khi có
  * biến, nên đổi DEMO_DRIVER_PASSWORD rồi seed lại là xoay mật khẩu. `--no-app` bỏ qua cả phần BE-27.
  *
+ * T128 (FE-01a, ADR-0018): seed.sql tạo admin.demo@powerme.test và staff.demo@powerme.test (người thao
+ * tác WF-05) không có mật khẩu. Nếu có DEMO_STAFF_PASSWORD, script băm nó bằng cùng hàm scrypt mà
+ * StaffAccounts.login (src/users/auth.ts) dùng để kiểm, rồi ghi cho hai tài khoản đó — để đăng nhập
+ * dashboard trên staging. Chạy cả khi `--no-app` (hai tài khoản thuộc seed.sql). Thiếu biến thì bỏ qua
+ * và cảnh báo; có biến thì hash luôn được ghi lại (đổi biến rồi seed lại là xoay mật khẩu).
+ *
  * Biến môi trường: DATABASE_URL, DEMO_CHARGE_POINT_PASSWORD (bắt buộc, không mặc định, >= 16 ký tự),
- * DEMO_DRIVER_PASSWORD (tuỳ chọn, 12..128 ký tự).
+ * DEMO_DRIVER_PASSWORD, DEMO_STAFF_PASSWORD (tuỳ chọn, 12..128 ký tự).
  * Thoát mã 2 nếu thiếu/yếu cấu hình, mã 1 nếu lỗi khi nạp. Cần `migrate.mjs` đã chạy trước.
- * Chạy: DATABASE_URL=... DEMO_CHARGE_POINT_PASSWORD=... [DEMO_DRIVER_PASSWORD=...] node scripts/seed-demo.mjs [--no-app]
+ * Chạy: DATABASE_URL=... DEMO_CHARGE_POINT_PASSWORD=... [DEMO_DRIVER_PASSWORD=...] [DEMO_STAFF_PASSWORD=...]
+ *   node scripts/seed-demo.mjs [--no-app]
  */
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
@@ -42,6 +49,9 @@ export const APP_DRIVER_EMAILS = [
 export const MIN_DRIVER_PASSWORD_LENGTH = 12;
 /** Trần độ dài mật khẩu của BE-21 (`checkPassword` trong driver-account.ts: 8..128 code point). */
 export const MAX_DRIVER_PASSWORD_LENGTH = 128;
+/** Tài khoản dashboard mẫu của seed.sql (T128), dùng chung một mật khẩu DEMO_STAFF_PASSWORD. */
+export const ADMIN_DEMO_EMAIL = 'admin.demo@powerme.test';
+export const STAFF_DEMO_EMAIL = 'staff.demo@powerme.test';
 
 /**
  * Mật khẩu trụ demo từ môi trường. Tên cũ DEMO_PILLAR_PASSWORD vẫn được đọc khi tên mới trống,
@@ -61,17 +71,22 @@ export function checkPassword(password) {
 }
 
 /** Trả thông báo lỗi nếu DEMO_DRIVER_PASSWORD đặt mà không dùng được, null nếu hợp lệ hoặc trống. */
-export function checkDriverPassword(password) {
+export function checkDriverPassword(password, name = 'DEMO_DRIVER_PASSWORD') {
   if (!password) return null;
   const length = [...password].length;
   if (length < MIN_DRIVER_PASSWORD_LENGTH || length > MAX_DRIVER_PASSWORD_LENGTH) {
-    return `DEMO_DRIVER_PASSWORD phải dài ${MIN_DRIVER_PASSWORD_LENGTH}..${MAX_DRIVER_PASSWORD_LENGTH} ký tự (hiện ${length}; sinh bằng: openssl rand -hex 8)`;
+    return `${name} phải dài ${MIN_DRIVER_PASSWORD_LENGTH}..${MAX_DRIVER_PASSWORD_LENGTH} ký tự (hiện ${length}; sinh bằng: openssl rand -hex 8)`;
   }
   // Khoảng trắng / ký tự điều khiển (vd \r của file CRLF) lọt vào hash thì không ai gõ lại được.
   if (/[\s\x00-\x1f\x7f]/.test(password)) {
-    return 'DEMO_DRIVER_PASSWORD có khoảng trắng hoặc ký tự điều khiển (\\r của file CRLF?)';
+    return `${name} có khoảng trắng hoặc ký tự điều khiển (\\r của file CRLF?)`;
   }
   return null;
+}
+
+/** DEMO_STAFF_PASSWORD (T128): cùng luật với DEMO_DRIVER_PASSWORD; trống = hợp lệ (seed bỏ qua). */
+export function checkStaffPassword(password) {
+  return checkDriverPassword(password, 'DEMO_STAFF_PASSWORD');
 }
 
 /** Băm bằng hàm của CSMS đã build; không sao chép thuật toán sang đây. */
@@ -167,6 +182,39 @@ export async function seedApp(client, driverPassword, log = () => {}, hash = und
   return rows[0];
 }
 
+/**
+ * T128: đặt mật khẩu dashboard cho admin/staff mẫu của seed.sql. Cần seed.sql đã chạy. Chỉ ghi dòng có
+ * đúng role VÀ dòng admins / operator_staff đi kèm (StaffAccounts.login đòi cả hai). `hash` để test
+ * tiêm hàm băm; mặc định là hàm của CSMS đã build — cùng hàm login dùng để kiểm. Trả số tài khoản đã đặt.
+ */
+export async function seedStaff(client, staffPassword, log = () => {}, hash = undefined) {
+  const bad = checkStaffPassword(staffPassword);
+  if (bad) throw new Error(bad);
+  const emails = `${ADMIN_DEMO_EMAIL}, ${STAFF_DEMO_EMAIL}`;
+  if (!staffPassword) {
+    log(
+      `CẢNH BÁO: DEMO_STAFF_PASSWORD trống — ${emails} chưa có mật khẩu, không đăng nhập dashboard ` +
+        'được (staging: ./init-env.sh --add-missing rồi ./seed.sh)',
+    );
+    return 0;
+  }
+  const hasher = hash ?? (await loadHasher());
+  // Một hash (một salt) cho cả hai: cùng mật khẩu, tài khoản mẫu.
+  const passwordHash = await hasher(staffPassword);
+  const upd = await client.query(
+    `UPDATE users u SET password_hash = $1, updated_at = now()
+      WHERE (u.email = $2 AND u.role = 'admin'
+             AND EXISTS (SELECT 1 FROM admins a WHERE a.user_id = u.id))
+         OR (u.email = $3 AND u.role = 'operator_staff'
+             AND EXISTS (SELECT 1 FROM operator_staff s WHERE s.user_id = u.id))`,
+    [passwordHash, ADMIN_DEMO_EMAIL, STAFF_DEMO_EMAIL],
+  );
+  log(
+    `đã đặt mật khẩu dashboard cho ${upd.rowCount}/2 tài khoản mẫu (${emails}; DEMO_STAFF_PASSWORD)`,
+  );
+  return upd.rowCount;
+}
+
 // ---- Chạy riêng ----
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const url = process.env.DATABASE_URL;
@@ -191,12 +239,19 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     console.error(`[seed-demo] ${badDriver}`);
     process.exit(2);
   }
+  const staffPassword = process.env.DEMO_STAFF_PASSWORD || '';
+  const badStaff = checkStaffPassword(staffPassword);
+  if (badStaff) {
+    console.error(`[seed-demo] ${badStaff}`);
+    process.exit(2);
+  }
   const pg = createRequire(import.meta.url)('pg');
   const client = new (pg.default ?? pg).Client({ connectionString: url });
   try {
     await client.connect();
     const log = (m) => console.log(`[seed-demo] ${m}`);
     await seedDemo(client, demoPassword(), log);
+    await seedStaff(client, staffPassword, log);
     if (withApp) await seedApp(client, driverPassword, log);
   } catch (err) {
     console.error(`[seed-demo] LỖI: ${err instanceof Error ? err.message : String(err)}`);

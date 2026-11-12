@@ -4,7 +4,8 @@
 #   ./deploy.sh <tag> [--seed] [--sim]
 #
 #   --seed  nạp dữ liệu mẫu (trụ RH24D1-00001 có credential từ DEMO_CHARGE_POINT_PASSWORD; dữ liệu app
-#           tài xế BE-27: trạm TP.HCM, mẫu xe, tài xế app.ds0x@powerme.test với DEMO_DRIVER_PASSWORD)
+#           tài xế BE-27: trạm TP.HCM, mẫu xe, tài xế app.ds0x@powerme.test với DEMO_DRIVER_PASSWORD;
+#           mật khẩu dashboard của admin.demo / staff.demo@powerme.test từ DEMO_STAFF_PASSWORD, T128)
 #   --sim   cập nhật/bật cả simulator (tự bật nếu nó đang chạy sẵn)
 #
 # Các bước: kiểm .env -> sao lưu DB -> pull ảnh -> migrate -> (seed) -> khởi động -> kiểm sức khoẻ
