@@ -65,11 +65,8 @@ export const sessionOriginEnum = pgEnum('session_origin', [
   'free_vend',
 ]);
 // `free` bỏ ở migration 0009 (01/11/2026): free vend → unattributed, phân biệt qua origin.
-export const paymentModeEnum = pgEnum('payment_mode', [
-  'csms_billed',
-  'station_wallet',
-  'unattributed',
-]);
+// `station_wallet` bỏ ở migration 0016 (T109/T110): không còn thẻ ví, phiên cũ → unattributed.
+export const paymentModeEnum = pgEnum('payment_mode', ['csms_billed', 'unattributed']);
 export const billingModeEnum = pgEnum('billing_mode', [
   'full',
   'timed',
@@ -77,7 +74,8 @@ export const billingModeEnum = pgEnum('billing_mode', [
   'amount_vnd',
 ]);
 export const pauseCauseEnum = pgEnum('pause_cause', ['ev', 'evse']);
-export const rfidCardKindEnum = pgEnum('rfid_card_kind', ['online', 'wallet', 'free_vend']);
+// `wallet` (thẻ trả trước, trụ tự trừ) bỏ ở migration 0016 (T109/T110); thẻ cũ → online.
+export const rfidCardKindEnum = pgEnum('rfid_card_kind', ['online', 'free_vend']);
 export const rfidCardStatusEnum = pgEnum('rfid_card_status', ['unlinked', 'active', 'blocked']);
 
 // ---- tariffs ----

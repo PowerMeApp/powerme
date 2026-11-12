@@ -19,11 +19,13 @@ import { createServer, Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { CONFIG, CsmsConfig } from '../config.js';
 import { ConsoleCommands } from './console.commands.js';
-import { createConsoleListener } from './console.http.js';
+import { ConsoleError, createConsoleListener } from './console.http.js';
 import { ConsoleQueries } from './console.queries.js';
 import { createDriverListener } from '../driver/driver.http.js';
+import { createOperatorApiListener, OPERATOR_API_PATH } from '../operator-api/operator-api.http.js';
 import { DB, Db } from '../db/db.module.js';
 import { DriverChargingService } from '../sessions/driver-charging.service.js';
+import { ChargePointOnboardingService } from '../stations/charge-point-onboarding.service.js';
 
 @Injectable()
 export class ConsoleServer implements OnModuleInit, OnModuleDestroy {
@@ -36,7 +38,16 @@ export class ConsoleServer implements OnModuleInit, OnModuleDestroy {
     private readonly commands: ConsoleCommands,
     @Optional() @Inject(DB) private readonly db?: Db,
     @Optional() private readonly driver?: DriverChargingService,
+    @Optional() private readonly onboarding?: ChargePointOnboardingService,
   ) {}
+
+  /** WF-05 (T119): the onboarding service, or 503 when this server was built without it (tests). */
+  private onboardingService(): ChargePointOnboardingService {
+    if (!this.onboarding) {
+      throw new ConsoleError(503, 'onboarding_unavailable', 'Onboarding service not wired');
+    }
+    return this.onboarding;
+  }
 
   /** Cổng thực tế đang nghe (khác config khi consolePort = 0); null nếu chưa mở. */
   get port(): number | null {
@@ -66,27 +77,74 @@ export class ConsoleServer implements OnModuleInit, OnModuleDestroy {
       throw new Error(
         'Console and Driver shared listener requires a loopback bind (or CONSOLE_ALLOW_NON_LOOPBACK=true behind a closed network)',
       );
-    const admin = createConsoleListener({
-      health: () => this.queries.health(),
-      stations: () => this.queries.stations(),
-      sessions: (limit) => this.queries.sessions(limit),
-      session: (id) => this.queries.session(id),
-      reconciliation: (limit) => this.queries.reconciliation(limit),
-      messages: (limit, after) => this.queries.messages(limit, after),
-      summary: () => this.queries.summary(),
-      disconnect: (serial) => this.commands.disconnect(serial),
-      remoteStop: (id) => this.commands.remoteStop(id),
-      faults: (filter, limit) => this.commands.faults(filter, limit),
-      acknowledgeFault: (id) => this.commands.acknowledgeFault(id),
-      resetFault: (id, type, force) => this.commands.resetFault(id, type, force),
-      closeFault: (id) => this.commands.closeFault(id),
-    });
+    const admin = createConsoleListener(
+      {
+        health: () => this.queries.health(),
+        stations: () => this.queries.stations(),
+        sessions: (limit) => this.queries.sessions(limit),
+        session: (id) => this.queries.session(id),
+        reconciliation: (limit) => this.queries.reconciliation(limit),
+        messages: (limit, after) => this.queries.messages(limit, after),
+        summary: () => this.queries.summary(),
+        disconnect: (serial) => this.commands.disconnect(serial),
+        remoteStop: (id) => this.commands.remoteStop(id),
+        faults: (filter, limit) => this.commands.faults(filter, limit),
+        acknowledgeFault: (id) => this.commands.acknowledgeFault(id),
+        resetFault: (id, type, force) => this.commands.resetFault(id, type, force),
+        closeFault: (id) => this.commands.closeFault(id),
+        unattributedQueue: (limit) => this.commands.unattributedQueue(limit),
+        reviewQueue: (limit) => this.commands.reviewQueue(limit),
+        assignUnattributed: (id, input) => this.commands.assignUnattributed(id, input),
+        closeUnattributed: (id, input) => this.commands.closeUnattributed(id, input),
+        resolveReview: (id, input) => this.commands.resolveReview(id, input),
+        registerChargePoint: async (adminId, input) => {
+          const r = await this.onboardingService().registerDevice(adminId, input);
+          return {
+            charge_point_id: r.chargePointId,
+            serial_number: r.serialNumber,
+            lifecycle: r.lifecycle,
+          };
+        },
+        onboardChargePoint: async (staffId, input) => {
+          const r = await this.onboardingService().onboard(staffId, input);
+          return {
+            charge_point_id: r.chargePointId,
+            display_code: r.displayCode,
+            lifecycle: r.lifecycle,
+            ocpp_url: r.ocppUrl,
+            identity: r.identity,
+            password: r.password,
+          };
+        },
+      },
+      {
+        adminUserId: this.config.consoleActorAdminId ?? null,
+        staffUserId: this.config.consoleActorStaffId ?? null,
+      },
+    );
     const driver =
       this.db && this.driver
         ? createDriverListener(this.db, this.driver, this.config.driverApi ?? { devAuth: false })
         : null;
+    // FE-01a: /api/{auth,operator,admin}/v1 → operator-api (JWT, ADR-0018). Matched before the
+    // console so `/api/admin/v1/*` never reaches the unauthenticated `/api/admin/*` routes.
+    const operatorApi = this.db
+      ? createOperatorApiListener(
+          this.db,
+          this.config.dashboardAuth ?? {},
+          this.config.driverApi ?? { devAuth: false },
+        )
+      : null;
     const server = createServer((req, res) => {
-      if (/^\/api\/driver(?:\/|\?|$)/.test(req.url ?? '')) {
+      if (OPERATOR_API_PATH.test(req.url ?? '')) {
+        if (operatorApi) operatorApi(req, res);
+        else {
+          res.writeHead(503, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+          res.end(
+            JSON.stringify({ error: 'auth_unavailable', detail: 'Operator API unavailable' }),
+          );
+        }
+      } else if (/^\/api\/driver(?:\/|\?|$)/.test(req.url ?? '')) {
         if (driver) driver(req, res);
         else {
           res.writeHead(503, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });

@@ -20,7 +20,7 @@
 //
 // GIẢ ĐỊNH CHƯA XÁC NHẬN HÃNG (bảng đầy đủ trong README.md)
 //   Wh là số nguyên; idTag free vend = "HMI-FREEVEND" và gửi thẳng StartTransaction không Authorize;
-//   offline trụ chấp nhận thẻ hợp lệ + thẻ ví theo danh sách cục bộ; pin đầy → reason "Other";
+//   offline trụ chấp nhận hai thẻ hợp lệ theo danh sách cục bộ; pin đầy → reason "Other";
 //   hai súng chia đều 120 kW; config key hỗ trợ là tập con tự chọn.
 //
 // Đồng hồ mô phỏng: mọi timestamp OCPP dùng đồng hồ mô phỏng (tăng nhanh ×speed khi demo tăng tốc).

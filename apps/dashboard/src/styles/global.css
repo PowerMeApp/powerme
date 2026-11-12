@@ -1,0 +1,321 @@
+/*
+ * Theme PowerMe (FE-01b: only what the shell and login use) — cùng token với app tài xế Flutter (apps/mobile/lib/core/theme/app_theme.dart):
+ * nền Rich Black, thẻ Graphite bo 20 px, ô nhập bo 14 px viền teal khi focus, pill bo tròn nền 12 %.
+ * Chỉ có giao diện tối, như app.
+ */
+:root {
+  --rich-black: #0a0a0a;
+  --graphite: #141414;
+  --graphite-2: #1b1d22;
+  --line: #2b2f3a;
+  --teal: #00e0c2;
+  --teal-soft: rgba(0, 224, 194, 0.12);
+  --teal-indicator: rgba(39, 229, 193, 0.2);
+  --gold: #d4af37;
+  --gold-soft: rgba(212, 175, 55, 0.12);
+  --danger: #ff6b6b;
+  --danger-soft: rgba(255, 107, 107, 0.12);
+  --warning: #ffc857;
+  --warning-soft: rgba(255, 200, 87, 0.12);
+  --muted: #9ea4b3;
+  --muted-soft: rgba(158, 164, 179, 0.12);
+  --text: #ffffff;
+  --radius-card: 20px;
+  --radius-input: 14px;
+  --radius-pill: 30px;
+  font-family:
+    'Inter',
+    'Roboto',
+    system-ui,
+    -apple-system,
+    'Segoe UI',
+    'Helvetica Neue',
+    Arial,
+    sans-serif;
+  color: var(--text);
+  background: var(--rich-black);
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+html,
+body,
+#root {
+  margin: 0;
+  min-height: 100%;
+  background: var(--rich-black);
+}
+body {
+  font-size: 15px;
+  line-height: 1.45;
+}
+a {
+  color: var(--teal);
+  text-decoration: none;
+}
+h1,
+h2,
+h3 {
+  margin: 0;
+  font-weight: 700;
+}
+:focus-visible {
+  outline: 2px solid var(--teal);
+  outline-offset: 2px;
+}
+
+/* ---- khung ứng dụng ---- */
+.shell {
+  display: grid;
+  grid-template-columns: 248px 1fr;
+  min-height: 100vh;
+}
+.rail {
+  background: var(--graphite);
+  border-right: 1px solid var(--line);
+  padding: 20px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  overflow-y: auto;
+}
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 10px 18px;
+}
+.brand-mark {
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  background: linear-gradient(135deg, var(--gold), #a8841d);
+  display: grid;
+  place-items: center;
+  color: var(--rich-black);
+  font-weight: 800;
+}
+.brand-name {
+  font-weight: 800;
+  letter-spacing: 0.02em;
+}
+.brand-name b {
+  color: var(--gold);
+}
+.brand-sub {
+  font-size: 12px;
+  color: var(--muted);
+}
+.rail-section {
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+  padding: 14px 12px 6px;
+}
+.nav-link {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  color: #d6d9e0;
+  font-size: 14px;
+}
+.nav-link:hover {
+  background: var(--graphite-2);
+}
+.nav-link.active {
+  background: var(--teal-indicator);
+  color: var(--text);
+}
+.nav-link.active svg {
+  color: var(--teal);
+}
+.rail-foot {
+  margin-top: auto;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+}
+.main {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px 28px;
+  border-bottom: 1px solid var(--line);
+  background: rgba(10, 10, 10, 0.85);
+  backdrop-filter: blur(6px);
+  position: sticky;
+  top: 0;
+  z-index: 5;
+}
+.topbar .spacer {
+  flex: 1;
+}
+.who {
+  text-align: right;
+  font-size: 13px;
+}
+.who small {
+  display: block;
+  color: var(--muted);
+}
+.content {
+  padding: 24px 28px 48px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  max-width: 1360px;
+  width: 100%;
+}
+
+/* ---- tiêu đề trang ---- */
+.page-head {
+  display: flex;
+  align-items: flex-end;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.page-head h1 {
+  font-size: 26px;
+}
+.page-head p {
+  margin: 4px 0 0;
+  color: var(--muted);
+}
+/* ---- thẻ ---- */
+.card {
+  background: var(--graphite);
+  border-radius: var(--radius-card);
+  padding: 20px;
+  border: 1px solid #1f2229;
+}
+.card h2 {
+  font-size: 17px;
+  margin-bottom: 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* ---- nút ---- */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 1px solid var(--line);
+  background: var(--graphite-2);
+  color: var(--text);
+  padding: 9px 16px;
+  border-radius: var(--radius-input);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.btn:hover:not(:disabled) {
+  border-color: var(--muted);
+}
+.btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.btn.primary {
+  background: var(--teal);
+  color: var(--rich-black);
+  border-color: var(--teal);
+}
+.btn.ghost {
+  background: transparent;
+  border-color: transparent;
+  color: var(--muted);
+}
+
+/* ---- ô nhập ---- */
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--muted);
+}
+.input,
+select.input,
+textarea.input {
+  background: var(--graphite);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-input);
+  padding: 11px 14px;
+  font: inherit;
+  font-size: 14px;
+}
+.input:focus {
+  outline: none;
+  border: 1.5px solid var(--teal);
+}
+.form-error {
+  color: var(--danger);
+  font-size: 13px;
+}
+
+.muted {
+  color: var(--muted);
+}
+.hint {
+  color: var(--muted);
+  font-size: 13px;
+  margin-top: 4px;
+}
+.auth {
+  min-height: 100vh;
+  display: grid;
+  grid-template-columns: 1.1fr 1fr;
+}
+.auth-hero {
+  background:
+    radial-gradient(circle at 20% 20%, rgba(0, 224, 194, 0.18), transparent 50%),
+    radial-gradient(circle at 80% 80%, rgba(212, 175, 55, 0.18), transparent 50%), var(--graphite);
+  padding: 48px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+.auth-hero h1 {
+  font-size: 40px;
+  line-height: 1.15;
+  max-width: 460px;
+}
+.auth-hero h1 span {
+  color: var(--teal);
+}
+.auth-form {
+  display: grid;
+  place-items: center;
+  padding: 32px;
+}
+.auth-form form {
+  width: min(380px, 100%);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+@media (max-width: 860px) {
+  .auth {
+    grid-template-columns: 1fr;
+  }
+  .auth-hero {
+    display: none;
+  }
+}

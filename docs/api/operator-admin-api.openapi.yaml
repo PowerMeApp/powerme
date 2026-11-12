@@ -1,0 +1,3450 @@
+openapi: 3.1.0
+info:
+  title: PowerMe CSMS — Operator & Admin API
+  version: 0.1.0
+  summary: Hợp đồng REST cho Operator Dashboard và Admin Console (T98)
+  description: |
+    Hợp đồng giữa CSMS (WP2) và dashboard React (WP4) cho hai bề mặt:
+    `/api/operator/v1` (nhân viên operator, role `operator_staff`) và `/api/admin/v1`
+    (quản trị nền tảng, role `admin`). Văn bản giải thích, ma trận role × endpoint, ánh xạ từ
+    console hiện tại và câu hỏi mở nằm ở `OPERATOR-ADMIN-API-HOP-DONG.md` cùng thư mục.
+
+    Đăng nhập là một route chung `/api/auth/v1/login` cho cả hai bề mặt (ADR-0018). Mọi
+    `/api/operator/v1/*` và `/api/admin/v1/*` đi qua RolesGuard **trước khi khớp route**: đường
+    dẫn chưa có route mà không có token hợp lệ nhận 401, không phải 404.
+
+    Hành vi hiện tại của listener (`operator-api.http.ts`, main 9c90f34), áp cho mọi route kể cả
+    route chưa viết:
+    - Request có header `Origin` không phải `http(s)://localhost|127.0.0.1|[::1]` (cổng bất kỳ)
+      → 403 `forbidden_origin` trước mọi thứ khác. Preflight `OPTIONS` từ localhost → 204.
+    - Có query string (kể cả `?` rỗng) → 400 `invalid_input` **trước** guard. Sẽ đổi khi viết
+      route đầu tiên có tham số query (danh sách); các tham số query trong file này là hợp đồng
+      cho lúc đó.
+    - Lỗi của tầng xác thực trả `{error, detail}` với `detail` = chính mã lỗi (chưa có câu tiếng
+      Việt); 500 trả `internal_error`.
+    - Chưa cấu hình `DASHBOARD_JWT_*` → mọi route 503 `auth_unavailable`.
+
+    Mỗi operation có bốn khoá mở rộng:
+    - `x-roles`: role được gọi (nguồn sinh ma trận NFR-05). Role khác có token hợp lệ → 403.
+    - `x-status`: `implemented` (route chạy trên main, có JWT), `console` (logic đã chạy ở
+      console `/api/admin/*` chưa xác thực, phải chuyển sang đây), `service` (service/hàm có
+      trong code, route chưa), `in_progress` (đang làm ở nhánh khác), `planned` (chưa có code).
+    - `x-owner`: người làm route (theo WP; BM04 không có trong repo — Trí sửa nếu lệch).
+    - `x-refs`: UC / FR / BR / STM trong SRS (report3-srs.md), phiếu v1.3 và thiết kế.
+
+    Quy ước chung giống Driver API (`driver-api.openapi.yaml`):
+    - JSON snake_case. Tiền là số nguyên VND, điện năng là số nguyên Wh, thời gian ISO 8601 UTC;
+      ngày (`date`) là ngày lịch Asia/Ho_Chi_Minh.
+    - Id bigint trả dạng **chuỗi số** (`"id": "12"`).
+    - Lỗi luôn là `{error, detail}`; `error` là mã ổn định snake_case.
+    - Danh sách phân trang: `page` (từ 1), `page_size` (1–100, mặc định 50) → `{items, total,
+      page, page_size}`. Nhật ký OCPP dùng con trỏ `after` + `limit` để poll.
+    - Phiên chỉ có `payment_mode` ∈ {`csms_billed`, `unattributed`} và thẻ RFID chỉ có
+      `card_kind` ∈ {`online`, `free_vend`} (theo T110).
+  x-owner: Trí (WP2) — hợp đồng; route theo `x-owner` từng operation
+  x-status: >-
+    v0.1 — hợp đồng; trên main 9c90f34 chỉ có `POST /auth/v1/login`, `GET /operator/v1/me`,
+    `GET /admin/v1/me` (FE-01a #118, ADR-0018); các route còn lại chưa có
+servers:
+  - url: http://localhost:3000/api
+    description: CSMS cục bộ (cùng tiến trình, cùng cổng với console và Driver API)
+tags:
+  - name: auth
+    description: Đăng nhập nhân viên operator và admin, hồ sơ người gọi (F-13, ADR-0018)
+  - name: onboarding
+    description: UC-OPS-01, UC-ADM-03, UC-ADM-05 — đăng ký serial, onboard trụ, vòng đời STM-3
+  - name: monitoring
+    description: UC-OPS-02, UC-OPS-04 — trạng thái trụ/súng, chỉ số BR-P43, lệnh từ xa
+  - name: faults
+    description: UC-OPS-03 — cảnh báo sự cố (WF-04, STM-6)
+  - name: sessions
+    description: UC-OPS-05 — phiên, đối soát, phiên review / unattributed, khôi phục lệnh (T72)
+  - name: tariffs
+    description: UC-OPS-06, UC-OPS-07 — biểu giá theo giờ và khuyến mãi
+  - name: revenue
+    description: UC-OPS-09, UC-ADM-10 — doanh thu theo BR-P46, xuất CSV
+  - name: accounts
+    description: UC-ADM-01, UC-ADM-02 — tài khoản và role
+  - name: cards
+    description: UC-ADM-04 — sổ thẻ RFID
+  - name: platform
+    description: UC-ADM-07 — tổng quan nền tảng, nhật ký giao dịch và bản tin OCPP
+  - name: billing-exceptions
+    description: UC-ADM-08 — ngoại lệ thanh toán (hình dạng chi tiết ở WF-02 D10, Khang)
+
+security:
+  - bearerAuth: []
+
+paths:
+  # ============================================================================================
+  # AUTH (FE-01a #118, ADR-0018 — đã chạy trên main 9c90f34)
+  # ============================================================================================
+  /auth/v1/login:
+    post:
+      tags: [auth]
+      operationId: dashboardLogin
+      x-roles: [public]
+      x-status: implemented
+      x-owner: Nghĩa (FE-01a, #118)
+      x-refs: [F-13, UC-ACC-04, UC-ACC-05, BR-P16, NFR-SEC-01, ADR-0018]
+      summary: Nhân viên operator và Admin đăng nhập email + mật khẩu (một endpoint, màn 16 và 26)
+      description: |
+        Một endpoint cho cả hai vai trò (ADR-0018 #1). Token mang `role`; màn đăng nhập của mỗi
+        khu vực (dashboard `/operator/login`, `/admin/login`) tự từ chối vai trò còn lại, không lưu
+        token. Code: `apps/csms/src/users/auth.ts` (`StaffAccounts.login`), route ở
+        `apps/csms/src/operator-api/operator-api.http.ts`.
+
+        - Body đúng hai khoá `email`, `password` (chuỗi). Thiếu, sai kiểu hoặc có khoá lạ
+          (vd `role`) → 400 `invalid_input`. Content-Type phải là `application/json` (tuỳ chọn
+          `; charset=utf-8`), không thì 415; body tối đa 16 KiB, quá thì 413; JSON hỏng → 400.
+        - `email` được `trim()` + chữ thường rồi so `lower(users.email)`; không kiểm định dạng.
+          `email` > 254 ký tự hoặc `password` > 128 code point → 401 `invalid_credentials`
+          (không phải 400, không tính vào bộ đếm thử sai).
+        - Sai email, sai mật khẩu, user là tài xế, `operator_staff` không có dòng
+          `operator_staff`, `admin` không có dòng `admins`: cùng **401** `invalid_credentials`;
+          email không tồn tại vẫn băm giả một lần để thời gian như nhau.
+        - Chỉ **sau khi mật khẩu đúng**: `account_status ≠ active` → 403 `account_locked`;
+          nhân viên có Operator `status ≠ active` → 403 `operator_inactive`.
+        - Thử sai (bộ đếm riêng của dashboard, cùng số BR-P49 / BE-21): 5 lần / 60 s theo email +
+          IP, hoặc 20 lần / 60 s theo IP → khoá 15 phút, mọi lần thử trong lúc khoá (kể cả mật
+          khẩu đúng) → 429 `too_many_attempts` + `Retry-After` (giây). Quá 20 lần đang băm song
+          song từ một IP → 429 với `Retry-After: 1`. Đăng nhập đúng xoá bộ đếm email + IP. IP là
+          `req.socket.remoteAddress` — chưa đọc `X-Forwarded-For` (xem §2.7 của hợp đồng).
+        - Chưa cấu hình `DASHBOARD_JWT_*` (cả ba trống) → 503 `auth_unavailable`.
+        - Token: JWT HS256 `typ: JWT`, khoá `DASHBOARD_JWT_SECRET_BASE64`, `iss` / `aud` theo
+          `DASHBOARD_JWT_ISSUER` / `_AUDIENCE`; claim `sub` (users.id), `role`, `iat`, `exp` =
+          `iat` + 28 800 s (8 giờ), `jti` (UUID); nhân viên thêm `operator_id`, `staff_role`.
+          **Không có refresh token**: hết 8 giờ thì đăng nhập lại.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LoginRequest' }
+      responses:
+        '200':
+          description: Access token 8 giờ và người dùng (cùng hình dạng với `/me`)
+          headers:
+            Cache-Control:
+              schema: { type: string, const: no-store }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LoginResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/InvalidCredentials' }
+        '403': { $ref: '#/components/responses/AccountLocked' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+        '413': { $ref: '#/components/responses/PayloadTooLarge' }
+        '415': { $ref: '#/components/responses/UnsupportedMediaType' }
+        '429': { $ref: '#/components/responses/TooManyAttempts' }
+        '503': { $ref: '#/components/responses/AuthUnavailable' }
+
+  /operator/v1/me:
+    get:
+      tags: [auth]
+      operationId: operatorMe
+      x-roles: [operator_staff]
+      x-status: implemented
+      x-owner: Nghĩa (FE-01a, #118)
+      x-refs: [BR-P16, 'Table 5 #17', ADR-0018]
+      summary: Nhân viên và Operator đang đăng nhập (đầu trang Operator Dashboard, khôi phục phiên)
+      description: |
+        Trả `DashboardUser` có `operator_id`, `operator_name`, `staff_role`. Ba trường này lấy từ
+        lần đọc DB của RolesGuard ở chính request này, không từ token — nhân viên vừa bị chuyển
+        Operator nhận 401 (đăng nhập lại), không thấy Operator cũ.
+      responses:
+        '200':
+          description: Người gọi
+          headers:
+            Cache-Control:
+              schema: { type: string, const: no-store }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DashboardUser' }
+              examples:
+                staff:
+                  value:
+                    user_id: '42'
+                    email: tech@operator-a.vn
+                    full_name: Nguyễn Văn A
+                    role: operator_staff
+                    operator_id: '3'
+                    operator_name: Công ty TNHH Trạm Sạc A
+                    staff_role: technician
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+        '503': { $ref: '#/components/responses/AuthUnavailable' }
+
+  /admin/v1/me:
+    get:
+      tags: [auth]
+      operationId: adminMe
+      x-roles: [admin]
+      x-status: implemented
+      x-owner: Nghĩa (FE-01a, #118)
+      x-refs: [BR-P16, 'Table 5 #27', ADR-0018]
+      summary: Admin đang đăng nhập
+      description: |
+        Trả `DashboardUser` **không có** `operator_id`, `operator_name`, `staff_role` (khoá vắng
+        mặt, không phải `null`). Guard đòi user còn `role = admin`, `active` và còn dòng `admins`.
+      responses:
+        '200':
+          description: Người gọi
+          headers:
+            Cache-Control:
+              schema: { type: string, const: no-store }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DashboardUser' }
+              examples:
+                admin:
+                  value:
+                    user_id: '7'
+                    email: admin@powerme.vn
+                    full_name: Trần Thị B
+                    role: admin
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+        '503': { $ref: '#/components/responses/AuthUnavailable' }
+
+  # ============================================================================================
+  # ONBOARDING (operator) + REGISTRY (admin)
+  # ============================================================================================
+  /operator/v1/sites:
+    get:
+      tags: [onboarding]
+      operationId: listOperatorSites
+      x-roles: [operator_staff]
+      x-status: planned
+      x-owner: Ân
+      x-refs: [UC-OPS-01, BR-P11, 'Table 5 #19']
+      summary: Các site của operator người gọi (ô chọn site trong sheet onboarding)
+      parameters:
+        - $ref: '#/components/parameters/page'
+        - $ref: '#/components/parameters/pageSize'
+      responses:
+        '200':
+          description: Site của operator, sắp theo `site_code`
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SitePage' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /operator/v1/charge-points:
+    get:
+      tags: [monitoring]
+      operationId: listOperatorChargePoints
+      x-roles: [operator_staff]
+      x-status: console
+      x-source: 'GET /api/admin/stations → ConsoleQueries.stations (không lọc operator)'
+      x-owner: Nghĩa
+      x-refs: [UC-OPS-02, FR-10, BR-P10, BR-P38, BR-P39, 'Table 5 #18']
+      summary: Đội trụ của operator, kèm trạng thái sống từng súng
+      description: |
+        Chỉ trụ ở site của operator người gọi (BR-P16). Mỗi trụ có đúng các súng thật
+        (BR-P10: tối đa 2), mỗi súng giữ trạng thái OCPP riêng — không gộp. `connected` là socket
+        trong RAM của tiến trình; `is_online` là cột DB (ADR-0016 D-C), có thể lệch sau khi CSMS
+        khởi động lại cho tới lượt quét.
+      parameters:
+        - name: site_id
+          in: query
+          schema: { $ref: '#/components/schemas/Id' }
+        - name: lifecycle
+          in: query
+          schema: { $ref: '#/components/schemas/ChargePointLifecycle' }
+        - name: online
+          in: query
+          schema: { type: boolean }
+        - $ref: '#/components/parameters/page'
+        - $ref: '#/components/parameters/pageSize'
+      responses:
+        '200':
+          description: Trụ của operator
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ChargePointPage' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [onboarding]
+      operationId: onboardChargePoint
+      x-roles: [operator_staff]
+      x-status: service
+      x-source: 'ChargePointOnboardingService.onboard (WF-05, PR #33/#35)'
+      x-owner: Ân (T119)
+      x-refs: [UC-OPS-01, FR-09, 'STM-3 #2', SD-5a, ADR-0011]
+      summary: Onboard một serial đã đăng ký vào site của mình, nhận credential một lần
+      description: |
+        Serial phải đã được Admin đăng ký (`registered`). Tạo 1–2 súng `Unavailable`, đổi vòng đời
+        sang `awaiting_connection`, sinh mật khẩu Basic Auth 24 ký tự, chỉ lưu băm scrypt và
+        **trả mật khẩu đúng một lần** trong response này. Response có `Cache-Control: no-store`.
+        Không idempotent theo kiểu phát lại: gọi lại cùng serial → 409 `already_onboarded`, mật
+        khẩu không hiện lại (luồng cấp lại credential chưa có — câu hỏi mở cho Ân).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/OnboardRequest' }
+      responses:
+        '201':
+          description: Đã onboard; credential hiện một lần
+          headers:
+            Cache-Control:
+              schema: { type: string, const: no-store }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OnboardResult' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403':
+          description: '`forbidden` (role), `site_of_other_operator` (site thuộc operator khác, SD-5a)'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '404':
+          description: '`site_not_found`'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '409':
+          description: '`serial_not_registered`, `already_onboarded`'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /operator/v1/charge-points/{chargePointId}:
+    get:
+      tags: [monitoring]
+      operationId: getOperatorChargePoint
+      x-roles: [operator_staff]
+      x-status: planned
+      x-owner: Nghĩa
+      x-refs: [UC-OPS-02, UC-OPS-04, 'Table 5 #20']
+      summary: Chi tiết trụ — súng, sự cố gần đây, lệnh gần đây
+      parameters:
+        - $ref: '#/components/parameters/chargePointId'
+      responses:
+        '200':
+          description: Chi tiết
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ChargePointDetail' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /operator/v1/charge-points/{chargePointId}/metrics:
+    get:
+      tags: [monitoring]
+      operationId: getChargePointMetrics
+      x-roles: [operator_staff]
+      x-status: planned
+      x-owner: Trí
+      x-refs: [UC-OPS-02, FR-10, BR-P43, ADR-0015]
+      summary: Uptime, utilisation, số sự cố, tỉ lệ khởi động hỏng trong 7 hoặc 30 ngày
+      description: |
+        Tính từ `connector_status_events` trên đồng hồ CSMS (BR-P43). Uptime = phần thời gian không
+        `Faulted`, `Unavailable` hoặc offline; utilisation = phần thời gian "In use" (BR-P38).
+        Tỉ lệ là số thực 0–1, null khi cửa sổ chưa có dữ liệu.
+      parameters:
+        - $ref: '#/components/parameters/chargePointId'
+        - name: window
+          in: query
+          schema: { type: string, enum: [7d, 30d], default: 7d }
+      responses:
+        '200':
+          description: Chỉ số theo trụ và từng súng
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ChargePointMetrics' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /operator/v1/charge-points/{chargePointId}/disable:
+    post:
+      tags: [onboarding]
+      operationId: disableChargePoint
+      x-roles: [operator_staff]
+      x-status: planned
+      x-source: 'ChargePointLifecyclePolicy (STM-3 #4) — chỉ có policy, chưa có service ghi DB'
+      x-owner: Ân
+      x-refs: [UC-OPS-02, 'STM-3 #4', ADR-0016 D-C, BR-P07]
+      summary: Đưa trụ ra khỏi vận hành (in_service → disabled)
+      parameters:
+        - $ref: '#/components/parameters/chargePointId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/NoteRequest' }
+      responses:
+        '200':
+          description: Vòng đời mới
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LifecycleResult' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/InvalidTransition' }
+
+  /operator/v1/charge-points/{chargePointId}/enable:
+    post:
+      tags: [onboarding]
+      operationId: enableChargePoint
+      x-roles: [operator_staff]
+      x-status: planned
+      x-source: 'ChargePointLifecyclePolicy (STM-3 #5)'
+      x-owner: Ân
+      x-refs: [UC-OPS-02, 'STM-3 #5', ADR-0016 D-C]
+      summary: Đưa trụ trở lại vận hành (disabled → in_service)
+      parameters:
+        - $ref: '#/components/parameters/chargePointId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/NoteRequest' }
+      responses:
+        '200':
+          description: Vòng đời mới
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LifecycleResult' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/InvalidTransition' }
+
+  /admin/v1/charge-points:
+    get:
+      tags: [onboarding]
+      operationId: listRegistryChargePoints
+      x-roles: [admin]
+      x-status: console
+      x-source: 'GET /api/admin/stations (một phần: thiếu model, firmware, bảo hành, operator)'
+      x-owner: Ân
+      x-refs: [UC-ADM-03, UC-ADM-07, FR-15, 'Table 5 #29']
+      summary: Sổ đăng ký trụ toàn nền tảng
+      parameters:
+        - name: lifecycle
+          in: query
+          schema: { $ref: '#/components/schemas/ChargePointLifecycle' }
+        - name: operator_id
+          in: query
+          schema: { $ref: '#/components/schemas/Id' }
+        - name: q
+          in: query
+          description: Tìm theo serial hoặc display_code (tiền tố, không phân biệt hoa thường)
+          schema: { type: string, minLength: 1, maxLength: 48 }
+        - $ref: '#/components/parameters/page'
+        - $ref: '#/components/parameters/pageSize'
+      responses:
+        '200':
+          description: Trụ trong sổ
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RegistryChargePointPage' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [onboarding]
+      operationId: registerChargePoint
+      x-roles: [admin]
+      x-status: service
+      x-source: 'ChargePointOnboardingService.registerDevice'
+      x-owner: Ân (T119)
+      x-refs: [UC-ADM-03, FR-15, 'STM-3 #1']
+      summary: Thêm serial vào sổ đăng ký (vòng đời registered)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RegisterDeviceRequest' }
+      responses:
+        '201':
+          description: Đã đăng ký
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RegistryChargePoint' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409':
+          description: '`serial_already_registered`'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /admin/v1/charge-points/{chargePointId}:
+    get:
+      tags: [onboarding]
+      operationId: getRegistryChargePoint
+      x-roles: [admin]
+      x-status: planned
+      x-owner: Ân
+      x-refs: [UC-ADM-03]
+      summary: Một trụ trong sổ đăng ký
+      parameters:
+        - $ref: '#/components/parameters/chargePointId'
+      responses:
+        '200':
+          description: Trụ
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RegistryChargePoint' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      tags: [onboarding]
+      operationId: updateRegistryChargePoint
+      x-roles: [admin]
+      x-status: planned
+      x-owner: Ân
+      x-refs: [UC-ADM-03]
+      summary: Sửa model, firmware, công suất danh định, hạn bảo hành
+      description: Không đổi được serial (là OCPP identity và tên Basic Auth) hay vòng đời.
+      parameters:
+        - $ref: '#/components/parameters/chargePointId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RegistryChargePointPatch' }
+      responses:
+        '200':
+          description: Trụ sau khi sửa
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RegistryChargePoint' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /admin/v1/charge-points/{chargePointId}/free-vend-tag:
+    put:
+      tags: [onboarding]
+      operationId: setFreeVendTag
+      x-roles: [admin]
+      x-status: planned
+      x-owner: Ân
+      x-refs: [UC-ADM-05, FR-15, BR-P09, ADR-0012]
+      summary: Đặt hoặc xoá idTag free vend của trụ
+      description: |
+        `free_vend_tag = null` tắt free vend. Chỉ áp cho phiên bắt đầu SAU khi đổi: phân loại phiên
+        làm một lần lúc start (BR-P08). Tag không được trùng `card_identifier` của thẻ đã đăng ký
+        → 409 `tag_conflicts_with_card`.
+      parameters:
+        - $ref: '#/components/parameters/chargePointId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/FreeVendTagRequest' }
+      responses:
+        '200':
+          description: Trụ sau khi đổi
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RegistryChargePoint' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: '`tag_conflicts_with_card`, `charge_point_not_onboarded`'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /admin/v1/charge-points/{chargePointId}/decommission:
+    post:
+      tags: [onboarding]
+      operationId: decommissionChargePoint
+      x-roles: [admin]
+      x-status: planned
+      x-source: 'ChargePointLifecyclePolicy (STM-3 #6)'
+      x-owner: Ân
+      x-refs: [UC-ADM-03, 'STM-3 #6']
+      summary: Cho trụ nghỉ hẳn (disabled → decommissioned)
+      parameters:
+        - $ref: '#/components/parameters/chargePointId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/NoteRequest' }
+      responses:
+        '200':
+          description: Vòng đời mới
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LifecycleResult' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/InvalidTransition' }
+
+  # ============================================================================================
+  # MONITORING + COMMANDS (operator)
+  # ============================================================================================
+  /operator/v1/summary:
+    get:
+      tags: [monitoring]
+      operationId: getOperatorSummary
+      x-roles: [operator_staff]
+      x-status: planned
+      x-source: 'khác GET /api/admin/summary (console tóm tắt toàn hệ thống cho demo)'
+      x-owner: Nghĩa (T97)
+      x-refs: [UC-OPS-02, UC-OPS-03, 'Table 5 #17']
+      summary: Số trụ theo trạng thái và cảnh báo mở — màn hình đầu của Operator Dashboard
+      responses:
+        '200':
+          description: Tóm tắt của operator người gọi
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OperatorSummary' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /operator/v1/charge-points/{chargePointId}/commands:
+    post:
+      tags: [monitoring]
+      operationId: sendRemoteCommand
+      x-roles: [operator_staff]
+      x-status: console
+      x-source: 'POST /api/admin/sessions/{id}/remote-stop → ConsoleCommands.remoteStop (chỉ remote_stop, đồng bộ 200)'
+      x-owner: Trí
+      x-refs: [UC-OPS-04, FR-11, BR-P01, BR-P06, BR-P07, 'Table 7 #2']
+      summary: Gửi lệnh từ xa — remote_start, remote_stop, reset
+      description: |
+        Trả **202** ngay với lệnh `pending`/`sent`; kết quả thật đọc ở `GET /commands/{id}` (hoặc
+        sự kiện realtime `command.result` khi có). Lệnh ghi vào `remote_commands` với
+        `requested_by` = người gọi và `idempotency_key`.
+        - `remote_stop`: cần `session_id` của phiên trên trụ này ở `pending|active|paused|stopping`.
+          Phiên chỉ `closed` khi trụ gửi StopTransaction (BR-P01).
+        - `remote_start`: cần `connector_no` và `id_tag`; trụ sẽ Authorize như mọi phiên, nên idTag
+          phải được chấp nhận (BR-P06) và phiên được phân loại bình thường (BR-P08).
+        - `reset`: `type` Soft|Hard, cả trụ (OCPP 1.6). Còn phiên đang sạc → 409 `sessions_active`
+          trừ khi `force = true` (cùng luật với Reset trong WF-04, BR-P07).
+        Trụ offline → 409 `station_offline`, không ghi lệnh. `UnlockConnector` không có trong
+        SRS Table 7 #2 nên chưa nằm trong hợp đồng (câu hỏi mở).
+      parameters:
+        - $ref: '#/components/parameters/chargePointId'
+        - $ref: '#/components/parameters/idempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CommandRequest' }
+      responses:
+        '202':
+          description: Lệnh đã nhận; kết quả về sau
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RemoteCommand' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: |
+            `station_offline`, `session_not_stoppable`, `connector_busy_or_unknown`,
+            `sessions_active`, `reset_in_progress`, `idempotency_conflict`
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /operator/v1/commands/{commandId}:
+    get:
+      tags: [monitoring]
+      operationId: getRemoteCommand
+      x-roles: [operator_staff]
+      x-status: planned
+      x-owner: Trí
+      x-refs: [UC-OPS-04, 'Table 7 #2']
+      summary: Trạng thái một lệnh từ xa
+      parameters:
+        - name: commandId
+          in: path
+          required: true
+          schema: { $ref: '#/components/schemas/Id' }
+      responses:
+        '200':
+          description: Lệnh
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RemoteCommand' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /operator/v1/ocpp-messages:
+    get:
+      tags: [monitoring]
+      operationId: listOperatorOcppMessages
+      x-roles: [operator_staff]
+      x-status: console
+      x-source: 'GET /api/admin/messages → ConsoleQueries.messages (không lọc operator)'
+      x-owner: Nghĩa
+      x-refs: [FE-08, PKG-2 ocpp-messages, UC-OPS-02]
+      summary: Bản tin OCPP thô của trụ thuộc operator (FE-08)
+      description: |
+        Không có `after`: `limit` dòng mới nhất, trả theo id tăng dần. Có `after`: các dòng
+        id > after (poll tiếp). Chỉ metadata khung (action, hướng, unique_id, replayed), không trả
+        payload — SRS Table 6 chưa có màn hình này cho Operator (câu hỏi mở cho Nghĩa).
+      parameters:
+        - name: charge_point_id
+          in: query
+          schema: { $ref: '#/components/schemas/Id' }
+        - $ref: '#/components/parameters/after'
+        - $ref: '#/components/parameters/limit'
+      responses:
+        '200':
+          description: Bản tin
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OcppMessageList' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  # ============================================================================================
+  # FAULTS (operator)
+  # ============================================================================================
+  /operator/v1/faults:
+    get:
+      tags: [faults]
+      operationId: listFaults
+      x-roles: [operator_staff]
+      x-status: console
+      x-source: 'GET /api/admin/faults → ConsoleCommands.faults → FaultService.list'
+      x-owner: Nghĩa
+      x-refs: [UC-OPS-03, FR-10, STM-6, WF-04, NFR-OCPP-07]
+      summary: Cảnh báo sự cố (Faulted, offline, tài xế báo) của operator
+      description: Sắp theo mức nghiêm trọng rồi thời điểm; mặc định chỉ sự cố mở.
+      parameters:
+        - name: status
+          in: query
+          schema: { type: string, enum: [open, all], default: open }
+        - name: charge_point_id
+          in: query
+          schema: { $ref: '#/components/schemas/Id' }
+        - $ref: '#/components/parameters/page'
+        - $ref: '#/components/parameters/pageSize'
+      responses:
+        '200':
+          description: Sự cố
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FaultPage' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /operator/v1/faults/{faultId}/acknowledge:
+    post:
+      tags: [faults]
+      operationId: acknowledgeFault
+      x-roles: [operator_staff]
+      x-status: console
+      x-source: 'POST /api/admin/faults/{id}/acknowledge → FaultService.acknowledge (acknowledged_by = null vì chưa có login)'
+      x-owner: Nghĩa
+      x-refs: [UC-OPS-03, STM-6 t2]
+      summary: Xác nhận đã thấy sự cố (raised → acknowledged)
+      parameters:
+        - $ref: '#/components/parameters/faultId'
+      responses:
+        '200':
+          description: Trạng thái mới
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FaultTransition' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/InvalidTransition' }
+
+  /operator/v1/faults/{faultId}/reset:
+    post:
+      tags: [faults]
+      operationId: resetFault
+      x-roles: [operator_staff]
+      x-status: console
+      x-source: 'POST /api/admin/faults/{id}/reset?type&force → ConsoleCommands.resetFault'
+      x-owner: Nghĩa
+      x-refs: [UC-OPS-03, UC-OPS-04, STM-6 t4, BR-P07, 'WF-04 #12']
+      summary: Gửi Reset cho trụ của sự cố đã acknowledged
+      description: |
+        Đồng bộ (chờ trụ trả lời tối đa 15 s) vì kết quả quyết định trạng thái sự cố: Accepted →
+        `resetting`, Rejected → `acknowledged`, trụ không trả lời → 502 và lệnh `failed`. Trụ còn
+        phiên đang sạc ở súng khác → 409 `sessions_active` (detail liệt kê súng/phiên); gửi lại với
+        `force = true` thì lệnh ghi `payload.force = true`. Console nhận `type`/`force` qua query;
+        hợp đồng chuyển vào body.
+      parameters:
+        - $ref: '#/components/parameters/faultId'
+        - $ref: '#/components/parameters/idempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/FaultResetRequest' }
+      responses:
+        '200':
+          description: Kết quả Reset
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FaultResetResult' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: |
+            `fault_not_acknowledged`, `station_offline`, `reset_in_progress`, `sessions_active`,
+            `invalid_transition`, `idempotency_conflict`
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '502': { $ref: '#/components/responses/StationError' }
+        '503': { $ref: '#/components/responses/Unavailable' }
+
+  /operator/v1/faults/{faultId}/close:
+    post:
+      tags: [faults]
+      operationId: closeFault
+      x-roles: [operator_staff]
+      x-status: console
+      x-source: 'POST /api/admin/faults/{id}/close → FaultService.close'
+      x-owner: Nghĩa
+      x-refs: [UC-OPS-03, STM-6 t7, BR-P42]
+      summary: Đóng sự cố bằng tay (acknowledged → resolved)
+      parameters:
+        - $ref: '#/components/parameters/faultId'
+      responses:
+        '200':
+          description: Trạng thái mới
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FaultTransition' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/InvalidTransition' }
+
+  # ============================================================================================
+  # SESSIONS & RECONCILIATION (operator)
+  # ============================================================================================
+  /operator/v1/sessions:
+    get:
+      tags: [sessions]
+      operationId: listOperatorSessions
+      x-roles: [operator_staff]
+      x-status: console
+      x-source: 'GET /api/admin/sessions?limit → ConsoleQueries.sessions (không lọc, không phân trang)'
+      x-owner: Trí
+      x-refs: [UC-OPS-05, FR-13, FR-16, BR-P08, 'Table 5 #22']
+      summary: Phiên trên trụ của operator; `queue` lọc hàng việc cần xử lý
+      description: |
+        `queue=review`: phiên `status = review` (đối soát kết luận conflict/gap hoặc hard cap,
+        STM-1 #16a). `queue=unattributed`: phiên `payment_mode = unattributed` chưa giải quyết
+        (thẻ lạ, free vend, BR-P06). Không có `queue`: mọi phiên, mới nhất trước.
+      parameters:
+        - name: queue
+          in: query
+          schema: { type: string, enum: [review, unattributed] }
+        - name: status
+          in: query
+          schema: { $ref: '#/components/schemas/SessionStatus' }
+        - name: payment_mode
+          in: query
+          schema: { $ref: '#/components/schemas/PaymentMode' }
+        - name: charge_point_id
+          in: query
+          schema: { $ref: '#/components/schemas/Id' }
+        - $ref: '#/components/parameters/from'
+        - $ref: '#/components/parameters/to'
+        - $ref: '#/components/parameters/page'
+        - $ref: '#/components/parameters/pageSize'
+      responses:
+        '200':
+          description: Phiên
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SessionPage' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /operator/v1/sessions/{sessionId}:
+    get:
+      tags: [sessions]
+      operationId: getOperatorSession
+      x-roles: [operator_staff]
+      x-status: console
+      x-source: 'GET /api/admin/sessions/{id} → ConsoleQueries.session'
+      x-owner: Trí
+      x-refs: [UC-OPS-05, FR-16, 'Table 7 #7']
+      summary: Chi tiết phiên — chuỗi meter, khoảng tạm dừng, bản ghi đối soát
+      parameters:
+        - $ref: '#/components/parameters/sessionId'
+      responses:
+        '200':
+          description: Phiên
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SessionDetail' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /operator/v1/sessions/{sessionId}/resolve:
+    post:
+      tags: [sessions]
+      operationId: resolveReviewSession
+      x-roles: [operator_staff]
+      x-status: service
+      x-source: 'SessionReviewService.resolveReview (BE-18)'
+      x-owner: Trí
+      x-refs: [UC-OPS-05, FR-13, 'STM-1 #17']
+      summary: Giải quyết phiên review (review → reconciled), quyết toán nếu đã có StopTransaction
+      description: |
+        Một transaction: STM-1 #17, ghi `session_status_history` (actor = người gọi), đóng các
+        bản ghi đối soát chưa duyệt. Phiên của operator khác → 404 như không tồn tại.
+      parameters:
+        - $ref: '#/components/parameters/sessionId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ResolveReviewRequest' }
+      responses:
+        '200':
+          description: Đã giải quyết
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ResolveReviewResult' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: '`not_in_review`'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /operator/v1/sessions/{sessionId}/assign:
+    post:
+      tags: [sessions]
+      operationId: assignUnattributedSession
+      x-roles: [operator_staff]
+      x-status: in_progress
+      x-owner: Trí (T102)
+      x-refs: [UC-OPS-05, FR-13, BR-P06, BR-P08]
+      summary: Gán phiên unattributed cho một tài xế (T102 — hình dạng body do T102 chốt)
+      description: |
+        Đang làm ở T102 trên console; hợp đồng giữ chỗ đường dẫn và role. Body dưới đây là tối
+        thiểu (`note` bắt buộc, giống resolve); trường xác định tài xế và có trừ credit hay không
+        theo bản chốt của T102.
+      parameters:
+        - $ref: '#/components/parameters/sessionId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AssignSessionRequest' }
+      responses:
+        '200':
+          description: Phiên sau khi gán
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SessionListItem' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/InvalidTransition' }
+
+  /operator/v1/sessions/{sessionId}/close:
+    post:
+      tags: [sessions]
+      operationId: closeUnattributedSession
+      x-roles: [operator_staff]
+      x-status: in_progress
+      x-owner: Trí (T102)
+      x-refs: [UC-OPS-05, FR-13]
+      summary: Đóng phiên unattributed không gán ai, ghi kết luận (T102)
+      parameters:
+        - $ref: '#/components/parameters/sessionId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/NoteRequest' }
+      responses:
+        '200':
+          description: Phiên sau khi đóng
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SessionListItem' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/InvalidTransition' }
+
+  /operator/v1/reconciliation-records:
+    get:
+      tags: [sessions]
+      operationId: listOperatorReconciliationRecords
+      x-roles: [operator_staff]
+      x-status: console
+      x-source: 'GET /api/admin/reconciliation → ConsoleQueries.reconciliation (không lọc operator)'
+      x-owner: Trí
+      x-refs: [UC-OPS-05, FR-16, 'Table 7 #6', 'Table 7 #7']
+      summary: Bản ghi đối soát trên trụ của operator
+      parameters:
+        - name: session_id
+          in: query
+          schema: { $ref: '#/components/schemas/Id' }
+        - name: reviewed
+          in: query
+          schema: { type: boolean }
+        - $ref: '#/components/parameters/page'
+        - $ref: '#/components/parameters/pageSize'
+      responses:
+        '200':
+          description: Bản ghi
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReconciliationRecordPage' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  # ---- T72: khôi phục lệnh không chắc chắn -------------------------------------------------------
+  /operator/v1/charge-intents:
+    get:
+      tags: [sessions]
+      operationId: listStuckChargeIntents
+      x-roles: [operator_staff]
+      x-status: planned
+      x-owner: Trí
+      x-refs: [UC-OPS-04, UC-CHG-02, T72]
+      summary: Lệnh bắt đầu từ app chưa rõ kết quả trên trụ của operator (hàng việc T72)
+      parameters:
+        - name: state
+          in: query
+          schema: { type: string, enum: [uncertain, recovering, all], default: uncertain }
+        - $ref: '#/components/parameters/page'
+        - $ref: '#/components/parameters/pageSize'
+      responses:
+        '200':
+          description: Start intent cần operator xem
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ChargeIntentPage' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /operator/v1/charge-intents/{intentId}/recovery:
+    get:
+      tags: [sessions]
+      operationId: getStartRecovery
+      x-roles: [operator_staff]
+      x-status: service
+      x-source: 'DriverChargingService.startRecovery'
+      x-owner: Trí
+      x-refs: [UC-OPS-04, T72]
+      summary: Trạng thái khôi phục của một start intent
+      parameters:
+        - $ref: '#/components/parameters/intentId'
+      responses:
+        '200':
+          description: Bản ghi khôi phục
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StartRecovery' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /operator/v1/charge-intents/{intentId}/begin-recovery:
+    post:
+      tags: [sessions]
+      operationId: beginStartRecovery
+      x-roles: [operator_staff]
+      x-status: service
+      x-source: 'DriverChargingService.beginStartRecovery'
+      x-owner: Trí
+      x-refs: [UC-OPS-04, T72]
+      summary: Rào súng (ChangeAvailability Inoperative) cho start không rõ, kèm bằng chứng
+      parameters:
+        - $ref: '#/components/parameters/intentId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/NoteRequest' }
+      responses:
+        '200':
+          description: Bản ghi khôi phục
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StartRecovery' }
+        '400': { $ref: '#/components/responses/RecoveryBadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/RecoveryConflict' }
+
+  /operator/v1/charge-intents/{intentId}/complete-recovery:
+    post:
+      tags: [sessions]
+      operationId: completeStartRecovery
+      x-roles: [operator_staff]
+      x-status: service
+      x-source: 'DriverChargingService.completeStartRecovery'
+      x-owner: Trí
+      x-refs: [UC-OPS-04, T72]
+      summary: Kết thúc khôi phục khi rào đã Accepted — nhả tiền giữ chỗ cho tài xế
+      parameters:
+        - $ref: '#/components/parameters/intentId'
+      responses:
+        '200':
+          description: Bản ghi khôi phục
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StartRecovery' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/RecoveryConflict' }
+
+  /operator/v1/charge-intents/{intentId}/restore-connector:
+    post:
+      tags: [sessions]
+      operationId: restoreRecoveredConnector
+      x-roles: [operator_staff]
+      x-status: service
+      x-source: 'DriverChargingService.restoreRecoveredConnector'
+      x-owner: Trí
+      x-refs: [UC-OPS-04, T72]
+      summary: Mở lại súng đã rào (ChangeAvailability Operative)
+      parameters:
+        - $ref: '#/components/parameters/intentId'
+      responses:
+        '200':
+          description: Bản ghi khôi phục
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StartRecovery' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/RecoveryConflict' }
+
+  /operator/v1/charge-intents/{intentId}/retry-recovery:
+    post:
+      tags: [sessions]
+      operationId: retryStartRecovery
+      x-roles: [operator_staff]
+      x-status: service
+      x-source: 'DriverChargingService.retryStartRecovery'
+      x-owner: Trí
+      x-refs: [UC-OPS-04, T72]
+      summary: Gửi lại ChangeAvailability (fence hoặc restore); RemoteStart không bao giờ gửi lại
+      parameters:
+        - $ref: '#/components/parameters/intentId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RetryRecoveryRequest' }
+      responses:
+        '200':
+          description: Bản ghi khôi phục
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StartRecovery' }
+        '400': { $ref: '#/components/responses/RecoveryBadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/RecoveryConflict' }
+
+  /operator/v1/charge-intents/{intentId}/approve-late-start:
+    post:
+      tags: [sessions]
+      operationId: approveLateStart
+      x-roles: [operator_staff]
+      x-status: service
+      x-source: 'DriverChargingService.approveLateStart'
+      x-owner: Trí
+      x-refs: [UC-OPS-04, UC-OPS-05, T72]
+      summary: Chấp nhận StartTransaction đến muộn sau khi đã rào, kèm bằng chứng
+      parameters:
+        - $ref: '#/components/parameters/intentId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/NoteRequest' }
+      responses:
+        '200':
+          description: Bản ghi khôi phục
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StartRecovery' }
+        '400': { $ref: '#/components/responses/RecoveryBadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/RecoveryConflict' }
+
+  /operator/v1/sessions/{sessionId}/recover-stop:
+    post:
+      tags: [sessions]
+      operationId: recoverStop
+      x-roles: [operator_staff]
+      x-status: service
+      x-source: 'DriverChargingService.recoverStop'
+      x-owner: Trí
+      x-refs: [UC-OPS-04, BR-P01, T72, BE-17]
+      summary: Thêm một lần thử dừng có kiểm toán cho cùng stop intent (không tạo key mới)
+      parameters:
+        - $ref: '#/components/parameters/sessionId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RecoverStopRequest' }
+      responses:
+        '202':
+          description: Lệnh dừng mới đã ghi
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RemoteCommand' }
+        '400': { $ref: '#/components/responses/RecoveryBadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/RecoveryConflict' }
+
+  /operator/v1/sessions/{sessionId}/tariff-boundary:
+    post:
+      tags: [sessions]
+      operationId: recordTariffBoundary
+      x-roles: [operator_staff]
+      x-status: service
+      x-source: 'ChargeSettlementService.recordTariffBoundary'
+      x-owner: Trí
+      x-refs: [UC-OPS-05, BR-P02, BR-P45, T72]
+      summary: Ghi số đồng hồ tại mốc đổi khung giá do operator cung cấp (bằng chứng, không giả telemetry)
+      parameters:
+        - $ref: '#/components/parameters/sessionId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TariffBoundaryRequest' }
+      responses:
+        '204':
+          description: Đã ghi; quyết toán chạy lại ở lượt sau
+        '400': { $ref: '#/components/responses/RecoveryBadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/RecoveryConflict' }
+
+  # ============================================================================================
+  # TARIFFS & PROMOTIONS (operator)
+  # ============================================================================================
+  /operator/v1/tariffs:
+    get:
+      tags: [tariffs]
+      operationId: getTariffSchedule
+      x-roles: [operator_staff]
+      x-status: planned
+      x-owner: Nghĩa (+ Khang)
+      x-refs: [UC-OPS-06, FR-12, BR-P02, 'Table 5 #23']
+      summary: Biểu giá đang hiệu lực và các bản sắp hiệu lực của operator
+      parameters:
+        - name: at
+          in: query
+          description: Ngày xem (mặc định hôm nay, Asia/Ho_Chi_Minh)
+          schema: { type: string, format: date }
+      responses:
+        '200':
+          description: Biểu giá
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TariffScheduleView' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    put:
+      tags: [tariffs]
+      operationId: putTariffSchedule
+      x-roles: [operator_staff]
+      x-status: planned
+      x-owner: Nghĩa (+ Khang)
+      x-refs: [UC-OPS-06, FR-12, BR-P02, BR-P45]
+      summary: Đặt biểu giá mới từ một ngày; không sửa bản đã hiệu lực
+      description: |
+        Các khung phải phủ kín 24 giờ, không chồng nhau; khung qua nửa đêm tách hai dòng (như bảng
+        `tariff_periods`). `effective_from` ≥ hôm nay; bản cũ được đặt `effective_to` = ngày trước
+        đó. Phiên đã quyết toán không đổi vì giá đã nằm trong `session_tariff_segments`.
+      parameters:
+        - $ref: '#/components/parameters/idempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TariffSchedule' }
+      responses:
+        '200':
+          description: Biểu giá sau khi đặt
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TariffScheduleView' }
+        '400':
+          description: '`invalid_input`, `tariff_gap_or_overlap`, `effective_from_in_past`'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409':
+          description: '`idempotency_conflict`'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /operator/v1/promotions:
+    get:
+      tags: [tariffs]
+      operationId: listPromotions
+      x-roles: [operator_staff]
+      x-status: planned
+      x-owner: Nghĩa (+ Khang)
+      x-refs: [UC-OPS-07, FR-12]
+      summary: Khuyến mãi của operator
+      parameters:
+        - name: active
+          in: query
+          schema: { type: boolean }
+        - $ref: '#/components/parameters/page'
+        - $ref: '#/components/parameters/pageSize'
+      responses:
+        '200':
+          description: Khuyến mãi
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PromotionPage' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [tariffs]
+      operationId: createPromotion
+      x-roles: [operator_staff]
+      x-status: planned
+      x-owner: Nghĩa (+ Khang)
+      x-refs: [UC-OPS-07, FR-12]
+      summary: Tạo khuyến mãi
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PromotionCreate' }
+      responses:
+        '201':
+          description: Đã tạo
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Promotion' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409':
+          description: '`promotion_code_taken` (mã duy nhất toàn nền tảng)'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /operator/v1/promotions/{promotionId}:
+    patch:
+      tags: [tariffs]
+      operationId: updatePromotion
+      x-roles: [operator_staff]
+      x-status: planned
+      x-owner: Nghĩa (+ Khang)
+      x-refs: [UC-OPS-07, FR-12]
+      summary: Sửa khuyến mãi chưa hết hạn
+      parameters:
+        - $ref: '#/components/parameters/promotionId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PromotionPatch' }
+      responses:
+        '200':
+          description: Sau khi sửa
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Promotion' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: '`promotion_expired`'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /operator/v1/promotions/{promotionId}/deactivate:
+    post:
+      tags: [tariffs]
+      operationId: deactivatePromotion
+      x-roles: [operator_staff]
+      x-status: planned
+      x-owner: Nghĩa (+ Khang)
+      x-refs: [UC-OPS-07, FR-12]
+      summary: Ngừng khuyến mãi ngay (valid_to = bây giờ)
+      parameters:
+        - $ref: '#/components/parameters/promotionId'
+      responses:
+        '200':
+          description: Sau khi ngừng
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Promotion' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: '`promotion_expired`'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  # ============================================================================================
+  # REVENUE (operator + admin) — BR-P46
+  # ============================================================================================
+  /operator/v1/revenue:
+    get:
+      tags: [revenue]
+      operationId: getOperatorRevenue
+      x-roles: [operator_staff]
+      x-status: planned
+      x-owner: Khang (T108)
+      x-refs: [UC-OPS-09, FR-18, BR-P46, BR-P45, BR-P08, 'Table 5 #25']
+      summary: Doanh thu của operator theo trụ, site hoặc ngày (BR-P46)
+      description: |
+        `revenue_vnd` = tổng `session_debit` của phiên `payment_mode = csms_billed` và
+        `status = reconciled`, mỗi phiên tính đúng một lần (unique index
+        `credit_transactions_one_debit_per_session`), chỉ trụ của operator người gọi. Phiên
+        `unattributed` là dòng riêng, chỉ đếm phiên và Wh, không có tiền. Không tính phí nền tảng,
+        không chia doanh thu (K1 đóng). Xếp kỳ (K3, Trí chốt 12/11): phiên `reconciled` xếp theo
+        **đúng mốc giờ quyết toán đã dùng để tính giá** (giờ trụ đã kiểm, hoặc giờ CSMS khi rơi về
+        — cách lưu mốc chờ #120 / T101); khi chưa có mốc lưu thì dùng
+        `COALESCE(cp_stopped_at, received_stopped_at)`. Phiên `closed` / `review` xếp theo
+        `received_stopped_at`. Ngày chia theo UTC+7 (Asia/Ho_Chi_Minh). Phiên csms_billed đã dừng
+        nhưng chưa reconciled được đếm ở `pending_reconciliation`; số của kỳ cũ có thể đổi khi
+        một phiên đối soát muộn, nên màn hình và CSV ghi "tính đến lúc `generated_at`".
+      parameters:
+        - $ref: '#/components/parameters/fromDate'
+        - $ref: '#/components/parameters/toDate'
+        - $ref: '#/components/parameters/revenueGroupBy'
+        - name: site_id
+          in: query
+          schema: { $ref: '#/components/schemas/Id' }
+      responses:
+        '200':
+          description: Báo cáo
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RevenueReport' }
+        '400': { $ref: '#/components/responses/RevenueBadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /operator/v1/revenue.csv:
+    get:
+      tags: [revenue]
+      operationId: exportOperatorRevenueCsv
+      x-roles: [operator_staff]
+      x-status: planned
+      x-owner: Khang (T108)
+      x-refs: [UC-OPS-09, BR-P46]
+      summary: Cùng báo cáo, dạng CSV — khớp từng dòng và dòng tổng với màn hình
+      description: |
+        Cùng tham số và cùng truy vấn với `GET /revenue`; CSV UTF-8 có BOM (Excel đọc đúng tiếng
+        Việt), dấu phẩy, số nguyên không định dạng nghìn, dòng cuối `TOTAL`. Cột theo thứ tự các
+        trường của `RevenueRow` rồi `RevenueBucket` (csms_billed_*, unattributed_*).
+      parameters:
+        - $ref: '#/components/parameters/fromDate'
+        - $ref: '#/components/parameters/toDate'
+        - $ref: '#/components/parameters/revenueGroupBy'
+        - name: site_id
+          in: query
+          schema: { $ref: '#/components/schemas/Id' }
+      responses:
+        '200':
+          description: Tệp CSV
+          headers:
+            Content-Disposition:
+              schema: { type: string, examples: ['attachment; filename="revenue_2026-11-01_2026-11-30.csv"'] }
+          content:
+            text/csv:
+              schema: { type: string }
+        '400': { $ref: '#/components/responses/RevenueBadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /admin/v1/revenue:
+    get:
+      tags: [revenue]
+      operationId: getPlatformRevenue
+      x-roles: [admin]
+      x-status: planned
+      x-owner: Khang (T108)
+      x-refs: [UC-ADM-10, BR-P46]
+      summary: Doanh thu toàn nền tảng, lọc hoặc nhóm theo operator
+      description: Cùng định nghĩa với báo cáo operator; thêm `group_by = operator` và lọc `operator_id`.
+      parameters:
+        - $ref: '#/components/parameters/fromDate'
+        - $ref: '#/components/parameters/toDate'
+        - name: group_by
+          in: query
+          schema: { type: string, enum: [operator, site, charge_point, day], default: operator }
+        - name: operator_id
+          in: query
+          schema: { $ref: '#/components/schemas/Id' }
+      responses:
+        '200':
+          description: Báo cáo
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RevenueReport' }
+        '400': { $ref: '#/components/responses/RevenueBadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /admin/v1/revenue.csv:
+    get:
+      tags: [revenue]
+      operationId: exportPlatformRevenueCsv
+      x-roles: [admin]
+      x-status: planned
+      x-owner: Khang (T108)
+      x-refs: [UC-ADM-10, BR-P46]
+      summary: Báo cáo doanh thu nền tảng dạng CSV
+      parameters:
+        - $ref: '#/components/parameters/fromDate'
+        - $ref: '#/components/parameters/toDate'
+        - name: group_by
+          in: query
+          schema: { type: string, enum: [operator, site, charge_point, day], default: operator }
+        - name: operator_id
+          in: query
+          schema: { $ref: '#/components/schemas/Id' }
+      responses:
+        '200':
+          description: Tệp CSV
+          content:
+            text/csv:
+              schema: { type: string }
+        '400': { $ref: '#/components/responses/RevenueBadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  # ============================================================================================
+  # ACCOUNTS & ROLES (admin)
+  # ============================================================================================
+  /admin/v1/users:
+    get:
+      tags: [accounts]
+      operationId: listUsers
+      x-roles: [admin]
+      x-status: planned
+      x-owner: Trí
+      x-refs: [UC-ADM-01, FR-14, BR-P05, BR-P16, 'Table 5 #28']
+      summary: Tài khoản (tài xế, nhân viên operator, admin)
+      parameters:
+        - name: role
+          in: query
+          schema: { $ref: '#/components/schemas/UserRole' }
+        - name: account_status
+          in: query
+          schema: { $ref: '#/components/schemas/AccountStatus' }
+        - name: operator_id
+          in: query
+          schema: { $ref: '#/components/schemas/Id' }
+        - name: q
+          in: query
+          description: Tìm theo email hoặc họ tên (chứa, không phân biệt hoa thường)
+          schema: { type: string, minLength: 2, maxLength: 100 }
+        - $ref: '#/components/parameters/page'
+        - $ref: '#/components/parameters/pageSize'
+      responses:
+        '200':
+          description: Tài khoản
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UserAccountPage' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [accounts]
+      operationId: createStaffUser
+      x-roles: [admin]
+      x-status: planned
+      x-owner: Trí
+      x-refs: [UC-ADM-01, UC-ADM-02, FR-14, BR-P16]
+      summary: Tạo tài khoản nhân viên operator hoặc admin
+      description: |
+        Tài xế tự đăng ký (UC-ACC-01, cần consent BR-P05) nên route này chỉ nhận `operator_staff`
+        hoặc `admin`. `operator_staff` bắt buộc `operator_id` và `staff_role`. Mật khẩu ban đầu do
+        Admin đặt và giao ngoài hệ thống (câu hỏi mở: buộc đổi lần đầu).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateStaffUserRequest' }
+      responses:
+        '201':
+          description: Đã tạo
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UserAccount' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404':
+          description: '`operator_not_found`'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '409':
+          description: '`email_taken`'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /admin/v1/users/{userId}:
+    get:
+      tags: [accounts]
+      operationId: getUser
+      x-roles: [admin]
+      x-status: planned
+      x-owner: Trí
+      x-refs: [UC-ADM-01]
+      summary: Một tài khoản
+      parameters:
+        - $ref: '#/components/parameters/userId'
+      responses:
+        '200':
+          description: Tài khoản
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UserAccount' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      tags: [accounts]
+      operationId: updateUser
+      x-roles: [admin]
+      x-status: planned
+      x-owner: Trí
+      x-refs: [UC-ADM-01]
+      summary: Sửa họ tên, số điện thoại
+      parameters:
+        - $ref: '#/components/parameters/userId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateUserRequest' }
+      responses:
+        '200':
+          description: Sau khi sửa
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UserAccount' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /admin/v1/users/{userId}/role:
+    put:
+      tags: [accounts]
+      operationId: setUserRole
+      x-roles: [admin]
+      x-status: planned
+      x-owner: Trí
+      x-refs: [UC-ADM-02, FR-14, BR-P16]
+      summary: Đổi role giữa operator_staff và admin, hoặc đổi operator / staff_role
+      description: |
+        Mỗi user đúng một role (BR-P16). Tài khoản tài xế không đổi role được (có credit, điểm,
+        consent) → 409 `role_change_not_allowed`. Admin không tự hạ role của chính mình →
+        409 `cannot_change_own_role`. Có hiệu lực ở request kế tiếp vì mọi request kiểm DB.
+      parameters:
+        - $ref: '#/components/parameters/userId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SetRoleRequest' }
+      responses:
+        '200':
+          description: Sau khi đổi
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UserAccount' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: '`role_change_not_allowed`, `cannot_change_own_role`'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /admin/v1/users/{userId}/lock:
+    post:
+      tags: [accounts]
+      operationId: lockUser
+      x-roles: [admin]
+      x-status: planned
+      x-owner: Trí
+      x-refs: [UC-ADM-01, F-13]
+      summary: Khoá tài khoản (active → suspended); đăng nhập và mọi request sau đó bị 403
+      parameters:
+        - $ref: '#/components/parameters/userId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/NoteRequest' }
+      responses:
+        '200':
+          description: Sau khi khoá
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UserAccount' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: '`invalid_transition` (đã khoá hoặc đã đóng), `cannot_lock_self`'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /admin/v1/users/{userId}/unlock:
+    post:
+      tags: [accounts]
+      operationId: unlockUser
+      x-roles: [admin]
+      x-status: planned
+      x-owner: Trí
+      x-refs: [UC-ADM-01, F-13]
+      summary: Mở khoá (suspended → active); tài khoản closed không mở lại được
+      parameters:
+        - $ref: '#/components/parameters/userId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/NoteRequest' }
+      responses:
+        '200':
+          description: Sau khi mở
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UserAccount' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/InvalidTransition' }
+
+  /admin/v1/operators:
+    get:
+      tags: [accounts]
+      operationId: listOperators
+      x-roles: [admin]
+      x-status: planned
+      x-owner: Trí
+      x-refs: [UC-ADM-02, BR-P11, BR-P16]
+      summary: Operator đối tác (để gán nhân viên và lọc báo cáo)
+      parameters:
+        - name: status
+          in: query
+          schema: { type: string, enum: [active, suspended, closed] }
+        - $ref: '#/components/parameters/page'
+        - $ref: '#/components/parameters/pageSize'
+      responses:
+        '200':
+          description: Operator
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OperatorPage' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  # ============================================================================================
+  # RFID CARDS (admin)
+  # ============================================================================================
+  /admin/v1/rfid-cards:
+    get:
+      tags: [cards]
+      operationId: listRfidCards
+      x-roles: [admin]
+      x-status: planned
+      x-owner: Ân
+      x-refs: [UC-ADM-04, FR-15, BR-P15, 'Table 5 #30']
+      summary: Sổ thẻ RFID
+      parameters:
+        - name: card_kind
+          in: query
+          schema: { $ref: '#/components/schemas/CardKind' }
+        - name: status
+          in: query
+          schema: { $ref: '#/components/schemas/CardStatus' }
+        - name: driver_id
+          in: query
+          schema: { $ref: '#/components/schemas/Id' }
+        - name: q
+          in: query
+          description: Tiền tố `card_identifier`
+          schema: { type: string, minLength: 1, maxLength: 20 }
+        - $ref: '#/components/parameters/page'
+        - $ref: '#/components/parameters/pageSize'
+      responses:
+        '200':
+          description: Thẻ
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RfidCardPage' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [cards]
+      operationId: registerRfidCard
+      x-roles: [admin]
+      x-status: planned
+      x-owner: Ân
+      x-refs: [UC-ADM-04, FR-15, BR-P15, BR-P23]
+      summary: Đăng ký thẻ (một loại, tối đa một tài xế)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RfidCardCreate' }
+      responses:
+        '201':
+          description: Đã đăng ký
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RfidCard' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404':
+          description: '`driver_not_found`'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '409':
+          description: '`card_already_registered`'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /admin/v1/rfid-cards/{cardId}:
+    patch:
+      tags: [cards]
+      operationId: updateRfidCard
+      x-roles: [admin]
+      x-status: planned
+      x-owner: Ân
+      x-refs: [UC-ADM-04, BR-P15, BR-P23]
+      summary: Gắn / bỏ gắn tài xế, khoá / mở khoá thẻ
+      description: |
+        Không đổi được `card_identifier` và `card_kind` (BR-P15: đúng một loại). Khoá thẻ chỉ áp
+        cho Authorize sau đó; phiên đang chạy không bị dừng.
+      parameters:
+        - name: cardId
+          in: path
+          required: true
+          schema: { $ref: '#/components/schemas/Id' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RfidCardPatch' }
+      responses:
+        '200':
+          description: Sau khi sửa
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RfidCard' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: '`card_kind_has_no_driver` (thẻ free_vend không gắn tài xế)'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  # ============================================================================================
+  # PLATFORM (admin)
+  # ============================================================================================
+  /admin/v1/summary:
+    get:
+      tags: [platform]
+      operationId: getAdminSummary
+      x-roles: [admin]
+      x-status: console
+      x-source: 'GET /api/admin/summary (một phần: có trụ/phiên/đối soát/bản tin, thiếu user, thẻ, ngoại lệ thanh toán)'
+      x-owner: Nghĩa (T97)
+      x-refs: [UC-ADM-07, 'Table 5 #27']
+      summary: Số tài khoản, trụ đã đăng ký, thẻ, ngoại lệ thanh toán mở — màn hình đầu Admin Console
+      responses:
+        '200':
+          description: Tóm tắt nền tảng
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdminSummary' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /admin/v1/sessions:
+    get:
+      tags: [platform]
+      operationId: listPlatformSessions
+      x-roles: [admin]
+      x-status: console
+      x-source: 'GET /api/admin/sessions → ConsoleQueries.sessions'
+      x-owner: Trí
+      x-refs: [UC-ADM-07, FR-19, BR-P05]
+      summary: Nhật ký phiên toàn nền tảng (chỉ đọc)
+      parameters:
+        - name: operator_id
+          in: query
+          schema: { $ref: '#/components/schemas/Id' }
+        - name: status
+          in: query
+          schema: { $ref: '#/components/schemas/SessionStatus' }
+        - name: payment_mode
+          in: query
+          schema: { $ref: '#/components/schemas/PaymentMode' }
+        - $ref: '#/components/parameters/from'
+        - $ref: '#/components/parameters/to'
+        - $ref: '#/components/parameters/page'
+        - $ref: '#/components/parameters/pageSize'
+      responses:
+        '200':
+          description: Phiên
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SessionPage' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /admin/v1/sessions/{sessionId}:
+    get:
+      tags: [platform]
+      operationId: getPlatformSession
+      x-roles: [admin]
+      x-status: console
+      x-source: 'GET /api/admin/sessions/{id} → ConsoleQueries.session'
+      x-owner: Trí
+      x-refs: [UC-ADM-07]
+      summary: Chi tiết một phiên (chỉ đọc; admin không giải quyết phiên của operator)
+      parameters:
+        - $ref: '#/components/parameters/sessionId'
+      responses:
+        '200':
+          description: Phiên
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SessionDetail' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /admin/v1/reconciliation-records:
+    get:
+      tags: [platform]
+      operationId: listPlatformReconciliationRecords
+      x-roles: [admin]
+      x-status: console
+      x-source: 'GET /api/admin/reconciliation → ConsoleQueries.reconciliation'
+      x-owner: Trí
+      x-refs: [UC-ADM-07, FR-16]
+      summary: Tổng quan đối soát toàn nền tảng
+      parameters:
+        - name: operator_id
+          in: query
+          schema: { $ref: '#/components/schemas/Id' }
+        - name: kind
+          in: query
+          schema: { $ref: '#/components/schemas/ReconciliationKind' }
+        - $ref: '#/components/parameters/page'
+        - $ref: '#/components/parameters/pageSize'
+      responses:
+        '200':
+          description: Bản ghi
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReconciliationRecordPage' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /admin/v1/ocpp-messages:
+    get:
+      tags: [platform]
+      operationId: listPlatformOcppMessages
+      x-roles: [admin]
+      x-status: console
+      x-source: 'GET /api/admin/messages → ConsoleQueries.messages'
+      x-owner: Nghĩa
+      x-refs: [UC-ADM-07, FE-08, 'Table 7 #4']
+      summary: Đuôi nhật ký bản tin OCPP toàn nền tảng
+      parameters:
+        - name: charge_point_id
+          in: query
+          schema: { $ref: '#/components/schemas/Id' }
+        - $ref: '#/components/parameters/after'
+        - $ref: '#/components/parameters/limit'
+      responses:
+        '200':
+          description: Bản tin
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OcppMessageList' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  # ============================================================================================
+  # BILLING EXCEPTIONS (admin) — đường dẫn ở đây, hình dạng chi tiết ở WF-02 D10 (Khang)
+  # ============================================================================================
+  /admin/v1/billing/top-ups:
+    get:
+      tags: [billing-exceptions]
+      operationId: listRefundableTopUps
+      x-roles: [admin]
+      x-status: planned
+      x-owner: Khang
+      x-refs: [UC-ADM-08, FR-07, BR-P21, WF-02 D10]
+      summary: Top-up có thể hoàn (`status=credited`)
+      parameters:
+        - name: status
+          in: query
+          schema: { type: string, enum: [credited], default: credited }
+        - $ref: '#/components/parameters/page'
+        - $ref: '#/components/parameters/pageSize'
+      responses:
+        '200':
+          description: Trang top-up; phần tử theo WF-02 D10
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BillingItemPage' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /admin/v1/billing/top-ups/{topUpId}/refund:
+    post:
+      tags: [billing-exceptions]
+      operationId: refundTopUp
+      x-roles: [admin]
+      x-status: planned
+      x-owner: Khang
+      x-refs: [UC-ADM-08, SD-2e, BR-P21, BR-P14]
+      summary: Hoàn toàn bộ một top-up về nguồn (202, refund chạy nền)
+      parameters:
+        - $ref: '#/components/parameters/topUpId'
+        - $ref: '#/components/parameters/idempotencyKey'
+      responses:
+        '202':
+          description: Refund đã ghi `requested`
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RefundRequested' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: '`invalid_transition`, `insufficient_available_balance`, `account_closed`, `idempotency_conflict`'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /admin/v1/billing/top-ups/late-payments:
+    get:
+      tags: [billing-exceptions]
+      operationId: listLatePayments
+      x-roles: [admin]
+      x-status: planned
+      x-owner: Khang
+      x-refs: [UC-ADM-08, BR-P13, 'Table 7 #19']
+      summary: Khoản thanh toán thành công tới sau khi top-up đã expired hoặc failed, chờ hoàn
+      parameters:
+        - $ref: '#/components/parameters/page'
+        - $ref: '#/components/parameters/pageSize'
+      responses:
+        '200':
+          description: Trang khoản trễ
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BillingItemPage' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /admin/v1/billing/top-ups/{topUpId}/late-refund:
+    post:
+      tags: [billing-exceptions]
+      operationId: refundLatePayment
+      x-roles: [admin]
+      x-status: planned
+      x-owner: Khang
+      x-refs: [UC-ADM-08, SD-2e, BR-P13]
+      summary: Hoàn khoản thanh toán trễ về nguồn
+      parameters:
+        - $ref: '#/components/parameters/topUpId'
+        - $ref: '#/components/parameters/idempotencyKey'
+      responses:
+        '202':
+          description: Refund đã ghi `requested`
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RefundRequested' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: '`late_refund_not_allowed`, `idempotency_conflict`'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /admin/v1/billing/e-invoices:
+    get:
+      tags: [billing-exceptions]
+      operationId: listNeedsReviewInvoices
+      x-roles: [admin]
+      x-status: planned
+      x-owner: Khang
+      x-refs: [UC-ADM-08, BR-P44, 'Table 7 #20']
+      summary: Hoá đơn điện tử cần xem lại
+      parameters:
+        - name: status
+          in: query
+          schema: { type: string, enum: [needs_review], default: needs_review }
+        - $ref: '#/components/parameters/page'
+        - $ref: '#/components/parameters/pageSize'
+      responses:
+        '200':
+          description: Trang hoá đơn
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BillingItemPage' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /admin/v1/billing/e-invoices/{invoiceId}/retry:
+    post:
+      tags: [billing-exceptions]
+      operationId: retryEInvoice
+      x-roles: [admin]
+      x-status: planned
+      x-owner: Khang
+      x-refs: [UC-ADM-08, SD-2c, BR-P44, BR-P14]
+      summary: Thử lại một hoá đơn sau khi sửa nguyên nhân (một lần một)
+      parameters:
+        - name: invoiceId
+          in: path
+          required: true
+          schema: { $ref: '#/components/schemas/Id' }
+        - $ref: '#/components/parameters/idempotencyKey'
+      responses:
+        '200':
+          description: Kết quả lần thử
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/EInvoiceRetryResult' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/InvalidTransition' }
+
+  /admin/v1/billing/refunds:
+    get:
+      tags: [billing-exceptions]
+      operationId: listFailedRefunds
+      x-roles: [admin]
+      x-status: planned
+      x-owner: Khang
+      x-refs: [UC-ADM-08, STM-10, WF-02 D1, WF-02 D10]
+      summary: Refund thất bại (gồm cả account_closure) chờ thử lại
+      parameters:
+        - name: status
+          in: query
+          schema: { type: string, enum: [failed], default: failed }
+        - $ref: '#/components/parameters/page'
+        - $ref: '#/components/parameters/pageSize'
+      responses:
+        '200':
+          description: Trang refund
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BillingItemPage' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /admin/v1/billing/refunds/{refundId}/retry:
+    post:
+      tags: [billing-exceptions]
+      operationId: retryRefund
+      x-roles: [admin]
+      x-status: planned
+      x-owner: Khang
+      x-refs: [UC-ADM-08, STM-10, WF-02 D1]
+      summary: Thử lại một refund thất bại (một lượt, không reset bộ đếm)
+      parameters:
+        - name: refundId
+          in: path
+          required: true
+          schema: { $ref: '#/components/schemas/Id' }
+        - $ref: '#/components/parameters/idempotencyKey'
+      responses:
+        '202':
+          description: Refund trở lại `requested`
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RefundRequested' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/InvalidTransition' }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: |
+        Đã chạy (FE-01a #118, ADR-0018; `apps/csms/src/users/roles-guard.ts`). Token lấy từ
+        `POST /auth/v1/login`: JWT HS256, `typ: JWT`, ký bằng khoá **riêng của dashboard**
+        `DASHBOARD_JWT_SECRET_BASE64` với `iss` = `DASHBOARD_JWT_ISSUER`, `aud` =
+        `DASHBOARD_JWT_AUDIENCE` — không dùng chung khoá, issuer hay audience với Driver API.
+        Claim bắt buộc `sub` (users.id, bigint dạng chuỗi), `role` ∈ {`operator_staff`, `admin`}
+        (enum `user_role`), `iat`, `exp`; nhân viên có thêm `operator_id`, `staff_role`; có `jti`.
+        Sống 8 giờ, kiểm cả `exp` lẫn tuổi tính từ `iat` ≤ 28 800 s, không có dung sai đồng hồ.
+        Không có refresh token.
+
+        Header: đúng **một** `Authorization: Bearer <jwt>` (≤ 8 192 ký tự); hai header hoặc sai
+        dạng → 401.
+
+        Thứ tự kiểm (mọi `/operator/v1/*`, `/admin/v1/*`, trước khi khớp route):
+        1. Thiếu / sai chữ ký / sai iss-aud / hết hạn → 401 `unauthorized`. Nếu chữ ký sai nhưng
+           token xác minh được bằng khoá Driver API và có `role = driver` → 403 `forbidden`
+           (F-13: token tài xế là token hợp lệ của vai trò khác). Khi Driver API chưa cấu hình
+           khoá, token tài xế nhận 401.
+        2. `role` trong token khác bề mặt (token admin gọi `/operator/v1`, hoặc ngược lại) → 403
+           `forbidden`.
+        3. Đọc lại DB ở mỗi request: không còn user → 401; `users.role` khác bề mặt → 403
+           `forbidden`; `account_status ≠ active` → 403 `account_locked`. Admin: thiếu dòng
+           `admins` → 403 `forbidden`. Nhân viên: không còn dòng `operator_staff` hoặc
+           `operator_id` khác claim (bị chuyển Operator) → 401 (đăng nhập lại); Operator không
+           `active` → 403 `operator_inactive`.
+
+        Phạm vi Operator của request lấy từ lần đọc DB ở bước 3, không bao giờ từ token, query
+        hay body. Ngược lại, token dashboard gửi tới `/api/driver/v1` bị Driver API trả 401
+        `unauthorized` (sai khoá; Driver API không thử khoá dashboard nên không trả 403). Không có header dev kiểu `X-Driver-Id` cho bề mặt này.
+
+  parameters:
+    page:
+      name: page
+      in: query
+      schema: { type: integer, minimum: 1, default: 1 }
+    pageSize:
+      name: page_size
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
+    after:
+      name: after
+      in: query
+      description: Con trỏ — chỉ lấy dòng có id lớn hơn
+      schema: { $ref: '#/components/schemas/Id' }
+    limit:
+      name: limit
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 500, default: 100 }
+    from:
+      name: from
+      in: query
+      description: Thời điểm bắt đầu (bao gồm), so với `started_at`
+      schema: { $ref: '#/components/schemas/Timestamp' }
+    to:
+      name: to
+      in: query
+      description: Thời điểm kết thúc (không bao gồm)
+      schema: { $ref: '#/components/schemas/Timestamp' }
+    fromDate:
+      name: from
+      in: query
+      required: true
+      description: Ngày đầu kỳ (bao gồm), Asia/Ho_Chi_Minh
+      schema: { type: string, format: date }
+    toDate:
+      name: to
+      in: query
+      required: true
+      description: Ngày cuối kỳ (bao gồm), Asia/Ho_Chi_Minh; kỳ tối đa 366 ngày
+      schema: { type: string, format: date }
+    revenueGroupBy:
+      name: group_by
+      in: query
+      schema: { type: string, enum: [charge_point, site, day], default: charge_point }
+    chargePointId:
+      name: chargePointId
+      in: path
+      required: true
+      schema: { $ref: '#/components/schemas/Id' }
+    faultId:
+      name: faultId
+      in: path
+      required: true
+      schema: { $ref: '#/components/schemas/Id' }
+    sessionId:
+      name: sessionId
+      in: path
+      required: true
+      schema: { $ref: '#/components/schemas/Id' }
+    intentId:
+      name: intentId
+      in: path
+      required: true
+      schema: { $ref: '#/components/schemas/Id' }
+    promotionId:
+      name: promotionId
+      in: path
+      required: true
+      schema: { $ref: '#/components/schemas/Id' }
+    userId:
+      name: userId
+      in: path
+      required: true
+      schema: { $ref: '#/components/schemas/Id' }
+    topUpId:
+      name: topUpId
+      in: path
+      required: true
+      schema: { $ref: '#/components/schemas/Id' }
+    idempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      description: |
+        Do dashboard sinh (UUID v4 khuyến nghị), giữ nguyên khi gửi lại sau lỗi mạng. Cùng key +
+        cùng body trong 24 giờ → trả lại đúng response cũ, không gửi lệnh lần hai. Cùng key khác
+        body → 409 `idempotency_conflict`.
+      schema: { $ref: '#/components/schemas/IdempotencyKey' }
+
+  responses:
+    BadRequest:
+      description: |
+        `invalid_input` — tham số/body sai, trường lạ, id không phải bigint dương. Hiện tại mọi
+        request có query string cũng nhận 400 này, trước RolesGuard (sẽ đổi khi có route danh sách)
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Unauthorized:
+      description: |
+        `unauthorized` — thiếu, sai, hết hạn token, hai header Authorization; user không còn;
+        nhân viên đã bị chuyển sang Operator khác (đăng nhập lại). Hiện chưa gửi header
+        `WWW-Authenticate`
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Forbidden:
+      description: |
+        `forbidden` — token hợp lệ của vai trò khác, kể cả token tài xế (F-13), hoặc Admin không
+        còn dòng `admins`; `account_locked` — tài khoản không còn `active` (có hiệu lực ở request
+        kế tiếp, không chờ token hết hạn); `operator_inactive` — Operator của nhân viên không còn
+        `active`; `forbidden_origin` — header Origin không phải localhost
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    MethodNotAllowed:
+      description: '`method_not_allowed` — kèm header `Allow`'
+      headers:
+        Allow:
+          schema: { type: string, examples: ['POST, OPTIONS', 'GET, OPTIONS'] }
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    PayloadTooLarge:
+      description: '`payload_too_large` — body quá 16 KiB; kèm `Connection: close`'
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    UnsupportedMediaType:
+      description: '`unsupported_media_type` — Content-Type không phải `application/json`'
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    NotFound:
+      description: '`not_found` — không có, hoặc thuộc operator khác (không phân biệt để tránh dò)'
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    InvalidTransition:
+      description: '`invalid_transition` — trạng thái hiện tại không cho phép hành động này'
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    StationError:
+      description: '`station_error` — trụ trả lỗi, status lạ hoặc quá hạn'
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Unavailable:
+      description: '`faults_unavailable` / `auth_unavailable` — module chưa nạp hoặc chưa cấu hình'
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    InvalidCredentials:
+      description: |
+        `invalid_credentials` — sai email, sai mật khẩu, user là tài xế, thiếu dòng
+        `operator_staff` / `admins`, email > 254 ký tự hoặc mật khẩu > 128 ký tự. Một mã chung để
+        không lộ email nào là nhân viên
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    AccountLocked:
+      description: |
+        Chỉ trả khi mật khẩu đúng: `account_locked` (UC-ACC-04, F-13 — `account_status` là
+        `suspended` / `closed`…), `operator_inactive` (Operator của nhân viên bị đình chỉ / đóng)
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    TooManyAttempts:
+      description: |
+        `too_many_attempts`; Retry-After là số giây còn khoá (15 phút sau 5 lần sai / 60 s theo
+        email + IP hoặc 20 lần / 60 s theo IP; 1 s khi quá 20 lần đang chạy song song từ một IP)
+      headers:
+        Retry-After:
+          schema: { type: string, pattern: '^[1-9][0-9]*$' }
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    AuthUnavailable:
+      description: |
+        `auth_unavailable` — `DASHBOARD_JWT_*` để trống cả ba (hoặc CSMS chạy không có DB). Đặt
+        thiếu một trong ba thì CSMS không khởi động, nên không có trạng thái "nửa cấu hình"
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    RecoveryBadRequest:
+      description: '`invalid_input`, `recovery_evidence_required`, `invalid_recovery_retry`, `invalid_boundary_evidence`'
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    RecoveryConflict:
+      description: |
+        `recovery_waiting_for_connection`, `start_not_recoverable`, `start_effect_observed`,
+        `recovery_evidence_incomplete`, `recovery_not_completed`, `stop_attempt_not_current`,
+        `stop_effect_observed_or_not_recoverable`, `session_not_stoppable` (mã của
+        `ChargingError`, giữ nguyên văn)
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    RevenueBadRequest:
+      description: '`invalid_input`, `invalid_period` (from > to hoặc dài hơn 366 ngày)'
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+
+  schemas:
+    # ---- chung ----------------------------------------------------------------------------------
+    Id:
+      type: string
+      pattern: '^[1-9][0-9]{0,18}$'
+      description: bigint dạng chuỗi số (như Driver API)
+      examples: ['12']
+    IdempotencyKey:
+      type: string
+      minLength: 8
+      maxLength: 64
+      pattern: '^[A-Za-z0-9._:-]+$'
+      description: Tối đa 64 vì cột `remote_commands.idempotency_key` là varchar(64)
+    Timestamp:
+      type: string
+      format: date-time
+      examples: ['2026-11-10T08:30:00.000Z']
+    Error:
+      type: object
+      required: [error, detail]
+      properties:
+        error: { type: string, description: 'Mã ổn định, snake_case' }
+        detail: { type: string, description: 'Lời giải thích để hiển thị' }
+      examples:
+        - { error: sessions_active, detail: 'Trụ PM-D1-HCM-0001 đang có phiên sạc ở súng 2 (phiên 418); Reset sẽ cắt phiên này.' }
+    PageMeta:
+      type: object
+      required: [total, page, page_size]
+      properties:
+        total: { type: integer, minimum: 0 }
+        page: { type: integer, minimum: 1 }
+        page_size: { type: integer, minimum: 1, maximum: 100 }
+    NoteRequest:
+      type: object
+      additionalProperties: false
+      required: [note]
+      properties:
+        note: { type: string, minLength: 1, maxLength: 500, description: 'Lý do / bằng chứng, ghi vào lịch sử' }
+    OperatorRef:
+      type: object
+      required: [id, legal_name]
+      properties:
+        id: { $ref: '#/components/schemas/Id' }
+        legal_name: { type: string }
+    SiteRef:
+      type: object
+      required: [id, site_code, site_name]
+      properties:
+        id: { $ref: '#/components/schemas/Id' }
+        site_code: { type: string }
+        site_name: { type: string }
+
+    # ---- auth -----------------------------------------------------------------------------------
+    LoginRequest:
+      type: object
+      additionalProperties: false
+      required: [email, password]
+      description: |
+        Đúng hai khoá; khoá lạ → 400. Không có giới hạn độ dài ở tầng 400: email > 254 ký tự
+        hoặc mật khẩu > 128 code point → 401 `invalid_credentials`. Type TS:
+        `packages/shared/src/api/auth.ts` `LoginRequest`.
+      properties:
+        email:
+          type: string
+          description: So khớp sau `trim()` + chữ thường với `lower(users.email)`; không kiểm định dạng
+        password: { type: string, writeOnly: true }
+    LoginResponse:
+      type: object
+      description: '`packages/shared/src/api/auth.ts` `LoginResponse`'
+      required: [access_token, token_type, expires_in, user]
+      properties:
+        access_token: { type: string, description: 'JWT HS256, khoá DASHBOARD_JWT_*' }
+        token_type: { type: string, const: Bearer }
+        expires_in: { type: integer, const: 28800, description: 'Giây (8 giờ). Không có refresh token' }
+        user: { $ref: '#/components/schemas/DashboardUser' }
+    DashboardUser:
+      type: object
+      description: |
+        `packages/shared/src/api/auth.ts` `DashboardUser` (= `DashboardMe`). Phẳng, không lồng
+        object `operator`. Với `role = operator_staff` luôn có đủ `operator_id`, `operator_name`,
+        `staff_role` (không null — cột DB `NOT NULL`, Operator đã được guard kiểm tồn tại); với
+        `role = admin` ba khoá này **vắng mặt**, không phải `null`.
+      required: [user_id, email, full_name, role]
+      properties:
+        user_id: { $ref: '#/components/schemas/Id' }
+        email: { type: string, description: 'Như lưu trong `users.email`' }
+        full_name: { type: string }
+        role: { type: string, enum: [operator_staff, admin] }
+        operator_id: { $ref: '#/components/schemas/Id' }
+        operator_name: { type: string, description: '`operators.legal_name`' }
+        staff_role: { type: string, enum: [manager, technician] }
+      oneOf:
+        - properties: { role: { const: operator_staff } }
+          required: [operator_id, operator_name, staff_role]
+        - properties: { role: { const: admin } }
+          not:
+            anyOf:
+              - required: [operator_id]
+              - required: [operator_name]
+              - required: [staff_role]
+
+    # ---- trụ / súng -----------------------------------------------------------------------------
+    ChargePointLifecycle:
+      type: string
+      enum: [registered, awaiting_connection, in_service, disabled, decommissioned]
+      description: STM-3 v0.3; giá trị DB cũ `offline` được trả là `in_service`
+    ConnectorStatus:
+      type: string
+      enum: [Available, Preparing, Charging, SuspendedEV, SuspendedEVSE, Finishing, Reserved, Unavailable, Faulted]
+    Site:
+      type: object
+      required: [id, site_code, site_name, vinfast_only]
+      properties:
+        id: { $ref: '#/components/schemas/Id' }
+        site_code: { type: string, maxLength: 20 }
+        site_name: { type: string }
+        address: { type: [string, 'null'] }
+        vinfast_only: { type: boolean }
+        latitude: { type: [number, 'null'] }
+        longitude: { type: [number, 'null'] }
+    SitePage:
+      allOf:
+        - $ref: '#/components/schemas/PageMeta'
+        - type: object
+          required: [items]
+          properties:
+            items: { type: array, items: { $ref: '#/components/schemas/Site' } }
+    ConnectorLive:
+      type: object
+      required: [connector_id, connector_no, status, status_updated_at, status_quality]
+      properties:
+        connector_id: { $ref: '#/components/schemas/Id' }
+        connector_no: { type: integer, enum: [1, 2], description: 'BR-P10: 1 = súng A, 2 = súng B' }
+        connector_type: { type: [string, 'null'], enum: [ccs2, chademo, gbt, type2, null] }
+        max_power_kw: { type: [number, 'null'] }
+        status: { $ref: '#/components/schemas/ConnectorStatus' }
+        status_updated_at: { oneOf: [{ $ref: '#/components/schemas/Timestamp' }, { type: 'null' }] }
+        status_quality:
+          type: string
+          enum: [fresh, stale, offline]
+          description: BR-P39 — stale sau 2 chu kỳ heartbeat; offline sau ngưỡng 900 s
+        error_code: { type: [string, 'null'], description: 'ChargePointErrorCode gần nhất khi Faulted' }
+        active_session_id:
+          oneOf:
+            - $ref: '#/components/schemas/Id'
+            - type: 'null'
+    ChargePoint:
+      type: object
+      required: [id, serial_number, display_code, lifecycle, connected, is_online, last_message_at, site, connectors]
+      properties:
+        id: { $ref: '#/components/schemas/Id' }
+        serial_number: { type: string, description: 'OCPP identity, cuối URL /ocpp/{serial}' }
+        display_code: { type: [string, 'null'], examples: ['PM-D1-HCM-0001'] }
+        model: { type: [string, 'null'] }
+        lifecycle: { $ref: '#/components/schemas/ChargePointLifecycle' }
+        connected: { type: boolean, description: 'Socket đang mở trong tiến trình này' }
+        is_online: { type: boolean, description: 'Cột DB (ADR-0016 D-C)' }
+        last_message_at: { oneOf: [{ $ref: '#/components/schemas/Timestamp' }, { type: 'null' }] }
+        site:
+          oneOf:
+            - $ref: '#/components/schemas/SiteRef'
+            - type: 'null'
+        connectors: { type: array, maxItems: 2, items: { $ref: '#/components/schemas/ConnectorLive' } }
+    ChargePointPage:
+      allOf:
+        - $ref: '#/components/schemas/PageMeta'
+        - type: object
+          required: [items]
+          properties:
+            items: { type: array, items: { $ref: '#/components/schemas/ChargePoint' } }
+    ChargePointDetail:
+      allOf:
+        - $ref: '#/components/schemas/ChargePoint'
+        - type: object
+          required: [open_faults, recent_commands]
+          properties:
+            firmware_version: { type: [string, 'null'] }
+            rated_power_kw: { type: [number, 'null'] }
+            reports_soc: { type: boolean, description: 'BR-P40 — trụ có gửi SoC' }
+            supports_reservation: { type: boolean }
+            open_faults: { type: array, items: { $ref: '#/components/schemas/Fault' } }
+            recent_commands:
+              type: array
+              maxItems: 20
+              items: { $ref: '#/components/schemas/RemoteCommand' }
+    MetricValues:
+      type: object
+      required: [uptime_ratio, utilisation_ratio, fault_count, failed_start_rate]
+      properties:
+        uptime_ratio: { type: [number, 'null'], minimum: 0, maximum: 1 }
+        utilisation_ratio: { type: [number, 'null'], minimum: 0, maximum: 1 }
+        fault_count: { type: integer, minimum: 0 }
+        failed_start_rate: { type: [number, 'null'], minimum: 0, maximum: 1 }
+    ChargePointMetrics:
+      allOf:
+        - $ref: '#/components/schemas/MetricValues'
+        - type: object
+          required: [charge_point_id, window, from, to, connectors]
+          properties:
+            charge_point_id: { $ref: '#/components/schemas/Id' }
+            window: { type: string, enum: [7d, 30d] }
+            from: { $ref: '#/components/schemas/Timestamp' }
+            to: { $ref: '#/components/schemas/Timestamp' }
+            connectors:
+              type: array
+              items:
+                allOf:
+                  - $ref: '#/components/schemas/MetricValues'
+                  - type: object
+                    required: [connector_no]
+                    properties:
+                      connector_no: { type: integer, enum: [1, 2] }
+    ConnectorInput:
+      type: object
+      additionalProperties: false
+      required: [connector_no]
+      properties:
+        connector_no: { type: integer, enum: [1, 2] }
+        connector_type: { type: string, enum: [ccs2, chademo, gbt, type2] }
+        max_power_kw: { type: [number, 'null'], exclusiveMinimum: 0 }
+    OnboardRequest:
+      type: object
+      additionalProperties: false
+      required: [serial_number, site_id, connectors]
+      properties:
+        serial_number: { type: string, pattern: '^[A-Za-z0-9._-]{3,48}$' }
+        site_id: { $ref: '#/components/schemas/Id' }
+        connectors:
+          type: array
+          minItems: 1
+          maxItems: 2
+          items: { $ref: '#/components/schemas/ConnectorInput' }
+    OnboardResult:
+      type: object
+      required: [charge_point_id, display_code, lifecycle, ocpp_url, identity, password]
+      properties:
+        charge_point_id: { $ref: '#/components/schemas/Id' }
+        display_code: { type: string }
+        lifecycle: { type: string, const: awaiting_connection }
+        ocpp_url: { type: string, description: '`{OCPP base URL}/{serial_number}`' }
+        identity: { type: string, description: 'Tên Basic Auth = serial' }
+        password: { type: string, minLength: 24, maxLength: 24, description: 'Hiện một lần; chỉ băm được lưu' }
+    LifecycleResult:
+      type: object
+      required: [charge_point_id, lifecycle]
+      properties:
+        charge_point_id: { $ref: '#/components/schemas/Id' }
+        lifecycle: { $ref: '#/components/schemas/ChargePointLifecycle' }
+    RegistryChargePoint:
+      type: object
+      required: [id, serial_number, lifecycle, is_online, free_vend_tag, operator, site, created_at]
+      properties:
+        id: { $ref: '#/components/schemas/Id' }
+        serial_number: { type: string }
+        display_code: { type: [string, 'null'] }
+        model: { type: [string, 'null'], maxLength: 20 }
+        firmware_version: { type: [string, 'null'], maxLength: 50 }
+        rated_power_kw: { type: [number, 'null'] }
+        warranty_until: { type: [string, 'null'], format: date }
+        lifecycle: { $ref: '#/components/schemas/ChargePointLifecycle' }
+        is_online: { type: boolean }
+        free_vend_tag: { type: [string, 'null'], maxLength: 20 }
+        operator:
+          oneOf:
+            - $ref: '#/components/schemas/OperatorRef'
+            - type: 'null'
+        site:
+          oneOf:
+            - $ref: '#/components/schemas/SiteRef'
+            - type: 'null'
+        created_at: { $ref: '#/components/schemas/Timestamp' }
+    RegistryChargePointPage:
+      allOf:
+        - $ref: '#/components/schemas/PageMeta'
+        - type: object
+          required: [items]
+          properties:
+            items: { type: array, items: { $ref: '#/components/schemas/RegistryChargePoint' } }
+    RegisterDeviceRequest:
+      type: object
+      additionalProperties: false
+      required: [serial_number]
+      properties:
+        serial_number: { type: string, pattern: '^[A-Za-z0-9._-]{3,48}$' }
+        model: { type: [string, 'null'], maxLength: 20 }
+        rated_power_kw: { type: [number, 'null'], exclusiveMinimum: 0 }
+    RegistryChargePointPatch:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        model: { type: [string, 'null'], maxLength: 20 }
+        firmware_version: { type: [string, 'null'], maxLength: 50 }
+        rated_power_kw: { type: [number, 'null'], exclusiveMinimum: 0 }
+        warranty_until: { type: [string, 'null'], format: date }
+    FreeVendTagRequest:
+      type: object
+      additionalProperties: false
+      required: [free_vend_tag]
+      properties:
+        free_vend_tag: { type: [string, 'null'], minLength: 1, maxLength: 20 }
+
+    # ---- lệnh / tóm tắt / bản tin -------------------------------------------------------------
+    CommandRequest:
+      type: object
+      additionalProperties: false
+      required: [action]
+      properties:
+        action: { type: string, enum: [remote_start, remote_stop, reset] }
+        connector_no: { type: integer, enum: [1, 2], description: 'Bắt buộc với remote_start' }
+        id_tag: { type: string, minLength: 1, maxLength: 20, description: 'Bắt buộc với remote_start' }
+        session_id:
+          allOf: [{ $ref: '#/components/schemas/Id' }]
+          description: Bắt buộc với remote_stop
+        type: { type: string, enum: [Soft, Hard], default: Soft, description: 'Chỉ với reset' }
+        force: { type: boolean, default: false, description: 'Chỉ với reset — xác nhận lần hai khi còn phiên' }
+    RemoteCommandStatus:
+      type: string
+      enum: [pending, sent, accepted, rejected, timeout, failed]
+    RemoteCommand:
+      type: object
+      required: [id, charge_point_id, action, connector_no, status, requested_at]
+      properties:
+        id: { $ref: '#/components/schemas/Id' }
+        charge_point_id: { $ref: '#/components/schemas/Id' }
+        action:
+          type: string
+          description: Tên action OCPP nguyên văn (RemoteStartTransaction, RemoteStopTransaction, Reset, ChangeAvailability)
+        connector_no: { type: [integer, 'null'] }
+        status: { $ref: '#/components/schemas/RemoteCommandStatus' }
+        requested_at: { $ref: '#/components/schemas/Timestamp' }
+        sent_at: { oneOf: [{ $ref: '#/components/schemas/Timestamp' }, { type: 'null' }] }
+        responded_at: { oneOf: [{ $ref: '#/components/schemas/Timestamp' }, { type: 'null' }] }
+        error: { type: [string, 'null'] }
+    OperatorSummary:
+      type: object
+      required: [charge_points, connectors, open_faults, sessions_to_review, unattributed_sessions, uncertain_starts]
+      properties:
+        charge_points:
+          type: object
+          required: [total, online, offline, by_lifecycle]
+          properties:
+            total: { type: integer, minimum: 0 }
+            online: { type: integer, minimum: 0 }
+            offline: { type: integer, minimum: 0 }
+            by_lifecycle:
+              type: object
+              additionalProperties: { type: integer, minimum: 0 }
+        connectors:
+          type: object
+          description: Đếm theo nhóm BR-P38 (cùng cách gộp với app tài xế)
+          required: [available, in_use, freeing_soon, unavailable, offline]
+          properties:
+            available: { type: integer, minimum: 0 }
+            in_use: { type: integer, minimum: 0 }
+            freeing_soon: { type: integer, minimum: 0 }
+            unavailable: { type: integer, minimum: 0 }
+            offline: { type: integer, minimum: 0 }
+        open_faults:
+          type: object
+          required: [total, critical, major, minor, none]
+          properties:
+            total: { type: integer, minimum: 0 }
+            critical: { type: integer, minimum: 0 }
+            major: { type: integer, minimum: 0 }
+            minor: { type: integer, minimum: 0 }
+            none: { type: integer, minimum: 0 }
+        sessions_to_review: { type: integer, minimum: 0 }
+        unattributed_sessions: { type: integer, minimum: 0 }
+        uncertain_starts: { type: integer, minimum: 0, description: 'Hàng việc T72' }
+    OcppMessage:
+      type: object
+      required: [id, charge_point_serial, received_at, epoch, direction, unique_id, replayed]
+      properties:
+        id: { $ref: '#/components/schemas/Id' }
+        charge_point_serial: { type: string }
+        received_at: { $ref: '#/components/schemas/Timestamp' }
+        cp_timestamp: { oneOf: [{ $ref: '#/components/schemas/Timestamp' }, { type: 'null' }] }
+        epoch: { type: integer, minimum: 0 }
+        direction: { type: string, enum: [in, out] }
+        message_type: { type: [integer, 'null'], enum: [2, 3, 4, null] }
+        action: { type: [string, 'null'] }
+        unique_id: { type: string }
+        validation_error: { type: [string, 'null'] }
+        replayed: { type: boolean, description: 'Table 7 #6' }
+    OcppMessageList:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/OcppMessage' } }
+
+    # ---- sự cố ------------------------------------------------------------------------------
+    FaultStatus:
+      type: string
+      enum: [raised, acknowledged, resetting, resolved]
+    Fault:
+      type: object
+      required: [id, event_no, charge_point_id, serial_number, connector_no, source, severity, status, raised_at, station_online]
+      properties:
+        id: { $ref: '#/components/schemas/Id' }
+        event_no: { $ref: '#/components/schemas/Id' }
+        charge_point_id: { $ref: '#/components/schemas/Id' }
+        serial_number: { type: string }
+        connector_no: { type: integer, minimum: 0, maximum: 2, description: '0 = cả trụ' }
+        source: { type: string, enum: [ocpp, driver_report, operator] }
+        error_code: { type: [string, 'null'] }
+        severity: { type: string, enum: [critical, major, minor, none] }
+        hint: { type: [string, 'null'], description: 'Hướng xử lý từ bảng mã lỗi (FE-04)' }
+        status: { $ref: '#/components/schemas/FaultStatus' }
+        raised_at: { $ref: '#/components/schemas/Timestamp' }
+        acknowledged_at: { oneOf: [{ $ref: '#/components/schemas/Timestamp' }, { type: 'null' }] }
+        resolved_at: { oneOf: [{ $ref: '#/components/schemas/Timestamp' }, { type: 'null' }] }
+        reset_command_id:
+          oneOf:
+            - $ref: '#/components/schemas/Id'
+            - type: 'null'
+        reset_command_status:
+          oneOf:
+            - $ref: '#/components/schemas/RemoteCommandStatus'
+            - type: 'null'
+        station_online: { type: boolean }
+    FaultPage:
+      allOf:
+        - $ref: '#/components/schemas/PageMeta'
+        - type: object
+          required: [items]
+          properties:
+            items: { type: array, items: { $ref: '#/components/schemas/Fault' } }
+    FaultTransition:
+      type: object
+      required: [id, status]
+      properties:
+        id: { $ref: '#/components/schemas/Id' }
+        status: { $ref: '#/components/schemas/FaultStatus' }
+    FaultResetRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        type: { type: string, enum: [Soft, Hard], default: Soft }
+        force: { type: boolean, default: false }
+    FaultResetResult:
+      type: object
+      required: [fault_id, command_id, serial_number, reset_status, fault_status, forced]
+      properties:
+        fault_id: { $ref: '#/components/schemas/Id' }
+        command_id: { $ref: '#/components/schemas/Id' }
+        serial_number: { type: string }
+        reset_status: { type: string, enum: [Accepted, Rejected] }
+        fault_status: { $ref: '#/components/schemas/FaultStatus' }
+        forced: { type: boolean }
+
+    # ---- phiên / đối soát -------------------------------------------------------------------
+    SessionStatus:
+      type: string
+      enum: [pending, active, paused, stopping, closed, review, reconciled, orphaned, failed]
+    PaymentMode:
+      type: string
+      enum: [csms_billed, unattributed]
+    SessionListItem:
+      type: object
+      required: [id, transaction_no, charge_point_id, serial_number, connector_no, origin, payment_mode, status, started_at]
+      properties:
+        id: { $ref: '#/components/schemas/Id' }
+        transaction_no: { type: integer }
+        charge_point_id: { $ref: '#/components/schemas/Id' }
+        serial_number: { type: string }
+        connector_no: { type: integer, enum: [1, 2] }
+        id_tag: { type: string, description: 'idTag trên dây; BR-P05 — chỉ role được phép thấy' }
+        origin: { type: string, enum: [app_qr, rfid, hmi_password, free_vend] }
+        payment_mode: { $ref: '#/components/schemas/PaymentMode' }
+        status: { $ref: '#/components/schemas/SessionStatus' }
+        started_at: { $ref: '#/components/schemas/Timestamp' }
+        ended_at: { oneOf: [{ $ref: '#/components/schemas/Timestamp' }, { type: 'null' }] }
+        meter_start_wh: { type: integer }
+        meter_stop_wh: { type: [integer, 'null'] }
+        energy_wh: { type: [integer, 'null'] }
+        stop_reason: { type: [string, 'null'] }
+        delivered_offline: { type: boolean }
+        has_conflict: { type: boolean }
+        debit_vnd: { type: [integer, 'null'], description: 'Số đã trừ credit (session_debit), null nếu chưa quyết toán' }
+    SessionPage:
+      allOf:
+        - $ref: '#/components/schemas/PageMeta'
+        - type: object
+          required: [items]
+          properties:
+            items: { type: array, items: { $ref: '#/components/schemas/SessionListItem' } }
+    MeterValue:
+      type: object
+      required: [id, cp_timestamp, received_at, measurand, value, replayed]
+      properties:
+        id: { $ref: '#/components/schemas/Id' }
+        cp_timestamp: { $ref: '#/components/schemas/Timestamp' }
+        received_at: { $ref: '#/components/schemas/Timestamp' }
+        measurand: { type: string }
+        value: { type: number }
+        unit: { type: [string, 'null'] }
+        context: { type: [string, 'null'] }
+        phase: { type: [string, 'null'] }
+        replayed: { type: boolean }
+    SessionDetail:
+      allOf:
+        - $ref: '#/components/schemas/SessionListItem'
+        - type: object
+          required: [meter_values, pauses, reconciliation_records]
+          properties:
+            cp_started_at: { $ref: '#/components/schemas/Timestamp' }
+            cp_stopped_at: { oneOf: [{ $ref: '#/components/schemas/Timestamp' }, { type: 'null' }] }
+            meter_values: { type: array, items: { $ref: '#/components/schemas/MeterValue' } }
+            pauses:
+              type: array
+              items:
+                type: object
+                required: [paused_at, resumed_at, pause_cause]
+                properties:
+                  paused_at: { $ref: '#/components/schemas/Timestamp' }
+                  resumed_at: { oneOf: [{ $ref: '#/components/schemas/Timestamp' }, { type: 'null' }] }
+                  pause_cause: { type: string, enum: [ev, evse] }
+            reconciliation_records:
+              type: array
+              items: { $ref: '#/components/schemas/ReconciliationRecord' }
+    ReconciliationKind:
+      type: string
+      enum: [conflict, gap_detected, replay, duplicate, orphan_stop, unknown_id_tag, meter_gap, late_sample]
+    ReconciliationRecord:
+      type: object
+      required: [id, session_id, record_type, kind, reviewed, created_at]
+      properties:
+        id: { $ref: '#/components/schemas/Id' }
+        session_id: { $ref: '#/components/schemas/Id' }
+        transaction_no: { type: [integer, 'null'] }
+        record_type: { type: string }
+        kind: { $ref: '#/components/schemas/ReconciliationKind' }
+        gap_start: { oneOf: [{ $ref: '#/components/schemas/Timestamp' }, { type: 'null' }] }
+        gap_end: { oneOf: [{ $ref: '#/components/schemas/Timestamp' }, { type: 'null' }] }
+        energy_difference_wh: { type: [integer, 'null'] }
+        reviewed: { type: boolean }
+        resolution: { type: [string, 'null'] }
+        created_at: { $ref: '#/components/schemas/Timestamp' }
+    ReconciliationRecordPage:
+      allOf:
+        - $ref: '#/components/schemas/PageMeta'
+        - type: object
+          required: [items]
+          properties:
+            items: { type: array, items: { $ref: '#/components/schemas/ReconciliationRecord' } }
+    ResolveReviewRequest:
+      type: object
+      additionalProperties: false
+      required: [resolution, note]
+      properties:
+        resolution:
+          type: string
+          pattern: '^[a-z0-9_]{1,40}$'
+          examples: [accepted_station_data]
+        note: { type: string, minLength: 1, maxLength: 500 }
+    ResolveReviewResult:
+      type: object
+      required: [session_id, status, records_reviewed, settlement]
+      properties:
+        session_id: { $ref: '#/components/schemas/Id' }
+        status: { type: string, const: reconciled }
+        records_reviewed: { type: integer, minimum: 0 }
+        settlement: { type: [string, 'null'], enum: [posted, already_posted, pending, ineligible, null] }
+    AssignSessionRequest:
+      type: object
+      required: [note]
+      description: Giữ chỗ — trường xác định tài xế theo bản chốt của T102
+      properties:
+        note: { type: string, minLength: 1, maxLength: 500 }
+    ChargeIntent:
+      type: object
+      required: [id, charge_point_id, serial_number, connector_no, requested_at, state]
+      properties:
+        id: { $ref: '#/components/schemas/Id' }
+        charge_point_id: { $ref: '#/components/schemas/Id' }
+        serial_number: { type: string }
+        connector_no: { type: integer, enum: [1, 2] }
+        requested_at: { $ref: '#/components/schemas/Timestamp' }
+        state: { type: string, enum: [uncertain, recovering, completed] }
+        late_start_seen: { type: boolean, description: 'Trụ đã gửi StartTransaction muộn' }
+    ChargeIntentPage:
+      allOf:
+        - $ref: '#/components/schemas/PageMeta'
+        - type: object
+          required: [items]
+          properties:
+            items: { type: array, items: { $ref: '#/components/schemas/ChargeIntent' } }
+    StartRecovery:
+      type: object
+      description: Một dòng `driver_start_recoveries` (migration 0005) kèm trạng thái hai lệnh
+      required: [intent_id, fence_command_id, fence_status, evidence_note, released_vnd, fence_attempt, restore_attempt, created_at]
+      properties:
+        intent_id: { $ref: '#/components/schemas/Id' }
+        fence_command_id: { $ref: '#/components/schemas/Id' }
+        fence_status:
+          type: string
+          enum: [scheduled, pending, sent, accepted, rejected, timeout, failed]
+        restore_command_id:
+          oneOf:
+            - $ref: '#/components/schemas/Id'
+            - type: 'null'
+        restore_status:
+          oneOf:
+            - $ref: '#/components/schemas/RemoteCommandStatus'
+            - type: 'null'
+        evidence_note: { type: string }
+        released_vnd: { type: integer, minimum: 0 }
+        released_at: { oneOf: [{ $ref: '#/components/schemas/Timestamp' }, { type: 'null' }] }
+        fence_attempt: { type: integer, minimum: 1 }
+        restore_attempt: { type: integer, minimum: 0 }
+        created_at: { $ref: '#/components/schemas/Timestamp' }
+    RetryRecoveryRequest:
+      type: object
+      additionalProperties: false
+      required: [kind, note]
+      properties:
+        kind: { type: string, enum: [fence, restore] }
+        note: { type: string, minLength: 1, maxLength: 500 }
+    RecoverStopRequest:
+      type: object
+      additionalProperties: false
+      required: [previous_command_id, note]
+      properties:
+        previous_command_id: { $ref: '#/components/schemas/Id' }
+        note: { type: string, minLength: 1, maxLength: 500 }
+    TariffBoundaryRequest:
+      type: object
+      additionalProperties: false
+      required: [boundary_at, meter_wh, note]
+      properties:
+        boundary_at: { $ref: '#/components/schemas/Timestamp' }
+        meter_wh: { type: integer, minimum: 0 }
+        note: { type: string, minLength: 1, maxLength: 500 }
+
+    # ---- biểu giá / khuyến mãi --------------------------------------------------------------
+    TariffPeriod:
+      type: object
+      additionalProperties: false
+      required: [band, time_start, time_end, price_per_kwh_vnd]
+      properties:
+        band: { type: string, enum: [off_peak, normal, peak], description: 'Enum `tariff_band` trong DB (xem mục mơ hồ #3)' }
+        time_start: { type: string, pattern: '^([01][0-9]|2[0-3]):[0-5][0-9]$' }
+        time_end: { type: string, pattern: '^(([01][0-9]|2[0-3]):[0-5][0-9]|24:00)$', description: 'Không bao gồm; 24:00 = hết ngày' }
+        price_per_kwh_vnd: { type: integer, minimum: 0 }
+    TariffSchedule:
+      type: object
+      additionalProperties: false
+      required: [effective_from, periods]
+      properties:
+        effective_from: { type: string, format: date }
+        effective_to: { type: [string, 'null'], format: date, readOnly: true }
+        periods: { type: array, minItems: 1, maxItems: 24, items: { $ref: '#/components/schemas/TariffPeriod' } }
+    TariffScheduleView:
+      type: object
+      required: [current, upcoming]
+      properties:
+        current:
+          oneOf:
+            - $ref: '#/components/schemas/TariffSchedule'
+            - type: 'null'
+        upcoming: { type: array, items: { $ref: '#/components/schemas/TariffSchedule' } }
+    Promotion:
+      type: object
+      required: [id, promotion_code, discount_type, discount_value, valid_from, valid_to, active]
+      properties:
+        id: { $ref: '#/components/schemas/Id' }
+        promotion_code: { type: string, maxLength: 20 }
+        discount_type: { type: string, enum: [percent, fixed_vnd] }
+        discount_value: { type: integer, minimum: 0, description: 'percent: 0–100; fixed_vnd: VND' }
+        valid_from: { $ref: '#/components/schemas/Timestamp' }
+        valid_to: { $ref: '#/components/schemas/Timestamp' }
+        active: { type: boolean, description: 'Tính ra: valid_from ≤ bây giờ < valid_to' }
+    PromotionCreate:
+      type: object
+      additionalProperties: false
+      required: [promotion_code, discount_type, discount_value, valid_from, valid_to]
+      properties:
+        promotion_code: { type: string, pattern: '^[A-Z0-9_-]{3,20}$' }
+        discount_type: { type: string, enum: [percent, fixed_vnd] }
+        discount_value: { type: integer, minimum: 0 }
+        valid_from: { $ref: '#/components/schemas/Timestamp' }
+        valid_to: { $ref: '#/components/schemas/Timestamp' }
+    PromotionPatch:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        discount_type: { type: string, enum: [percent, fixed_vnd] }
+        discount_value: { type: integer, minimum: 0 }
+        valid_from: { $ref: '#/components/schemas/Timestamp' }
+        valid_to: { $ref: '#/components/schemas/Timestamp' }
+    PromotionPage:
+      allOf:
+        - $ref: '#/components/schemas/PageMeta'
+        - type: object
+          required: [items]
+          properties:
+            items: { type: array, items: { $ref: '#/components/schemas/Promotion' } }
+
+    # ---- doanh thu (BR-P46) -------------------------------------------------------------------
+    RevenueBucket:
+      type: object
+      required: [csms_billed_session_count, csms_billed_energy_wh, csms_billed_revenue_vnd, unattributed_session_count, unattributed_energy_wh]
+      properties:
+        csms_billed_session_count: { type: integer, minimum: 0 }
+        csms_billed_energy_wh: { type: integer, minimum: 0 }
+        csms_billed_revenue_vnd: { type: integer, minimum: 0, description: 'Σ session_debit, mỗi phiên một lần' }
+        unattributed_session_count: { type: integer, minimum: 0 }
+        unattributed_energy_wh: { type: integer, minimum: 0, description: 'Không quy ra tiền' }
+    RevenueRow:
+      allOf:
+        - type: object
+          required: [key]
+          properties:
+            key: { type: string, description: 'Id của nhóm (charge_point/site/operator) hoặc ngày YYYY-MM-DD' }
+            operator_id: { oneOf: [{ $ref: '#/components/schemas/Id' }, { type: 'null' }] }
+            operator_name: { type: [string, 'null'] }
+            site_id: { oneOf: [{ $ref: '#/components/schemas/Id' }, { type: 'null' }] }
+            site_name: { type: [string, 'null'] }
+            charge_point_id: { oneOf: [{ $ref: '#/components/schemas/Id' }, { type: 'null' }] }
+            serial_number: { type: [string, 'null'] }
+            day: { type: [string, 'null'], format: date }
+        - $ref: '#/components/schemas/RevenueBucket'
+    RevenueReport:
+      type: object
+      required: [from, to, group_by, currency, rows, totals, pending_reconciliation, generated_at]
+      properties:
+        from: { type: string, format: date }
+        to: { type: string, format: date }
+        group_by: { type: string, enum: [operator, site, charge_point, day] }
+        operator_id: { oneOf: [{ $ref: '#/components/schemas/Id' }, { type: 'null' }] }
+        currency: { type: string, const: VND }
+        rows: { type: array, items: { $ref: '#/components/schemas/RevenueRow' } }
+        totals: { $ref: '#/components/schemas/RevenueBucket' }
+        pending_reconciliation:
+          type: object
+          description: Phiên csms_billed đã dừng trong kỳ nhưng chưa reconciled — chưa tính vào doanh thu
+          required: [session_count]
+          properties:
+            session_count: { type: integer, minimum: 0 }
+        generated_at:
+          allOf: [{ $ref: '#/components/schemas/Timestamp' }]
+          description: 'Lúc chạy truy vấn; hiển thị "tính đến lúc …" vì kỳ cũ còn đổi khi có phiên đối soát muộn (K3)'
+
+    # ---- tài khoản / operator / thẻ -----------------------------------------------------------
+    UserRole:
+      type: string
+      enum: [driver, operator_staff, admin]
+    AccountStatus:
+      type: string
+      enum: [active, suspended, closed]
+    UserAccount:
+      type: object
+      required: [id, email, full_name, role, account_status, operator, staff_role, created_at]
+      properties:
+        id: { $ref: '#/components/schemas/Id' }
+        email: { type: string, format: email }
+        full_name: { type: string }
+        phone_number: { type: [string, 'null'] }
+        role: { $ref: '#/components/schemas/UserRole' }
+        account_status: { $ref: '#/components/schemas/AccountStatus' }
+        operator:
+          oneOf:
+            - $ref: '#/components/schemas/OperatorRef'
+            - type: 'null'
+        staff_role: { type: [string, 'null'], enum: [manager, technician, null] }
+        created_at: { $ref: '#/components/schemas/Timestamp' }
+    UserAccountPage:
+      allOf:
+        - $ref: '#/components/schemas/PageMeta'
+        - type: object
+          required: [items]
+          properties:
+            items: { type: array, items: { $ref: '#/components/schemas/UserAccount' } }
+    CreateStaffUserRequest:
+      type: object
+      additionalProperties: false
+      required: [email, full_name, role, initial_password]
+      properties:
+        email: { type: string, format: email, maxLength: 254 }
+        full_name: { type: string, minLength: 1, maxLength: 100 }
+        phone_number: { type: [string, 'null'], pattern: '^\+[1-9][0-9]{6,14}$' }
+        role: { type: string, enum: [operator_staff, admin] }
+        operator_id:
+          allOf: [{ $ref: '#/components/schemas/Id' }]
+          description: Bắt buộc khi role = operator_staff
+        staff_role: { type: string, enum: [manager, technician], description: 'Bắt buộc khi role = operator_staff' }
+        initial_password: { type: string, minLength: 8, maxLength: 128, writeOnly: true }
+    UpdateUserRequest:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        full_name: { type: string, minLength: 1, maxLength: 100 }
+        phone_number: { type: [string, 'null'], pattern: '^\+[1-9][0-9]{6,14}$' }
+    SetRoleRequest:
+      type: object
+      additionalProperties: false
+      required: [role]
+      properties:
+        role: { type: string, enum: [operator_staff, admin] }
+        operator_id:
+          allOf: [{ $ref: '#/components/schemas/Id' }]
+          description: Bắt buộc khi role = operator_staff
+        staff_role: { type: string, enum: [manager, technician] }
+    Operator:
+      type: object
+      required: [id, tax_code, legal_name, status]
+      properties:
+        id: { $ref: '#/components/schemas/Id' }
+        tax_code: { type: string, maxLength: 14 }
+        legal_name: { type: string }
+        status: { type: string, enum: [active, suspended, closed] }
+    OperatorPage:
+      allOf:
+        - $ref: '#/components/schemas/PageMeta'
+        - type: object
+          required: [items]
+          properties:
+            items: { type: array, items: { $ref: '#/components/schemas/Operator' } }
+    CardKind:
+      type: string
+      enum: [online, free_vend]
+    CardStatus:
+      type: string
+      enum: [unlinked, active, blocked]
+    RfidCard:
+      type: object
+      required: [id, card_identifier, card_kind, status, driver, issued_at]
+      properties:
+        id: { $ref: '#/components/schemas/Id' }
+        card_identifier: { type: string, maxLength: 20 }
+        card_kind: { $ref: '#/components/schemas/CardKind' }
+        status: { $ref: '#/components/schemas/CardStatus' }
+        driver:
+          oneOf:
+            - type: object
+              required: [id, email, full_name]
+              properties:
+                id: { $ref: '#/components/schemas/Id' }
+                email: { type: string, format: email }
+                full_name: { type: string }
+            - type: 'null'
+        issued_at: { $ref: '#/components/schemas/Timestamp' }
+        updated_at: { $ref: '#/components/schemas/Timestamp' }
+    RfidCardPage:
+      allOf:
+        - $ref: '#/components/schemas/PageMeta'
+        - type: object
+          required: [items]
+          properties:
+            items: { type: array, items: { $ref: '#/components/schemas/RfidCard' } }
+    RfidCardCreate:
+      type: object
+      additionalProperties: false
+      required: [card_identifier, card_kind]
+      properties:
+        card_identifier: { type: string, minLength: 1, maxLength: 20 }
+        card_kind: { $ref: '#/components/schemas/CardKind' }
+        driver_id:
+          oneOf:
+            - $ref: '#/components/schemas/Id'
+            - type: 'null'
+    RfidCardPatch:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        driver_id:
+          oneOf:
+            - $ref: '#/components/schemas/Id'
+            - type: 'null'
+        status: { type: string, enum: [active, blocked] }
+
+    # ---- admin tóm tắt / ngoại lệ thanh toán ---------------------------------------------------
+    AdminSummary:
+      type: object
+      required: [users, charge_points, rfid_cards, billing_exceptions]
+      properties:
+        users:
+          type: object
+          required: [driver, operator_staff, admin, suspended]
+          properties:
+            driver: { type: integer, minimum: 0 }
+            operator_staff: { type: integer, minimum: 0 }
+            admin: { type: integer, minimum: 0 }
+            suspended: { type: integer, minimum: 0 }
+        charge_points:
+          type: object
+          required: [by_lifecycle, online]
+          properties:
+            by_lifecycle:
+              type: object
+              additionalProperties: { type: integer, minimum: 0 }
+            online: { type: integer, minimum: 0 }
+        rfid_cards:
+          type: object
+          required: [active, blocked, unlinked]
+          properties:
+            active: { type: integer, minimum: 0 }
+            blocked: { type: integer, minimum: 0 }
+            unlinked: { type: integer, minimum: 0 }
+        billing_exceptions:
+          type: object
+          required: [late_payments, invoices_needs_review, failed_refunds]
+          properties:
+            late_payments: { type: integer, minimum: 0 }
+            invoices_needs_review: { type: integer, minimum: 0 }
+            failed_refunds: { type: integer, minimum: 0 }
+    BillingItemPage:
+      allOf:
+        - $ref: '#/components/schemas/PageMeta'
+        - type: object
+          required: [items]
+          properties:
+            items:
+              type: array
+              items:
+                type: object
+                description: Hình dạng phần tử do WF-02 D10 chốt (Khang); hợp đồng này chỉ chốt phong bì
+    RefundRequested:
+      type: object
+      required: [refund_id, status]
+      properties:
+        refund_id: { $ref: '#/components/schemas/Id' }
+        status: { type: string, const: requested }
+    EInvoiceRetryResult:
+      oneOf:
+        - type: object
+          required: [status, invoice_no]
+          properties:
+            status: { type: string, const: issued }
+            invoice_no: { type: string }
+        - type: object
+          required: [status, attempt_count, last_error_kind, last_error_message]
+          properties:
+            status: { type: string, const: needs_review }
+            attempt_count: { type: integer, minimum: 1 }
+            last_error_kind: { type: string, enum: [transient, data] }
+            last_error_message: { type: string }

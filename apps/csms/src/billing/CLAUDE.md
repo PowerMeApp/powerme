@@ -40,6 +40,10 @@ Decisions khác diagram thì theo diagram và sửa decisions. Diagram mâu thu�
 - Mọi chuyển trạng thái top-up đi qua `TopUpStateMachine`. Chuyển không hợp lệ → ném `InvalidTransition`.
 - **VNPay refund chỉ được gọi từ `RefundService.send`** (do worker refund gọi), không gọi trong DB transaction.
 - Việc nền (e-invoice, gửi refund, realtime emit) chỉ chạy **sau khi commit**. Việc nền chạy bằng **quét DB** (`status` + `next_attempt_at`, `FOR UPDATE SKIP LOCKED`), `Scheduler` chỉ để chạy sớm; không thêm BullMQ (decisions D7).
+- **Việc nền gọi bên ngoài đi theo lease, không giữ transaction qua HTTP** (T32 Phần 12):
+  - cài `BackgroundWork.runDue(limit, signal)` (`background-work.ts`); bảng có `next_attempt_at` dùng `runLeasedBatch` (`due-rows.ts`): tx ngắn giữ chỗ một dòng → gọi ngoài tx → tx2 `lockLeased` (trả `null` = mất lease, bỏ kết quả) rồi ghi qua state machine;
+  - đăng ký bằng `BackgroundWorkRunner.register(this)` trong `onModuleInit`, sau commit gọi `kick(name)` / `kickAt(name, at)`. **Luôn register trong `onModuleInit`, kể cả khi `BILLING_WORKER_ENABLED=false`**: `kick` một tên chưa đăng ký sẽ ném sau commit. Có test kiểm việc đăng ký;
+  - lịch retry dùng `nextRetry` (`retry-schedule.ts`), không tự viết 5 phút / 30 phút / 2 giờ.
 - Thứ tự khoá dòng khi cần nhiều bảng: **`top_ups` → `credit_accounts` → `loyalty_accounts`** (tránh deadlock; WP3 cũng khoá `credit_accounts` trước `loyalty_accounts`). `CreditLedgerService.post` chỉ khoá `credit_accounts`, nên luồng nào cần khoá `top_ups` (IPN, timeout, hoàn) thì phải khoá **trước** khi gọi `post`. `LoyaltyService` khoá `loyalty_accounts`, nên gọi **sau** `post`.
 - `post` / `earnForSession` nhận client của transaction bên gọi (`LedgerClient = Pick<PoolClient, 'query'>`) và **không tự BEGIN/COMMIT**. Lỗi nghiệp vụ (`LedgerPostRejected`, `LedgerEntryExists`, `CreditAccountNotFound` trong `billing-errors.ts`) ném ra trước khi có câu SQL lỗi, nên transaction bên gọi vẫn dùng được. DB không có CHECK dấu tiền: `post` kiểm dấu theo loại dòng.
 - Tiền là `bigint` VND, không dùng số thực.
@@ -76,7 +80,7 @@ Decisions khác diagram thì theo diagram và sửa decisions. Diagram mâu thu�
 | Tạo top-up | SD-2a | D2 | STM-4 #1 | TC-STM4-01/11/16/18 |
 | IPN cộng tiền | SD-2b | D3 | STM-4 #2 #3, STM-5 | TC-STM4-02/03/08/09/10, TC-STM5-* |
 | Xuất hoá đơn, retry | SD-2c | D5 | STM-7 | TC-STM7-* |
-| Timeout, thanh toán trễ | SD-2d | D4 | STM-4 #4–#6 | TC-STM4-04/05/06/07/15 |
+| Timeout, thanh toán trễ | SD-2d | D4 | STM-4 #4, #6 | TC-STM4-04/05/06/07/15 |
 | Admin hoàn, gửi refund, retry | SD-2e | D1 | STM-4 #7, STM-10 | TC-STM4-12/13/14, TC-STM10-* |
 | Đóng tài khoản (tài xế đóng, hệ thống tự hoàn) | SD-2f | D6 | STM-5, STM-10 | (theo test case của nhóm) |
 | Worker quét DB | (không vẽ) | D7 | | |

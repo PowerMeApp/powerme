@@ -75,7 +75,7 @@ package "entities (tables)" {
   class Session <<entity>> {
     + transactionNo : number
     + status : SessionStatus
-    + paymentMode : csms_billed | station_wallet | unattributed
+    + paymentMode : csms_billed | unattributed
     + meterStartWh : number
     + meterStopWh : number [0..1]
     + orphanedAt : Date [0..1]

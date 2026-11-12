@@ -2,7 +2,7 @@
 //   chế độ sạc, dừng, gây/xoá lỗi, tốc độ mô phỏng. Mỗi hàm trả { ok, message }.
 // VÌ SAO TÁCH: station.mjs giữ mạng + phiên + điện; file này chỉ là "bàn phím" của trụ.
 // GIẢ ĐỊNH: free vend (mật khẩu HMI) gửi thẳng StartTransaction idTag "HMI-FREEVEND", không
-//   Authorize; offline chấp nhận thẻ hợp lệ + thẻ ví theo danh sách cục bộ; pin đầy/lỗi → "Other".
+//   Authorize; offline chấp nhận hai thẻ hợp lệ theo danh sách cục bộ; pin đầy/lỗi → "Other".
 
 import { CARDS, ERROR_CODES, FREE_VEND_TAG } from './model.mjs';
 

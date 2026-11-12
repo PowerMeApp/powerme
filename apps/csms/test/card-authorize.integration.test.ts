@@ -99,7 +99,7 @@ describeDb('BE-19 — thẻ RFID: liên kết tài xế (BR-P23) + số dư tố
 
   async function card(
     identifier: string,
-    kind: 'online' | 'wallet' | 'free_vend',
+    kind: 'online' | 'free_vend',
     status: 'active' | 'blocked' | 'unlinked',
     driverId: number | null,
   ) {
@@ -162,7 +162,8 @@ describeDb('BE-19 — thẻ RFID: liên kết tài xế (BR-P23) + số dư tố
     await card('C-SUSPENDED', 'online', 'active', suspendedDriver);
     await card('C-BLOCKED', 'online', 'blocked', okDriver);
     await card('C-UNLINKED', 'online', 'unlinked', null);
-    await card('C-WALLET', 'wallet', 'active', null);
+    // T110: thẻ ví cũ sau migration 0016 — card_kind wallet → online, giữ status/driver_id (null).
+    await card('C-EXWALLET', 'online', 'active', null);
     await card('C-FREEVEND', 'free_vend', 'active', null);
 
     svc = new SessionsService(
@@ -193,7 +194,8 @@ describeDb('BE-19 — thẻ RFID: liên kết tài xế (BR-P23) + số dư tố
       ['thẻ bị khoá (blocked) dù tài xế đủ tiền', 'C-BLOCKED', 'Blocked'],
       ['thẻ unlinked', 'C-UNLINKED', 'Invalid'],
       ['thẻ lạ', 'KHONG-CO-TRONG-SO', 'Invalid'],
-      ['thẻ ví (trả tại trụ) không cần tài xế', 'C-WALLET', 'Accepted'],
+      // T110: trước 0016 thẻ ví không cần tài xế và Accepted; nay là thẻ online chưa gắn tài xế.
+      ['thẻ ví cũ (0016 đổi thành online), chưa gắn tài xế (BR-P23)', 'C-EXWALLET', 'Invalid'],
       ['thẻ free_vend không cần tài xế', 'C-FREEVEND', 'Accepted'],
     ] as const)('%s -> %s', async (_label, idTag, expected) => {
       expect(await svc.authorize(idTag)).toBe(expected);
@@ -295,10 +297,30 @@ describeDb('BE-19 — thẻ RFID: liên kết tài xế (BR-P23) + số dư tố
       expect(records[0]?.resolution).toMatch(/card_status=blocked/);
     });
 
-    it('giữ nguyên: thẻ ví -> station_wallet, thẻ free_vend và free_vend_tag của trụ -> free_vend/unattributed, không record', async () => {
-      const wallet = await start('C-WALLET', T('02:00'));
-      expect(wallet.session).toMatchObject({ paymentMode: 'station_wallet', origin: 'rfid' });
-      expect(wallet.records).toHaveLength(0);
+    it('T110: thẻ ví cũ (online, chưa gắn tài xế) -> unattributed, không driver, record card_denied=no_driver (trước 0016: station_wallet, không record)', async () => {
+      const exWallet = await start('C-EXWALLET', T('02:00'));
+      expect(exWallet.session).toMatchObject({
+        paymentMode: 'unattributed',
+        origin: 'rfid',
+        driverId: null,
+      });
+      expect(exWallet.records).toHaveLength(1);
+      expect(exWallet.records[0]).toMatchObject({ recordType: 'unknown_id_tag' });
+      expect(exWallet.records[0]?.resolution).toContain('card_denied=no_driver');
+    });
+
+    it('T110: DB không còn nhận thẻ wallet hay phiên station_wallet', async () => {
+      await expect(
+        db.$client.query(
+          `INSERT INTO rfid_cards (card_identifier, card_kind, status) VALUES ('C-WALLET-MOI', 'wallet', 'active')`,
+        ),
+      ).rejects.toThrow(/invalid input value for enum rfid_card_kind: "wallet"/);
+      await expect(db.$client.query(`SELECT 'station_wallet'::payment_mode`)).rejects.toThrow(
+        /invalid input value for enum payment_mode: "station_wallet"/,
+      );
+    });
+
+    it('giữ nguyên: thẻ free_vend và free_vend_tag của trụ -> free_vend/unattributed, không record', async () => {
       const fv = await start('C-FREEVEND', T('02:10'));
       expect(fv.session).toMatchObject({ paymentMode: 'unattributed', origin: 'free_vend' });
       expect(fv.records).toHaveLength(0);

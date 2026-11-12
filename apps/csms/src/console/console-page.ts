@@ -6,6 +6,9 @@
  * dựng frontend riêng. Trang poll các endpoint `/api/admin/*` mỗi 1 s (đủ cho demo; realtime
  * Socket.IO là việc sau) và vẽ biểu đồ năng lượng bằng SVG thuần.
  *
+ * WF-05 (T119): nút "Onboard Charge Point" mở một khung nhỏ gọi POST /api/operator/charge-points/onboard
+ * và hiện credential MỘT lần (không lưu, đóng khung là xoá khỏi DOM).
+ *
  * CHƯA CÓ XÁC THỰC — footer cố định nói rõ điều đó. JS cố ý không dùng template literal để
  * chuỗi này nằm gọn trong String.raw (không cần escape dấu backtick / `${`). Mọi dữ liệu từ API
  * đi qua `esc()` trước khi chèn vào HTML.
@@ -148,12 +151,31 @@ svg text { fill: var(--muted); font-size: 13px; }
 .b-raised, .b-critical { background: var(--badbg); color: var(--bad); }
 .b-acknowledged, .b-major { background: var(--warnbg); color: var(--warn); }
 .b-resetting, .b-minor { background: var(--infobg); color: var(--info); }
+#onboard {
+  position: fixed; top: 0; right: 0; bottom: 34px; width: min(560px, 96vw); background: var(--panel);
+  border-left: 2px solid var(--line); box-shadow: -8px 0 24px rgba(0,0,0,.25); display: none; flex-direction: column; z-index: 6;
+}
+#onboard.open { display: flex; }
+#onboard .dh { display: flex; align-items: center; gap: 12px; padding: 10px 16px; border-bottom: 1px solid var(--line); }
+#onboard .dh h2 { margin: 0; flex: 1; font-size: 22px; }
+#onboard form, #ob-result { padding: 12px 16px; display: grid; gap: 10px; }
+#onboard label { display: grid; gap: 3px; font-size: 14px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+#onboard input, #onboard select { font: inherit; font-size: 17px; padding: 4px 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel2); color: var(--ink); }
+#onboard button[type=submit] { justify-self: start; border-color: var(--accent); color: var(--accent); }
+#onboard button[type=submit]:hover:not(:disabled) { background: var(--accent); color: var(--panel); }
+#ob-result .once { background: var(--warnbg); color: var(--warn); font-weight: 600; padding: 6px 10px; border-radius: 8px; }
+#ob-result .row { display: flex; gap: 8px; align-items: center; }
+#ob-result .row input { flex: 1; font-family: ui-monospace, Consolas, monospace; }
+#ob-result .err { background: var(--badbg); color: var(--bad); padding: 6px 10px; border-radius: 8px; }
+header button { border-color: var(--accent); color: var(--accent); }
+header button:hover:not(:disabled) { background: var(--accent); color: var(--panel); }
 #toast { position: fixed; left: 50%; bottom: 52px; transform: translateX(-50%); background: var(--ink); color: var(--bg); padding: 8px 18px; border-radius: 8px; display: none; z-index: 9; font-size: 17px; }
 </style>
 </head>
 <body>
 <header>
   <h1>PowerMe CSMS — Bảng điều khiển vận hành</h1>
+  <button id="ob-open" type="button">Onboard Charge Point</button>
   <div id="live"><b></b><span>đang kết nối…</span></div>
 </header>
 <main>
@@ -171,6 +193,16 @@ svg text { fill: var(--muted); font-size: 13px; }
   </section>
 </main>
 <aside id="drawer"></aside>
+<aside id="onboard" aria-label="Onboard Charge Point">
+  <div class="dh"><h2>Onboard Charge Point</h2><button class="plain" id="ob-close" type="button">Close ✕</button></div>
+  <form id="ob-form" autocomplete="off">
+    <label>Serial number (OCPP identity)<input name="serial" required pattern="[A-Za-z0-9._\-]{3,48}" placeholder="SIM-0005"></label>
+    <label>Site id<input name="site" type="number" min="1" step="1" required></label>
+    <label>Connectors<select name="n"><option value="2">2 (connector 1 and 2)</option><option value="1">1 (connector 1)</option></select></label>
+    <button type="submit">Onboard</button>
+  </form>
+  <div id="ob-result"></div>
+</aside>
 <div id="toast"></div>
 <footer>Bảng điều khiển demo — chưa có xác thực; dữ liệu mô phỏng</footer>
 <script>
@@ -449,10 +481,59 @@ svg text { fill: var(--muted); font-size: 13px; }
       .then(function () { busy = false; });
   }
 
+  // ---- WF-05 (T119): onboard một trụ, hiện credential một lần ----
+  function closeOnboard() {
+    $('onboard').className = '';
+    $('ob-result').innerHTML = ''; // không giữ mật khẩu trong DOM sau khi đóng
+  }
+  function obRow(label, value, id) {
+    return '<label>' + esc(label) + '<div class="row"><input readonly id="' + id + '" value="' + esc(value) + '"><button class="plain" type="button" data-copy="' + id + '">Copy</button></div></label>';
+  }
+  $('ob-form').addEventListener('submit', function (ev) {
+    ev.preventDefault();
+    var f = ev.target;
+    var n = Number(f.elements.n.value);
+    var body = {
+      serial_number: f.elements.serial.value.trim(),
+      site_id: Number(f.elements.site.value),
+      connectors: n === 2 ? [{ connector_no: 1 }, { connector_no: 2 }] : [{ connector_no: 1 }]
+    };
+    var btn = f.querySelector('button[type=submit]');
+    btn.disabled = true;
+    fetch('/api/operator/charge-points/onboard', {
+      method: 'POST', cache: 'no-store', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
+    }).then(function (r) {
+      return r.json().then(function (j) { return { ok: r.ok, body: j }; });
+    }).then(function (r) {
+      if (!r.ok) {
+        $('ob-result').innerHTML = '<div class="err">' + esc(r.body.error) + ': ' + esc(r.body.detail) + '</div>';
+        return;
+      }
+      var b = r.body;
+      $('ob-result').innerHTML =
+        '<div class="once">Shown once — paste it into the charge point. ' + esc(b.display_code) + ' is now ' + esc(b.lifecycle) + '.</div>' +
+        obRow('OCPP URL', b.ocpp_url, 'ob-url') + obRow('Identity (Basic Auth user)', b.identity, 'ob-id') + obRow('Password', b.password, 'ob-pw');
+      f.reset();
+      tick();
+    }).catch(function (e) {
+      $('ob-result').innerHTML = '<div class="err">' + esc(e.message) + '</div>';
+    }).then(function () { btn.disabled = false; });
+  });
+
   // ---- hành động ----
   document.addEventListener('click', function (ev) {
     var t = ev.target;
     if (!(t instanceof Element)) return;
+    if (t.id === 'ob-open') { $('onboard').className = 'open'; $('ob-form').elements.serial.focus(); return; }
+    if (t.id === 'ob-close') { closeOnboard(); return; }
+    var cp = t.closest('[data-copy]');
+    if (cp) {
+      var input = $(cp.getAttribute('data-copy'));
+      var copied = function () { toast('Copied'); };
+      if (navigator.clipboard) navigator.clipboard.writeText(input.value).then(copied, function () { input.select(); });
+      else { input.select(); document.execCommand('copy'); copied(); }
+      return;
+    }
     var disc = t.closest('[data-disc]');
     if (disc) {
       var serial = disc.getAttribute('data-disc');
@@ -498,7 +579,7 @@ svg text { fill: var(--muted); font-size: 13px; }
     }
   });
   document.addEventListener('keydown', function (ev) {
-    if (ev.key === 'Escape') { openSessionId = null; $('drawer').className = ''; }
+    if (ev.key === 'Escape') { openSessionId = null; $('drawer').className = ''; closeOnboard(); }
   });
 
   // Liên kết sâu: /#s=<id phiên> mở thẳng khung chi tiết (tiện khi demo / chụp ảnh).

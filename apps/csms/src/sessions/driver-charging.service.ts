@@ -1280,6 +1280,9 @@ export class DriverChargingService {
     });
   }
 
+  // BE-22: phiên của tài xế bất kể origin (thẻ RFID online, HMI) — hợp đồng §5; phiên không do app
+  // tạo thì không có intent nên reserved_vnd null. price_per_kwh_vnd = giá cao nhất hiện hành của
+  // operator, cùng giá dùng để giữ trước (BR-P18), để route tính tiền tạm tính dạng cận trên.
   async progress(driverId: number, sessionId: number) {
     this.validateIds(driverId, sessionId);
     return chargeTransaction(this.db, async (c) => {
@@ -1287,12 +1290,16 @@ export class DriverChargingService {
       const row = (
         await c.query(
           `SELECT s.id,s.status,s.updated_at,s.energy_wh,s.meter_start_wh,s.meter_stop_wh,
-        s.limit_value,i.billing_review_required,j.state AS settlement_state,j.reason AS settlement_reason,j.next_attempt_at AS settlement_retry_at,i.reserved_vnd,cp.lifecycle,cp.is_online,cp.online_changed_at,cp.last_message_at,
+        s.limit_value,coalesce(i.billing_review_required,false) AS billing_review_required,j.state AS settlement_state,j.reason AS settlement_reason,j.next_attempt_at AS settlement_retry_at,i.reserved_vnd,cp.lifecycle,cp.is_online,cp.online_changed_at,cp.last_message_at,
         (SELECT CASE WHEN unit='kWh' THEN value*1000 ELSE value END FROM meter_values m
           WHERE m.session_id=s.id AND measurand='Energy.Active.Import.Register' AND phase IS NULL
-          AND (unit IN ('Wh','kWh') OR unit IS NULL) ORDER BY cp_timestamp DESC LIMIT 1) AS latest_wh
+          AND (unit IN ('Wh','kWh') OR unit IS NULL) ORDER BY cp_timestamp DESC LIMIT 1) AS latest_wh,
+        (SELECT max(t.price_per_kwh_vnd) FROM tariff_periods t WHERE t.operator_id=st.operator_id
+          AND t.effective_from<=(now() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date
+          AND (t.effective_to IS NULL OR t.effective_to>=(now() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date)) AS price_per_kwh_vnd
         FROM sessions s JOIN charge_points cp ON cp.id=s.charge_point_id
-        JOIN driver_charge_intents i ON i.session_id=s.id AND i.driver_id=s.driver_id
+        JOIN sites st ON st.id=cp.site_id
+        LEFT JOIN driver_charge_intents i ON i.session_id=s.id AND i.driver_id=s.driver_id
         LEFT JOIN charge_settlement_jobs j ON j.session_id=s.id
         WHERE s.id=$1 AND s.driver_id=$2`,
           [sessionId, driverId],

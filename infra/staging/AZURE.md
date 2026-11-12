@@ -69,7 +69,16 @@ cd ~/powerme/infra/staging
 ./init-env.sh <FQDN> <TAG>        # ví dụ: ./init-env.sh powerme-staging.japaneast.cloudapp.azure.com review-4
 ```
 
-Script sinh `POSTGRES_PASSWORD` và `DEMO_CHARGE_POINT_PASSWORD`, ghi vào `.env` (chmod 600), **không in ra**. Chạy lại sẽ bị từ chối (tránh làm lệch mật khẩu DB đã tạo); chỉ dùng `--force` khi chấp nhận mất mật khẩu cũ.
+Script sinh `POSTGRES_PASSWORD`, `DEMO_CHARGE_POINT_PASSWORD`, khoá JWT Driver API (`DRIVER_API_JWT_SECRET_BASE64` + issuer `powerme-staging` + audience `powerme-driver-app`) và `DEMO_DRIVER_PASSWORD` (mật khẩu tài xế mẫu cho app), ghi vào `.env` (chmod 600), **không in ra**. Chạy lại sẽ bị từ chối (tránh làm lệch mật khẩu DB đã tạo); chỉ dùng `--force` khi chấp nhận mất mật khẩu cũ.
+
+**`.env` đã có từ trước BE-27** (VM hiện tại): đừng `--force`. Chạy
+
+```bash
+./init-env.sh --add-missing        # chỉ thêm biến còn trống; in TÊN biến đã thêm, không in giá trị
+./deploy.sh <TAG> --seed           # csms nhận biến mới + nạp dữ liệu mẫu cho app (idempotent)
+```
+
+Chưa chạy `--add-missing` thì deploy vẫn chạy (chỉ cảnh báo), nhưng app nhận 503 `auth_unavailable`.
 
 ## 5. Deploy lần đầu (tay)
 
@@ -108,6 +117,8 @@ ssh -i ~/.ssh/powerme_staging -L 3000:127.0.0.1:3000 -L 8100:127.0.0.1:8100 depl
 
 Giữ cửa sổ đó mở, rồi mở `http://localhost:3000` (console) và `http://localhost:8100` (HMI trụ nếu bật `--sim`).
 
+Cho dev app (Sơn) dùng DB và Driver API staging: **không** đưa khoá `powerme_staging`; làm theo [`DEV-ACCESS.md`](DEV-ACCESS.md) (user `devtunnel` chỉ forward được `127.0.0.1:5432` và `127.0.0.1:3000`, role Postgres `app_dev`).
+
 ## 8. Bật deploy tự động từ GitHub (sau khi deploy tay thành công)
 
 1. Settings → Environments → **staging**: secrets `STAGING_SSH_KEY` (khoá riêng), `STAGING_USER` (`deploy`), **`STAGING_HOST`** (= FQDN). Hai cái đầu có thể đã được tạo sẵn; thiếu `STAGING_HOST` thì thêm.
@@ -115,6 +126,8 @@ Giữ cửa sổ đó mở, rồi mở `http://localhost:3000` (console) và `ht
 3. Đẩy tag: `git tag -a review-N -m "..." <commit>` rồi `git push origin review-N` → workflow `deploy-staging` build ảnh rồi deploy qua SSH.
 
 Chưa bật `STAGING_ENABLED` thì đẩy tag chỉ build ảnh, không deploy (đúng ý: không làm workflow đỏ khi chưa có VPS).
+
+**Trạng thái (10/11):** đã bật. `STAGING_HOST` = `powerme-staging.japaneast.cloudapp.azure.com`, `STAGING_ENABLED=true`; lần deploy tự động đầu tiên là `review-7` (job "Triển khai staging" xanh, CSMS `healthy`). Sau mỗi lần CI deploy, repo trên VM ở trạng thái `--detach` tại tag: deploy tay thì `git fetch --tags --force origin && git checkout --detach <tag>`, không `git pull`.
 
 ## 9. Chi phí, tắt máy, dọn dẹp
 
@@ -135,9 +148,11 @@ Chưa bật `STAGING_ENABLED` thì đẩy tag chỉ build ảnh, không deploy (
 | SSH `Permission denied` | đang dùng đúng khoá `-i ~/.ssh/powerme_staging` và user `deploy` chưa; cloud-init đã xong chưa |
 | Deploy thất bại giữa chừng | **không tự lùi nếu đã áp migration** (an toàn dữ liệu); đọc thông báo và mục Rollback ở `README.md` |
 
-## 11. Những gì chưa được kiểm chứng
+## 11. Đã kiểm chứng và chưa kiểm chứng
 
-- Chưa tạo VM nào trên Azure: mọi bước portal là từ mô tả, chưa bấm thật.
-- `cloud-init.yaml` chưa chạy trên Ubuntu 24.04 thật (chỉ kiểm cú pháp YAML). Rủi ro chính: tên gói/kho Docker thay đổi, hoặc user `deploy` chưa có nhóm `docker` ngay phiên SSH đầu (đăng xuất rồi đăng nhập lại là đủ).
-- Chưa kiểm Let's Encrypt trên tên miền `cloudapp.azure.com` (về nguyên tắc dùng được; giới hạn tần suất cấp chứng chỉ áp cho cả tên miền cha, hiếm khi chạm tới).
+Đã chạy thật (04–10/11): tạo VM qua Portal, `cloud-init.yaml` trên Ubuntu 24.04 (Docker, user `deploy`, clone repo), Let's Encrypt trên `cloudapp.azure.com`, `init-env.sh`, `deploy.sh` (tay `review-4`…`review-6`, CI `review-7`).
+
+Chưa kiểm chứng:
+
+- Rollback (`rollback.sh`) chưa diễn tập trên staging.
 - Hành vi `docker compose` với cú pháp lồng `${SIM_CSMS_URL:-wss://${DOMAIN}/ocpp}` chưa kiểm bằng Docker thật (đã nêu từ PR #48).

@@ -32,7 +32,7 @@ Sau khi sang `review`, StopTransaction đến muộn của phiên đó đi `orph
 
 ## 3. OPERATOR_RESOLVED (#17, review → reconciled)
 
-`SessionReviewService.resolveReview(sessionId, operatorUserId, resolution, note)`. Không có endpoint HTTP.
+`SessionReviewService.resolveReview(sessionId, operatorUserId, resolution, note)`. Endpoint HTTP: từ BE-24 (10/11) có `POST /api/admin/sessions/:id/resolve-review` trên console, `operator_user_id` tạm lấy từ thân JSON — xem `docs/BE-24-UNATTRIBUTED.md` §5 và dòng **Endpoint** bên dưới (giữ nguyên làm lịch sử quyết định).
 
 - **Quyền**: `operator_staff` đang `active` của operator `active` **sở hữu trụ của phiên** (cùng cách kiểm với `beginStartRecovery`/`recordBoundaryEvidence`). Tài xế, admin, user lạ, nhân viên bị khoá → `forbidden`. Nhân viên operator khác → `not_found` (không lộ phiên liên-operator). Phiên không ở `review` → `not_in_review` (nên gọi lại hoặc đua nhau chỉ có một lượt thắng, một dấu vết). `resolution` là mã ngắn `[a-z0-9_]{1,40}`, `note` 1–500 ký tự, sai → `invalid_input`.
 - **Một transaction**: khoá phiên `FOR UPDATE` → `apply('review','OPERATOR_RESOLVED')` → UPDATE `sessions` → `session_status_history` (`actor` = users.id của operator, note `<resolution>: <note>`) → các `reconciliation_records` chưa duyệt của phiên thuộc loại có kết luận (`meter_gap`, `conflict`, `late_sample`) được đặt `reviewed_by` (operator_staff, B2/D14), `reviewed_at`, và `resolution` được nối thêm ` | operator_resolved(<mã>): <note>` (tiền tố cũ giữ nguyên để console còn phân loại được). Bản ghi `replay`/`duplicate`/… (thông tin) không bị đóng.

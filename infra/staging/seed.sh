@@ -3,11 +3,14 @@
 #
 #   ./seed.sh                nạp/áp lại dữ liệu mẫu, đặt lại credential trụ demo từ
 #                            DEMO_CHARGE_POINT_PASSWORD (đổi mật khẩu trong .env rồi chạy = xoay mật khẩu).
-#                            Idempotent; KHÔNG xoá phiên/meter đã phát sinh.
+#                            Kèm dữ liệu cho app tài xế (BE-27: 9 trạm TP.HCM, mẫu xe, tài xế
+#                            app.ds0x@powerme.test, mật khẩu = DEMO_DRIVER_PASSWORD).
+#                            Idempotent; KHÔNG xoá phiên/meter/sổ cái đã phát sinh.
+#   ./seed.sh --no-app       như trên nhưng bỏ phần dữ liệu app (chỉ seed.sql của demo Review 2).
 #   ./seed.sh --reset [--yes]  XOÁ TOÀN BỘ DB, migrate lại, seed — về trạng thái đầu cho kịch bản
 #                            DS-01..DS-10. Mất mọi dữ liệu, cả backup tự động không có.
 #
-# Dữ liệu mẫu nằm ở apps/csms/demo/seed.sql; script thực thi: apps/csms/scripts/seed-demo.mjs.
+# Dữ liệu mẫu nằm ở apps/csms/demo/seed.sql + seed-app.sql; script thực thi: apps/csms/scripts/seed-demo.mjs.
 set -Eeuo pipefail
 cd "$(dirname "$0")"
 # shellcheck source=lib.sh
@@ -15,12 +18,14 @@ cd "$(dirname "$0")"
 
 RESET=false
 YES=""
+SEED_ARGS=()
 for arg in "$@"; do
   case "$arg" in
     --reset) RESET=true ;;
     --yes) YES="--yes" ;;
+    --no-app) SEED_ARGS+=(--no-app) ;;
     *)
-      echo "dùng: ./seed.sh [--reset [--yes]]" >&2
+      echo "dùng: ./seed.sh [--reset [--yes]] [--no-app]" >&2
       exit 2
       ;;
   esac
@@ -50,7 +55,7 @@ if [ "$RESET" = true ]; then
 fi
 
 log "Nạp dữ liệu mẫu"
-run_csms_script scripts/seed-demo.mjs
+run_csms_script scripts/seed-demo.mjs "${SEED_ARGS[@]}"
 
 if [ "$RESET" = true ]; then
   log "Khởi động lại ứng dụng"
