@@ -166,7 +166,12 @@ JOIN drivers d ON d.user_id = u.id
 JOIN vehicle_models m ON m.brand = v.brand AND m.model_name = v.model
 -- Tài xế đã tự đặt xe mặc định khác (qua app) thì xe seed vào không mặc định, khỏi vấp unique index.
 WHERE NOT (v.is_default AND EXISTS (SELECT 1 FROM vehicles x WHERE x.driver_id = d.user_id AND x.is_default))
-ON CONFLICT ON CONSTRAINT vehicles_plate_number_key DO NOTHING;
+-- BE-34 (0018): biển đã có — kể cả xe tài xế đã GỠ qua app — thì không nạp lại (seed không hồi sinh
+-- xe đã gỡ). So theo khoá chữ + số như index vehicles_plate_key_active.
+  AND NOT EXISTS (SELECT 1 FROM vehicles x
+                  WHERE upper(regexp_replace(x.plate_number, '[^A-Za-z0-9]', '', 'g'))
+                      = upper(regexp_replace(v.plate, '[^A-Za-z0-9]', '', 'g')))
+ON CONFLICT DO NOTHING;
 
 -- Ví credit: số dư = sổ cái (một top_up gốc + một dòng credit_transactions entry 1) ---------------
 -- Chỉ nạp khi ví CHƯA có dòng sổ cái nào: ví đã phát sinh giao dịch (app đã sạc/nạp) thì giữ nguyên,

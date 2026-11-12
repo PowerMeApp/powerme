@@ -159,7 +159,7 @@ Cột: `card_identifier` (BK — giá trị idTag trên dây, `varchar(20)` theo
 
 **`vehicle_models`** — danh mục mẫu xe. UNIQUE `(brand, model_name)`; `connector_type`, `battery_capacity_kwh`, `rated_range_km`, `max_dc_kw`, `is_vinfast`.
 
-**`vehicles`** — xe của tài xế. `plate_number` (BK), `driver_id` (FK → `drivers`), `vehicle_model_id` (FK), `is_default`. Partial UNIQUE `(driver_id) WHERE is_default` — một xe mặc định mỗi tài xế.
+**`vehicles`** — xe của tài xế. `plate_number` (BK trong xe đang dùng), `driver_id` (FK → `drivers`), `vehicle_model_id` (FK), `is_default`, `removed_at` (0018 / BE-34: xoá mềm — tài xế gỡ xe, dòng giữ cho lịch sử phiên). Partial UNIQUE `(driver_id) WHERE is_default` — một xe mặc định mỗi tài xế; CHECK `vehicles_removed_not_default` (xe đã gỡ không mặc định). Từ 0018 biển số duy nhất theo unique index `vehicles_plate_key_active` trên `upper(regexp_replace(plate_number, '[^A-Za-z0-9]', '', 'g')) WHERE removed_at IS NULL` (thay UNIQUE `vehicles_plate_number_key`): `51K-901.01` và `51k90101` là một biển; biển của xe đã gỡ đăng ký lại được.
 
 **`sessions`** — phiên sạc = một giao dịch OCPP. Bảng trung tâm của hệ thống.
 Cột định danh: `transaction_no integer` (BK; `transactionId` CSMS cấp cho trụ qua sequence `sessions_transaction_no_seq`, kiểu int32 vì OCPP 1.6), `connector_id`, `charge_point_id`, `connector_no`, `id_tag` (idTag nguyên văn trong `StartTransaction`, kể cả khi không tra được thẻ).
@@ -286,6 +286,7 @@ Khoá: CHECK `connector_no IS NULL OR connector_no IN (0,1,2)`; CHECK `sent_at >
 | UNIQUE `(charge_point_id, epoch)` | charge_point_connections | epoch không trùng trong một trụ |
 | `card_identifier varchar(20)` (trước 0014: CHECK `char_length <= 20`) | rfid_cards | giới hạn idTag của OCPP 1.6 |
 | partial UNIQUE `vehicles (driver_id) WHERE is_default` | vehicles | một xe mặc định mỗi tài xế |
+| partial UNIQUE `vehicles_plate_key_active` (khoá chữ + số của biển) `WHERE removed_at IS NULL` | vehicles | biển số duy nhất trong xe đang dùng (0018, BE-34) |
 | CHECK `amount_paid_vnd = amount_vnd - points_discount_vnd` | top_ups | cột dẫn xuất không lệch nguồn |
 | CHECK loại `session_debit` phải có `session_id`; loại `top_up` phải có `top_up_id` | credit_transactions | ledger không có dòng "trừ tiền phiên" mà không biết phiên nào |
 | CHECK `issued` ⇒ có `invoice_no` và `issued_at` | e_invoices | không có hoá đơn "đã phát hành" mà không có số |
