@@ -1,10 +1,10 @@
 # NFR-02: chỉ số và dung sai cho thí nghiệm đối soát (RQ1)
 
-> Task T121 (Trí). **Đã chốt** theo quyết định của Ân (PM) ngày 12/11/2026. Thay bản đề xuất 10/11.
+> Task T121 (Trí). **Đã chốt** theo quyết định của Ân (PM) ngày 12/11/2026. Thay bản đề xuất 10/11. Luật đạt ở mục 3 sửa theo quyết định của Ân trong T130 (mẫu gộp 90 lần).
 
 ## 1. Quyết định
 
-- **Giữ nguyên BM04:** một ngưỡng chung cho cả 3 kịch bản đứt kết nối. Tỉ lệ phiên **đúng** của PowerMe phải có cận dưới khoảng tin cậy 95% **≥ 95%**, và tốt hơn cấu hình tắt đối soát và SteVe.
+- **Giữ nguyên BM04:** một ngưỡng chung cho cả 3 kịch bản đứt kết nối. Tỉ lệ phiên **đúng** của PowerMe, tính trên **90 lần gộp** của 3 kịch bản, phải có cận dưới khoảng tin cậy 95% **≥ 95%**, và tốt hơn cấu hình tắt đối soát và SteVe.
 - **`review` chỉ được tính là đúng khi dữ liệu của trụ thật sự sai** so với sự thật nền. Giữ phiên lại trong khi lẽ ra tính tiền được thì tính là **sai**. Nhờ vậy, đẩy mọi phiên vào `review` không còn là cách "ăn gian" chỉ số.
 - **Tính tiền sai im lặng phải bằng 0.**
 - Báo thêm **precision** và **recall** của việc giữ phiên lại.
@@ -32,9 +32,11 @@
 | **Tính tiền sai im lặng** | Đã tính tiền và `abs(E_bill − E_true) > tol` | **Sai, phải bằng 0** |
 | **Mất / trùng** | Phiên không được ghi, hoặc ghi hai lần | Sai (đo riêng theo SRS NFR-REC-01) |
 
-**Chỉ số chính NFR-02** = (Tính tiền đúng + Giữ lại đúng) ÷ tổng phiên, báo theo từng kịch bản và từng cấu hình, kèm khoảng tin cậy 95% (Wilson). Đạt khi cận dưới ≥ 95% ở cả 3 kịch bản.
+**Chỉ số chính NFR-02** = (Tính tiền đúng + Giữ lại đúng) ÷ tổng phiên, kèm khoảng tin cậy 95% (Wilson), cho từng cấu hình.
 
-**Ràng buộc đi kèm:** Tính tiền sai im lặng = 0 ở PowerMe trên toàn bộ 90 lần chạy.
+**Luật đạt (thử nghiệm, Ân chốt trong T130):** cận dưới Wilson 95% trên **90 lần gộp** (3 kịch bản × 30 lần) ≥ 95%, **và** W1 = 0 (không có phiên tính tiền sai im lặng). Tỉ lệ của từng kịch bản **chỉ báo cáo**, không dùng để xét đạt: với n = 30, kể cả 30/30 đúng thì cận dưới Wilson chỉ là 88,6%, nên ngưỡng 95% cho từng kịch bản không thể đạt. Với 90 lần gộp, luật này chỉ đạt khi 90/90 đúng (cận dưới 95,9%); 89/90 cho 94,0%.
+
+**W1:** số phiên tính tiền sai im lặng của PowerMe trên toàn bộ 90 lần chạy, phải bằng 0.
 
 ## 4. Precision và recall của việc giữ phiên lại
 
