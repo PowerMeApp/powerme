@@ -41,6 +41,18 @@ Một operator, một site ở TP.HCM, trụ `RH24D1-00001` (D1-120, lifecycle `
 
 `seed.sql` có thêm hai user demo (`admin.demo@powerme.test` = Admin, `staff.demo@powerme.test` = staff của operator site `HCM-DEMO-01`) và trụ `SIM-0005` ở lifecycle `registered` (chưa site, chưa credential, chưa súng). Seed in id hai user; `run-demo.mjs` đặt chúng vào `CONSOLE_ACTOR_ADMIN_ID` / `CONSOLE_ACTOR_STAFF_ID` để console gọi `ChargePointOnboardingService` thay cho người đăng nhập (tạm, tới RolesGuard T103).
 
+### Đăng nhập dashboard (FE-01a, D16)
+
+`seed.sql` còn có Operator thứ hai (`0398765432`, site `HCM-DEMO-02`, trụ `RH24D1-00002`) và các staff `tech.demo@powerme.test` (technician, Operator 1), `staff2.demo@powerme.test` (manager, Operator 2). Không user nào có mật khẩu trong repo. Đặt mật khẩu:
+
+```bash
+DEMO_STAFF_PASSWORD='…' npm run demo -w @powerme/csms -- --port-offset 200   # đặt cho mọi staff/admin demo
+npm run demo:set-password -w @powerme/csms -- staff.demo@powerme.test --port-offset 200  # hoặc từng người (hỏi mật khẩu)
+CSMS_URL=http://127.0.0.1:3200 npm run dev -w @powerme/dashboard
+```
+
+`run-demo.mjs` sinh khoá `DASHBOARD_JWT_*` mới mỗi lần chạy (token hết hiệu lực khi tắt demo).
+
 ```bash
 npm run demo -w @powerme/csms -- --no-hmi     # cửa sổ 1
 node apps/csms/demo/onboard-sim.mjs           # cửa sổ 2  (--show-password để in mật khẩu)

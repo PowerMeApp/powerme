@@ -12,7 +12,8 @@
     "test:driver-discovery": "node scripts/test-driver-discovery.mjs",
     "demo": "node demo/run-demo.mjs",
     "demo:reset": "node demo/run-demo.mjs --reset",
-    "demo:db": "node demo/db-embedded.mjs"
+    "demo:db": "node demo/db-embedded.mjs",
+    "demo:set-password": "node scripts/set-password.mjs"
   },
   "dependencies": {
     "@nestjs/common": "12.4.0",

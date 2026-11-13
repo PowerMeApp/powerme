@@ -21,12 +21,22 @@
  * HMI và scripted-station.mjs dùng CÙNG identity RH24D1-00001: không chạy cả hai cùng lúc.
  */
 import { spawn, spawnSync } from 'node:child_process';
+import { randomBytes } from 'node:crypto';
 import { existsSync, readdirSync, statSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import net from 'node:net';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { CSMS_DIR, killTree, prepareDb, resetDataDir } from './db-embedded.mjs';
+import { connectDemoDb, CSMS_DIR, killTree, prepareDb, resetDataDir } from './db-embedded.mjs';
+import { setStaffPasswords } from '../scripts/set-password.mjs';
+
+/** D16: the demo's staff and admin accounts (demo/seed.sql), all without a committed password. */
+const DASHBOARD_USERS = [
+  'staff.demo@powerme.test',
+  'tech.demo@powerme.test',
+  'staff2.demo@powerme.test',
+  'admin.demo@powerme.test',
+];
 
 const require = createRequire(import.meta.url);
 const REPO_ROOT = path.resolve(CSMS_DIR, '..', '..');
@@ -209,6 +219,18 @@ async function main() {
 
   ensureBuilt();
 
+  // D16: DEMO_STAFF_PASSWORD (infra/.env) → every demo staff/admin can log in to the dashboard.
+  let dashboardLogin = 'chưa đặt mật khẩu: DEMO_STAFF_PASSWORD=… hoặc npm run demo:set-password';
+  if (process.env.DEMO_STAFF_PASSWORD) {
+    const client = await connectDemoDb(db.url);
+    try {
+      await setStaffPasswords(client, DASHBOARD_USERS, process.env.DEMO_STAFF_PASSWORD);
+      dashboardLogin = `${DASHBOARD_USERS.join(', ')} (mật khẩu = DEMO_STAFF_PASSWORD)`;
+    } finally {
+      await client.end();
+    }
+  }
+
   info('khởi động CSMS…');
   launch('csms', process.execPath, ['dist/main.js'], {
     cwd: CSMS_DIR,
@@ -223,6 +245,10 @@ async function main() {
       ...(db.actors?.admin ? { CONSOLE_ACTOR_ADMIN_ID: String(db.actors.admin) } : {}),
       ...(db.actors?.staff ? { CONSOLE_ACTOR_STAFF_ID: String(db.actors.staff) } : {}),
       CONSOLE_PORT: String(PORTS.console),
+      // FE-01a / ADR-0018: dashboard login. A fresh key each run: tokens die with the demo.
+      DASHBOARD_JWT_SECRET_BASE64: randomBytes(32).toString('base64'),
+      DASHBOARD_JWT_ISSUER: 'powerme-csms-demo',
+      DASHBOARD_JWT_AUDIENCE: 'powerme-dashboard',
       // Giá trị theo infra/.env.example
       OCPP_HEARTBEAT_INTERVAL_SECONDS: '300',
       METER_VALUE_SAMPLE_INTERVAL_S: '10',
@@ -287,6 +313,10 @@ async function main() {
     ['CSMS OCPP', `ws://localhost:${PORTS.ocpp}/ocpp/${CP_ID}`],
     ['Console CSMS', consoleUrl ?? '(chưa có)'],
     ['HMI trụ D1', hmiUrl ?? '(chưa có / tắt)'],
+    [
+      'Dashboard',
+      `CSMS_URL=http://127.0.0.1:${PORTS.console} npm run dev -w @powerme/dashboard — ${dashboardLogin}`,
+    ],
     [
       'Test tích hợp',
       `DATABASE_URL=${db.testUrl} npm test -w @powerme/csms  (DB riêng, đừng trỏ vào DB demo)`,

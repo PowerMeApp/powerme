@@ -137,6 +137,51 @@ CROSS JOIN operators o
 WHERE u.email = 'staff.demo@powerme.test' AND o.tax_code = '0312345678'
 ON CONFLICT (user_id) DO NOTHING;
 
+-- FE-01a / D16: dashboard login. A second Operator with its own Charging Station and charge point,
+-- so screen 21 can show that each Operator sees only its own FaultEvents (BR-P11, BR-P16). Staff
+-- rows have no password_hash: `npm run demo:set-password -w @powerme/csms -- <email>` sets one
+-- (run-demo does it for every demo staff/admin when DEMO_STAFF_PASSWORD is set). No password or hash
+-- is ever committed.
+INSERT INTO operators (tax_code, legal_name, address, status)
+VALUES ('0398765432', 'Cong ty Sac Xanh Demo', '2 Le Loi, Quan 3, TP.HCM', 'active')
+ON CONFLICT ON CONSTRAINT operators_tax_code_key DO NOTHING;
+
+INSERT INTO sites (site_code, operator_id, site_name, address, latitude, longitude)
+SELECT 'HCM-DEMO-02', o.id, 'Tram sac demo Quan 3', '2 Le Loi, Quan 3, TP.HCM', 10.779412, 106.686539
+FROM operators o
+WHERE o.tax_code = '0398765432'
+ON CONFLICT ON CONSTRAINT sites_site_code_key DO NOTHING;
+
+INSERT INTO charge_points (
+  serial_number, display_code, site_id, model, firmware_version, rated_power_kw,
+  lifecycle, reports_soc, supports_reservation
+)
+SELECT 'RH24D1-00002', 'PM-D1-HCM-0002', s.id, 'D1-120', '4.0.4.22', 120,
+       'awaiting_connection', true, true
+FROM sites s
+WHERE s.site_code = 'HCM-DEMO-02'
+ON CONFLICT ON CONSTRAINT charge_points_serial_number_key DO NOTHING;
+
+INSERT INTO connectors (charge_point_id, connector_no, connector_type, max_power_kw)
+SELECT cp.id, n.no, 'ccs2', 60
+FROM charge_points cp
+CROSS JOIN (VALUES (1), (2)) AS n(no)
+WHERE cp.serial_number = 'RH24D1-00002'
+ON CONFLICT ON CONSTRAINT connectors_charge_point_id_connector_no_key DO NOTHING;
+
+INSERT INTO users (email, full_name, role, account_status)
+VALUES ('tech.demo@powerme.test', 'Tech Demo', 'operator_staff', 'active'),
+       ('staff2.demo@powerme.test', 'Staff Sac Xanh', 'operator_staff', 'active')
+ON CONFLICT ON CONSTRAINT users_email_key DO NOTHING;
+
+INSERT INTO operator_staff (user_id, operator_id, staff_role)
+SELECT u.id, o.id, v.staff_role::staff_role
+FROM (VALUES ('tech.demo@powerme.test', '0312345678', 'technician'),
+             ('staff2.demo@powerme.test', '0398765432', 'manager')) AS v(email, tax_code, staff_role)
+JOIN users u ON u.email = v.email
+JOIN operators o ON o.tax_code = v.tax_code
+ON CONFLICT (user_id) DO NOTHING;
+
 -- SIM-0005: what registerDevice() writes (Admin registry step, STM-3 #1): lifecycle 'registered',
 -- no site, no display code, no credential, no connectors. DS-09 onboards it through the console.
 INSERT INTO charge_points (serial_number, model, rated_power_kw, lifecycle)
