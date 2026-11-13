@@ -24,6 +24,7 @@ import {
   InvalidFaultTransitionError,
   ResetType,
 } from '../stations/faults/fault.service.js';
+import type { FaultStatus, FaultTrigger } from '../stations/faults/fault-state-machine.js';
 
 /** Who acts: `operator_staff.user_id` and that staff's Operator (from the token, BR-P16). */
 export interface FaultActor {
@@ -60,6 +61,11 @@ export interface ResetResult {
  */
 const CHARGING = ['pending', 'active', 'paused', 'stopping', 'orphaned'] as const;
 const RESET_CALL_TIMEOUT_MS = 15_000;
+const OPERATOR_TRIGGERS = [
+  ['acknowledge', 'ACKNOWLEDGE'],
+  ['reset', 'RESET_SENT'],
+  ['close', 'OPERATOR_CLOSE'],
+] as const satisfies readonly (readonly [string, FaultTrigger])[];
 
 export class FaultActions {
   constructor(
@@ -68,18 +74,45 @@ export class FaultActions {
     private readonly faultService?: FaultService,
   ) {}
 
-  async list(filter: 'open' | 'all', limit: number, _actor: FaultActor | null = null) {
-    return this.requireFaults().list(filter, limit);
+  /** STM-6 transitions an Operator may trigger from `status` (D38: t2, t4, t7). */
+  allowedActions(status: FaultStatus): ('acknowledge' | 'reset' | 'close')[] {
+    const faults = this.requireFaults();
+    return OPERATOR_TRIGGERS.filter(([, trigger]) => faults.canApply(status, trigger)).map(
+      ([action]) => action,
+    );
+  }
+
+  /** How long a Reset waits for the connector to recover (t5) before t6. */
+  get resetTimeoutS(): number {
+    return this.requireFaults().resetTimeoutS;
+  }
+
+  /** With an actor: only FaultEvents of that staff's Operator (BR-P11, BR-P16, D3). */
+  async list(filter: 'open' | 'all', limit: number, actor: FaultActor | null = null) {
+    return this.requireFaults().list(filter, limit, actor?.operatorId);
   }
 
   /** t2. */
   async acknowledge(id: number, actor: FaultActor | null) {
-    return this.mapFaultErrors(() => this.requireFaults().acknowledge(id, actor?.userId ?? null));
+    const faults = this.requireFaults();
+    return this.mapFaultErrors(async () => {
+      await this.ownFault(faults, id, actor);
+      return faults.acknowledge(id, actor?.userId ?? null);
+    });
   }
 
   /** t7 OPERATOR_CLOSE. */
   async close(id: number, actor: FaultActor | null) {
-    return this.mapFaultErrors(() => this.requireFaults().close(id, actor?.userId ?? null));
+    const faults = this.requireFaults();
+    return this.mapFaultErrors(async () => {
+      await this.ownFault(faults, id, actor);
+      return faults.close(id, actor?.userId ?? null);
+    });
+  }
+
+  /** 404 when the FaultEvent is not on the actor's Operator's charge points (D37). */
+  private async ownFault(faults: FaultService, id: number, actor: FaultActor | null) {
+    if (actor) await faults.get(id, actor.operatorId);
   }
 
   /**
@@ -99,7 +132,7 @@ export class FaultActions {
     actor: FaultActor | null,
   ): Promise<ResetResult> {
     const faults = this.requireFaults();
-    const fault = await this.mapFaultErrors(() => faults.get(id));
+    const fault = await this.mapFaultErrors(() => faults.get(id, actor?.operatorId));
     if (!faults.canApply(fault.status, 'RESET_SENT')) {
       throw new FaultActionError(
         409,

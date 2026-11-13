@@ -133,6 +133,8 @@ export class ConsoleServer implements OnModuleInit, OnModuleDestroy {
           this.db,
           this.config.dashboardAuth ?? {},
           this.config.driverApi ?? { devAuth: false },
+          undefined,
+          this.commands.faultActions,
         )
       : null;
     const server = createServer((req, res) => {
