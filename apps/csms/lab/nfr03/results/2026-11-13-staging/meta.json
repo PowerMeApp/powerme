@@ -1,0 +1,87 @@
+{
+  "tool": "lab/nfr03",
+  "label": "staging, 50 trụ × 600 s",
+  "target": {
+    "kind": "staging",
+    "endpoint": "wss://powerme-staging.japaneast.cloudapp.azure.com/ocpp"
+  },
+  "params": {
+    "stations": 50,
+    "durationS": 600,
+    "rampS": 25,
+    "meterIntervalS": 10,
+    "heartbeatS": "theo BootNotification.conf",
+    "seed": 20261112,
+    "callTimeoutS": 30,
+    "profile": {
+      "idleMinS": 5,
+      "idleMaxS": 20,
+      "firstIdleMaxS": 15,
+      "ticksMin": 6,
+      "ticksMax": 18,
+      "powerMinKw": 30,
+      "powerMaxKw": 120,
+      "powerJitter": 0.1
+    }
+  },
+  "startedAt": "2026-11-13T08:31:24.924Z",
+  "finishedAt": "2026-11-13T08:41:50.464Z",
+  "wallClockS": 625.5,
+  "stations": {
+    "requested": 50,
+    "connected": 50,
+    "connects": 50,
+    "connectFailures": 0,
+    "connectFailureSamples": [],
+    "disconnects": 0,
+    "sessionsStarted": 257,
+    "sessionsStopped": 257,
+    "authorizeNotAccepted": 0,
+    "stepErrors": 0,
+    "errorSamples": [],
+    "heartbeatS": 300
+  },
+  "clientCalls": 4919,
+  "eventLoopDelayMs": {
+    "p50": 15.43,
+    "p99": 20.82,
+    "max": 38.6
+  },
+  "git": {
+    "commit": "f6336a4ab78aa4800d83e5ba3152ad94719955e2",
+    "branch": "main",
+    "dirty": false
+  },
+  "machine": {
+    "cpuModel": "Intel(R) Core(TM) i5-10400F CPU @ 2.90GHz",
+    "logicalCpus": 12,
+    "totalMemGb": 15.9,
+    "os": "Windows_NT 10.0.26200",
+    "node": "v24.18.1",
+    "platform": "win32-x64"
+  },
+  "serverTimings": {
+    "source": "ocpp_message_log",
+    "readAt": "2026-11-13T08:41:53.938Z",
+    "windowFrom": "2026-11-13T08:29:24.924Z",
+    "windowTo": "2026-11-13T08:43:50.464Z",
+    "framesRead": 10246,
+    "callsInWindow": 4961,
+    "callsOfThisRun": 4919
+  },
+  "footprint": {
+    "ocpp_message_log": 10246,
+    "sessions": 259,
+    "meter_values": 5464,
+    "session_status_history": 777,
+    "reconciliation_records": 0,
+    "connector_status_events": 1302,
+    "charge_point_connections": 54,
+    "remote_commands": 0,
+    "fault_events": 0,
+    "session_debits": 0,
+    "sessions_by_status": {
+      "reconciled": 259
+    }
+  }
+}

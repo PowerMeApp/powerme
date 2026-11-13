@@ -6,7 +6,7 @@ Dụng cụ đo, không phải sản phẩm. Không sửa mã CSMS (`src/` khôn
 |---|---|
 | Dụng cụ (bộ sinh tải, server timings, phân tích, seed/cất dữ liệu) | Xong, có unit test |
 | Chạy LOCAL (CSMS + Postgres nhúng + 50 trụ trên một máy dev) | **Đã chạy thật** 50 trụ × 600 s, xem [`results/2026-11-12-local/`](results/2026-11-12-local/summary.md) |
-| Chạy STAGING (số chính thức của cam kết) | **Chưa chạy.** Trí chạy theo mục "Chạy trên staging" |
+| Chạy STAGING (số chính thức của cam kết) | **Đã chạy 13/11/2026: ĐẠT.** Staging `review-14` (VM Azure 2 vCPU / 4 GB, Japan East), máy bắn tải ở Việt Nam: 50/50 trụ, 600 s, 4919 CALL, 0 không trả lời, 0 lỗi; p95 server 34 ms (p99 51, max 152), p95 client 134,9 ms (gồm mạng + TLS + Caddy). `docker stats` lấy mẫu mỗi ~45 s (14 mẫu): cao nhất `csms` 17,1% CPU / 91 MiB, `postgres` 6,7% CPU / 44 MiB. Kết quả: [`results/2026-11-13-staging/`](results/2026-11-13-staging/summary.md). 50 trụ tải đã cất (`disabled`) ngay sau khi đo |
 
 ## Đo cái gì
 
