@@ -1697,9 +1697,14 @@ describeDb('WP3/T31 WF-01 service journey with real OCPP + Postgres', () => {
     expect(result.total).toBe(1);
     expect(result.items.map((s) => s.site_id)).toEqual([other]);
   });
-  it('WF-04 search keeps a connector listed when its open FaultEvent comes from a driver report', async () => {
+  it('WF-04 search hides a connector with an open driver-report FaultEvent too (STM-6, AD-7)', async () => {
+    await q(
+      `INSERT INTO connectors(charge_point_id,connector_no,status,status_changed_at)
+      SELECT charge_point_id,2,'Available',now() FROM connectors WHERE id=$1`,
+      [connector],
+    );
     await openFault(connector, 'driver_report', null);
-    expect(await listedGuns()).toEqual([1]);
+    expect(await listedGuns()).toEqual([2]);
   });
   it('T72 search excludes administrative disable and inactive operators independently of connectivity', async () => {
     await q("UPDATE operators SET status='suspended'");

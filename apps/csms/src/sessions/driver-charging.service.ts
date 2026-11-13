@@ -1270,7 +1270,9 @@ export class DriverChargingService {
       const row = (
         await c.query(
           `SELECT c.id AS connector_id,c.connector_no,c.status,cp.display_code,
-        cp.serial_number,cp.lifecycle,cp.is_online,cp.online_changed_at,cp.last_message_at,st.site_name,st.vinfast_only
+        cp.serial_number,cp.lifecycle,cp.is_online,cp.online_changed_at,cp.last_message_at,st.site_name,st.vinfast_only,
+        EXISTS(SELECT 1 FROM fault_reports r JOIN fault_events f ON f.id=r.fault_event_id
+          WHERE r.connector_id=c.id AND r.cleared_at IS NULL AND f.status<>'resolved') AS reported_issue
         FROM connectors c JOIN charge_points cp ON cp.id=c.charge_point_id
         JOIN sites st ON st.id=cp.site_id JOIN operators o ON o.id=st.operator_id AND o.status='active'
         JOIN vehicles v ON v.id=$1 AND v.driver_id=$2 AND v.removed_at IS NULL

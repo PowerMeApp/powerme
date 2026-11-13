@@ -182,10 +182,10 @@ export async function searchStations(
       JOIN connectors c ON c.charge_point_id=cp.id AND c.connector_type=$1
       WHERE ($2 OR NOT st.vinfast_only)
         -- WF-04/AD-7: an open FaultEvent hides its connector; a whole-charge-point one (connector_id
-        -- NULL, e.g. Offline) hides all of them. Driver reports only label (BR-P41/P42), never hide.
+        -- NULL, e.g. Offline) hides all of them. Driver-report events hide too (STM-6 Fig 14, AD-7).
         AND NOT EXISTS(SELECT 1 FROM fault_events f WHERE f.charge_point_id=cp.id
           AND (f.connector_id=c.id OR f.connector_id IS NULL)
-          AND f.status<>'resolved' AND f.source<>'driver_report')
+          AND f.status<>'resolved')
     ), classified AS (
       SELECT *,CASE WHEN offline THEN 'offline'
         WHEN status='Available' AND (status_quality<>'fresh' OR occupied) THEN 'unknown'
