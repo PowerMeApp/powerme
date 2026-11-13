@@ -1,3 +1,6 @@
+import 'dart:async';
+
+import 'package:dio/dio.dart';
 import 'package:driver_app/app/composition/api_app.dart';
 import 'package:driver_app/core/api/api_config.dart';
 import 'package:flutter/material.dart';
@@ -22,7 +25,84 @@ Future<void> enterAccount(WidgetTester tester) async {
 }
 
 void main() {
-  testWidgets('API profile is read-only, scoped and blocks other routes', (
+  testWidgets('API login prevents duplicate submissions and shows failures', (
+    tester,
+  ) async {
+    final firstLogin = Completer<ResponseBody>();
+    var attempt = 0;
+    final fixture = DriverApiFixture((request) async {
+      switch (++attempt) {
+        case 1:
+          return firstLogin.future;
+        case 2:
+          return reply(429, {'error': 'too_many_attempts'});
+        default:
+          throw DioException(
+            requestOptions: request,
+            type: DioExceptionType.connectionError,
+          );
+      }
+    });
+    final config = ApiConfig.parse(
+      api.baseUrl.toString(),
+      consentVersion: 'fixture-v1',
+    );
+    await tester.binding.setSurfaceSize(const Size(800, 600));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    await tester.pumpWidget(ApiApp(config: config, httpAdapter: fixture));
+    await tester.pumpAndSettle();
+    final submit = find.byKey(const Key('auth-submit'));
+    final register = find.byKey(const Key('auth-register'));
+    await tester.enterText(
+      find.byKey(const Key('auth-email')),
+      ' test@example.invalid ',
+    );
+    await tester.enterText(
+      find.byKey(const Key('auth-password')),
+      'fixture password ',
+    );
+    await tester.ensureVisible(submit);
+    expect(tester.getSize(submit).width, 440);
+    await tester.tap(submit);
+    await tester.tap(submit);
+    await tester.pump();
+    expect(find.text('Đang đăng nhập…'), findsOneWidget);
+    expect(find.byType(CircularProgressIndicator), findsOneWidget);
+    expect(tester.widget<FilledButton>(submit).onPressed, isNull);
+    expect(tester.widget<TextButton>(register).onPressed, isNull);
+    await tester.pump(const Duration(milliseconds: 50));
+    expect(fixture.requests.single.path, 'auth/login');
+    expect(fixture.requests.single.data, {
+      'email': 'test@example.invalid',
+      'password': 'fixture password ',
+    });
+
+    firstLogin.complete(reply(401, {'error': 'invalid_credentials'}));
+    await tester.pumpAndSettle();
+    expect(find.text('Email hoặc mật khẩu chưa đúng.'), findsOneWidget);
+
+    await tester.ensureVisible(submit);
+    await tester.tap(submit);
+    await tester.pumpAndSettle();
+    expect(
+      find.text('Bạn đã thử quá nhiều lần. Vui lòng thử lại sau.'),
+      findsOneWidget,
+    );
+
+    await tester.ensureVisible(submit);
+    await tester.tap(submit);
+    await tester.pumpAndSettle();
+    expect(
+      find.text('Không kết nối được PowerMe. Vui lòng thử lại.'),
+      findsOneWidget,
+    );
+    expect(
+      fixture.requests.map((request) => request.path),
+      List.filled(3, 'auth/login'),
+    );
+  });
+
+  testWidgets('API account exposes vehicles and blocks unrelated routes', (
     tester,
   ) async {
     var forbidden = false;
@@ -43,13 +123,14 @@ void main() {
     expect(find.textContaining('51A-00001'), findsOneWidget);
     expect(find.text('Tín dụng sạc'), findsNothing);
     expect(find.byKey(const Key('edit-profile')), findsNothing);
-    expect(find.byKey(const Key('add-vehicle')), findsNothing);
+    expect(find.byKey(const Key('add-vehicle')), findsOneWidget);
+    expect(find.byKey(const Key('edit-9')), findsNothing);
     expect(find.byType(NavigationBar), findsNothing);
     final router = GoRouter.of(tester.element(find.text('Tài xế kiểm thử')));
     for (final route in [
       '/credit',
       '/station/test',
-      '/vehicles/new',
+      '/vehicles/9/edit',
       '/scan',
     ]) {
       router.go(route);
@@ -89,7 +170,7 @@ void main() {
     );
     await tester.pumpWidget(ApiApp(config: config, httpAdapter: fixture));
     await tester.pumpAndSettle();
-    final register = find.text('Chưa có tài khoản? Đăng ký');
+    final register = find.byKey(const Key('auth-register'));
     await tester.ensureVisible(register);
     await tester.tap(register);
     await tester.pumpAndSettle();

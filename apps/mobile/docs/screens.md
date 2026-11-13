@@ -97,4 +97,19 @@ Views 1/2/10 → FR-01/02, UC-ACC-01/02/03, BR-P05/16, NFR-SEC-01 → PKG-3 Auth
 
 Run `lib/main.dart` đọc `config/api.local.json` rồi mở màn hình đăng nhập Driver API. Thiếu hoặc sai cấu hình thì hiển thị lỗi kết nối. `DriverAppTestHarness` trong `test/support` giữ kiểm thử các màn chưa tích hợp. Fixture API kiểm tra startup và luồng account. [Hướng dẫn T96](t96-driver-api.md).
 
+## T96 slice 2 — Xe của tôi qua BE-34
+
+View 10 (RP3 màn hình 13) → FR-02, UC-ACC-03, BR-P03/17, NFR-SEC-01 → PKG-3 Profile/Auth/composition. **Tài khoản → Xe của tôi** hiển thị biển số, mẫu, chuẩn cổng và xe mặc định từ `/me`. Tài xế thêm xe từ danh mục, đặt xe mặc định hoặc xác nhận gỡ. BE-34 chỉ hỗ trợ đặt mặc định cho xe đã lưu. Phần sửa biển số hoặc mẫu xe trong UC-ACC-03 chờ API. Liên kết xe với lịch sử phiên thuộc backend (BR-P17).
+
+Fixture HTTP/widget kiểm tra hồ sơ trống, danh mục tải/lỗi/rỗng/thử lại, kiểm tra trường bắt buộc, thêm/đặt mặc định/gỡ xe, mặc định do server chỉ định lại, 409/404 và tải lại hồ sơ khi kết quả chưa rõ. Chờ người dùng kiểm thử API thật theo [kịch bản T96](t96-driver-api.md#4-kiểm-thử-xe-qua-tunnel-api).
+
 View 2 (FR-01, UC-ACC-01, PKG-3 Auth) kiểm tra ô **Nhập lại mật khẩu** khi gửi bước tài khoản, được bao phủ bằng test API và harness. Giá trị phải khớp từng ký tự, kể cả khoảng trắng. API chỉ nhận mật khẩu gốc. Dùng `Form.validate()` và validator của `TextFormField` theo [mẫu Flutter trong SDK](https://github.com/flutter/flutter/blob/c9a6c484230f8b5e408ec57be1ef71dee1e77020/examples/api/lib/widgets/form/form.0.dart), giấy phép BSD.
+
+## T96 — giao diện đăng nhập theo Stitch
+
+View 1 (RP3 Table 5, UC-ACC-04/01, FR-01, BR-P05/16, NFR-SEC-01) → PKG-3 Auth presentation. `AuthScreen` dùng lockup PowerMe gốc, form email/mật khẩu trên nền tối và liên kết đăng ký theo cấu hình hiện có. Kiểm thử local bao phủ bàn phím ở 320 px/200%, ẩn/hiện mật khẩu, trạng thái đang gửi, gửi lặp và lỗi API 401/429/kết nối. Flutter analyze sạch, 116 test pass và ảnh Flutter 390 × 844 đã kiểm tra bằng mắt.
+
+## T96 — giao diện đăng ký và thêm xe theo Stitch
+
+- View 2 → FR-01, UC-ACC-01, BR-P05, NFR-US-02 → PKG-3 Auth presentation và Shared UI. Đăng ký API giữ hai bước đồng ý và thông tin tài khoản, dùng logo gốc, nhãn trường riêng và xác nhận mật khẩu. Bước xe thứ ba chỉ thuộc harness kiểm thử cũ.
+- View 10 → FR-02, UC-ACC-03, NFR-SEC-01 → PKG-3 Profile. **Thêm xe** tìm theo hãng hoặc tên mẫu và chọn trong danh mục BE-34. Thông số của mẫu đã chọn lấy từ API, biển số vẫn bắt buộc, nút lưu ở cuối form. Kiểm thử local bao phủ lọc, giữ lựa chọn, mẫu bị gỡ, thông số nullable, payload lưu và cuộn ở 320 px/200% khi có bàn phím. Kiểm thử trên thiết bị và staging cho giao diện này còn chờ.

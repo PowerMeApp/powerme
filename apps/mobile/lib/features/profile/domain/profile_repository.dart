@@ -17,7 +17,29 @@ abstract interface class RefreshableProfileRepository {
   Future<DriverProfile> refresh();
 }
 
-enum ProfileFailure { invalid, conflict, missing, unavailable }
+abstract interface class VehicleManagementRepository {
+  Future<List<VehicleModel>> listModels();
+  Future<DriverProfile> addVehicle(VehicleRegistration registration);
+}
+
+enum ProfileFailure {
+  invalid,
+  conflict,
+  missing,
+  unavailable,
+  invalidPlate,
+  unknownModel,
+  plateTaken,
+  vehicleInUse,
+  vehicleMissing,
+  mutationUnconfirmed,
+  mutationNeedsRefresh;
+
+  bool get needsRefresh =>
+      this == mutationUnconfirmed ||
+      this == mutationNeedsRefresh ||
+      this == vehicleMissing;
+}
 
 class ProfileException implements Exception {
   const ProfileException(this.failure);

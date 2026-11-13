@@ -53,6 +53,7 @@ class DriverApiSession {
       final json = await _request(
         session,
         path,
+        method: 'POST',
         body: fields,
         expectedStatus: status,
       );
@@ -79,12 +80,20 @@ class DriverApiSession {
   }
 
   Future<DriverAccountResponse> refreshAccount() async {
+    return _refreshAccount(_activeSession());
+  }
+
+  _Session _activeSession() {
     final session = _session;
-    final previous = session?.account;
-    if (session == null || previous == null) throw _sessionEnded;
+    if (session == null || session.account == null) throw _sessionEnded;
+    return session;
+  }
+
+  Future<DriverAccountResponse> _refreshAccount(_Session session) async {
+    final principal = session.account?.id;
     final account = await _readMe(session);
     _requireCurrent(session);
-    if (account.id != previous.id) {
+    if (account.id != principal) {
       _end(session, DriverSessionEnd.expired);
       throw _sessionEnded;
     }
@@ -92,11 +101,75 @@ class DriverApiSession {
     return account;
   }
 
-  Future<DriverAccountResponse> _readMe(_Session session) async {
+  Future<DriverAccountResponse> _readMe(_Session session) async =>
+      DriverAccountResponse.fromJson(await _protectedRead(session, 'me'));
+
+  Future<List<DriverVehicleModelResponse>> listVehicleModels() async =>
+      DriverVehicleModelResponse.catalog(
+        await _protectedRead(_activeSession(), 'vehicle-models'),
+      );
+
+  Future<DriverAccountResponse> addVehicle({
+    required String plateNumber,
+    required String modelId,
+    required bool makeDefault,
+  }) => _writeVehicles('vehicles', 'POST', 201, {
+    'plate_number': plateNumber,
+    'vehicle_model_id': modelId,
+    if (makeDefault) 'is_default': true,
+  });
+
+  Future<DriverAccountResponse> setDefaultVehicle(String id) => _writeVehicles(
+    'vehicles/${Uri.encodeComponent(id)}',
+    'PATCH',
+    200,
+    {'is_default': true},
+  );
+
+  Future<DriverAccountResponse> removeVehicle(String id) =>
+      _writeVehicles('vehicles/${Uri.encodeComponent(id)}', 'DELETE', 204);
+
+  Future<DriverAccountResponse> _writeVehicles(
+    String path,
+    String method,
+    int expectedStatus, [
+    Map<String, Object?>? body,
+  ]) async {
+    final session = _activeSession();
+    try {
+      await _send(
+        session,
+        path,
+        method: method,
+        expectedStatus: expectedStatus,
+        body: body,
+        accessToken: session.accessToken,
+      );
+    } on DriverApiException catch (error) {
+      if (error.status == 403) _end(session, DriverSessionEnd.forbidden);
+      if (error.status == 401) {
+        // Recover credentials through GET /me before allowing a manual retry.
+        await _refreshAccount(session);
+      }
+      rethrow;
+    }
+    try {
+      return await _refreshAccount(session);
+    } on DriverApiException {
+      _requireCurrent(session);
+      throw const DriverApiException(DriverApiProblem.accountRefreshRequired);
+    }
+  }
+
+  Future<Map<String, dynamic>> _protectedRead(
+    _Session session,
+    String path,
+  ) async {
+    _requireCurrent(session);
     final accessToken = session.accessToken;
     try {
       try {
-        return await _getMe(session, accessToken);
+        return await _get(session, path, accessToken);
       } on DriverApiException catch (error) {
         if (error.status != 401) rethrow;
       }
@@ -105,7 +178,7 @@ class DriverApiSession {
         await _refreshOnce(session);
       }
       _requireCurrent(session);
-      return await _getMe(session, session.accessToken);
+      return await _get(session, path, session.accessToken);
     } on DriverApiException catch (error) {
       if (error.status == 401 || error.status == 403) {
         _end(
@@ -119,15 +192,11 @@ class DriverApiSession {
     }
   }
 
-  Future<DriverAccountResponse> _getMe(_Session session, String token) async {
-    final json = await _request(
-      session,
-      'me',
-      accessToken: token,
-      expectedStatus: 200,
-    );
-    return DriverAccountResponse.fromJson(json);
-  }
+  Future<Map<String, dynamic>> _get(
+    _Session session,
+    String path,
+    String token,
+  ) => _request(session, path, accessToken: token, expectedStatus: 200);
 
   Future<void> _refreshOnce(_Session session) =>
       session.refreshInFlight ??= _refresh(session).whenComplete(() {
@@ -138,6 +207,7 @@ class DriverApiSession {
     final json = await _request(
       session,
       'auth/refresh',
+      method: 'POST',
       body: {'refresh_token': session.refreshToken},
       expectedStatus: 200,
     );
@@ -147,6 +217,26 @@ class DriverApiSession {
   Future<Map<String, dynamic>> _request(
     _Session session,
     String path, {
+    String method = 'GET',
+    required int expectedStatus,
+    Map<String, Object?>? body,
+    String? accessToken,
+  }) async {
+    final response = await _send(
+      session,
+      path,
+      method: method,
+      expectedStatus: expectedStatus,
+      body: body,
+      accessToken: accessToken,
+    );
+    return _decodeObject(response.data) ?? (throw _malformed);
+  }
+
+  Future<Response<String>> _send(
+    _Session session,
+    String path, {
+    required String method,
     required int expectedStatus,
     Map<String, Object?>? body,
     String? accessToken,
@@ -159,7 +249,7 @@ class DriverApiSession {
         data: body,
         cancelToken: session.cancel,
         options: Options(
-          method: body == null ? 'GET' : 'POST',
+          method: method,
           contentType: body == null ? null : Headers.jsonContentType,
           headers: accessToken == null
               ? null
@@ -180,14 +270,17 @@ class DriverApiSession {
           'invalid_input' => 'invalid_input',
           'email_taken' => 'email_taken',
           'consent_required' => 'consent_required',
+          'invalid_plate_number' => 'invalid_plate_number',
+          'unknown_vehicle_model' => 'unknown_vehicle_model',
+          'plate_taken' => 'plate_taken',
+          'vehicle_in_use' => 'vehicle_in_use',
           _ => null,
         },
       );
     }
     _requireCurrent(session);
-    final json = _decodeObject(response.data);
-    if (response.statusCode != expectedStatus || json == null) throw _malformed;
-    return json;
+    if (response.statusCode != expectedStatus) throw _malformed;
+    return response;
   }
 
   void _requireCurrent(_Session session) {
