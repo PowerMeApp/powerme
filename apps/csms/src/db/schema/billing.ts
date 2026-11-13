@@ -94,8 +94,16 @@ export const topUps = pgTable(
     /** Dẫn xuất = amount_vnd - points_discount_vnd; ghi lúc tạo top-up. */
     amountPaidVnd: bigint('amount_paid_vnd', { mode: 'number' }).notNull(),
     status: topUpStatusEnum('status').notNull().default('pending'),
-    /** Khoá chống tạo trùng từ app khi retry (UNIQUE). */
-    idempotencyKey: varchar('idempotency_key', { length: 64 }).notNull(),
+    /**
+     * Header Idempotency-Key của app (8–100 ký tự). UNIQUE theo tài khoản
+     * `(credit_account_id, idempotency_key)` từ 0019: hai tài xế trùng key không chặn nhau.
+     */
+    idempotencyKey: varchar('idempotency_key', { length: 100 }).notNull(),
+    /**
+     * sha256 hex của `JSON.stringify([amount_vnd, points_to_redeem])` tài xế gửi (0019), cùng cách
+     * băm `driver_charge_intents.request_hash`. NULL = dòng không tạo qua API (seed / trước 0019).
+     */
+    requestHash: varchar('request_hash', { length: 64 }),
     /** vnp_TransactionNo — mã phía VNPay, ghi khi IPN/querydr báo đã trả (SD-2b). UNIQUE khi có. */
     gatewayTransactionNo: varchar('gateway_transaction_no', { length: 20 }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
@@ -123,13 +131,17 @@ export const topUps = pgTable(
   },
   (t) => [
     unique('top_ups_gateway_reference_key').on(t.gatewayReference),
-    unique('top_ups_idempotency_key_key').on(t.idempotencyKey),
+    // 0019: cột đầu credit_account_id nên UNIQUE này cũng là index của FK (thay index một cột).
+    unique('top_ups_account_idempotency_key_key').on(t.creditAccountId, t.idempotencyKey),
     unique('top_ups_late_gateway_ref_key').on(t.lateGatewayRef),
     // Một giao dịch VNPay cộng cho đúng một top-up (BR-P13); partial vì NULL tới khi cổng báo trả.
     uniqueIndex('top_ups_gateway_transaction_no_key')
       .on(t.gatewayTransactionNo)
       .where(sql`${t.gatewayTransactionNo} IS NOT NULL`),
-    index('top_ups_credit_account_id_idx').on(t.creditAccountId),
+    // Mỗi tài khoản tối đa một top-up pending (WF-02 D2, 0019).
+    uniqueIndex('top_ups_one_pending_per_account_key')
+      .on(t.creditAccountId)
+      .where(sql`${t.status} = 'pending'`),
     // Quét top-up pending quá hạn 15 phút (SD-2d, D7; migration 0015).
     index('top_ups_status_expires_at_idx').on(t.status, t.expiresAt),
     check(

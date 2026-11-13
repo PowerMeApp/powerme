@@ -83,7 +83,9 @@ JOIN (VALUES
   ('driver.demo@powerme.test', 'DEMO-TOPUP-0001', 'demo-seed-topup-0001'),
   ('driver2.demo@powerme.test', 'DEMO-TOPUP-0002', 'demo-seed-topup-0002')
 ) AS v(email, ref, idem) ON v.email = u.email
-ON CONFLICT ON CONSTRAINT top_ups_idempotency_key_key DO NOTHING;
+-- Không chỉ tên constraint: UNIQUE idempotency đổi tên ở 0019, mà seed còn chạy trên DB trước 0019
+-- (test migration-0017). Trùng gateway_reference / key của chính các dòng này cũng bỏ qua.
+ON CONFLICT DO NOTHING;
 
 INSERT INTO credit_transactions (
   credit_account_id, entry_no, transaction_type, amount_vnd, balance_after_vnd, top_up_id

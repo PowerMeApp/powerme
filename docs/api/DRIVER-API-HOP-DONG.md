@@ -23,6 +23,9 @@ không suy ra OTP/login đã hoàn thành. Thay đổi chưa merge/commit/push k
 **BE-34 (12/11/2026, OpenAPI 0.8.0):** quản lý xe (F-01, UC-ACC-03): `GET /vehicle-models`,
 `POST /vehicles`, `PATCH /vehicles/{id}` (đặt mặc định), `DELETE /vehicles/{id}` (xoá mềm,
 migration 0018) — xem §13.
+**T32 Phần 5 (12/11/2026, OpenAPI 0.9.0, WP5 — Khang):** thêm `GET /billing/top-ups/quote`,
+`POST /billing/top-ups`, `GET /billing/top-ups/{id}` (nạp Charging Credit qua VNPay, WF-02 SD-2a)
+— xem §2, §7 và §14. **Chưa dùng cho app** tới khi T32 Phần 6 và Phần 8 merge.
 
 ---
 
@@ -47,9 +50,13 @@ Tình huống chuỗi phải chạy được ở Review 3: HMI trụ đổi sún
 | `GET /credit` | — (đọc `credit_accounts`, `driver/driver-credit.ts`) | UC-PAY-02; BR-P18 | có (BE-22) |
 | `GET /credit/transactions` | — (đọc `credit_transactions`) | UC-PAY-02 | có (BE-22) |
 | `GET /vehicle-models`, `POST /vehicles`, `PATCH`/`DELETE /vehicles/{id}` | — (`driver/vehicles.http.ts`) | UC-ACC-03; BR-P03, BR-P17 | có (BE-34), §13 |
+| `GET /billing/top-ups/quote` | `TopUpService.quote` (billing) | UC-PAY-01; BR-P35 | có (T32 Phần 5), **chưa dùng cho app** (§14) |
+| `POST /billing/top-ups` | `TopUpService.create` (billing) | UC-PAY-01; BR-P22, P35; WF-02 D2 | có (T32 Phần 5), **chưa dùng cho app** (§14) |
+| `GET /billing/top-ups/{id}` | `TopUpService.get` (billing) | UC-PAY-01 | có (T32 Phần 5), **chưa dùng cho app** (§14) |
 
 Route tài xế nằm **cùng tiến trình/cổng HTTP** với console `/api/admin/*` (mặc định 3000),
-qua handler riêng `driver/driver.http.ts` (route sạc/credit ở `driver/charges.http.ts`) do
+qua handler riêng `driver/driver.http.ts` (route sạc/credit ở `driver/charges.http.ts`, top-up ở
+`driver/top-ups.http.ts`) do
 `ConsoleServer` chọn trước handler admin. Không mở cổng mới hoặc Nest controller. Admin chưa có
 auth nên shared listener bắt buộc loopback.
 
@@ -173,6 +180,9 @@ Content-Type: application/json
 | 409 | `idempotency_conflict`, `credit_unavailable` (chưa có ví hoặc ví không `active`), `connector_unavailable`, `connector_busy_or_unknown`, `tariff_unavailable`, `session_not_stoppable`, `stop_pending_or_unknown` |
 | 400 / 409 (xe, BE-34) | `invalid_plate_number`, `unknown_vehicle_model`; `plate_taken`, `vehicle_in_use` — §13 |
 | 503 | `policy_unconfigured` |
+| 409 (top-up, §14) | `idempotency_conflict`, `account_closed`, `top_up_pending` (+ `top_up_id`, `payment_url`), `pending_top_up_confirming` (+ `top_up_id`) — trường thêm đặt cùng cấp với `error`, `detail` |
+| 422 (top-up, §14) | **lỗi luật nghiệp vụ**: BR-P22 `amount_out_of_range`, `balance_limit_exceeded`; BR-P35 `points_below_minimum`, `points_unavailable`, `points_exceed_cap` |
+| 503 (top-up, §14) | `payment_unconfigured` (CSMS chưa có mã VNPay, không ghi dòng nào; hoặc server không kèm billing) |
 
 Các mã `recovery_*`, `start_not_recoverable`, `stop_attempt_not_current` thuộc đường operator (T72), không có trong API tài xế; nếu lọt ra thì route trả 500 `internal_error` đã làm sạch. Ánh xạ nằm ở `chargingErrorStatus` (`driver/charges.http.ts`).
 
@@ -242,7 +252,7 @@ Phiên RFID/HMI dừng tại trụ (route trả 404).
 
 **Credit (UC-PAY-02).** `GET /credit` → `{balance_vnd, held_vnd, available_vnd, status, updated_at}`;
 hiện `available_vnd` là số có thể dùng để sạc, `held_vnd` là "đang giữ cho phiên".
-`status = none` → tài xế chưa có ví (chưa nạp lần nào). `GET /credit/transactions?page=1&page_size=20`
+`status = none` → tài xế chưa có ví (chưa tạo top-up nào; từ T32 Phần 5, tạo top-up là có ví dù chưa trả). `GET /credit/transactions?page=1&page_size=20`
 → sổ cái mới nhất trước; dòng `session_debit` có `session_id` để mở bảng kê.
 
 Id của tài xế khác, key của tài xế khác và id không tồn tại đều trả 404 `not_found` như nhau.
@@ -295,3 +305,40 @@ Content-Type: application/json
   thì chuyển sang xe mặc định mới, không còn xe thì đưa về màn hình thêm xe.
 - Xe của tài xế khác, xe không tồn tại và xe đã gỡ đều 404 `not_found` như nhau.
 - Chưa có: sửa biển / đổi mẫu xe (gỡ rồi thêm lại), khôi phục xe đã gỡ, giới hạn số xe mỗi tài xế.
+
+## 14. Top-up (WF-02) — nạp Charging Credit qua VNPay (T32 Phần 5)
+
+> **Chưa dùng cho app** tới khi T32 Phần 6 và Phần 8 merge. Trước Phần 6 chưa có IPN, nên tiền
+> không bao giờ được cộng và trang return `/billing/vnpay/return` chưa có: thanh toán sandbox xong
+> sẽ quay về 404. Trước Phần 8 không có gì chuyển top-up bỏ dở sang `expired`, nên tài xế đã tạo
+> một top-up rồi bỏ sẽ bị chặn `pending_top_up_confirming` mãi.
+
+Route ở `driver/top-ups.http.ts`, luật ở `billing/top-up.service.ts`; ánh xạ lỗi ở `topUpErrorJson`.
+Luật: WF-02 decisions D2, BR-P22 theo ADR-0013, BR-P35.
+
+1. **Báo giá (BR-P35).** `GET /billing/top-ups/quote?amount_vnd=200000` →
+   `{points_available, max_points, max_discount_vnd}`. App hiện "dùng tối đa N điểm, giảm X ₫".
+   Dưới 500 điểm → `max_points = 0` (không phải lỗi). Chỉ để hiển thị, không giữ chỗ.
+2. **Tạo.** Mỗi lần tài xế bấm "Nạp" sinh một UUID v4 (giữ nguyên khi gửi lại sau lỗi mạng):
+   ```
+   POST /billing/top-ups   Idempotency-Key: <uuid>   Content-Type: application/json
+   {"amount_vnd":200000,"points_to_redeem":600}
+   → 201 {top_up_id, status:"pending", amount_vnd, points_redeemed, points_discount_vnd,
+          amount_paid_vnd, created_at, expires_at, payment_url}
+   ```
+   `points_to_redeem` bỏ trống / `null` / 0 = không dùng điểm. Gửi lại cùng key cùng body → **200**
+   cùng top-up; cùng key khác body → 409 `idempotency_conflict`. Mở `payment_url` (trình duyệt /
+   webview); URL hết hạn lúc `expires_at` (15 phút).
+3. **Đang có top-up chưa xong** — rẽ nhánh theo `error`, **không** theo việc có `payment_url`:
+   - `top_up_pending` → hỏi "Bạn còn giao dịch nạp chưa thanh toán, tiếp tục?" và mở lại
+     `payment_url` trong body lỗi;
+   - `pending_top_up_confirming` → báo "Giao dịch trước đang được xác nhận, thử lại sau ít phút"
+     (thường ~2 phút sau `expires_at`, tối đa ~1 giờ khi ngân hàng xác nhận chậm). Không có
+     `payment_url`.
+4. **Kết quả.** Return URL chỉ để hiển thị — **không** coi là đã nạp. Poll
+   `GET /billing/top-ups/{top_up_id}` tới khi `status` rời `pending` (`credited` → đọc lại
+   `GET /credit`; `failed` / `expired` → báo chưa nạp được). Tiền chỉ được cộng khi VNPay báo qua
+   IPN có chữ ký hoặc querydr.
+5. **422** là lỗi luật nghiệp vụ (BR-P22: 50.000–2.000.000 ₫ mỗi lần, số dư sau nạp ≤ 5.000.000 ₫
+   tính đủ `amount_vnd`; BR-P35: ≥ 500 điểm, không quá điểm còn hiệu lực, không quá 50 % số tiền).
+   CSMS không tự hạ số điểm: gọi lại `quote` rồi để tài xế chọn.

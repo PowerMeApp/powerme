@@ -59,7 +59,7 @@ const VARCHAR_TABLE: [string, string, number][] = [
   ['vehicles', 'plate_number', 12],
   ['rfid_cards', 'card_identifier', 20],
   ['top_ups', 'gateway_reference', 100],
-  ['top_ups', 'idempotency_key', 64],
+  ['top_ups', 'idempotency_key', 100], // 0014 đặt 64; 0019 (T32 Phần 5) nới theo hợp đồng 8–100
   ['top_ups', 'gateway_transaction_no', 20],
   ['top_ups', 'late_gateway_ref', 100],
   ['e_invoices', 'invoice_no', 20],
