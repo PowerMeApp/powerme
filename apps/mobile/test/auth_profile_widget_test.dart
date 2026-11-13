@@ -103,7 +103,7 @@ void main() {
       size(tester);
       await tester.pumpWidget(const DriverAppTestHarness());
       await tester.pumpAndSettle();
-      await tap(tester, find.text('Chưa có tài khoản? Đăng ký'));
+      await tap(tester, find.byKey(const Key('auth-register')));
       await tap(tester, find.byKey(const Key('onboarding-next')));
       expect(
         find.text('Cần sự đồng ý của bạn để tạo tài khoản.'),
@@ -208,7 +208,34 @@ void main() {
     await tester.pumpWidget(const DriverAppTestHarness());
     await tester.pumpAndSettle();
     cleanCopy(tester);
-    await tap(tester, find.text('Chưa có tài khoản? Đăng ký'));
+    final semantics = tester.ensureSemantics();
+    try {
+      expect(find.bySemanticsLabel(RegExp(r'^Email\b')), findsOneWidget);
+      expect(find.bySemanticsLabel(RegExp(r'^Mật khẩu')), findsOneWidget);
+    } finally {
+      semantics.dispose();
+    }
+    final password = find.byKey(const Key('auth-password'));
+    final passwordInput = find.descendant(
+      of: password,
+      matching: find.byType(TextField),
+    );
+    final submit = find.byKey(const Key('auth-submit'));
+    await tester.showKeyboard(password);
+    tester.view.viewInsets = const FakeViewPadding(bottom: 480);
+    addTearDown(tester.view.resetViewInsets);
+    await tester.pumpAndSettle();
+    expect(tester.widget<TextField>(passwordInput).obscureText, isTrue);
+    await tap(tester, find.byTooltip('Hiện mật khẩu'));
+    expect(find.byTooltip('Ẩn mật khẩu'), findsOneWidget);
+    expect(tester.widget<TextField>(passwordInput).obscureText, isFalse);
+    await tap(tester, find.byTooltip('Ẩn mật khẩu'));
+    expect(tester.widget<TextField>(passwordInput).obscureText, isTrue);
+    await tap(tester, submit);
+    expect(find.text('Nhập mật khẩu.'), findsOneWidget);
+    tester.view.resetViewInsets();
+    await tester.pumpAndSettle();
+    await tap(tester, find.byKey(const Key('auth-register')));
     await tap(tester, find.byKey(const Key('consent')));
     await tap(tester, find.byKey(const Key('onboarding-next')));
     await tester.ensureVisible(find.byKey(const Key('register-name')));
@@ -226,7 +253,11 @@ void main() {
     final confirmation = find.byKey(const Key('register-confirm-password'));
     await tester.ensureVisible(confirmation);
     await tester.enterText(confirmation, 'PowerMe123!');
+    tester.view.viewInsets = const FakeViewPadding(bottom: 480);
+    await tester.pumpAndSettle();
     await tap(tester, find.byKey(const Key('onboarding-next')));
+    tester.view.resetViewInsets();
+    await tester.pumpAndSettle();
     await tester.ensureVisible(find.byKey(const Key('vehicle-brand')));
     await tester.enterText(find.byKey(const Key('vehicle-brand')), 'BYD');
     await tester.ensureVisible(find.byKey(const Key('vehicle-model')));

@@ -7,19 +7,20 @@ import '../../../core/widgets/app_page.dart';
 import '../../../core/widgets/flow_page.dart';
 import '../application/profile_controller.dart';
 import '../domain/driver_profile.dart';
+import 'vehicle_management_feedback.dart';
 import '../../auth/application/auth_controller.dart';
 import '../../payments/application/payments_controller.dart';
 
 class ProfileScreen extends ConsumerWidget {
-  const ProfileScreen({super.key, this.readOnly = false});
-  final bool readOnly;
+  const ProfileScreen({super.key, this.apiMode = false});
+  final bool apiMode;
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final state = ref.watch(profileControllerProvider);
     final profile = state.profile;
     final copy = AppCopy(profile.language);
     final text = Theme.of(context).textTheme;
-    if (readOnly) {
+    if (apiMode) {
       return AppPage(
         children: [
           Text(copy.profile, style: text.headlineSmall),
@@ -30,42 +31,48 @@ class ProfileScreen extends ConsumerWidget {
               contentPadding: EdgeInsets.zero,
               leading: const Icon(Icons.person_outline_rounded),
               title: Text(profile.displayName, style: text.titleLarge),
-              subtitle: const Text('Tài xế'),
+              subtitle: Text(copy.text('Tài xế', 'Driver')),
             ),
           ),
           const SizedBox(height: 20),
-          Text('Xe của bạn', style: text.titleMedium),
+          Text(copy.text('Xe của tôi', 'My vehicles'), style: text.titleMedium),
           const SizedBox(height: 12),
-          InfoCard(
-            children: [
-              if (profile.vehicles.isEmpty)
-                const Text('Chưa có xe trong hồ sơ.'),
-              for (final vehicle in profile.vehicles)
-                ListTile(
-                  contentPadding: EdgeInsets.zero,
-                  leading: const Icon(Icons.directions_car_outlined),
-                  title: Text(vehicle.label),
-                  subtitle: Text(
-                    [
-                      if (vehicle.plateNumber case final String plate) plate,
-                      ...vehicle.connectors,
-                      if (profile.selectedVehicleId == vehicle.id)
-                        'Xe mặc định',
-                    ].join(' · '),
-                  ),
-                ),
-            ],
-          ),
+          if (profile.vehicles.isEmpty)
+            InfoCard(
+              children: [
+                Text(copy.text('Chưa có xe trong hồ sơ.', 'No vehicles yet.')),
+              ],
+            ),
           if (state.failure != null)
-            const FailureNotice('Chưa tải được hồ sơ mới. Vui lòng thử lại.'),
+            FailureNotice(vehicleManagementMessage(copy, state.failure!)),
+          for (final vehicle in profile.vehicles)
+            _ApiVehicleCard(
+              key: ValueKey(vehicle.id),
+              vehicle: vehicle,
+              isDefault: profile.selectedVehicleId == vehicle.id,
+              canChange: state.canChange,
+              copy: copy,
+            ),
           const SizedBox(height: 16),
+          OutlinedButton.icon(
+            key: const Key('add-vehicle'),
+            onPressed: state.canChange
+                ? () => context.push('/vehicles/new')
+                : null,
+            icon: const Icon(Icons.add),
+            label: Text(copy.text('Thêm xe', 'Add vehicle')),
+          ),
           OutlinedButton.icon(
             key: const Key('refresh-profile'),
             onPressed: state.busy
                 ? null
                 : () => ref.read(profileControllerProvider.notifier).refresh(),
             icon: const Icon(Icons.refresh),
-            label: Text(state.busy ? 'Đang tải hồ sơ…' : 'Tải lại hồ sơ'),
+            label: Text(
+              state.busy
+                  ? copy.text('Đang cập nhật hồ sơ…', 'Updating profile…')
+                  : copy.text('Tải lại hồ sơ', 'Reload profile'),
+            ),
           ),
           _SignOutButton(copy: copy),
         ],
@@ -448,6 +455,113 @@ class ProfileScreen extends ConsumerWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+class _ApiVehicleCard extends ConsumerStatefulWidget {
+  const _ApiVehicleCard({
+    super.key,
+    required this.vehicle,
+    required this.isDefault,
+    required this.canChange,
+    required this.copy,
+  });
+
+  final Vehicle vehicle;
+  final bool isDefault;
+  final bool canChange;
+  final AppCopy copy;
+
+  @override
+  ConsumerState<_ApiVehicleCard> createState() => _ApiVehicleCardState();
+}
+
+class _ApiVehicleCardState extends ConsumerState<_ApiVehicleCard> {
+  bool _confirming = false;
+
+  Future<void> _confirmRemoval() async {
+    if (_confirming) return;
+    _confirming = true;
+    final scope = ref.read(authControllerProvider).scope;
+    final vehicle = widget.vehicle;
+    final copy = widget.copy;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text(copy.text('Gỡ xe?', 'Remove vehicle?')),
+        content: Text('${vehicle.label} · ${vehicle.plateNumber}'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: Text(copy.text('Giữ xe', 'Keep vehicle')),
+          ),
+          TextButton(
+            key: const Key('confirm-remove-vehicle'),
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: Text(copy.text('Gỡ xe', 'Remove vehicle')),
+          ),
+        ],
+      ),
+    );
+    _confirming = false;
+    if (confirmed == true &&
+        mounted &&
+        identical(scope, ref.read(authControllerProvider).scope)) {
+      await ref
+          .read(profileControllerProvider.notifier)
+          .removeVehicle(vehicle.id);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final vehicle = widget.vehicle;
+    final copy = widget.copy;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: InfoCard(
+        spacing: 8,
+        children: [
+          ListTile(
+            contentPadding: EdgeInsets.zero,
+            leading: Icon(
+              Icons.directions_car_outlined,
+              color: widget.isDefault ? PowerMeColors.teal : PowerMeColors.gold,
+            ),
+            title: Text(vehicle.label),
+            subtitle: Text(
+              [
+                if (vehicle.plateNumber case final String plate) plate,
+                ...vehicle.connectors,
+                if (widget.isDefault)
+                  copy.text('Xe mặc định', 'Default vehicle'),
+              ].join(' · '),
+            ),
+          ),
+          Wrap(
+            spacing: 8,
+            children: [
+              if (!widget.isDefault)
+                OutlinedButton(
+                  key: Key('select-${vehicle.id}'),
+                  onPressed: widget.canChange
+                      ? () => ref
+                            .read(profileControllerProvider.notifier)
+                            .selectVehicle(vehicle.id)
+                      : null,
+                  child: Text(copy.text('Đặt mặc định', 'Set as default')),
+                ),
+              TextButton.icon(
+                key: Key('remove-${vehicle.id}'),
+                onPressed: widget.canChange ? _confirmRemoval : null,
+                icon: const Icon(Icons.delete_outline),
+                label: Text(copy.text('Gỡ xe', 'Remove vehicle')),
+              ),
+            ],
+          ),
+        ],
+      ),
     );
   }
 }

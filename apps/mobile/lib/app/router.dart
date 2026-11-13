@@ -6,6 +6,7 @@ import '../features/profile/application/profile_controller.dart';
 import '../features/profile/presentation/profile_screen.dart';
 import '../features/profile/presentation/profile_edit_screen.dart';
 import '../features/profile/presentation/vehicle_edit_screen.dart';
+import '../features/profile/presentation/vehicle_add_screen.dart';
 import '../features/auth/application/auth_controller.dart';
 import '../features/auth/presentation/auth_screen.dart';
 import '../features/auth/presentation/onboarding_screen.dart';
@@ -41,7 +42,9 @@ final routerProvider = Provider<GoRouter>((ref) {
               ? null
               : '/login';
         }
-        return path == '/profile' ? null : '/profile';
+        return path == '/profile' || path == '/vehicles/new'
+            ? null
+            : '/profile';
       }
       if (auth.scope == null &&
           RegExp(r'^/station/[a-zA-Z0-9_-]{1,100}$').hasMatch(path)) {
@@ -74,13 +77,19 @@ final routerProvider = Provider<GoRouter>((ref) {
         path: '/register',
         builder: (context, state) => const OnboardingScreen(),
       ),
-      if (accountOnly)
+      if (accountOnly) ...[
         GoRoute(
           path: '/profile',
           builder: (context, state) => const _PrivatePage(
-            child: Scaffold(body: ProfileScreen(readOnly: true)),
+            child: Scaffold(body: ProfileScreen(apiMode: true)),
           ),
         ),
+        GoRoute(
+          path: '/vehicles/new',
+          builder: (context, state) =>
+              const _PrivatePage(child: VehicleAddScreen()),
+        ),
+      ],
       if (!accountOnly) ...[
         GoRoute(
           path: '/credit',
