@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:driver_app/app/composition/demo_app.dart';
+import 'support/driver_app_test_harness.dart';
 import 'package:driver_app/app/powerme_app.dart';
 import 'package:driver_app/app/router.dart';
 import 'package:driver_app/features/charging/application/charging_controller.dart';
@@ -27,7 +27,7 @@ void main() {
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
     addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
-    await tester.pumpWidget(DemoApp(clock: () => now));
+    await tester.pumpWidget(DriverAppTestHarness(clock: () => now));
     await tester.pumpAndSettle();
     await signIn(tester);
     return ProviderScope.containerOf(tester.element(find.byType(PowerMeApp)));

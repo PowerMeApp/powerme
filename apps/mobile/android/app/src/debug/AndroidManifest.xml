@@ -4,4 +4,9 @@
          to allow setting breakpoints, to provide hot reload, etc.
     -->
     <uses-permission android:name="android.permission.INTERNET"/>
+    <application android:networkSecurityConfig="@xml/driver_tunnel_network_security">
+        <meta-data
+            android:name="io.flutter.network-policy"
+            android:resource="@xml/driver_tunnel_network_security" />
+    </application>
 </manifest>

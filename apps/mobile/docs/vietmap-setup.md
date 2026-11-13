@@ -1,6 +1,8 @@
 # Vietmap — bản đồ nền và vị trí theo yêu cầu 30/10/2026
 
-## Điền key và chạy Android Studio
+## Cấu hình Vietmap của slice 30/10
+
+T96 chạy Driver API từ `lib/main.dart`. Các bước cấu hình key bên dưới ghi lại cách thiết lập Vietmap của slice 30/10. Widget test và công cụ chụp ảnh dùng `DriverAppTestHarness` trong `test/support`. [Hướng dẫn chạy T96](t96-driver-api.md).
 
 File local đã được tạo: `E:/Project/PowerMe/powerme/apps/mobile/config/vietmap.local.json`.
 Điền key Tile/Map của riêng bạn vào giá trị `apiKey`; không gửi key vào chat.
@@ -10,11 +12,11 @@ File local đã được tạo: `E:/Project/PowerMe/powerme/apps/mobile/config/v
 ```
 
 File thật bị gitignore; template commit được là `config/vietmap.example.json`.
-Sau khi clone mới, copy template thành `vietmap.local.json` trước `flutter pub get`/build.
+Để dùng bản đồ Vietmap, copy template thành `vietmap.local.json` trước khi build.
 Không ghi key vào Dart define, source, README, log, QR hay manifest. Không overwrite file local khi cập nhật code.
 Key maps phía client vẫn có thể bị trích từ app; ignore chỉ tránh commit. Dùng key riêng cho development, hạn mức và restrictions do Vietmap hỗ trợ; không dùng credential thanh toán/signing.
 
-Mở `E:/Project/PowerMe/powerme/apps/mobile` trong Android Studio; chọn Flutter SDK `E:/MobileDev/Flutter`, chọn thiết bị Android API 24 trở lên, chạy `lib/main.dart`. Sau đổi key, Stop rồi Run lại để đóng gói asset mới. Không cần Google Maps key. Style dark được xác minh theo tài liệu chính thức:
+Style dark của slice 30/10 được xác minh theo tài liệu chính thức:
 `https://maps.vietmap.vn/maps/styles/dm/style.json?apikey={your-apikey}`.
 
 Bản đồ khởi đầu quanh Nhà Văn hóa Sinh viên ĐHQG TP.HCM, Đông Hòa (10.87534, 106.80003, zoom 16). Đây là camera mặc định, không là vị trí người dùng.
@@ -22,7 +24,7 @@ Bấm **Vị trí của tôi** trên map để xin quyền foreground và lấy 
 
 ## Phạm vi và kiến trúc
 
-`main` đọc config local → `DemoApp(mapConfig: config)` compose live Vietmap surface. `DemoApp()` không config chỉ dành cho local harness/preview hiện có; không fallback âm thầm từ live-map lỗi sang sơ đồ. Key rỗng/config lỗi hiển thị chưa mở được map, không gọi provider bằng key mẫu.
+Trong slice 30/10, composition Vietmap nhận config local để chọn surface. Hiện widget test inject config qua `DriverAppTestHarness(mapConfig: config)` để kiểm tra cách surface phản hồi. Key rỗng/config lỗi hiển thị chưa mở được map, không gọi provider bằng key mẫu.
 
 Stations extension: `MapLocationRepository` (domain Dart) ← `DeviceLocationRepository` (geolocator), `MapLocationController` (Riverpod, scope/dispose/request guard) → surface. UI không gọi geolocator trực tiếp. Một tap lấy một fix, duplicate tap coalesced; late result sau đổi auth/dispose không áp vào state. Camera/controller native thuộc presentation; VietmapGL tự dispose native controller.
 

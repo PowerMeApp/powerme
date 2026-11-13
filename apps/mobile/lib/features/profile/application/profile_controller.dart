@@ -43,6 +43,12 @@ class ProfileController extends Notifier<ProfileState> {
       _change((repo, revision) => repo.removeVehicle(id, revision));
   Future<bool> selectVehicle(String id) =>
       _change((repo, revision) => repo.selectVehicle(id, revision));
+  Future<bool> refresh() => _change((repo, _) {
+    if (repo case RefreshableProfileRepository refreshable) {
+      return refreshable.refresh();
+    }
+    throw const ProfileException(ProfileFailure.unavailable);
+  });
 
   Future<bool> _change(
     Future<DriverProfile> Function(ProfileRepository, int) action,

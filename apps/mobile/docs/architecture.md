@@ -103,7 +103,7 @@ Giữ ShellRoute thay StatefulShellRoute/indexed stack: đã đủ ba đích c�
 
 Research trước sửa: đọc source [ShellRoute example](https://github.com/flutter/packages/blob/9ec29b6d23e79e8cb83a29ad29311c903d7cd07d/packages/go_router/example/lib/shell_route.dart), [test chuyển tab/detail/back](https://github.com/flutter/packages/blob/9ec29b6d23e79e8cb83a29ad29311c903d7cd07d/packages/go_router/example/test/shell_route_test.dart) và phần GoRoute/navigator-key trong [route.dart](https://github.com/flutter/packages/blob/9ec29b6d23e79e8cb83a29ad29311c903d7cd07d/packages/go_router/lib/src/route.dart). Commit `9ec29b6d23e79e8cb83a29ad29311c903d7cd07d`, go_router 16.3.0 đã lock; Flutter packages chính chủ, BSD-3-Clause ([license](https://github.com/flutter/packages/blob/9ec29b6d23e79e8cb83a29ad29311c903d7cd07d/packages/go_router/LICENSE), notice local giữ nguyên). Áp dụng mô hình shell chứa navigator + path-selected tab, viết code/test riêng theo PowerMe; không copy nguyên example, chạy code nguồn hay thêm dependency. Route guard không thay ownership/authorization server. Test upstream dùng `example/test/shell_route_test.dart`; đường dẫn `test/shell_route_test.dart` thử trước trả 404 nên không dùng làm bằng chứng.
 
-### Groups 2–4 local implementation — 29/10, supersedes pending runtime baselines
+### Historical snapshot — groups 2–4 local implementation, 29/10
 
 - Exact WF01 ChargingController/ChargingRepository/StartRequest/CommandOutcome/SessionSnapshot/Statement and typed enums now exist. Controller owns prepare/start/stop/resync/recover/apply/dispose, scope/session/version guards and subscription lifecycle. `ChargingPreparation.preview/current`, StartPreview, connectorLabel, stopReason, pauseCause and tariff segments are local extensions. `statementProvider` resolves owned snapshots in the application layer; screens do not call adapters directly.
 - StationsController.suggest calls StationRepository.suggest. The optional StationSuggestionPreferences interface supplies fixture battery/target/mode settings; SuggestionController orchestrates it. StationActionsRepository plus ReservationController handle canonical QR/manual resolution, quote/hold/cancel/expiry/void. SupportController handles stable-key saved acknowledgments; its label provider uses public station metadata to show a human connector label.
@@ -113,7 +113,7 @@ Research trước sửa: đọc source [ShellRoute example](https://github.com/f
 
 Final evidence and limitations are in README; the earlier pending rows describe the original baseline only. No shared diagrams changed.
 
-### Group 1 extension — 29/10, supersedes fixed-scope/auth-pending baseline below
+### Historical snapshot — group 1 extension, 29/10
 
 - `AuthRepository.restore(): Future<String?>`, `signIn(email,password): Future<String>`, `register(Registration): Future<String>`, `signOut(): void`; `AuthController` owns restoring/busy/failure/scope and monotonically increasing generation. Repository does not create auth scope or navigate. Mock auth validates in-memory accounts, atomically stores registration/consent and revokes pending work on logout. No real restore/refresh/secure storage/API auth.
 - `Vehicle(id,brand,model,connectors)`, derived `isVinFast`; `DriverProfile` holds owned vehicles, selected ID, email/name/language and revision. Empty selected vehicle is explicit. `ProfileState(profile,busy,failure)` wraps view state. `ProfileRepository` adds async `updateName(name,revision)`, `saveVehicle(draft,id?,revision)`, `removeVehicle(id,revision)`, `selectVehicle(id,revision)` returning `DriverProfile`; read/language remain synchronous local operations. This is project-specific PKG-3 work, not an invented WF01 class signature or WP2 endpoint.
@@ -123,9 +123,9 @@ Final evidence and limitations are in README; the earlier pending rows describe 
 
 Evidence: 18 regression tests and one nine-image preview capture pass, analyzer clean; [research/trace](auth-profile-slice.md). No API/device/gateway/NFR certification.
 
-`main → DemoApp (internal name) → ProviderScope → PowerMeApp/GoRouter`. Một store dùng chung mock Profile và Stations; dependencies được inject tập trung, test override interface được. Internal mock names được giữ; **UI không có demo/mock/sample/technical warning** theo yêu cầu mới nhất, scope local chỉ README. Riverpod 3.4.3 + go_router 16.3.0 đã được cho phép/lock; không dependency mới.
+Widget test và công cụ chụp ảnh dùng `DriverAppTestHarness → ProviderScope → PowerMeApp/GoRouter`. Harness và `FakeAuthRepository` nằm trong `test/support`. Một store dùng chung dữ liệu mock cho Profile, Stations, Charging và Payments trong các test tương ứng.
 
-API integration là composition khác được chọn chủ động, cần committed WP2 OpenAPI và pinned generator recipe dart-dio đã review. Không generated contract giả, không direct DB/OCPP/signing secrets. Profile language hiện chỉ custom app copy, không MaterialApp.locale/delegates/persistence. Auth restore/guards, private data server authorization và API adapters **chưa có**.
+Profile language trong harness chỉ dùng custom app copy, chưa có MaterialApp.locale/delegates/persistence. Xem mục T96 bên dưới cho composition dùng Driver API.
 
 ## Guard / checks bắt buộc theo ranh giới
 
@@ -141,7 +141,7 @@ Format/analyze/Flutter tests/web build chạy trực tiếp **nested `powerme/ap
 
 ## Vietmap UI extension — 30/10
 
-Live map composition, foreground location repository/controller, config handling và giới hạn tọa độ được ghi tại [Vietmap setup/research](vietmap-setup.md). Không thay chữ ký StationRepository hoặc sơ đồ WF01; không project mapX/mapY lên bản đồ thật. Main chọn Vietmap, test harness cũ chọn local rõ ràng; không fallback runtime khi tile lỗi.
+Live map composition, foreground location repository/controller, config handling và giới hạn tọa độ được ghi tại [Vietmap setup/research](vietmap-setup.md). Không thay chữ ký StationRepository hoặc sơ đồ WF01; không project mapX/mapY lên bản đồ thật. Mục này ghi lại slice cũ. Widget test vẫn chọn surface Vietmap hoặc sơ đồ thông qua harness.
 
 30/10 — Station.location: MapLocation? là extension thuần Dart cho hai trụ Đông Hòa được người dùng yêu cầu. MockStationRepository.observed giữ location khi map status. VietmapSurface chỉ render trạm có location từ StationsState.stations; canonical stationId qua onSelect gọi controller chọn trạm, dùng sheet/detail/start hiện có. Symbol queue + style epoch + tap listener cleanup quản lý lifecycle native; không thay interface find/suggest hoặc sơ đồ. Camera center không là vị trí GPS. Không vẽ roadRoute tương đối lên Vietmap. Kiểm chứng và giới hạn xem vietmap-setup.md/README.
 
@@ -153,3 +153,9 @@ ShellRoute bổ sung `/scan` cho Quét QR; `/charging` giữ nguyên màn phiên
 QrConnectionController loại response muộn khi auth/vehicle đổi, chặn duplicate/busy và pending/unknown/session chưa kết thúc. QR screen luôn có shortcut phiên nếu có command/session; không tạo key/start/recover khi vào tab. Camera chỉ mount trên top route `/scan` và foreground; dispose khi mở confirmation/session, đổi tab hoặc xuống nền. Serial release chờ pending permission/start trước stop/dispose. Permission error/retry và nhập tay có sẵn. Permission camera native chỉ sử dụng khi mở tab QR. Dữ liệu charging vẫn local; quét camera không đồng nghĩa tích hợp CSMS.
 
 Dependency được người dùng duyệt: `mobile_scanner` pin 7.4.2 (Dart >=3.7, Flutter >=3.29, phù hợp SDK hiện tại). Research source thực từ archive pub: `lib/src/mobile_scanner.dart`, `mobile_scanner_controller.dart`, `test/mobile_scanner_widget/detect_barcode_test.dart`, `test/mobile_scanner_controller/dispose_test.dart`, pubspec/license. Nguồn: https://github.com/juliansteenbakker/mobile_scanner ; release https://pub.dev/packages/mobile_scanner/versions/7.4.2 . Source master/README chỉ để định hướng, implementation dựa archive 7.4.2; commit archive không cung cấp nên không tự ghi SHA. Chọn scanner thay tự ghép camera+decoder: ít glue native hơn, có QR-only/controller/permission/error; đổi lại thêm MLKit/CameraX và cần device validation. Không thêm gallery/upload/quyền ảnh, không lưu/log raw QR/frame. BSD-3-Clause của Julian Steenbakker, notice đầy đủ giữ THIRD_PARTY_NOTICES.md. Code PowerMe tự viết theo repository/lifecycle hiện có; test fake theo public platform interface để kiểm behavior, không khẳng định device pass.
+
+## T96 slice 1 — API mode
+
+`main.dart → ApiConfig.load(rootBundle) → ApiApp`. Composition đọc `API_BASE_URL` và `API_CONSENT_VERSION` tùy chọn từ `config/api.local.json`. Debug chỉ cho HTTP tới host tunnel được phép, profile/release yêu cầu HTTPS. Cấu hình thiếu hoặc không hợp lệ mở màn hình lỗi kết nối. `lib/main.dart` là entrypoint của app. Xem [lệnh chạy và điều kiện backend](t96-driver-api.md).
+
+`ApiApp` injects `ApiAuthRepository` và `ApiProfileRepository` vào Riverpod. Hai adapter chia sẻ `DriverApiSession` với Dio và DTO `/me` ở `core/api`. `AuthRepository` giữ nguyên signatures; optional `AuthSessionEvents` báo hết phiên hoặc bị chặn để `AuthController` xóa scope. `ProfileRepository.read()` đọc snapshot đã bootstrap sau auth; optional `RefreshableProfileRepository.refresh()` đọc lại cùng phiên. `ProfileController` giữ guard scope/request khi nhận kết quả. API composition chỉ đăng ký các route auth và account đọc; PKG-3 và WF01 không đổi. Xem [hợp đồng, nghiên cứu và retest](t96-driver-api.md).

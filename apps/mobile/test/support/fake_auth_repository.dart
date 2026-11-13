@@ -1,10 +1,10 @@
-import '../../../demo/demo_store.dart';
-import '../../profile/domain/driver_profile.dart';
-import '../domain/auth_repository.dart';
-import '../domain/auth_scope.dart';
+import 'package:driver_app/demo/demo_store.dart';
+import 'package:driver_app/features/profile/domain/driver_profile.dart';
+import 'package:driver_app/features/auth/domain/auth_repository.dart';
+import 'package:driver_app/features/auth/domain/auth_scope.dart';
 
-class MockAuthRepository implements AuthRepository {
-  MockAuthRepository(this.store, {DateTime Function()? clock})
+class FakeAuthRepository implements AuthRepository {
+  FakeAuthRepository(this.store, {DateTime Function()? clock})
     : _clock = clock ?? DateTime.now;
   final DemoStore store;
   final DateTime Function() _clock;
@@ -39,18 +39,19 @@ class MockAuthRepository implements AuthRepository {
       throw const AuthException(AuthFailure.consentRequired);
     }
     final email = registration.email.trim().toLowerCase();
+    final vehicle = registration.vehicle;
     if (!RegExp(r'^[^\s@]+@[^\s@]+\.[^\s@]+$').hasMatch(email) ||
         registration.password.length < 8 ||
         registration.displayName.trim().isEmpty ||
         registration.displayName.trim().length > 80 ||
-        !registration.vehicle.valid) {
+        vehicle == null ||
+        !vehicle.valid) {
       throw const AuthException(AuthFailure.invalidRegistration);
     }
     if (_accounts.containsKey(email)) {
       throw const AuthException(AuthFailure.emailInUse);
     }
     final principal = 'registered-${++_account}';
-    final vehicle = registration.vehicle;
     final id = 'vehicle-${++store.nextVehicle}';
     store.profiles[principal] = DriverProfile(
       displayName: registration.displayName.trim(),

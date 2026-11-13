@@ -13,6 +13,10 @@ abstract interface class ProfileRepository {
   Future<DriverProfile> selectVehicle(String id, int revision);
 }
 
+abstract interface class RefreshableProfileRepository {
+  Future<DriverProfile> refresh();
+}
+
 enum ProfileFailure { invalid, conflict, missing, unavailable }
 
 class ProfileException implements Exception {

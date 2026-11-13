@@ -1,4 +1,4 @@
-import 'package:driver_app/app/composition/demo_app.dart';
+import 'support/driver_app_test_harness.dart';
 import 'package:driver_app/app/powerme_app.dart';
 import 'package:driver_app/app/router.dart';
 import 'package:driver_app/demo/demo_store.dart';
@@ -51,7 +51,7 @@ void main() {
     'Discovery search/filter/empty reset/detail and account language navigation',
     (tester) async {
       viewport(tester);
-      await tester.pumpWidget(const DemoApp());
+      await tester.pumpWidget(const DriverAppTestHarness());
       await tester.pumpAndSettle();
       await signIn(tester);
       expect(find.bySemanticsLabel('PowerMe'), findsOneWidget);

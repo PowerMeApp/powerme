@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'package:driver_app/demo/demo_store.dart';
 import 'package:driver_app/features/auth/application/auth_controller.dart';
-import 'package:driver_app/features/auth/data/mock_auth_repository.dart';
+import 'support/fake_auth_repository.dart';
 import 'package:driver_app/features/auth/domain/auth_repository.dart';
 import 'package:driver_app/features/auth/domain/auth_scope.dart';
 import 'package:driver_app/features/profile/application/profile_controller.dart';
@@ -52,7 +52,7 @@ void main() {
     'Mock credentials reject; consent and UTC receipt precede atomic registration; duplicates reject',
     () async {
       final store = DemoStore();
-      final repo = MockAuthRepository(
+      final repo = FakeAuthRepository(
         store,
         clock: () => DateTime.utc(2026, 10, 29),
       );
@@ -208,7 +208,7 @@ void main() {
     'Real composition A/logout/B clears private state and old mutation; edit compatibility refreshes',
     () async {
       final store = DemoStore();
-      final auth = MockAuthRepository(store);
+      final auth = FakeAuthRepository(store);
       final container = composition(store, auth);
       final controller = container.read(authControllerProvider.notifier);
       await Future<void>.delayed(Duration.zero);
@@ -252,7 +252,7 @@ void main() {
     'Mock repository cancellation does not create account after logout',
     () async {
       final store = DemoStore();
-      final repo = MockAuthRepository(store);
+      final repo = FakeAuthRepository(store);
       final pending = repo.register(registration());
       repo.signOut();
       await expectLater(pending, throwsA(isA<AuthException>()));
