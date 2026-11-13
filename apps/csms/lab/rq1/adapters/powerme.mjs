@@ -88,7 +88,7 @@ export function createPowermeAdapter({ db, endpoint, name = 'powerme' }) {
                amount_paid_vnd, status, idempotency_key, expires_at, completed_at)
              SELECT $2, ca.id, 500000, 0, 500000, 'credited', $3, now() + interval '15 minutes', now()
              FROM credit_accounts ca WHERE ca.driver_id = $1
-             ON CONFLICT ON CONSTRAINT top_ups_idempotency_key_key DO NOTHING`,
+             ON CONFLICT DO NOTHING`,
             [userId, ref, `rq1-topup-${run.idTag}`],
           );
           await db.query(
