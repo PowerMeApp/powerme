@@ -1,0 +1,17 @@
+side,action,n,answered,unanswered,call_errors,p50_ms,p95_ms,p99_ms,max_ms,mean_ms,p95_with_unanswered_ms,threshold_ms,pass
+server,ALL,4919,4919,0,0,18.00,34.00,51.00,152.00,19.63,34.00,1000,true
+server,Authorize,257,257,0,0,11.00,25.00,33.00,39.00,12.77,25.00,1000,true
+server,BootNotification,50,50,0,0,10.00,17.00,33.00,33.00,11.06,17.00,1000,true
+server,Heartbeat,98,98,0,0,9.00,17.00,43.00,43.00,10.53,17.00,1000,true
+server,MeterValues,2722,2722,0,0,17.00,31.00,44.00,104.00,19.02,31.00,1000,true
+server,StartTransaction,257,257,0,0,19.00,37.00,54.00,67.00,21.43,37.00,1000,true
+server,StatusNotification,1278,1278,0,0,18.00,34.00,55.00,152.00,20.01,34.00,1000,true
+server,StopTransaction,257,257,0,0,31.00,55.00,114.00,119.00,34.30,55.00,1000,true
+client,ALL,4919,4919,0,0,117.06,134.90,150.60,253.52,117.53,134.90,1000,true
+client,Authorize,257,257,0,0,110.00,125.31,136.22,138.83,110.06,125.31,1000,true
+client,BootNotification,50,50,0,0,109.07,123.05,135.48,135.48,108.96,123.05,1000,true
+client,Heartbeat,98,98,0,0,108.70,117.48,132.86,132.86,107.91,117.48,1000,true
+client,MeterValues,2722,2722,0,0,117.27,132.42,143.68,196.33,117.38,132.42,1000,true
+client,StartTransaction,257,257,0,0,117.98,135.32,154.31,166.98,118.69,135.32,1000,true
+client,StatusNotification,1278,1278,0,0,116.97,133.81,151.54,253.52,117.35,133.81,1000,true
+client,StopTransaction,257,257,0,0,129.57,155.31,206.94,220.20,131.76,155.31,1000,true
