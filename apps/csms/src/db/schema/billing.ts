@@ -32,6 +32,7 @@ import {
   loyaltyTransactionTypeEnum,
   refundKindEnum,
   refundStatusEnum,
+  topUpExceptionKindEnum,
   topUpStatusEnum,
 } from './enums.js';
 import { reservations } from './ops.js';
@@ -56,8 +57,8 @@ export const creditAccounts = pgTable(
     /**
      * Lúc ví closed không còn refund `account_closure` nào chưa `done` (D1, D6): refund
      * `account_closure` cuối cùng chuyển `done`; hoặc = closed_at khi lúc đóng không tạo refund nào
-     * (số dư 0, hoặc toàn bộ là phần dư). NULL = chưa hoàn xong. Không trước closed_at.
-     * (COMMENT ON COLUMN của 0015 còn ghi "NULL = … không có gì để hoàn" — sửa ở migration Phần 6.)
+     * (số dư 0, hoặc toàn bộ là phần dư). NULL chỉ có nghĩa là chưa hoàn xong. Không trước
+     * closed_at. (COMMENT ON COLUMN sửa theo nghĩa này ở 0021.)
      */
     closureRefundedAt: timestamp('closure_refunded_at', { withTimezone: true }),
   },
@@ -109,15 +110,35 @@ export const topUps = pgTable(
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     /** Hết hạn thanh toán (BR-P13: tạo + 15 phút). Không có DEFAULT — TopUpService đặt. */
     expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    /**
+     * Lúc rời `pending` (nghĩa từ 0021): `pending → credited / failed` (IPN, querydr) hoặc
+     * `pending → expired` (vòng quét, Phần 8). Không đổi khi `credited → refunded` và khi ghi khoản
+     * trễ. Chưa có CHECK.
+     */
     completedAt: timestamp('completed_at', { withTimezone: true }),
+    /**
+     * Lần querydr kế tiếp của top-up `pending` (T127, 0021): `expires_at + 2 phút`, rồi + 5, 10, 20,
+     * 40, 60 phút khi chưa ngã ngũ (Phần 8). NULL khi không còn `pending`.
+     */
+    nextAttemptAt: timestamp('next_attempt_at', { withTimezone: true }),
+    /**
+     * Ngoại lệ cần Admin xem (0021): `loyalty_error` chỉ khi `credited` / `refunded` (Phần 6);
+     * `unresolved_04` / `unresolved_07` chỉ khi `expired` (Phần 8). NULL = không có.
+     */
+    exceptionKind: topUpExceptionKindEnum('exception_kind'),
+    /** Lúc Admin đánh dấu đã xem ngoại lệ (Phần 10); chỉ khi có `exceptionKind`. */
+    exceptionReviewedAt: timestamp('exception_reviewed_at', { withTimezone: true }),
     /**
      * Lúc Admin quyết định hoàn top-up (STM-4 #7). Có giá trị ⇔ status = refunded. Admin nào:
      * refunds.requestedBy (kind top_up) — cột refunded_by bỏ ở 0015 (B5).
      */
     refundedAt: timestamp('refunded_at', { withTimezone: true }),
     /**
-     * Khoản trễ (BR-P13, SD-2d): thanh toán thành công tới sau khi top-up đã `expired` (hoặc
-     * `failed`, D4 ⊕), không cộng ví, chờ Admin hoàn. Ba cột late_* ghi cùng lúc.
+     * Khoản trễ (BR-P13, SD-2d, D4): khoản thanh toán thành công có `vnp_TransactionNo` khác khoản
+     * đã ghi, tới khi top-up không còn `pending` (`expired`, `failed`, và lần trả thứ hai cho top-up
+     * `credited` / `refunded`, T116). Không cộng ví, chờ Admin hoàn. Ba cột late_* ghi cùng lúc.
+     * `lateGatewayRef` = **`vnp_TransactionNo`** của khoản trễ (refund `late_payment` gửi số này);
+     * `latePaidAt` = `vnp_PayDate` (GMT+7), thiếu thì lúc nhận IPN; `lateAmountVnd` = `vnp_Amount / 100`.
      */
     lateGatewayRef: varchar('late_gateway_ref', { length: 100 }),
     latePaidAt: timestamp('late_paid_at', { withTimezone: true }),
@@ -144,6 +165,10 @@ export const topUps = pgTable(
       .where(sql`${t.status} = 'pending'`),
     // Quét top-up pending quá hạn 15 phút (SD-2d, D7; migration 0015).
     index('top_ups_status_expires_at_idx').on(t.status, t.expiresAt),
+    // Vòng quét querydr (Phần 8, D7): status = pending AND next_attempt_at <= now() (0021).
+    index('top_ups_pending_next_attempt_idx')
+      .on(t.nextAttemptAt)
+      .where(sql`${t.status} = 'pending'`),
     check(
       'top_ups_amount_check',
       sql`${t.amountVnd} > 0 AND ${t.pointsDiscountVnd} >= 0 AND ${t.amountPaidVnd} = ${t.amountVnd} - ${t.pointsDiscountVnd}`,
@@ -164,10 +189,18 @@ export const topUps = pgTable(
       'top_ups_late_refunded_check',
       sql`${t.lateRefundedAt} IS NULL OR (${t.latePaidAt} IS NOT NULL AND ${t.lateRefundedAt} >= ${t.latePaidAt})`,
     ),
-    // Hiện CHECK chỉ cho khoản trễ trên `expired`; migration Phần 6 (0017) nới thêm `failed` (D4 ⊕).
+    // Khoản trễ trên mọi trạng thái trừ `pending` (0021, T116; 0003 chỉ cho `expired`).
     check(
       'top_ups_late_payment_status_check',
-      sql`${t.lateGatewayRef} IS NULL OR ${t.status} = 'expired'`,
+      sql`${t.lateGatewayRef} IS NULL OR ${t.status} <> 'pending'`,
+    ),
+    check(
+      'top_ups_exception_reviewed_check',
+      sql`${t.exceptionReviewedAt} IS NULL OR ${t.exceptionKind} IS NOT NULL`,
+    ),
+    check(
+      'top_ups_exception_kind_status_check',
+      sql`${t.exceptionKind} IS NULL OR (${t.exceptionKind} = 'loyalty_error' AND ${t.status} IN ('credited', 'refunded')) OR (${t.exceptionKind} IN ('unresolved_04', 'unresolved_07') AND ${t.status} = 'expired')`,
     ),
   ],
 );
@@ -429,5 +462,9 @@ export const loyaltyTransactions = pgTable(
     uniqueIndex('loyalty_transactions_one_earn_per_session')
       .on(t.sessionId)
       .where(sql`${t.transactionType} = 'earn' AND ${t.sessionId} IS NOT NULL`),
+    // Mỗi top-up tối đa một dòng adjust (điểm hết hạn trước lúc cộng tiền, D3 ⊕; 0021).
+    uniqueIndex('loyalty_transactions_one_adjust_per_top_up')
+      .on(t.topUpId)
+      .where(sql`${t.transactionType} = 'adjust' AND ${t.topUpId} IS NOT NULL`),
   ],
 );

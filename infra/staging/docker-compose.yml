@@ -4,8 +4,9 @@
 # Biến ${...} đọc từ infra/staging/.env (xem .env.example). Mỗi dịch vụ nhận CHỈ những biến nó cần
 # qua `environment:` — không dùng `env_file`, để secret của Postgres/simulator không lọt sang
 # dịch vụ khác. Khác với kit ban đầu, KHÔNG có: dashboard (apps/dashboard chưa có mã build —
-# thêm lại khi WP4 có), redis (apps/csms không dùng), JWT_SECRET/VNPay/e-invoice (code không đọc;
+# thêm lại khi WP4 có), redis (apps/csms không dùng), JWT_SECRET/e-invoice (code không đọc;
 # JWT của app tài xế là DRIVER_API_JWT_*, của dashboard là DASHBOARD_JWT_*, cả hai ở dịch vụ csms).
+# VNPay (VNPAY_*) ở dịch vụ csms từ T32 Phần 6.
 name: powerme
 
 x-logging: &default-logging
@@ -95,6 +96,12 @@ services:
       # Là id user lấy từ log seed ("WF-05 console actors: ..."), KHÔNG lấy từ body. Trống → 503.
       CONSOLE_ACTOR_ADMIN_ID: ${CONSOLE_ACTOR_ADMIN_ID:-}
       CONSOLE_ACTOR_STAFF_ID: ${CONSOLE_ACTOR_STAFF_ID:-}
+      # T32 Phần 5/6 (WF-02 D2/D8): VNPay sandbox. Secret chỉ nằm trong .env trên VM, không ghi
+      # vào repo. Trống → tạo top-up trả 503 payment_unconfigured, IPN trả RspCode 99 (VNPay gọi lại).
+      VNPAY_TMN_CODE: ${VNPAY_TMN_CODE:-}
+      VNPAY_HASH_SECRET: ${VNPAY_HASH_SECRET:-}
+      VNPAY_URL: ${VNPAY_URL:-}
+      VNPAY_RETURN_URL: ${VNPAY_RETURN_URL:-}
       # MB-03: khoá Vietmap phía server cho /places/* và /stations/{id}/route (khác khoá tile của app).
       # Secret: chỉ nằm trong .env trên VM. Trống → các route đó báo lỗi nhà cung cấp, phần còn lại vẫn chạy.
       VIETMAP_SEARCH_API_KEY: ${VIETMAP_SEARCH_API_KEY:-}

@@ -431,12 +431,9 @@ describeDb('migration 0003 — billing WF-02 (nâng cấp DB đã có 0002)', ()
         `, 'expired', 'LATE-Z', now(), 1000, now() - interval '1 minute'`,
         'top_ups_late_refunded_check',
       ],
-      [
-        'khoản muộn trên top-up credited (tiền nhận hai lần, SD-2c D)',
-        ', status, late_gateway_ref, late_paid_at, late_amount_vnd',
-        `, 'credited', 'LATE-C', now(), 1000`,
-        'top_ups_late_payment_status_check',
-      ],
+      // Ca "khoản muộn trên top-up credited" của 0003 bỏ từ 0021 (T32 Phần 6, T116): lần trả thứ
+      // hai cho top-up đã cộng là khoản trễ hợp lệ. CHECK nay chỉ chặn pending (ca dưới), xem
+      // docs/NHAT-KY-MIGRATION-0021.md mục 4.
       [
         'khoản muộn trên top-up pending',
         ', late_gateway_ref, late_paid_at, late_amount_vnd',

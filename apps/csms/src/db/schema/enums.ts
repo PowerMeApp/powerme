@@ -115,6 +115,16 @@ export const topUpStatusEnum = pgEnum('top_up_status', [
   'expired',
   'refunded',
 ]);
+/**
+ * Ngoại lệ top-up cho Billing Exceptions (migration 0021, T32 Phần 6). `loyalty_error`: đã cộng
+ * tiền nhưng sổ điểm hỏng nên không trừ điểm (Phần 6). `unresolved_04` / `unresolved_07`: querydr
+ * tới hạn vẫn chưa ngã ngũ, top-up chuyển `expired` (Phần 8).
+ */
+export const topUpExceptionKindEnum = pgEnum('top_up_exception_kind', [
+  'unresolved_04',
+  'unresolved_07',
+  'loyalty_error',
+]);
 export const eInvoiceStatusEnum = pgEnum('e_invoice_status', [
   'requested',
   'issued',

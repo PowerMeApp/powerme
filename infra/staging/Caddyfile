@@ -1,9 +1,11 @@
 # TLS cho mọi thứ (OCPP Security Profile 2 cần wss). Let's Encrypt tự cấp cho $DOMAIN
 # (cần DNS A record trỏ về VPS và cổng 80/443 mở).
 #
-# CHỈ có hai đường dẫn ra internet. Console vận hành (/api/admin/*, gồm POST ngắt kết nối và
-# RemoteStop) CHƯA có xác thực nên TUYỆT ĐỐI không được proxy ở đây — xem bằng SSH tunnel.
-# Khi có xác thực (users + RolesGuard) và REST/realtime cho app thì mới thêm route.
+# CHỈ các đường dẫn dưới đây ra internet: /ocpp/*, /health, và đúng hai đường VNPay
+# /billing/vnpay/ipn, /billing/vnpay/return (T32 Phần 6, Trí duyệt). Console vận hành (/api/admin/*,
+# gồm POST ngắt kết nối và RemoteStop) CHƯA có xác thực nên TUYỆT ĐỐI không được proxy ở đây — xem
+# bằng SSH tunnel. KHÔNG mở /billing/* hay đường console khác. Khi có xác thực (users + RolesGuard)
+# và REST/realtime cho app thì mới thêm route.
 {$DOMAIN} {
 	encode gzip
 
@@ -16,6 +18,15 @@
 	# Chỉ đúng đường dẫn /health (khớp tuyệt đối) của console: {"ok":true,"db":true} hoặc 503.
 	# Không lộ phiên bản hay chi tiết. Cho giám sát bên ngoài; phần còn lại của console không ra.
 	handle /health {
+		reverse_proxy csms:3000
+	}
+
+	# WF-02 D8 (T32 Phần 6): VNPay gọi IPN server-to-server (chỉ dựa chữ ký, CSMS kiểm); return là
+	# trang tĩnh trình duyệt tài xế quay về. Khớp ĐÚNG hai đường dẫn (query không ảnh hưởng khớp).
+	handle /billing/vnpay/ipn {
+		reverse_proxy csms:3000
+	}
+	handle /billing/vnpay/return {
 		reverse_proxy csms:3000
 	}
 

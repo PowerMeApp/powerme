@@ -1,9 +1,11 @@
 /**
- * TopUpService — SD-2a: tài xế tạo top-up VNPay (T32 Phần 5, decisions D2).
+ * TopUpService — SD-2a: tài xế tạo top-up VNPay (T32 Phần 5, decisions D2); SD-2b: IPN cộng tiền
+ * (T32 Phần 6, D3).
  *
- * Phần 5 chỉ có `quote`, `create`, `get`. Cộng tiền chỉ do IPN có chữ ký (Phần 6) hoặc querydr
- * (Phần 8); service này **không** ghi sổ cái, **không** trừ điểm (điểm chỉ trừ lúc cộng tiền, SD-2b)
- * và **không** hẹn timeout (vòng quét `top_ups (status, expires_at)` của Phần 8 lo, D7).
+ * Phần 5: `quote`, `create`, `get` — không ghi sổ cái, không trừ điểm, không hẹn timeout; `create`
+ * đặt `next_attempt_at = expires_at + 2 phút` cho vòng quét querydr của Phần 8 (D7, T127).
+ * Phần 6: `applyPaymentResult` — chỉ IPN có chữ ký hợp lệ mới cộng tiền (nguyên tắc 1); khoá
+ * `top_ups` → `credit_accounts` → `loyalty_accounts` (thứ tự cố định ở mọi đường cộng tiền).
  *
  * Ba lớp chống trùng (nguyên tắc 2 của billing):
  *   1. Idempotency-Key theo tài khoản + `request_hash` (migration 0019);
@@ -14,18 +16,35 @@
  *      transaction một lần, lần đó trả kết quả như bước 2 / bước 4, không ném 500.
  */
 import { createHash } from 'node:crypto';
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import type { PoolClient } from 'pg';
 import { DB, Db } from '../db/db.module.js';
-import { RedemptionRejected, TopUpRejected } from './billing-errors.js';
+import { LoyaltyLedgerCorrupt, RedemptionRejected, TopUpRejected } from './billing-errors.js';
 import { CreditLedgerService, LedgerClient } from './credit-ledger.service.js';
 import { computeQuote } from './loyalty-lots.js';
 import { LoyaltyService } from './loyalty.service.js';
-import { TOP_UP_STATUSES, TopUpStateMachine, TopUpStatus } from './top-up-state-machine.js';
-import { newGatewayReference, VnpayAdapter } from './vnpay.adapter.js';
+import {
+  TOP_UP_STATUSES,
+  TopUpGuards,
+  TopUpStateMachine,
+  TopUpStatus,
+} from './top-up-state-machine.js';
+import {
+  classifyIpn,
+  IpnResultKind,
+  newGatewayReference,
+  parseVnpDate,
+  VnpayAdapter,
+} from './vnpay.adapter.js';
 
 /** D7: top-up pending hết hạn thanh toán sau 15 phút (`expires_at = now() + PENDING_TIMEOUT_MS`). */
 export const PENDING_TIMEOUT_MS = 15 * 60 * 1000;
+/**
+ * T127 / D4: lần querydr đầu tiên lúc `expires_at + 2 phút` (IPN đang trên đường vẫn kịp tới).
+ * `create` ghi `next_attempt_at = expires_at + QUERYDR_FIRST_DELAY_MS`; lịch lùi dần sau đó (+ 5, 10,
+ * 20, 40, 60 phút) là việc của Phần 8. Mọi chỗ rời `pending` đặt `next_attempt_at = NULL`.
+ */
+export const QUERYDR_FIRST_DELAY_MS = 2 * 60 * 1000;
 /** BR-P22 theo ADR-0013: mỗi lần nạp 50.000–2.000.000 VND, số dư sau nạp ≤ 5.000.000 VND. */
 export const TOP_UP_MIN_VND = 50_000;
 export const TOP_UP_MAX_VND = 2_000_000;
@@ -71,6 +90,49 @@ export function topUpRequestHash(amountVnd: number, pointsToRedeem = 0): string 
     .digest('hex');
 }
 
+/** RspCode trả VNPay (tài liệu PAY 2.1.0; câu Message theo code mẫu PHP). */
+export type IpnRspCode = '00' | '01' | '02' | '04' | '97' | '99';
+export interface IpnReply {
+  RspCode: IpnRspCode;
+  Message: string;
+}
+const IPN_MESSAGE: Record<IpnRspCode, string> = {
+  '00': 'Confirm Success',
+  '01': 'Order not found',
+  '02': 'Order already confirmed',
+  '04': 'invalid amount',
+  '97': 'Invalid signature',
+  '99': 'Unknow error',
+};
+export function ipnReply(code: IpnRspCode): IpnReply {
+  return { RspCode: code, Message: IPN_MESSAGE[code] };
+}
+
+/** Kết quả đã commit của một IPN; truyền cho `afterPaymentCommitted`. */
+export interface PaymentResultCommitted {
+  topUpId: number;
+  outcome: 'credited' | 'failed' | 'late_payment';
+}
+
+interface IpnTopUpRow {
+  id: string;
+  status: TopUpStatus;
+  credit_account_id: string;
+  amount_vnd: string;
+  amount_paid_vnd: string;
+  points_redeemed: number;
+  gateway_transaction_no: string | null;
+  late_gateway_ref: string | null;
+}
+
+interface IpnInput {
+  ref: string;
+  amountRaw: string;
+  kind: IpnResultKind;
+  oneZero: boolean;
+  transactionNo: string;
+}
+
 interface TopUpRow {
   id: string;
   status: TopUpStatus;
@@ -111,6 +173,7 @@ const REDEMPTION_CODE = {
 @Injectable()
 export class TopUpService {
   private readonly stm = new TopUpStateMachine();
+  private readonly logger = new Logger(TopUpService.name);
 
   constructor(
     @Inject(DB) private readonly db: Db,
@@ -174,6 +237,235 @@ export class TopUpService {
     ).rows[0];
     if (!row) throw new TopUpRejected('not_found');
     return this.view(row, ip);
+  }
+
+  /**
+   * SD-2b: áp kết quả thanh toán VNPay báo qua IPN (`GET /billing/vnpay/ipn`, D3). Nhận tham số
+   * query thô; luôn trả `{RspCode, Message}` (route trả HTTP 200), không ném.
+   *
+   * Kiểm request (không ghi gì nếu lỗi): thiếu cấu hình → 99; chữ ký sai / thiếu / `vnp_TmnCode`
+   * khác → 97; không thấy `vnp_TxnRef` → 01; `vnp_Amount ≠ amount_paid_vnd × 100` → 04. Chưa ngã ngũ
+   * (`classifyIpn`) → không ghi gì, 00. Còn lại đi qua `TopUpStateMachine` trong MỘT transaction:
+   * #2 cộng tiền + trừ điểm, #3 failed, khoản trễ ghi `late_*`, lặp → 02, mâu thuẫn → 02 + log error.
+   * Lỗi bất ngờ → rollback, 99 (VNPay gọi lại).
+   */
+  async applyPaymentResult(params: Record<string, string>): Promise<IpnReply> {
+    try {
+      return await this.applyPaymentResultOrThrow(params);
+    } catch (error) {
+      this.log('error', 'ipn_unexpected_error', {
+        gateway_reference: params['vnp_TxnRef'] ?? null,
+        vnp_TransactionNo: params['vnp_TransactionNo'] ?? null,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return ipnReply('99');
+    }
+  }
+
+  /**
+   * Điểm gọi sau commit (Phần 6 chưa làm gì). Phần 7: `EInvoiceService.requestForTopUp` khi
+   * `credited`. Realtime số dư mới: repo chưa có kênh realtime cho tài xế (chờ module `realtime`).
+   */
+  protected async afterPaymentCommitted(_result: PaymentResultCommitted): Promise<void> {}
+
+  private async applyPaymentResultOrThrow(p: Record<string, string>): Promise<IpnReply> {
+    if (!this.vnpay.configured) {
+      // 99 để VNPay gọi lại khi đã cấu hình (thiếu secret thì không kiểm được chữ ký).
+      this.log('error', 'ipn_unconfigured', { gateway_reference: p['vnp_TxnRef'] ?? null });
+      return ipnReply('99');
+    }
+    const sig = this.vnpay.verifyIpn(p);
+    if (!sig.ok) {
+      this.log('warn', 'ipn_invalid_signature', {
+        reason: sig.reason,
+        gateway_reference: p['vnp_TxnRef'] ?? null,
+      });
+      return ipnReply('97');
+    }
+    const ref = p['vnp_TxnRef'] ?? '';
+    const amountRaw = p['vnp_Amount'] ?? '';
+    const transactionNo = p['vnp_TransactionNo'] ?? '';
+    const { kind, oneZero } = classifyIpn(p['vnp_ResponseCode'], p['vnp_TransactionStatus']);
+    // Chữ ký đúng mà thiếu / sai dạng trường bắt buộc: không ghi gì, 99 để VNPay gọi lại.
+    // vnp_TransactionNo chỉ đọc ở nhánh thành công (giao dịch huỷ có thể mang số 0).
+    if (
+      !/^[A-Za-z0-9]{1,100}$/.test(ref) ||
+      !/^\d{1,15}$/.test(amountRaw) ||
+      (kind === 'succeeded' && !/^\d{1,15}$/.test(transactionNo))
+    ) {
+      this.log('error', 'ipn_malformed', {
+        gateway_reference: ref || null,
+        vnp_Amount: amountRaw || null,
+        vnp_TransactionNo: transactionNo || null,
+      });
+      return ipnReply('99');
+    }
+
+    const result = await this.transaction((c) =>
+      this.applyIpnIn(c, p, { ref, amountRaw, kind, oneZero, transactionNo }),
+    );
+    if (result.committed) {
+      // Đã commit: lỗi việc sau commit không được đổi RspCode (trả 99 sẽ làm VNPay gọi lại một IPN
+      // đã áp dụng). Phần 7 (e-invoice) có vòng quét DB bắt lại.
+      try {
+        await this.afterPaymentCommitted(result.committed);
+      } catch (error) {
+        this.log('error', 'ipn_after_commit_failed', {
+          top_up_id: result.committed.topUpId,
+          outcome: result.committed.outcome,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+    return ipnReply(result.code);
+  }
+
+  private async applyIpnIn(
+    c: PoolClient,
+    p: Record<string, string>,
+    v: IpnInput,
+  ): Promise<{ code: IpnRspCode; committed?: PaymentResultCommitted }> {
+    // Thứ tự khoá cố định: top_ups → credit_accounts (→ loyalty_accounts trong redeemForTopUp).
+    const top = (
+      await c.query<IpnTopUpRow>(
+        `SELECT id, status, credit_account_id, amount_vnd, amount_paid_vnd, points_redeemed,
+                gateway_transaction_no, late_gateway_ref
+         FROM top_ups WHERE gateway_reference = $1 FOR UPDATE`,
+        [v.ref],
+      )
+    ).rows[0];
+    if (!top) return { code: '01' };
+    const account = (
+      await c.query<{ id: string; driver_id: string }>(
+        'SELECT id, driver_id FROM credit_accounts WHERE id = $1 FOR UPDATE',
+        [top.credit_account_id],
+      )
+    ).rows[0]!;
+    const topUpId = Number(top.id);
+    const codes = {
+      vnp_ResponseCode: p['vnp_ResponseCode'] ?? null,
+      vnp_TransactionStatus: p['vnp_TransactionStatus'] ?? null,
+    };
+
+    if (BigInt(v.amountRaw) !== BigInt(top.amount_paid_vnd) * 100n) {
+      this.log('warn', 'ipn_amount_mismatch', {
+        top_up_id: topUpId,
+        gateway_reference: v.ref,
+        vnp_Amount: v.amountRaw,
+        amount_paid_vnd: Number(top.amount_paid_vnd),
+      });
+      return { code: '04' };
+    }
+
+    if (v.kind === 'unresolved') {
+      // Không ghi gì; querydr (Phần 8) hỏi lại theo next_attempt_at khi còn pending.
+      const fields = { top_up_id: topUpId, gateway_reference: v.ref, status: top.status, ...codes };
+      if (top.status === 'pending' && v.oneZero)
+        this.log('warn', 'ipn_unresolved_one_zero', fields);
+      else this.log('log', 'ipn_unresolved', fields);
+      return { code: '00' };
+    }
+
+    const event = v.kind === 'succeeded' ? 'PAYMENT_SUCCEEDED' : 'PAYMENT_FAILED';
+    const guards: TopUpGuards =
+      v.kind === 'succeeded'
+        ? {
+            transactionNo: v.transactionNo,
+            appliedTransactionNo: top.gateway_transaction_no ?? undefined,
+            recordedLateRef: top.late_gateway_ref,
+          }
+        : {};
+    const step = this.stm.apply(top.status, event, guards);
+
+    switch (step.outcome) {
+      case 'transition':
+        if (step.to === 'credited') {
+          await this.credit(c, top, Number(account.id), Number(account.driver_id), v.transactionNo);
+          return { code: '00', committed: { topUpId, outcome: 'credited' } };
+        }
+        await c.query(
+          `UPDATE top_ups SET status = $2::top_up_status, completed_at = now(),
+             next_attempt_at = NULL, updated_at = now() WHERE id = $1`,
+          [topUpId, step.to],
+        );
+        return { code: '00', committed: { topUpId, outcome: 'failed' } };
+      case 'late_payment':
+        // Giữ trạng thái; không cộng, không trừ điểm, không hoá đơn (D4).
+        await c.query(
+          `UPDATE top_ups SET late_gateway_ref = $2, late_paid_at = COALESCE($3::timestamptz, now()),
+             late_amount_vnd = $4, updated_at = now() WHERE id = $1`,
+          [topUpId, v.transactionNo, parseVnpDate(p['vnp_PayDate']), Number(top.amount_paid_vnd)],
+        );
+        return { code: '00', committed: { topUpId, outcome: 'late_payment' } };
+      case 'conflicting_result':
+        // Khoản thứ ba trên cùng top-up, hoặc báo lỗi trên top-up đã cộng: Admin xử lý ngoài hệ thống.
+        this.log('error', 'ipn_conflicting_result', {
+          top_up_id: topUpId,
+          gateway_reference: v.ref,
+          status: top.status,
+          vnp_TransactionNo: v.transactionNo || null,
+          gateway_transaction_no: top.gateway_transaction_no,
+          late_gateway_ref: top.late_gateway_ref,
+          vnp_Amount: v.amountRaw,
+          amount_paid_vnd: Number(top.amount_paid_vnd),
+          ...codes,
+        });
+        return { code: '02' };
+      case 'already_applied':
+      case 'stale':
+      case 'rejected':
+        return { code: '02' };
+    }
+  }
+
+  /** #2: pending → credited, ghi sổ cái, trừ điểm (D3). Bên gọi đã khoá top_ups + credit_accounts. */
+  private async credit(
+    c: PoolClient,
+    top: IpnTopUpRow,
+    accountId: number,
+    driverId: number,
+    transactionNo: string,
+  ): Promise<void> {
+    const topUpId = Number(top.id);
+    await c.query(
+      `UPDATE top_ups SET status = 'credited', gateway_transaction_no = $2, completed_at = now(),
+         next_attempt_at = NULL, updated_at = now() WHERE id = $1`,
+      [topUpId, transactionNo],
+    );
+    // in_shortfall → active khi số dư ≥ 0 do post lo.
+    await this.ledger.post(c, accountId, 'top_up', Number(top.amount_vnd), { topUpId });
+    if (Number(top.points_redeemed) === 0) return;
+
+    // Lỗi sổ điểm không được rollback việc cộng tiền (D3 ⊕, chốt Ân 13/11): SAVEPOINT bỏ mọi dòng
+    // điểm ghi dở, không ghi adjust, đánh dấu exception_kind để Admin xem. Lỗi khác → rollback hết.
+    await c.query('SAVEPOINT ipn_loyalty');
+    try {
+      await this.loyalty.redeemForTopUp(c, driverId, topUpId);
+      await c.query('RELEASE SAVEPOINT ipn_loyalty');
+    } catch (error) {
+      if (!(error instanceof LoyaltyLedgerCorrupt)) throw error;
+      await c.query('ROLLBACK TO SAVEPOINT ipn_loyalty');
+      await c.query(
+        `UPDATE top_ups SET exception_kind = 'loyalty_error', updated_at = now() WHERE id = $1`,
+        [topUpId],
+      );
+      const loyaltyAccount = (
+        await c.query<{ id: string }>('SELECT id FROM loyalty_accounts WHERE driver_id = $1', [
+          driverId,
+        ])
+      ).rows[0];
+      this.log('error', 'ipn_loyalty_ledger_corrupt', {
+        reason: error.reason,
+        entry_no: error.entryNo,
+        top_up_id: topUpId,
+        loyalty_account_id: loyaltyAccount ? Number(loyaltyAccount.id) : null,
+        points_redeemed: Number(top.points_redeemed),
+      });
+    }
+  }
+
+  private log(level: 'log' | 'warn' | 'error', event: string, fields: Record<string, unknown>) {
+    this.logger[level](JSON.stringify({ event, ...fields }));
   }
 
   /** Sinh `gateway_reference` (tách ra để test va chạm UNIQUE). */
@@ -284,8 +576,9 @@ export class TopUpService {
           await c.query<TopUpRow>(
             `INSERT INTO top_ups AS t (gateway_reference, credit_account_id, amount_vnd,
                points_redeemed, points_discount_vnd, amount_paid_vnd, status, idempotency_key,
-               request_hash, expires_at)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, now() + make_interval(secs => $10::float8))
+               request_hash, expires_at, next_attempt_at)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, now() + make_interval(secs => $10::float8),
+               now() + make_interval(secs => $10::float8) + make_interval(secs => $11::float8))
              RETURNING ${cols('t')}`,
             [
               this.nextGatewayReference(),
@@ -298,6 +591,7 @@ export class TopUpService {
               v.key,
               v.hash,
               PENDING_TIMEOUT_MS / 1000,
+              QUERYDR_FIRST_DELAY_MS / 1000,
             ],
           )
         ).rows[0]!;

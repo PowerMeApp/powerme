@@ -22,6 +22,7 @@ import { ConsoleCommands } from './console.commands.js';
 import { ConsoleError, createConsoleListener } from './console.http.js';
 import { ConsoleQueries } from './console.queries.js';
 import { TopUpService } from '../billing/top-up.service.js';
+import { createVnpayListener, isVnpayPath } from '../billing/vnpay-ipn.http.js';
 import { createDriverListener } from '../driver/driver.http.js';
 import { createOperatorApiListener, OPERATOR_API_PATH } from '../operator-api/operator-api.http.js';
 import { DB, Db } from '../db/db.module.js';
@@ -145,7 +146,14 @@ export class ConsoleServer implements OnModuleInit, OnModuleDestroy {
           this.config.driverApi ?? { devAuth: false },
         )
       : null;
+    // T32 Phần 6: /billing/vnpay/{ipn,return} công khai (chỉ dựa chữ ký VNPay). Mọi URL /billing…
+    // khác trả 404 ở listener này, không bao giờ rơi vào console chưa xác thực.
+    const vnpay = createVnpayListener(this.topUps);
     const server = createServer((req, res) => {
+      if (isVnpayPath(req.url ?? '')) {
+        vnpay(req, res);
+        return;
+      }
       if (OPERATOR_API_PATH.test(req.url ?? '')) {
         if (operatorApi) operatorApi(req, res);
         else {

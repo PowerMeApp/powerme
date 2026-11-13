@@ -1,6 +1,7 @@
 /**
- * VnpayAdapter (CD-2 «port») — Phần 5 chỉ có `buildPaymentUrl`: hàm THUẦN, không gọi mạng, không
- * đọc DB hay đồng hồ. IPN (Phần 6), querydr (Phần 8), refund (Phần 9) thêm sau.
+ * VnpayAdapter (CD-2 «port») — Phần 5: `buildPaymentUrl`; Phần 6: `verifyIpn` (kiểm chữ ký IPN).
+ * Đều là hàm THUẦN, không gọi mạng, không đọc DB hay đồng hồ. querydr (Phần 8), refund (Phần 9)
+ * thêm sau.
  *
  * URL thanh toán **không lưu DB**: dựng lại từ dòng `top_ups` + cấu hình mỗi lần cần (tạo, gửi lại
  * cùng key, GET), nên `vnp_CreateDate` / `vnp_ExpireDate` lấy từ `created_at` / `expires_at` của
@@ -16,7 +17,7 @@
  *   - `vnp_Amount` = VND × 100; ngày giờ `yyyyMMddHHmmss` theo GMT+7;
  *   - `vnp_TxnRef` Alphanumeric[1,100], không trùng trong ngày (DB: UNIQUE `gateway_reference`).
  */
-import { createHmac, randomBytes } from 'node:crypto';
+import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import { Inject, Injectable } from '@nestjs/common';
 import { VNPAY_CONFIG, VnpayConfig } from './vnpay.config.js';
 
@@ -54,6 +55,27 @@ export function vnpDate(at: Date): string {
     p(t.getUTCMinutes()) +
     p(t.getUTCSeconds())
   );
+}
+
+/**
+ * Ngược của `vnpDate`: `yyyyMMddHHmmss` theo GMT+7 → `Date`. Sai dạng / ngày không có → `null`.
+ * Dùng cho `vnp_PayDate` của IPN (tài liệu không ghi múi giờ; theo cùng quy ước `vnp_CreateDate`).
+ */
+export function parseVnpDate(s: string | undefined): Date | null {
+  const m = /^(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})$/.exec(s ?? '');
+  if (!m) return null;
+  const [y, mo, d, h, mi, se] = m.slice(1).map(Number) as [
+    number,
+    number,
+    number,
+    number,
+    number,
+    number,
+  ];
+  const utc = Date.UTC(y, mo - 1, d, h, mi, se) - 7 * 3600 * 1000;
+  const back = new Date(utc);
+  // Date.UTC tự "lăn" ngày sai (vd. 31/02); so lại để từ chối.
+  return vnpDate(back) === s ? back : null;
 }
 
 /** Chuỗi ký (và cũng là query string trước khi gắn chữ ký): tham số sắp xếp, đã encode. */
@@ -102,6 +124,57 @@ export function buildPaymentUrl(topUp: PaymentUrlTopUp, cfg: VnpaySigning, ipAdd
   return `${cfg.payUrl}${sep}${data}&vnp_SecureHash=${vnpSecureHash(data, cfg.hashSecret)}`;
 }
 
+/** Tham số không đưa vào chuỗi ký của IPN (code mẫu VNPay chỉ bỏ `vnp_SecureHash`). */
+const IPN_UNSIGNED = new Set(['vnp_SecureHash', 'vnp_SecureHashType']);
+
+export type IpnSignatureCheck = { ok: true } | { ok: false; reason: 'signature' | 'tmn_code' };
+
+/**
+ * Kiểm chữ ký IPN (SD-2b; Phần 6). Theo code mẫu PHP của VNPay: chỉ lấy tham số `vnp_*`, bỏ
+ * `vnp_SecureHash` / `vnp_SecureHashType`, sắp tên tăng dần, encode + nối bằng **đúng** `vnpSignData`
+ * (cùng hàm ký URL thanh toán), HMAC-SHA512, so sánh thời gian hằng. `vnp_TmnCode` khác cấu hình
+ * cũng coi là sai chữ ký (RspCode 97).
+ */
+export function verifyIpnSignature(
+  params: Record<string, string>,
+  cfg: Pick<VnpayConfig, 'tmnCode' | 'hashSecret'>,
+): IpnSignatureCheck {
+  const given = (params['vnp_SecureHash'] ?? '').toLowerCase();
+  if (!/^[0-9a-f]{128}$/.test(given)) return { ok: false, reason: 'signature' };
+  const signed: Record<string, string> = {};
+  for (const [k, v] of Object.entries(params))
+    if (k.startsWith('vnp_') && !IPN_UNSIGNED.has(k)) signed[k] = v;
+  const expected = vnpSecureHash(vnpSignData(signed), cfg.hashSecret);
+  if (!timingSafeEqual(Buffer.from(given, 'hex'), Buffer.from(expected, 'hex')))
+    return { ok: false, reason: 'signature' };
+  if (params['vnp_TmnCode'] !== cfg.tmnCode) return { ok: false, reason: 'tmn_code' };
+  return { ok: true };
+}
+
+export type IpnResultKind = 'succeeded' | 'unresolved' | 'failed';
+
+/**
+ * Phân loại kết quả IPN (D3, chốt Khang + Ân 12–13/11):
+ *   - `succeeded` ⇔ `vnp_ResponseCode = 00` **và** `vnp_TransactionStatus = 00`;
+ *   - `unresolved` (chưa ngã ngũ, giữ `pending`, querydr Phần 8 hỏi lại): đúng một trong hai mã là
+ *     `00` (`oneZero`; code mẫu VNPay dùng HOẶC nên ca này không coi là thất bại), hoặc
+ *     `vnp_ResponseCode = 07` (đã trừ tiền, nghi gian lận), hoặc `vnp_TransactionStatus ∈ {01, 04, 07}`
+ *     (chưa hoàn tất / giao dịch đảo / nghi gian lận);
+ *   - `failed`: còn lại → `PAYMENT_FAILED`.
+ */
+export function classifyIpn(
+  responseCode: string | undefined,
+  transactionStatus: string | undefined,
+): { kind: IpnResultKind; oneZero: boolean } {
+  const rc00 = responseCode === '00';
+  const ts00 = transactionStatus === '00';
+  if (rc00 && ts00) return { kind: 'succeeded', oneZero: false };
+  const oneZero = rc00 !== ts00;
+  if (oneZero || responseCode === '07' || ['01', '04', '07'].includes(transactionStatus ?? ''))
+    return { kind: 'unresolved', oneZero };
+  return { kind: 'failed', oneZero: false };
+}
+
 const REF_ALPHABET = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ';
 /** Độ dài phần ngẫu nhiên của `vnp_TxnRef` (36^14 ≈ 6·10^21; trùng thì service sinh lại). */
 export const GATEWAY_REFERENCE_RANDOM_LEN = 14;
@@ -140,5 +213,10 @@ export class VnpayAdapter {
 
   buildPaymentUrl(topUp: PaymentUrlTopUp, ipAddr: string): string {
     return buildPaymentUrl(topUp, this.config, ipAddr);
+  }
+
+  /** Kiểm chữ ký + `vnp_TmnCode` của IPN. Chỉ gọi khi `configured`. */
+  verifyIpn(params: Record<string, string>): IpnSignatureCheck {
+    return verifyIpnSignature(params, this.config);
   }
 }

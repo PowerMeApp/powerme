@@ -78,7 +78,7 @@ Decisions khác diagram thì theo diagram và sửa decisions. Diagram mâu thu�
 | Luồng | Diagram | Decisions | State machine | Test |
 |---|---|---|---|---|
 | Tạo top-up | SD-2a | D2 | STM-4 #1 | TC-STM4-01 + test theo nội dung: `test/billing-top-up.integration.test.ts`, `test/driver-top-ups.integration.test.ts`, `test/migration-0019.integration.test.ts`, `src/billing/vnpay.adapter.spec.ts` |
-| IPN cộng tiền | SD-2b | D3 | STM-4 #2 #3, STM-5 | TC-STM4-02/03/08/09/10, TC-STM5-* |
+| IPN cộng tiền | SD-2b | D3 | STM-4 #2 #3, STM-5 | TC-STM4-02/03/04 (bước IPN)/05 + test theo nội dung (khoản trễ trên `expired` / `refunded`, kiểm request, điểm, race, route): `test/billing-ipn.integration.test.ts`, `test/vnpay-ipn-route.integration.test.ts`, `test/migration-0021.integration.test.ts`, `src/billing/top-up-state-machine.spec.ts`, `src/billing/vnpay.adapter.spec.ts` |
 | Xuất hoá đơn, retry | SD-2c | D5 | STM-7 | TC-STM7-* |
 | Timeout, thanh toán trễ | SD-2d | D4 | STM-4 #4, #6 | TC-STM4-04/05/06/07/15 |
 | Admin hoàn, gửi refund, retry | SD-2e | D1 | STM-4 #7, STM-10 | TC-STM4-12/13/14, TC-STM10-* |
