@@ -53,11 +53,12 @@ import {
   FrameRef,
   ReconciliationService,
 } from '../reconciliation/reconciliation.service.js';
-import { parseChargePointTime, TARIFF_CLOCK_HOLD } from '../reconciliation/tariff-clock.js';
+import { parseChargePointTime, TARIFF_CLOCK_UNTRUSTED } from '../reconciliation/tariff-clock.js';
 import { isConnectorStatus, isExpectedTransition } from './connectors/valid-transitions.js';
 import { SessionEvent, SessionStateMachine, SessionStatus } from './session-state-machine.js';
 
 export const ENERGY_MEASURAND = 'Energy.Active.Import.Register';
+const METER_EVIDENCE_CONFLICT = 'METER_EVIDENCE_CONFLICT';
 
 /** Trạng thái còn "mở" trên trụ — nhận được bản tin live, StopTransaction. */
 const OPEN_STATUSES: readonly SessionStatus[] = ['active', 'paused', 'stopping', 'orphaned'];
@@ -343,13 +344,13 @@ export class SessionsService {
       }
       if (session.chargePointId !== ctx.chargePointId)
         throw new Error('session_charge_point_mismatch');
-      const { inserted, skipped, clockHeld } = await this.ingestSamples(
+      const { inserted, skipped, meterConflict, untrustedClock } = await this.ingestSamples(
         tx,
         session,
         req.meterValue,
         ctx,
       );
-      if (inserted === 0 && skipped > 0 && !clockHeld) {
+      if (inserted === 0 && skipped > 0 && !meterConflict && !untrustedClock) {
         await this.reconciliation.recordDuplicate(tx, session.id, frame);
       }
       if (ctx.replay.replayed) {
@@ -363,7 +364,7 @@ export class SessionsService {
       }
 
       // Mẫu muộn cho phiên đã có meter_stop → đối soát lại (WF-03 giai đoạn F, T13 #19).
-      if (!clockHeld && inserted > 0 && session.meterStopWh !== null) {
+      if (!meterConflict && inserted > 0 && session.meterStopWh !== null) {
         await this.reconcileLateSample(tx, session, ctx);
       }
     });
@@ -389,20 +390,19 @@ export class SessionsService {
       if (session.meterStopWh !== null || !OPEN_STATUSES.includes(session.status)) {
         if (session.receivedStoppedAt) {
           const expectedMeter = req.meterStop >= session.meterStartWh ? req.meterStop : null;
-          if (
-            !cpStoppedAt ||
-            cpStoppedAt.getTime() !== session.cpStoppedAt?.getTime() ||
-            expectedMeter !== session.meterStopWh
-          ) {
-            await this.recordClockHold(tx, session, ctx, 'tariff_clock_conflicting_stop');
-          } else if (req.transactionData?.length) {
-            const { inserted, clockHeld } = await this.ingestSamples(
+          if (expectedMeter !== session.meterStopWh) {
+            await this.recordMeterConflict(tx, session, ctx, 'conflicting_stop');
+          }
+          if (cpStoppedAt?.getTime() !== session.cpStoppedAt?.getTime() || !cpStoppedAt) {
+            await this.recordClockIssue(tx, session, ctx, 'tariff_clock_conflicting_stop');
+          } else if (expectedMeter === session.meterStopWh && req.transactionData?.length) {
+            const { inserted, meterConflict } = await this.ingestSamples(
               tx,
               session,
               req.transactionData,
               ctx,
             );
-            if (!clockHeld && inserted > 0 && session.meterStopWh !== null)
+            if (!meterConflict && inserted > 0 && session.meterStopWh !== null)
               await this.reconcileLateSample(tx, session, ctx);
           }
         }
@@ -417,7 +417,7 @@ export class SessionsService {
         await this.ingestSamples(tx, session, req.transactionData, ctx);
       }
       if (!cpStoppedAt)
-        await this.recordClockHold(tx, session, ctx, 'tariff_clock_invalid_timestamp');
+        await this.recordClockIssue(tx, session, ctx, 'tariff_clock_invalid_timestamp');
 
       const meterStopWh = req.meterStop >= session.meterStartWh ? req.meterStop : null;
       if (meterStopWh === null) {
@@ -464,28 +464,33 @@ export class SessionsService {
       let verdictNote: string;
       let verdictLabel: string;
       let diffLabel: string;
+      const [meterConflict] = await tx
+        .select({ id: sessionStatusHistory.id })
+        .from(sessionStatusHistory)
+        .where(
+          and(
+            eq(sessionStatusHistory.sessionId, session.id),
+            or(
+              eq(sessionStatusHistory.event, METER_EVIDENCE_CONFLICT),
+              sql`${sessionStatusHistory.event}='TARIFF_CLOCK_HOLD'
+                AND split_part(${sessionStatusHistory.note},' ',1)='tariff_clock_conflicting_sample'`,
+            ),
+          ),
+        )
+        .limit(1);
       if (this.reconciliation.enabled) {
         const verdict = await this.evaluateSession(tx, { ...session, meterStopWh, cpStoppedAt });
-        const [clockHold] = await tx
-          .select({ id: sessionStatusHistory.id })
-          .from(sessionStatusHistory)
-          .where(
-            and(
-              eq(sessionStatusHistory.sessionId, session.id),
-              eq(sessionStatusHistory.event, TARIFF_CLOCK_HOLD),
-            ),
-          )
-          .limit(1);
         await this.reconciliation.recordVerdict(tx, session.id, verdict, {
           kind: 'stop',
           replayed,
         });
-        event = clockHold || verdict.outcome === 'conflict' ? 'RECONCILE_CONFLICT' : 'RECONCILE_OK';
+        event =
+          meterConflict || verdict.outcome === 'conflict' ? 'RECONCILE_CONFLICT' : 'RECONCILE_OK';
         verdictLabel = verdict.outcome;
         verdictNote = `đối soát=${verdict.outcome}`;
         diffLabel = String(verdict.energyDifferenceWh ?? 'null');
       } else {
-        event = meterStopWh === null ? 'RECONCILE_CONFLICT' : 'RECONCILE_OK';
+        event = meterConflict || meterStopWh === null ? 'RECONCILE_CONFLICT' : 'RECONCILE_OK';
         verdictLabel = 'tắt';
         verdictNote = 'đối soát=tắt (ablation: tin meterStop của trụ)';
         diffLabel = '-';
@@ -757,7 +762,12 @@ export class SessionsService {
     session: SessionRow,
     values: MeterValue[],
     ctx: InboundContext,
-  ): Promise<{ inserted: number; skipped: number; clockHeld: boolean }> {
+  ): Promise<{
+    inserted: number;
+    skipped: number;
+    meterConflict: boolean;
+    untrustedClock: boolean;
+  }> {
     let inserted = 0;
     let skipped = 0;
     const invalidTimestamp = values.some(
@@ -818,27 +828,43 @@ export class SessionsService {
       });
       inserted++;
     }
-    if (invalidTimestamp || conflictingSample)
-      await this.recordClockHold(
-        tx,
-        session,
-        ctx,
-        invalidTimestamp ? 'tariff_clock_invalid_timestamp' : 'tariff_clock_conflicting_sample',
-      );
-    return { inserted, skipped, clockHeld: invalidTimestamp || conflictingSample };
+    if (invalidTimestamp)
+      await this.recordClockIssue(tx, session, ctx, 'tariff_clock_invalid_timestamp');
+    if (conflictingSample) await this.recordMeterConflict(tx, session, ctx, 'conflicting_sample');
+    return {
+      inserted,
+      skipped,
+      meterConflict: conflictingSample,
+      untrustedClock: invalidTimestamp,
+    };
   }
 
-  private async recordClockHold(tx: Tx, session: SessionRow, ctx: InboundContext, reason: string) {
+  private async recordClockIssue(tx: Tx, session: SessionRow, ctx: InboundContext, reason: string) {
     await tx.insert(sessionStatusHistory).values({
       sessionId: session.id,
       fromStatus: session.status,
       toStatus: session.status,
-      event: TARIFF_CLOCK_HOLD,
+      event: TARIFF_CLOCK_UNTRUSTED,
       note: `${reason} ${this.frameNote(ctx)}`,
       occurredAt: ctx.receivedAt,
     });
-    if (!this.reconciliation.enabled) return;
-    await this.reconciliation.recordTariffClockConflict(
+  }
+
+  private async recordMeterConflict(
+    tx: Tx,
+    session: SessionRow,
+    ctx: InboundContext,
+    reason: string,
+  ) {
+    await tx.insert(sessionStatusHistory).values({
+      sessionId: session.id,
+      fromStatus: session.status,
+      toStatus: session.status,
+      event: METER_EVIDENCE_CONFLICT,
+      note: `${reason} ${this.frameNote(ctx)}`,
+      occurredAt: ctx.receivedAt,
+    });
+    await this.reconciliation.recordMeterEvidenceConflict(
       tx,
       session.id,
       this.frameRef('charging_telemetry', ctx),

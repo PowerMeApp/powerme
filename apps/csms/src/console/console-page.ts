@@ -314,7 +314,12 @@ header button:hover:not(:disabled) { background: var(--accent); color: var(--pan
     var tag = /id_tag=(\S+)/.exec(r.resolution || '');
     var late = r.late_sample ? ' (phát hiện khi mẫu muộn tới)' : '';
     switch (r.kind) {
+      case 'tariff_clock_fallback':
+        var reason = /reason=(\S+)/.exec(r.resolution || '');
+        return 'Đã tính giá theo giờ nhận của CSMS vì không xác minh được đồng hồ trụ (' + (reason ? reason[1] : '?') + ')';
       case 'conflict':
+        if ((r.resolution || '').indexOf('meter_evidence_conflict ') === 0)
+          return 'Bản tin lặp có số đo khác bản đã lưu (' + r.resolution + ')';
         return 'meterStop ' + wh(r.meter_stop_minus_start_wh) + ' mâu thuẫn chuỗi đo ' + wh(r.series_last_wh) + ' — lệch ' + wh(r.energy_difference_wh) + late;
       case 'gap_detected':
         return 'Chuỗi đo bị đứt ' + hms(r.gap_start) + ' → ' + hms(r.gap_end) + ', chênh ' + wh(r.energy_difference_wh) + late;

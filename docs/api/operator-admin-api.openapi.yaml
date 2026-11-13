@@ -2971,7 +2971,7 @@ components:
               items: { $ref: '#/components/schemas/ReconciliationRecord' }
     ReconciliationKind:
       type: string
-      enum: [conflict, gap_detected, replay, duplicate, orphan_stop, unknown_id_tag, meter_gap, late_sample]
+      enum: [conflict, gap_detected, replay, duplicate, orphan_stop, unknown_id_tag, meter_gap, late_sample, tariff_clock_fallback]
     ReconciliationRecord:
       type: object
       required: [id, session_id, record_type, kind, reviewed, created_at]

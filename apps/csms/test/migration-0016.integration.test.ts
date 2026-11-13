@@ -293,7 +293,11 @@ describeDb('migration 0016 — bỏ thẻ wallet và payment_mode station_wallet
     it('phiên không phải station_wallet không bị đụng (kể cả updated_at)', async () => {
       for (const key of ['S-BILLED', 'S-FREE', 'S-UNKNOWN']) {
         const now = await one('SELECT * FROM sessions WHERE id = $1', [ids[key]]);
-        expect(now).toEqual(before[String(ids[key])]);
+        expect(now).toEqual({
+          ...before[String(ids[key])],
+          priced_clock: null,
+          priced_ended_at: null,
+        });
       }
     });
 

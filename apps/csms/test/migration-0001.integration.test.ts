@@ -158,6 +158,9 @@ describeDb('migration 0001 — nâng cấp DB đã có 0000 và ràng buộc m�
       expect(rec).toEqual({ record_type: 'meter_gap', resolution: 'conflict: diff=5' });
       const s = (await q('SELECT orphaned_at FROM sessions'))[0];
       expect(s?.['orphaned_at']).toBeNull();
+      expect(
+        await q('SELECT priced_clock,priced_ended_at FROM sessions WHERE id=$1', [sessionId]),
+      ).toEqual([{ priced_clock: null, priced_ended_at: null }]);
     });
 
     it("0009: phiên free vend cũ mang 'free' → unattributed, origin giữ free_vend; 'free' hết hợp lệ", async () => {
@@ -218,7 +221,7 @@ describeDb('migration 0001 — nâng cấp DB đã có 0000 và ràng buộc m�
       expect(epochCols).toHaveLength(5);
     });
 
-    it('giá trị enum 0001 nằm CUỐI danh sách (ADD VALUE); payment_mode sau 0009 và 0016 còn hai giá trị', async () => {
+    it('giá trị enum giữ thứ tự sau các migration ADD VALUE; payment_mode còn hai giá trị', async () => {
       const vals = async (t: string) =>
         (
           await q(
@@ -236,6 +239,7 @@ describeDb('migration 0001 — nâng cấp DB đã có 0000 và ràng buộc m�
         'unknown_id_tag',
         'conflict',
         'late_sample',
+        'tariff_clock_fallback',
       ]);
       expect(await vals('remote_command_status')).toEqual([
         'pending',

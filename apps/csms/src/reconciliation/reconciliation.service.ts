@@ -259,7 +259,7 @@ export class ReconciliationService {
     });
   }
 
-  async recordTariffClockConflict(
+  async recordMeterEvidenceConflict(
     ex: DbExecutor,
     sessionId: number,
     frame: FrameRef,
@@ -270,7 +270,7 @@ export class ReconciliationService {
       gapStart: null,
       gapEnd: frame.receivedAt,
       energyDifferenceWh: null,
-      resolution: `${reason}: message_log_id=${frame.messageLogId}`,
+      resolution: `meter_evidence_conflict reason=${reason} message_log_id=${frame.messageLogId}`,
     });
   }
 

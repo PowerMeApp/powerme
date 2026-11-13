@@ -91,6 +91,7 @@ export const reconciliationRecordTypeEnum = pgEnum('reconciliation_record_type',
   'unknown_id_tag',
   'conflict',
   'late_sample',
+  'tariff_clock_fallback',
 ]);
 
 // ---- billing ----

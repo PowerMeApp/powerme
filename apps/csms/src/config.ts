@@ -28,6 +28,7 @@ export interface CsmsConfig {
   sessionHardCapH: number;
   /** ADR-0009 / T13: received_at − cp_timestamp vượt ngưỡng này là ứng viên phát lại. */
   replaySkewThresholdS: number;
+  tariffClockToleranceS?: number;
   /** MeterValueSampleInterval của trụ (SAP template powerme-d1: 10 s). */
   meterValueSampleIntervalS: number;
   /** Lỗ hổng chuỗi MeterValues = khoảng cách hai mẫu > gapFactor × sampleInterval. */
@@ -122,6 +123,8 @@ export const DEFAULT_OFFLINE_ALERT_SWEEP_S = 60;
 /** Token DI cho CsmsConfig (dùng `@Inject(CONFIG)`). */
 export const CONFIG = Symbol('CSMS_CONFIG');
 
+export const DEFAULT_TARIFF_CLOCK_TOLERANCE_S = 300;
+
 function intEnv(env: NodeJS.ProcessEnv, key: string, fallback: number): number {
   const raw = env[key];
   if (raw === undefined || raw === '') return fallback;
@@ -189,6 +192,11 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): CsmsConfig {
     sessionStartTimeoutS: positiveSecondsEnv(env, 'SESSION_START_TIMEOUT_S', 120),
     sessionHardCapH: positiveHoursEnv(env, 'SESSION_HARD_CAP_H', 24),
     replaySkewThresholdS: intEnv(env, 'REPLAY_SKEW_THRESHOLD_S', DEFAULT_REPLAY_SKEW_S),
+    tariffClockToleranceS: positiveSecondsEnv(
+      env,
+      'TARIFF_CLOCK_TOLERANCE_S',
+      DEFAULT_TARIFF_CLOCK_TOLERANCE_S,
+    ),
     meterValueSampleIntervalS: intEnv(env, 'METER_VALUE_SAMPLE_INTERVAL_S', 10),
     reconcileGapFactor: intEnv(env, 'RECONCILE_GAP_FACTOR', 3),
     reconcileEnergyToleranceWh: intEnv(env, 'RECONCILE_ENERGY_TOLERANCE_WH', 1),

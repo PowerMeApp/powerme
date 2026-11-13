@@ -24,7 +24,7 @@ describe('T101 charge-point tariff clock', () => {
     expect(parseChargePointTime('2026-11-11T12:00:00+07:00')).toEqual(time(0));
   });
 
-  it('uses the existing tolerance inclusively for live frames and rejects future lead', () => {
+  it('uses the tariff tolerance inclusively for live frames and rejects future lead', () => {
     expect(checkTariffTime(time(65000), receipt, 5000)).toBeUndefined();
     expect(checkTariffTime(time(65001), receipt, 5000)).toBe('tariff_clock_future_timestamp');
   });

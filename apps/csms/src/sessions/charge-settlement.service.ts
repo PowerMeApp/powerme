@@ -1,8 +1,12 @@
 import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import type { PoolClient } from 'pg';
-import { CONFIG, CsmsConfig, DEFAULT_REPLAY_SKEW_S } from '../config.js';
+import { CONFIG, CsmsConfig, DEFAULT_TARIFF_CLOCK_TOLERANCE_S } from '../config.js';
 import { DB, Db } from '../db/db.module.js';
-import { checkTariffTimeline, TARIFF_CLOCK_HOLD } from '../reconciliation/tariff-clock.js';
+import {
+  checkTariffTimeline,
+  TARIFF_CLOCK_FALLBACK_PREFIX,
+  TARIFF_CLOCK_UNTRUSTED,
+} from '../reconciliation/tariff-clock.js';
 import { ChargePolicy, validateChargePolicy } from './charge-start-policy.js';
 import { chargeTransaction } from './charge-sql.js';
 
@@ -27,6 +31,12 @@ interface BillableSession {
   promotion_id: string | null;
   operator_id: string;
 }
+
+type StoppedSession = BillableSession & { received_stopped_at: Date; meter_stop_wh: string };
+
+type PricingTimeline = { start: Date; end: Date } & (
+  { clock: 'cp' } | { clock: 'csms'; reason: string }
+);
 
 @Injectable()
 export class ChargeSettlementService {
@@ -103,8 +113,8 @@ export class ChargeSettlementService {
       throw new Error('invalid_boundary_evidence');
     await chargeTransaction(this.db, async (c) => {
       const row = (
-        await c.query(
-          `SELECT s.* FROM sessions s JOIN charge_points cp ON cp.id=s.charge_point_id
+        await c.query<BillableSession>(
+          `SELECT s.*,st.operator_id FROM sessions s JOIN charge_points cp ON cp.id=s.charge_point_id
         JOIN sites st ON st.id=cp.site_id JOIN operator_staff staff ON staff.operator_id=st.operator_id
         JOIN users u ON u.id=staff.user_id AND u.role='operator_staff' AND u.account_status='active'
         JOIN operators o ON o.id=st.operator_id AND o.status='active'
@@ -113,12 +123,10 @@ export class ChargeSettlementService {
         )
       ).rows[0];
       if (!row) throw new Error('not_found');
-      // Mốc giá đo theo đồng hồ trụ, cùng trục với pricedSegments (xem chú thích ở đó).
       if (
+        row.status !== 'reconciled' ||
         !row.received_stopped_at ||
-        !row.cp_stopped_at ||
-        boundaryAt <= row.cp_started_at ||
-        boundaryAt >= row.cp_stopped_at ||
+        !row.received_started_at ||
         meterWh < Number(row.meter_start_wh) ||
         row.meter_stop_wh === null ||
         meterWh > Number(row.meter_stop_wh)
@@ -129,17 +137,26 @@ export class ChargeSettlementService {
           .rowCount
       )
         throw new Error('settlement_already_posted');
+      const timeline = await this.pricingTimeline(c, {
+        ...row,
+        received_stopped_at: row.received_stopped_at,
+        meter_stop_wh: row.meter_stop_wh,
+      });
+      if (boundaryAt <= timeline.start || boundaryAt >= timeline.end)
+        throw new Error('boundary_outside_session');
       const old = (
         await c.query(
-          'SELECT meter_wh FROM charge_tariff_boundary_evidence WHERE session_id=$1 AND boundary_at=$2',
-          [sessionId, boundaryAt],
+          `SELECT meter_wh FROM charge_tariff_boundary_evidence
+           WHERE session_id=$1 AND boundary_at=$2 AND pricing_clock=$3`,
+          [sessionId, boundaryAt, timeline.clock],
         )
       ).rows[0];
       if (old && old.meter_wh !== String(meterWh)) throw new Error('boundary_evidence_conflict');
       await c.query(
-        `INSERT INTO charge_tariff_boundary_evidence(session_id,boundary_at,meter_wh,recorded_by,evidence_note)
-        VALUES($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING`,
-        [sessionId, boundaryAt, meterWh, operatorId, note.trim()],
+        `INSERT INTO charge_tariff_boundary_evidence(
+           session_id,boundary_at,meter_wh,recorded_by,evidence_note,pricing_clock
+         ) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT DO NOTHING`,
+        [sessionId, boundaryAt, meterWh, operatorId, note.trim(), timeline.clock],
       );
       await c.query(
         "UPDATE charge_settlement_jobs SET next_attempt_at=now(),updated_at=now() WHERE session_id=$1 AND state='pending'",
@@ -198,33 +215,11 @@ export class ChargeSettlementService {
           .rowCount
       )
         return 'already_posted';
-      const clockHold = (
-        await c.query<{ reason: string }>(
-          `SELECT split_part(note,' ',1) AS reason FROM session_status_history
-           WHERE session_id=$1 AND event=$2 ORDER BY id LIMIT 1`,
-          [sessionId, TARIFF_CLOCK_HOLD],
-        )
-      ).rows[0];
-      if (clockHold) return pending(clockHold.reason);
-      if (session.received_stopped_at && session.cp_stopped_at && session.meter_stop_wh !== null) {
-        const issue = await checkTariffTimeline(
-          c,
-          {
-            ...session,
-            received_stopped_at: session.received_stopped_at,
-            cp_stopped_at: session.cp_stopped_at,
-            meter_stop_wh: session.meter_stop_wh,
-          },
-          (this.config?.replaySkewThresholdS ?? DEFAULT_REPLAY_SKEW_S) * 1000,
-        );
-        if (issue) return pending(issue);
-      }
       if (
         session.status !== 'reconciled' ||
         session.meter_stop_wh === null ||
         session.energy_wh === null ||
         !session.received_stopped_at ||
-        !session.cp_stopped_at ||
         session.promotion_id
       )
         return pending(
@@ -245,7 +240,12 @@ export class ChargeSettlementService {
         return pending('late_start_operator_review');
       const energy = BigInt(session.meter_stop_wh) - BigInt(session.meter_start_wh);
       if (energy < 0n || energy !== BigInt(session.energy_wh)) return pending('invalid_energy');
-      const segments = await this.pricedSegments(c, session);
+      const timeline = await this.pricingTimeline(c, {
+        ...session,
+        received_stopped_at: session.received_stopped_at,
+        meter_stop_wh: session.meter_stop_wh,
+      });
+      const segments = await this.pricedSegments(c, session, timeline);
       if (!segments) return pending('tariff_coverage_or_boundary_meter_required');
       const numerator = segments.reduce((sum, segment) => sum + segment.numerator, 0n);
       // WP3/T72: BR-P45 rounds the exact total once, never each tariff portion independently.
@@ -326,10 +326,19 @@ export class ChargeSettlementService {
         );
         allocated = rounded;
       }
-      await c.query('UPDATE sessions SET total_cost_vnd=$2,updated_at=now() WHERE id=$1', [
-        sessionId,
-        amount.toString(),
-      ]);
+      await c.query(
+        `UPDATE sessions SET total_cost_vnd=$2,priced_clock=$3,priced_ended_at=$4,updated_at=now()
+         WHERE id=$1`,
+        [sessionId, amount.toString(), timeline.clock, timeline.end],
+      );
+      if (timeline.clock === 'csms') {
+        await c.query(
+          `INSERT INTO reconciliation_records(session_id,record_no,record_type,resolution)
+           SELECT $1,coalesce(max(record_no),0)+1,'tariff_clock_fallback',$2
+           FROM reconciliation_records WHERE session_id=$1`,
+          [sessionId, TARIFF_CLOCK_FALLBACK_PREFIX + timeline.reason],
+        );
+      }
       await c.query(
         `INSERT INTO charging_statements(session_id,driver_id,energy_wh,amount_vnd,earned_points,debit_id,loyalty_entry_id)
         VALUES($1,$2,$3,$4,$5,$6,$7)`,
@@ -351,11 +360,37 @@ export class ChargeSettlementService {
     });
   }
 
-  private async pricedSegments(c: PoolClient, session: BillableSession) {
-    // BR-P02 uses the validated CP timeline for tariff boundaries, including offline replay.
-    const start = session.cp_started_at;
-    const end = session.cp_stopped_at!;
-    if (end < start || end.getTime() - start.getTime() > 366 * 86400000) return undefined;
+  private async pricingTimeline(c: PoolClient, session: StoppedSession): Promise<PricingTimeline> {
+    const { rows } = await c.query<{ reason: string }>(
+      `SELECT split_part(note,' ',1) AS reason FROM session_status_history
+       WHERE session_id=$1 AND (
+         event=$2 OR (event='TARIFF_CLOCK_HOLD' AND split_part(note,' ',1) IN (
+           'tariff_clock_invalid_timestamp','tariff_clock_conflicting_stop'
+         ))
+       ) ORDER BY id LIMIT 1`,
+      [session.id, TARIFF_CLOCK_UNTRUSTED],
+    );
+    const tolerance = this.config?.tariffClockToleranceS ?? DEFAULT_TARIFF_CLOCK_TOLERANCE_S;
+    const reason = rows[0]?.reason ?? (await checkTariffTimeline(c, session, tolerance * 1000));
+    if (!reason && session.cp_stopped_at)
+      return { clock: 'cp', start: session.cp_started_at, end: session.cp_stopped_at };
+    return {
+      clock: 'csms',
+      start: session.received_started_at,
+      end: session.received_stopped_at,
+      reason: reason ?? 'tariff_clock_invalid_timestamp',
+    };
+  }
+
+  private async pricedSegments(c: PoolClient, session: BillableSession, timeline: PricingTimeline) {
+    const { start, end, clock } = timeline;
+    if (
+      !Number.isFinite(start.getTime()) ||
+      !Number.isFinite(end.getTime()) ||
+      end < start ||
+      end.getTime() - start.getTime() > 366 * 86400000
+    )
+      return undefined;
     const { rows } = await c.query<{ id: string; price: string; starts: Date; ends: Date }>(
       `
       SELECT t.id,t.price_per_kwh_vnd AS price,
@@ -388,20 +423,23 @@ export class ChargeSettlementService {
       let meter: bigint;
       if (right === end.getTime()) meter = BigInt(session.meter_stop_wh!);
       else {
-        // WP3/T72: tariff boundaries need observed aggregate meters, never an invented split.
-        const sample = (
-          await c.query<{ wh: string }>(
-            `SELECT CASE WHEN unit='kWh' THEN value*1000 ELSE value END AS wh
-          FROM meter_values WHERE session_id=$1 AND cp_timestamp=$2 AND measurand='Energy.Active.Import.Register'
-          AND phase IS NULL AND (unit IN ('Wh','kWh') OR unit IS NULL)`,
-            [session.id, new Date(right)],
-          )
-        ).rows;
+        // Receipt time does not date the meter reading inside a delayed or batched frame.
+        const sample =
+          clock === 'cp'
+            ? (
+                await c.query<{ wh: string }>(
+                  `SELECT CASE WHEN unit='kWh' THEN value*1000 ELSE value END AS wh
+                   FROM meter_values WHERE session_id=$1 AND cp_timestamp=$2 AND measurand='Energy.Active.Import.Register'
+                   AND phase IS NULL AND (unit IN ('Wh','kWh') OR unit IS NULL)`,
+                  [session.id, new Date(right)],
+                )
+              ).rows
+            : [];
         const evidence = (
           await c.query<{ meter_wh: string }>(
             `SELECT meter_wh FROM charge_tariff_boundary_evidence
-          WHERE session_id=$1 AND boundary_at=$2`,
-            [session.id, new Date(right)],
+          WHERE session_id=$1 AND boundary_at=$2 AND pricing_clock=$3`,
+            [session.id, new Date(right), clock],
           )
         ).rows[0];
         if (sample.length > 1 || (sample.length === 1 && !/^\d+(?:\.0+)?$/.test(sample[0]!.wh)))

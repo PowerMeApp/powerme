@@ -1,6 +1,7 @@
 import type { PoolClient } from 'pg';
 
-export const TARIFF_CLOCK_HOLD = 'TARIFF_CLOCK_HOLD';
+export const TARIFF_CLOCK_FALLBACK_PREFIX = 'tariff_clock=csms_fallback reason=';
+export const TARIFF_CLOCK_UNTRUSTED = 'TARIFF_CLOCK_UNTRUSTED';
 
 interface Receipt {
   receivedAt: Date;
@@ -61,7 +62,7 @@ interface SessionClock {
   received_started_at: Date;
   received_stopped_at: Date;
   cp_started_at: Date;
-  cp_stopped_at: Date;
+  cp_stopped_at: Date | null;
 }
 
 interface Endpoint extends Receipt {
@@ -95,6 +96,7 @@ async function readEndpoint(c: PoolClient, s: SessionClock, stop: boolean) {
 }
 
 export async function checkTariffTimeline(c: PoolClient, s: SessionClock, toleranceMs: number) {
+  if (!s.cp_stopped_at) return 'tariff_clock_invalid_timestamp';
   const start = await readEndpoint(c, s, false);
   const stop = await readEndpoint(c, s, true);
   if (!start || !stop) return 'tariff_clock_frame_unverified';
@@ -116,15 +118,21 @@ export async function checkTariffTimeline(c: PoolClient, s: SessionClock, tolera
 
   const { rows } = await c.query<
     Receipt & {
-      cpTimestamp: Date;
+      cpTimestamps: Date[];
       meterClocks: string[] | null;
       stopBatchClocks: string[] | null;
     }
   >(
-    `SELECT m.cp_timestamp AS "cpTimestamp",m.received_at AS "receivedAt",m.epoch,
+    `WITH receipts AS (
+       SELECT received_at,epoch,array_agg(DISTINCT cp_timestamp ORDER BY cp_timestamp) AS timestamps
+       FROM meter_values WHERE session_id=$1 AND measurand='Energy.Active.Import.Register'
+         AND phase IS NULL AND (unit IN ('Wh','kWh') OR unit IS NULL)
+       GROUP BY received_at,epoch
+     )
+     SELECT m.timestamps AS "cpTimestamps",m.received_at AS "receivedAt",m.epoch,
        e.opened_at AS "openedAt",e.closed_at AS "closedAt",first_epoch.opened_at AS "firstOpenedAt",
        clocks.meter AS "meterClocks",clocks.stop_batch AS "stopBatchClocks"
-     FROM meter_values m
+     FROM receipts m
      LEFT JOIN charge_point_connections e ON e.charge_point_id=$2 AND e.epoch=m.epoch
      LEFT JOIN charge_point_connections first_epoch ON first_epoch.charge_point_id=$2 AND first_epoch.epoch=1
      LEFT JOIN LATERAL (
@@ -143,9 +151,7 @@ export async function checkTariffTimeline(c: PoolClient, s: SessionClock, tolera
          AND ((l.action='MeterValues' AND l.raw->3->>'connectorId'=$4)
            OR (l.action='StopTransaction' AND l.cp_timestamp=$5 AND l.raw->3->>'meterStop'=$6))
      ) clocks ON true
-     WHERE m.session_id=$1 AND m.measurand='Energy.Active.Import.Register' AND m.phase IS NULL
-       AND (m.unit IN ('Wh','kWh') OR m.unit IS NULL)
-     ORDER BY m.received_at,m.id`,
+     ORDER BY m.received_at,m.epoch`,
     [
       s.id,
       s.charge_point_id,
@@ -155,27 +161,29 @@ export async function checkTariffTimeline(c: PoolClient, s: SessionClock, tolera
       s.meter_stop_wh,
     ],
   );
-  let lastLive: { cp: Date; receivedAt: Date; epoch: number | null } | undefined;
+  const lastLive = new Map<number | null, Date>();
   for (const sample of rows) {
-    const cp = sample.cpTimestamp;
-    if (cp < s.cp_started_at || cp > s.cp_stopped_at || sample.receivedAt < start.receivedAt)
-      return 'tariff_clock_sample_outside_session';
-    const matches = (raw: string) => parseChargePointTime(raw)?.getTime() === cp.getTime();
-    const meterFrame = sample.meterClocks?.some(matches);
-    const stopBatch = sample.stopBatchClocks?.some(matches) ?? false;
-    const issue = checkTariffTime(cp, sample, toleranceMs, stopBatch);
-    if (issue) return issue;
-    if (!meterFrame && !stopBatch) return 'tariff_clock_sample_frame_unverified';
-    if (meterFrame && stopBatch) return 'tariff_clock_sample_frame_unverified';
-    if (sample.epoch! < start.epoch!) return 'tariff_clock_epoch_unverified';
-    // Replay and stop batches can carry older readings. Live readings must move forward.
-    if (!stopBatch && sample.receivedAt.getTime() - cp.getTime() <= toleranceMs) {
-      if (lastLive?.epoch === sample.epoch) {
-        if (sample.receivedAt > lastLive.receivedAt && cp < lastLive.cp)
-          return 'tariff_clock_sample_out_of_order';
-        if (cp < lastLive.cp) continue;
+    const meterTimes = new Set(
+      sample.meterClocks?.map((raw) => parseChargePointTime(raw)?.getTime()),
+    );
+    const stopTimes = new Set(
+      sample.stopBatchClocks?.map((raw) => parseChargePointTime(raw)?.getTime()),
+    );
+    const previous = lastLive.get(sample.epoch);
+    for (const cp of sample.cpTimestamps) {
+      if (cp < s.cp_started_at || cp > s.cp_stopped_at || sample.receivedAt < start.receivedAt)
+        return 'tariff_clock_sample_outside_session';
+      const meterFrame = meterTimes.has(cp.getTime());
+      const stopBatch = stopTimes.has(cp.getTime());
+      if (meterFrame === stopBatch) return 'tariff_clock_sample_frame_unverified';
+      const issue = checkTariffTime(cp, sample, toleranceMs, stopBatch);
+      if (issue) return issue;
+      if (sample.epoch! < start.epoch!) return 'tariff_clock_epoch_unverified';
+      // Within a receipt, a MeterValues frame can list samples in any order.
+      if (meterFrame && sample.receivedAt.getTime() - cp.getTime() <= toleranceMs) {
+        if (previous && cp < previous) return 'tariff_clock_sample_out_of_order';
+        lastLive.set(sample.epoch, cp);
       }
-      lastLive = { cp, receivedAt: sample.receivedAt, epoch: sample.epoch };
     }
   }
   return undefined;
