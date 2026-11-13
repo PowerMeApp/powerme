@@ -49,6 +49,25 @@ describe('loadConfig — OFFLINE_GRACE_S (ADR-0016 D-A)', () => {
   });
 });
 
+describe('loadConfig — TARIFF_CLOCK_TOLERANCE_S (T101)', () => {
+  it('defaults to 300 seconds independently of the 5-second replay threshold', () => {
+    expect(loadConfig(base)).toMatchObject({ tariffClockToleranceS: 300, replaySkewThresholdS: 5 });
+    expect(
+      loadConfig({ ...base, TARIFF_CLOCK_TOLERANCE_S: '', REPLAY_SKEW_THRESHOLD_S: '12' }),
+    ).toMatchObject({ tariffClockToleranceS: 300, replaySkewThresholdS: 12 });
+    expect(loadConfig({ ...base, TARIFF_CLOCK_TOLERANCE_S: '60' })).toMatchObject({
+      tariffClockToleranceS: 60,
+      replaySkewThresholdS: 5,
+    });
+  });
+
+  it.each(['0', '-1', '1.5', 'abc'])('rejects invalid tariff tolerance %s', (value) => {
+    expect(() => loadConfig({ ...base, TARIFF_CLOCK_TOLERANCE_S: value })).toThrow(
+      /TARIFF_CLOCK_TOLERANCE_S/,
+    );
+  });
+});
+
 describe('loadConfig — FAULT_RESET_TIMEOUT_S (WF-04, STM-6 t6)', () => {
   it('mặc định 120 giây khi không khai báo hoặc rỗng', () => {
     expect(loadConfig({ ...base }).faultResetTimeoutS).toBe(120);

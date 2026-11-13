@@ -13,6 +13,7 @@ import { ConsoleError } from '../src/console/console.http.js';
 import { createDb, Db } from '../src/db/db.module.js';
 import { ConnectionRegistry } from '../src/ocpp-gateway/connection-registry.js';
 import type { InboundContext } from '../src/ocpp-gateway/inbound-context.js';
+import { OcppMessageLogger } from '../src/ocpp-gateway/ocpp-message-logger.js';
 import { ReconciliationService } from '../src/reconciliation/reconciliation.service.js';
 import { ChargeSettlementService } from '../src/sessions/charge-settlement.service.js';
 import type { ChargePolicy } from '../src/sessions/charge-start-policy.js';
@@ -76,7 +77,24 @@ describeDb('BE-24 — phiên unattributed (F-12) và route review', () => {
 
   const q = async (sql: string, args: unknown[] = []) => (await db.$client.query(sql, args)).rows;
 
-  function ctx(at: Date): InboundContext {
+  async function ctx(
+    at: Date,
+    action: 'StartTransaction' | 'StopTransaction',
+    params: object,
+  ): Promise<InboundContext> {
+    const messageId = `m${++logId}`;
+    const messageLogId = await new OcppMessageLogger(db).log({
+      chargePointId: cpId,
+      epoch: 1,
+      direction: 'in',
+      messageType: 2,
+      uniqueId: messageId,
+      action,
+      cpTimestamp: at,
+      receivedAt: at,
+      raw: [2, messageId, action, params],
+      replayed: false,
+    });
     return {
       identity: CP,
       chargePointId: cpId,
@@ -84,8 +102,8 @@ describeDb('BE-24 — phiên unattributed (F-12) và route review', () => {
       epochOpenedAt: T(0),
       receivedAt: at,
       cpTimestamp: at,
-      messageId: `m${++logId}`,
-      messageLogId: logId,
+      messageId,
+      messageLogId,
       replay: { replayed: false, reason: null, skewS: 0 },
     };
   }
@@ -126,21 +144,20 @@ describeDb('BE-24 — phiên unattributed (F-12) và route review', () => {
   async function chargeWith(idTag: string, stop = true): Promise<number> {
     meter += 10000;
     const startAt = T(++minute);
+    const start = { connectorId: 1, idTag, meterStart: meter, timestamp: startAt.toISOString() };
     const r = await sessionsService.onStartTransaction(
-      { connectorId: 1, idTag, meterStart: meter, timestamp: startAt.toISOString() },
-      ctx(startAt),
+      start,
+      await ctx(startAt, 'StartTransaction', start),
     );
     if (stop) {
       const stopAt = T(++minute);
-      await sessionsService.onStopTransaction(
-        {
-          transactionId: r.transactionId,
-          meterStop: meter + 2000,
-          timestamp: stopAt.toISOString(),
-          reason: 'Local',
-        },
-        ctx(stopAt),
-      );
+      const end = {
+        transactionId: r.transactionId,
+        meterStop: meter + 2000,
+        timestamp: stopAt.toISOString(),
+        reason: 'Local' as const,
+      };
+      await sessionsService.onStopTransaction(end, await ctx(stopAt, 'StopTransaction', end));
     }
     return Number(
       (await q('SELECT id FROM sessions WHERE transaction_no=$1', [r.transactionId]))[0]!.id,
@@ -152,16 +169,26 @@ describeDb('BE-24 — phiên unattributed (F-12) và route review', () => {
     meter += 10000;
     const start = T(++minute);
     const stop = T(++minute);
-    return Number(
-      (
-        await q(
-          `INSERT INTO sessions(connector_id,charge_point_id,connector_no,id_tag,origin,payment_mode,status,
+    const idTag = `REVIEW-${minute}`;
+    const [row] = await q(
+      `INSERT INTO sessions(connector_id,charge_point_id,connector_no,id_tag,origin,payment_mode,status,
              cp_started_at,received_started_at,meter_start_wh,meter_stop_wh,cp_stopped_at,received_stopped_at,energy_wh)
-           VALUES($1,$2,1,$3,'rfid','unattributed','review',$4,$4,$5,$6,$7,$7,2000) RETURNING id`,
-          [connectorId, cpId, `REVIEW-${minute}`, start, meter, meter + 2000, stop],
-        )
-      )[0]!.id,
+           VALUES($1,$2,1,$3,'rfid','unattributed','review',$4,$4,$5,$6,$7,$7,2000)
+           RETURNING id,transaction_no`,
+      [connectorId, cpId, idTag, start, meter, meter + 2000, stop],
     );
+    await ctx(start, 'StartTransaction', {
+      connectorId: 1,
+      idTag,
+      meterStart: meter,
+      timestamp: start.toISOString(),
+    });
+    await ctx(stop, 'StopTransaction', {
+      transactionId: row!.transaction_no,
+      meterStop: meter + 2000,
+      timestamp: stop.toISOString(),
+    });
+    return Number(row!.id);
   }
 
   const session = async (id: number) =>
@@ -236,6 +263,10 @@ describeDb('BE-24 — phiên unattributed (F-12) và route review', () => {
           [CP, site, FREE_VEND_TAG],
         )
       )[0]!.id,
+    );
+    await q(
+      'INSERT INTO charge_point_connections(charge_point_id,epoch,opened_at) VALUES($1,1,$2)',
+      [cpId, T(0)],
     );
     connectorId = Number(
       (

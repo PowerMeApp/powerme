@@ -138,6 +138,29 @@ describe('reconciliationKind / resolutionNumber / mapReconciliation', () => {
     ).toBe(true);
   });
 
+  it('mapReconciliation exposes the tariff fallback audit kind', () => {
+    const resolution = 'tariff_clock=csms_fallback reason=tariff_clock_ambiguous_delay';
+    expect(
+      mapReconciliation({
+        id: 1,
+        sessionId: 3,
+        transactionNo: 3,
+        recordNo: 1,
+        recordType: 'tariff_clock_fallback',
+        gapStart: null,
+        gapEnd: null,
+        energyDifferenceWh: null,
+        reviewedAt: null,
+        resolution,
+        createdAt: T('14:21:00'),
+      }),
+    ).toMatchObject({
+      kind: 'tariff_clock_fallback',
+      record_type: 'tariff_clock_fallback',
+      resolution,
+    });
+  });
+
   it('rút số từ resolution; "null" hoặc thiếu khoá → null, không nhầm khoá có tiền tố', () => {
     expect(resolutionNumber(conflict, 'meter_stop_minus_start')).toBe(242);
     expect(resolutionNumber(conflict, 'series_last')).toBe(1042.64);
@@ -323,7 +346,7 @@ describe('buildSummary', () => {
     expect(out.sessions_by_status['review']).toBe(1);
     expect(out.sessions_by_status['failed']).toBe(0);
     expect(out.sessions_total).toBe(3);
-    expect(Object.keys(out.reconciliation_by_type)).toHaveLength(7);
+    expect(Object.keys(out.reconciliation_by_type)).toHaveLength(8);
     expect(out.reconciliation_by_type['conflict']).toBe(0);
     expect(out.reconciliation_by_type['late_sample']).toBe(0);
     expect(out.reconciliation_conflicts).toBe(7);

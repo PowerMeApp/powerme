@@ -23,7 +23,7 @@
  * stopping/RemoteStop (#7, #8, #9a), hard cap (#16a nhánh timer), operator resolve (#17).
  */
 import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
-import { and, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNull, or, sql } from 'drizzle-orm';
 import { CONFIG, CsmsConfig } from '../config.js';
 import { DB, Db, DbExecutor, Tx } from '../db/db.module.js';
 import {
@@ -53,10 +53,12 @@ import {
   FrameRef,
   ReconciliationService,
 } from '../reconciliation/reconciliation.service.js';
+import { parseChargePointTime, TARIFF_CLOCK_UNTRUSTED } from '../reconciliation/tariff-clock.js';
 import { isConnectorStatus, isExpectedTransition } from './connectors/valid-transitions.js';
 import { SessionEvent, SessionStateMachine, SessionStatus } from './session-state-machine.js';
 
 export const ENERGY_MEASURAND = 'Energy.Active.Import.Register';
+const METER_EVIDENCE_CONFLICT = 'METER_EVIDENCE_CONFLICT';
 
 /** Trạng thái còn "mở" trên trụ — nhận được bản tin live, StopTransaction. */
 const OPEN_STATUSES: readonly SessionStatus[] = ['active', 'paused', 'stopping', 'orphaned'];
@@ -252,6 +254,7 @@ export class SessionsService {
           .limit(1);
         if (!existing)
           throw new Error('UNIQUE từ chối nhưng không tìm thấy phiên — không thể xảy ra');
+        await tx.execute(sql`SELECT id FROM sessions WHERE id=${existing.id} FOR UPDATE`);
         await this.reconciliation.recordDuplicate(tx, existing.id, frame);
         this.logger.warn(
           `duplicate StartTransaction ${ctx.identity} c${req.connectorId} idTag=${req.idTag} → trả lại tx ${existing.transactionNo}`,
@@ -323,23 +326,31 @@ export class SessionsService {
   // ---------------------------------------------------------------------------
 
   async onMeterValues(req: MeterValuesRequest, ctx: InboundContext): Promise<void> {
-    if (req.transactionId === undefined || req.transactionId === null) {
+    const transactionNo = req.transactionId;
+    if (transactionNo === undefined || transactionNo === null) {
       this.logger.debug(
         `MeterValues không có transactionId (${ctx.identity} c${req.connectorId}) — bỏ qua`,
       );
       return;
     }
-    const session = await this.findByTransactionNo(req.transactionId);
-    if (!session) {
-      this.logger.warn(`MeterValues cho transactionId ${req.transactionId} không tồn tại — bỏ qua`);
-      return;
-    }
-    if (session.chargePointId !== ctx.chargePointId)
-      throw new Error('session_charge_point_mismatch');
     const frame = this.frameRef('MeterValues', ctx);
     await this.db.transaction(async (tx) => {
-      const { inserted, skipped } = await this.ingestSamples(tx, session.id, req.meterValue, ctx);
-      if (inserted === 0 && skipped > 0) {
+      const session = await this.lockTransaction(tx, transactionNo);
+      if (!session) {
+        this.logger.warn(
+          `MeterValues cho transactionId ${req.transactionId} không tồn tại — bỏ qua`,
+        );
+        return;
+      }
+      if (session.chargePointId !== ctx.chargePointId)
+        throw new Error('session_charge_point_mismatch');
+      const { inserted, skipped, meterConflict, untrustedClock } = await this.ingestSamples(
+        tx,
+        session,
+        req.meterValue,
+        ctx,
+      );
+      if (inserted === 0 && skipped > 0 && !meterConflict && !untrustedClock) {
         await this.reconciliation.recordDuplicate(tx, session.id, frame);
       }
       if (ctx.replay.replayed) {
@@ -353,7 +364,7 @@ export class SessionsService {
       }
 
       // Mẫu muộn cho phiên đã có meter_stop → đối soát lại (WF-03 giai đoạn F, T13 #19).
-      if (inserted > 0 && session.meterStopWh !== null) {
+      if (!meterConflict && inserted > 0 && session.meterStopWh !== null) {
         await this.reconcileLateSample(tx, session, ctx);
       }
     });
@@ -364,19 +375,37 @@ export class SessionsService {
   // ---------------------------------------------------------------------------
 
   async onStopTransaction(req: StopTransactionRequest, ctx: InboundContext): Promise<void> {
-    const session = await this.findByTransactionNo(req.transactionId);
     const frame = this.frameRef('StopTransaction', ctx);
-    if (!session) {
-      // Không có phiên để gắn record (session_id NOT NULL) — chỉ còn ocpp_message_log làm chứng.
-      this.logger.warn(
-        `StopTransaction cho transactionId ${req.transactionId} không tồn tại (${ctx.identity}) — orphan stop, chỉ có log`,
-      );
-      return;
-    }
-    if (session.chargePointId !== ctx.chargePointId)
-      throw new Error('session_charge_point_mismatch');
     await this.db.transaction(async (tx) => {
+      const session = await this.lockTransaction(tx, req.transactionId);
+      if (!session) {
+        this.logger.warn(
+          `StopTransaction cho transactionId ${req.transactionId} không tồn tại (${ctx.identity}) — orphan stop, chỉ có log`,
+        );
+        return;
+      }
+      if (session.chargePointId !== ctx.chargePointId)
+        throw new Error('session_charge_point_mismatch');
+      const cpStoppedAt = parseChargePointTime(req.timestamp);
       if (session.meterStopWh !== null || !OPEN_STATUSES.includes(session.status)) {
+        if (session.receivedStoppedAt) {
+          const expectedMeter = req.meterStop >= session.meterStartWh ? req.meterStop : null;
+          if (expectedMeter !== session.meterStopWh) {
+            await this.recordMeterConflict(tx, session, ctx, 'conflicting_stop');
+          }
+          if (cpStoppedAt?.getTime() !== session.cpStoppedAt?.getTime() || !cpStoppedAt) {
+            await this.recordClockIssue(tx, session, ctx, 'tariff_clock_conflicting_stop');
+          } else if (expectedMeter === session.meterStopWh && req.transactionData?.length) {
+            const { inserted, meterConflict } = await this.ingestSamples(
+              tx,
+              session,
+              req.transactionData,
+              ctx,
+            );
+            if (!meterConflict && inserted > 0 && session.meterStopWh !== null)
+              await this.reconcileLateSample(tx, session, ctx);
+          }
+        }
         this.logger.warn(
           `StopTransaction lặp cho tx ${req.transactionId} (status=${session.status}) — orphan_stop`,
         );
@@ -385,8 +414,10 @@ export class SessionsService {
       }
 
       if (req.transactionData && req.transactionData.length > 0) {
-        await this.ingestSamples(tx, session.id, req.transactionData, ctx);
+        await this.ingestSamples(tx, session, req.transactionData, ctx);
       }
+      if (!cpStoppedAt)
+        await this.recordClockIssue(tx, session, ctx, 'tariff_clock_invalid_timestamp');
 
       const meterStopWh = req.meterStop >= session.meterStartWh ? req.meterStop : null;
       if (meterStopWh === null) {
@@ -394,7 +425,6 @@ export class SessionsService {
           `tx ${req.transactionId}: meterStop ${req.meterStop} < meterStart ${session.meterStartWh} — không lưu, đối soát conflict`,
         );
       }
-      const cpStoppedAt = new Date(req.timestamp);
       const replayed = ctx.replay.replayed;
       await tx
         .update(sessions)
@@ -434,18 +464,33 @@ export class SessionsService {
       let verdictNote: string;
       let verdictLabel: string;
       let diffLabel: string;
+      const [meterConflict] = await tx
+        .select({ id: sessionStatusHistory.id })
+        .from(sessionStatusHistory)
+        .where(
+          and(
+            eq(sessionStatusHistory.sessionId, session.id),
+            or(
+              eq(sessionStatusHistory.event, METER_EVIDENCE_CONFLICT),
+              sql`${sessionStatusHistory.event}='TARIFF_CLOCK_HOLD'
+                AND split_part(${sessionStatusHistory.note},' ',1)='tariff_clock_conflicting_sample'`,
+            ),
+          ),
+        )
+        .limit(1);
       if (this.reconciliation.enabled) {
         const verdict = await this.evaluateSession(tx, { ...session, meterStopWh, cpStoppedAt });
         await this.reconciliation.recordVerdict(tx, session.id, verdict, {
           kind: 'stop',
           replayed,
         });
-        event = verdict.outcome === 'conflict' ? 'RECONCILE_CONFLICT' : 'RECONCILE_OK';
+        event =
+          meterConflict || verdict.outcome === 'conflict' ? 'RECONCILE_CONFLICT' : 'RECONCILE_OK';
         verdictLabel = verdict.outcome;
         verdictNote = `đối soát=${verdict.outcome}`;
         diffLabel = String(verdict.energyDifferenceWh ?? 'null');
       } else {
-        event = meterStopWh === null ? 'RECONCILE_CONFLICT' : 'RECONCILE_OK';
+        event = meterConflict || meterStopWh === null ? 'RECONCILE_CONFLICT' : 'RECONCILE_OK';
         verdictLabel = 'tắt';
         verdictNote = 'đối soát=tắt (ablation: tin meterStop của trụ)';
         diffLabel = '-';
@@ -587,6 +632,15 @@ export class SessionsService {
     return row ?? null;
   }
 
+  private async lockTransaction(tx: Tx, transactionNo: number) {
+    const [session] = await tx
+      .select()
+      .from(sessions)
+      .where(eq(sessions.transactionNo, transactionNo))
+      .for('update');
+    return session;
+  }
+
   /** Chuỗi Energy.Active.Import.Register của phiên theo cp_timestamp. */
   async getEnergySeries(ex: DbExecutor, sessionId: number): Promise<EnergySample[]> {
     const rows = await ex
@@ -705,30 +759,62 @@ export class SessionsService {
   /** Mỗi SampledValue một dòng; dedup bằng query vì partition không cho UNIQUE (T11). */
   private async ingestSamples(
     tx: Tx,
-    sessionId: number,
+    session: SessionRow,
     values: MeterValue[],
     ctx: InboundContext,
-  ): Promise<{ inserted: number; skipped: number }> {
+  ): Promise<{
+    inserted: number;
+    skipped: number;
+    meterConflict: boolean;
+    untrustedClock: boolean;
+  }> {
     let inserted = 0;
     let skipped = 0;
+    const invalidTimestamp = values.some(
+      (value) =>
+        !parseChargePointTime(value.timestamp) &&
+        value.sampledValue.some(
+          (sample) =>
+            (sample.measurand ?? ENERGY_MEASURAND) === ENERGY_MEASURAND &&
+            !sample.phase &&
+            (!sample.unit || sample.unit === 'Wh' || sample.unit === 'kWh'),
+        ),
+    );
+    let conflictingSample = false;
     for (const sample of this.flatten(values)) {
+      const aggregateEnergy =
+        sample.measurand === ENERGY_MEASURAND &&
+        sample.phase === null &&
+        [null, 'Wh', 'kWh'].includes(sample.unit);
       const [dup] = await tx
-        .select({ id: meterValues.id })
+        .select({
+          sameEnergy: aggregateEnergy
+            ? sql<boolean>`(${meterValues.value} * CASE WHEN ${meterValues.unit}='kWh' THEN 1000 ELSE 1 END)
+                = (${sample.value}::numeric(14,3) * ${sample.unit === 'kWh' ? 1000 : 1})`
+            : sql<boolean>`true`,
+        })
         .from(meterValues)
         .where(
           and(
-            eq(meterValues.sessionId, sessionId),
+            eq(meterValues.sessionId, session.id),
             eq(meterValues.cpTimestamp, sample.cpTimestamp),
             eq(meterValues.measurand, sample.measurand),
+            sample.phase === null ? isNull(meterValues.phase) : eq(meterValues.phase, sample.phase),
+            aggregateEnergy
+              ? or(isNull(meterValues.unit), inArray(meterValues.unit, ['Wh', 'kWh']))
+              : sample.unit === null
+                ? isNull(meterValues.unit)
+                : eq(meterValues.unit, sample.unit),
           ),
         )
         .limit(1);
       if (dup) {
+        if (!dup.sameEnergy) conflictingSample = true;
         skipped++;
         continue;
       }
       await tx.insert(meterValues).values({
-        sessionId,
+        sessionId: session.id,
         cpTimestamp: sample.cpTimestamp,
         receivedAt: ctx.receivedAt,
         measurand: sample.measurand,
@@ -742,14 +828,60 @@ export class SessionsService {
       });
       inserted++;
     }
-    return { inserted, skipped };
+    if (invalidTimestamp)
+      await this.recordClockIssue(tx, session, ctx, 'tariff_clock_invalid_timestamp');
+    if (conflictingSample) await this.recordMeterConflict(tx, session, ctx, 'conflicting_sample');
+    return {
+      inserted,
+      skipped,
+      meterConflict: conflictingSample,
+      untrustedClock: invalidTimestamp,
+    };
+  }
+
+  private async recordClockIssue(tx: Tx, session: SessionRow, ctx: InboundContext, reason: string) {
+    await tx.insert(sessionStatusHistory).values({
+      sessionId: session.id,
+      fromStatus: session.status,
+      toStatus: session.status,
+      event: TARIFF_CLOCK_UNTRUSTED,
+      note: `${reason} ${this.frameNote(ctx)}`,
+      occurredAt: ctx.receivedAt,
+    });
+  }
+
+  private async recordMeterConflict(
+    tx: Tx,
+    session: SessionRow,
+    ctx: InboundContext,
+    reason: string,
+  ) {
+    await tx.insert(sessionStatusHistory).values({
+      sessionId: session.id,
+      fromStatus: session.status,
+      toStatus: session.status,
+      event: METER_EVIDENCE_CONFLICT,
+      note: `${reason} ${this.frameNote(ctx)}`,
+      occurredAt: ctx.receivedAt,
+    });
+    await this.reconciliation.recordMeterEvidenceConflict(
+      tx,
+      session.id,
+      this.frameRef('charging_telemetry', ctx),
+      reason,
+    );
+    if (
+      session.status === 'reconciled' &&
+      !(await this.reconciliation.hasSessionDebit(tx, session.id))
+    )
+      await this.transition(tx, session, 'LATE_SAMPLE_CONFLICT', ctx.receivedAt, reason);
   }
 
   private flatten(values: MeterValue[]): FlatSample[] {
     const out: FlatSample[] = [];
     for (const mv of values) {
-      const cpTimestamp = new Date(mv.timestamp);
-      if (Number.isNaN(cpTimestamp.getTime())) continue;
+      const cpTimestamp = parseChargePointTime(mv.timestamp);
+      if (!cpTimestamp) continue;
       for (const sv of mv.sampledValue) {
         if (!Number.isFinite(Number(sv.value))) {
           this.logger.warn(

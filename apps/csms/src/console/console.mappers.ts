@@ -41,6 +41,7 @@ export const RECONCILIATION_TYPES = [
   'unknown_id_tag',
   'conflict',
   'late_sample',
+  'tariff_clock_fallback',
 ] as const;
 
 export function iso(d: Date | null | undefined): string | null {
@@ -91,6 +92,7 @@ export function mapStation(row: StationInput, connected: boolean) {
 
 export type ReconciliationKind =
   | 'conflict'
+  | 'tariff_clock_fallback'
   | 'gap_detected'
   | 'replay'
   | 'duplicate'
@@ -126,7 +128,8 @@ export function reconciliationKind(
     recordType === 'replay' ||
     recordType === 'duplicate' ||
     recordType === 'orphan_stop' ||
-    recordType === 'unknown_id_tag'
+    recordType === 'unknown_id_tag' ||
+    recordType === 'tariff_clock_fallback'
   ) {
     return recordType;
   }
