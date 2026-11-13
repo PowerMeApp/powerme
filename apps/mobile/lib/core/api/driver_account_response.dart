@@ -15,10 +15,9 @@ class DriverAccountResponse {
   final List<DriverVehicleResponse> vehicles;
 }
 
-class DriverVehicleResponse {
-  DriverVehicleResponse._(Map<String, dynamic> json)
-    : id = _id(json, 'vehicle_id'),
-      plate = _text(json, 'plate_number'),
+class DriverVehicleModelResponse {
+  DriverVehicleModelResponse._(Map<String, dynamic> json)
+    : modelId = _id(json, 'vehicle_model_id'),
       brand = _text(json, 'brand'),
       model = _text(json, 'model_name'),
       connector = switch (json['connector_type']) {
@@ -28,31 +27,56 @@ class DriverVehicleResponse {
         'type2' => 'Type 2',
         _ => throw _malformed,
       },
-      isDefault = _boolean(json, 'is_default') {
-    _id(json, 'vehicle_model_id');
-    _boolean(json, 'is_vinfast');
-    _nullableNumber<num>(json, 'battery_capacity_kwh');
-    _nullableNumber<int>(json, 'rated_range_km');
-    _nullableNumber<num>(json, 'max_dc_kw');
-  }
+      isVinFast = _boolean(json, 'is_vinfast'),
+      batteryCapacityKwh = _nullableNumber<num>(json, 'battery_capacity_kwh'),
+      ratedRangeKm = _nullableNumber<int>(json, 'rated_range_km'),
+      maxDcKw = _nullableNumber<num>(json, 'max_dc_kw');
 
-  final String id;
-  final String plate;
+  final String modelId;
   final String brand;
   final String model;
   final String connector;
+  final bool isVinFast;
+  final num? batteryCapacityKwh;
+  final int? ratedRangeKm;
+  final num? maxDcKw;
+
+  static List<DriverVehicleModelResponse> catalog(Map<String, dynamic> json) =>
+      _uniqueList(
+        json['items'],
+        DriverVehicleModelResponse._,
+        (v) => v.modelId,
+      );
+}
+
+class DriverVehicleResponse extends DriverVehicleModelResponse {
+  DriverVehicleResponse._(super.json)
+    : id = _id(json, 'vehicle_id'),
+      plate = _text(json, 'plate_number'),
+      isDefault = _boolean(json, 'is_default'),
+      super._();
+
+  final String id;
+  final String plate;
   final bool isDefault;
 }
 
-List<DriverVehicleResponse> _vehicles(Object? value) {
+List<DriverVehicleResponse> _vehicles(Object? value) =>
+    _uniqueList(value, DriverVehicleResponse._, (v) => v.id);
+
+List<T> _uniqueList<T>(
+  Object? value,
+  T Function(Map<String, dynamic>) parse,
+  String Function(T) id,
+) {
   if (value is! List) throw _malformed;
   final ids = <String>{};
   return List.unmodifiable(
     value.map((item) {
       if (item is! Map<String, dynamic>) throw _malformed;
-      final vehicle = DriverVehicleResponse._(item);
-      if (!ids.add(vehicle.id)) throw _malformed;
-      return vehicle;
+      final entry = parse(item);
+      if (!ids.add(id(entry))) throw _malformed;
+      return entry;
     }),
   );
 }
@@ -78,12 +102,12 @@ bool _boolean(Map<String, dynamic> json, String key) {
   return value;
 }
 
-void _nullableNumber<T extends num>(Map<String, dynamic> json, String key) {
+T? _nullableNumber<T extends num>(Map<String, dynamic> json, String key) {
+  if (!json.containsKey(key)) throw _malformed;
   final value = json[key];
-  if (!json.containsKey(key) ||
-      (value != null && (value is! T || !value.isFinite))) {
-    throw _malformed;
-  }
+  if (value == null) return null;
+  if (value is! T || !value.isFinite) throw _malformed;
+  return value;
 }
 
 const _malformed = DriverApiException(DriverApiProblem.malformed);

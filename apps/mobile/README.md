@@ -5,11 +5,15 @@
 | Chủ sở hữu | WP3 — Mobile Developer (Sơn) |
 | Cột mốc | **M3 — 18/10/2026** (giao diện + mock local, PR #70) |
 | Stack | Flutter 3.44.2 / Dart 3.12.2, flutter_riverpod 3.4.3, go_router 16.3.0, vietmap_flutter_gl 4.1.1, geolocator 14.0.2, mobile_scanner 7.4.2; ngoài npm workspaces (ADR-0001, phụ lục 10/2026) |
-| Hợp đồng API | [Driver OpenAPI](../../docs/api/driver-api.openapi.yaml) · T96 slice 1 hỗ trợ auth và hồ sơ đọc với Dio 5.9.2 |
+| Hợp đồng API | [Driver OpenAPI](../../docs/api/driver-api.openapi.yaml) · T96 hỗ trợ auth, hồ sơ và quản lý xe với Dio 5.9.2 |
 
-**T96 slice 1.** App lấy `API_BASE_URL` từ `config/api.local.json`. Để test trên Android Emulator với backend staging, mở [tunnel API](docs/api-tunnel.md) rồi bấm **Run** với `lib/main.dart` hoặc chạy `flutter run`. Các màn chưa nối API được kiểm tra bằng widget test và công cụ chụp ảnh ở mục bên dưới. Xem [cấu hình và cách retest](docs/t96-driver-api.md).
+**T96.** App lấy `API_BASE_URL` từ `config/api.local.json`. Để test trên Android Emulator với backend staging, mở [tunnel API](docs/api-tunnel.md) rồi bấm **Run** với `lib/main.dart` hoặc chạy `flutter run`. Các màn chưa nối API được kiểm tra bằng widget test và công cụ chụp ảnh ở mục bên dưới. Xem [cấu hình và kịch bản thêm, đặt mặc định, gỡ xe](docs/t96-driver-api.md#4-kiểm-thử-xe-qua-tunnel-api).
 
 Người dùng đã xác nhận đăng nhập, đăng xuất và đăng ký trên staging. App dùng Driver API cho các luồng này. Fake đăng nhập và cấu hình ghép các màn chưa tích hợp nằm trong `test/support`. Sau khi dọn mock, 106 test Flutter và 2 test chụp ảnh pass. Analyzer sạch, format kiểm 104 file không cần sửa.
+
+Slice xe đã kiểm local với Flutter 3.44.2. Toàn bộ 115 test pass, analyzer sạch, format kiểm 106 file. Android debug build offline thành công và APK dùng URL emulator từ cấu hình hiện có. Luồng xe qua API staging chờ người dùng kiểm thử.
+
+Restyle đăng ký và thêm xe T96 đã kiểm local bằng Flutter 3.44.2. `dart format` kiểm 109 file, `flutter analyze --no-pub` sạch, `flutter test --no-pub` qua 118 test. Ảnh Flutter 390 × 844 dùng transport fixture. Chờ kiểm trên thiết bị và staging cho restyle này.
 
 Đọc [screen/function reference](docs/screens.md) và [architecture reference](docs/architecture.md) trước khi code. Đây là hai tài liệu chuẩn của mobile; [AGENTS.md](AGENTS.md) bắt buộc đọc chúng. SRS/registration và sơ đồ hiện hành dẫn từ đó thay thế các bản tóm tắt MB cũ.
 

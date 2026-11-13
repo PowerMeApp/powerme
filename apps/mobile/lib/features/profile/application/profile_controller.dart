@@ -12,11 +12,24 @@ final profileRepositoryProvider = Provider<ProfileRepository>(
 final profileControllerProvider =
     NotifierProvider<ProfileController, ProfileState>(ProfileController.new);
 
+final vehicleModelsProvider = FutureProvider.autoDispose<List<VehicleModel>>((
+  ref,
+) {
+  final scope = ref.watch(authScopeProvider);
+  final repo = ref.watch(profileRepositoryProvider);
+  if (scope == signedOutScope) return const [];
+  if (repo case VehicleManagementRepository vehicles) {
+    return vehicles.listModels();
+  }
+  throw const ProfileException(ProfileFailure.unavailable);
+}, retry: (_, _) => null);
+
 class ProfileState {
   const ProfileState(this.profile, {this.busy = false, this.failure});
   final DriverProfile profile;
   final bool busy;
   final ProfileFailure? failure;
+  bool get canChange => !busy && !(failure?.needsRefresh ?? false);
 }
 
 class ProfileController extends Notifier<ProfileState> {
@@ -39,6 +52,13 @@ class ProfileController extends Notifier<ProfileState> {
       _change((repo, revision) => repo.updateName(name, revision));
   Future<bool> saveVehicle(VehicleDraft draft, String? id) =>
       _change((repo, revision) => repo.saveVehicle(draft, id, revision));
+  Future<bool> addVehicle(VehicleRegistration registration) =>
+      _change((repo, _) {
+        if (repo case VehicleManagementRepository vehicles) {
+          return vehicles.addVehicle(registration);
+        }
+        throw const ProfileException(ProfileFailure.unavailable);
+      });
   Future<bool> removeVehicle(String id) =>
       _change((repo, revision) => repo.removeVehicle(id, revision));
   Future<bool> selectVehicle(String id) =>
@@ -48,16 +68,19 @@ class ProfileController extends Notifier<ProfileState> {
       return refreshable.refresh();
     }
     throw const ProfileException(ProfileFailure.unavailable);
-  });
+  }, reading: true);
 
   Future<bool> _change(
-    Future<DriverProfile> Function(ProfileRepository, int) action,
-  ) async {
-    if (state.busy) return false;
-    final request = ++_request;
+    Future<DriverProfile> Function(ProfileRepository, int) action, {
+    bool reading = false,
+  }) async {
+    if (state.busy || (!reading && !state.canChange)) return false;
     final scope = ref.read(authScopeProvider);
+    if (scope == signedOutScope) return false;
+    final request = ++_request;
     final profile = state.profile;
-    state = ProfileState(profile, busy: true);
+    final recovery = state.failure?.needsRefresh == true ? state.failure : null;
+    state = ProfileState(profile, busy: true, failure: recovery);
     try {
       final next = await action(
         ref.read(profileRepositoryProvider),
@@ -70,9 +93,11 @@ class ProfileController extends Notifier<ProfileState> {
       if (_current(scope, request)) {
         state = ProfileState(
           ref.read(profileRepositoryProvider).read(),
-          failure: error is ProfileException
-              ? error.failure
-              : ProfileFailure.unavailable,
+          failure:
+              recovery ??
+              (error is ProfileException
+                  ? error.failure
+                  : ProfileFailure.unavailable),
         );
       }
       return false;

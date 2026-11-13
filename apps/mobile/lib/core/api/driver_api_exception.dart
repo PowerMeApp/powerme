@@ -4,6 +4,7 @@ enum DriverApiProblem {
   malformed,
   ended,
   registrationUnconfirmed,
+  accountRefreshRequired,
 }
 
 class DriverApiException implements Exception {

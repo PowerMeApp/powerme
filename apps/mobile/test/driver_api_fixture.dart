@@ -18,27 +18,47 @@ Map<String, Object> account({
   String name = 'Tài xế kiểm thử',
   String id = '9007199254740993',
   bool withVehicle = true,
+  List<Map<String, Object?>>? vehicles,
 }) => {
   'user_id': id,
   'full_name': name,
   'role': 'driver',
   'account_status': 'active',
-  'vehicles': [
-    if (withVehicle)
-      {
-        'vehicle_id': '9',
-        'plate_number': '51A-00001',
-        'is_default': true,
-        'vehicle_model_id': '10',
-        'brand': 'VinFast',
-        'model_name': 'VF 8',
-        'connector_type': 'gbt',
-        'is_vinfast': true,
-        'battery_capacity_kwh': null,
-        'rated_range_km': null,
-        'max_dc_kw': null,
-      },
-  ],
+  'vehicles': vehicles ?? [if (withVehicle) ownVehicle()],
+};
+
+const vf8 = {
+  'vehicle_model_id': '10',
+  'brand': 'VinFast',
+  'model_name': 'VF 8',
+  'connector_type': 'gbt',
+  'is_vinfast': true,
+  'battery_capacity_kwh': null,
+  'rated_range_km': null,
+  'max_dc_kw': null,
+};
+
+const leaf = {
+  'vehicle_model_id': '9007199254740997',
+  'brand': 'Nissan',
+  'model_name': 'Leaf',
+  'connector_type': 'chademo',
+  'is_vinfast': false,
+  'battery_capacity_kwh': 39.5,
+  'rated_range_km': 270,
+  'max_dc_kw': 50,
+};
+
+Map<String, Object?> ownVehicle({
+  String id = '9',
+  String plate = '51A-00001',
+  bool isDefault = true,
+  Map<String, Object?> model = vf8,
+}) => {
+  ...model,
+  'vehicle_id': id,
+  'plate_number': plate,
+  'is_default': isDefault,
 };
 
 ResponseBody reply(int status, Object json) => ResponseBody.fromString(
