@@ -80,6 +80,9 @@ export function experimentEnv({ databaseUrl, ocppPort, reconciliationEnabled, ti
 }
 
 /**
+ * `envOverrides` (tuỳ chọn): biến môi trường CSMS đè lên `experimentEnv`. Harness RQ1 không dùng;
+ * lab/nfr03 dùng để bật lại kiểm credential (ALLOW_LEGACY_NO_CREDENTIAL=false) như staging.
+ *
  * @returns `{ db, endpoint, env, csmsPid, logFile, stop() }` — `db` là pg.Client đã nối tới DB thí nghiệm.
  */
 export async function startLocalCsms({
@@ -90,6 +93,7 @@ export async function startLocalCsms({
   reconciliationEnabled,
   timing,
   logFile,
+  envOverrides = {},
   log = () => {},
 }) {
   if (await portOpen(pgPort)) throw new Error(`cổng Postgres ${pgPort} đang bận — đổi --pg-port`);
@@ -124,7 +128,10 @@ export async function startLocalCsms({
     await applySeed(client);
 
     ensureBuilt(log);
-    const env = experimentEnv({ databaseUrl: pg.url, ocppPort, reconciliationEnabled, timing });
+    const env = {
+      ...experimentEnv({ databaseUrl: pg.url, ocppPort, reconciliationEnabled, timing }),
+      ...envOverrides,
+    };
     const out = createWriteStream(logFile, { flags: 'w' });
     child = spawn(process.execPath, ['dist/main.js'], {
       cwd: CSMS_DIR,
