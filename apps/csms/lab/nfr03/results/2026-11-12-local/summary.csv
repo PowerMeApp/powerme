@@ -1,0 +1,17 @@
+side,action,n,answered,unanswered,call_errors,p50_ms,p95_ms,p99_ms,max_ms,mean_ms,p95_with_unanswered_ms,threshold_ms,pass
+server,ALL,4963,4963,0,0,5.00,9.00,16.00,176.00,5.45,9.00,1000,true
+server,Authorize,260,260,0,0,3.00,5.00,10.00,16.00,3.35,5.00,1000,true
+server,BootNotification,50,50,0,0,6.00,13.00,64.00,64.00,7.44,13.00,1000,true
+server,Heartbeat,100,100,0,0,2.00,3.00,4.00,6.00,1.89,3.00,1000,true
+server,MeterValues,2743,2743,0,0,5.00,8.00,14.00,51.00,5.26,8.00,1000,true
+server,StartTransaction,260,260,0,0,5.00,11.00,21.00,52.00,6.15,11.00,1000,true
+server,StatusNotification,1290,1290,0,0,5.00,8.00,16.00,176.00,5.60,8.00,1000,true
+server,StopTransaction,260,260,0,0,8.00,14.00,27.00,60.00,9.06,14.00,1000,true
+client,ALL,4963,4963,0,0,4.92,9.23,16.29,176.76,5.63,9.23,1000,true
+client,Authorize,260,260,0,0,3.11,5.68,11.06,15.30,3.53,5.68,1000,true
+client,BootNotification,50,50,0,0,5.97,13.06,69.39,69.39,7.69,13.06,1000,true
+client,Heartbeat,100,100,0,0,1.84,3.60,5.30,6.18,2.09,3.60,1000,true
+client,MeterValues,2743,2743,0,0,4.87,8.68,14.48,51.09,5.46,8.68,1000,true
+client,StartTransaction,260,260,0,0,5.28,10.63,20.82,51.32,6.29,10.63,1000,true
+client,StatusNotification,1290,1290,0,0,4.96,8.34,16.45,176.76,5.75,8.34,1000,true
+client,StopTransaction,260,260,0,0,8.09,14.78,26.50,60.21,9.25,14.78,1000,true

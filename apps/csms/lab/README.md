@@ -14,6 +14,7 @@ Dụng cụ đo, **không phải sản phẩm**. BE-02 thật dựng trên NestJ
 | `exp-02-dat-cho.mjs` | Kịch bản EXP-02 |
 | `simulator/` | Cấu hình cho SAP simulator — template trụ D1, idtags, config |
 | `rq1/` | Harness thí nghiệm RQ1 / NFR-02: 3 kịch bản đứt kết nối × 30 lần × 3 cấu hình, có sự thật nền và seed — xem `rq1/README.md` |
+| `nfr03/` | Dụng cụ đo NFR-03 / NFR-OCPP-01: 50 trụ giả × 10 phút, thời gian CSMS trả lời từng bản tin (phía client và phía server từ `ocpp_message_log`) — xem `nfr03/README.md` |
 
 ## Simulator nào là thật
 
