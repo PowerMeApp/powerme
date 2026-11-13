@@ -1654,6 +1654,53 @@ describeDb('WP3/T31 WF-01 service journey with real OCPP + Postgres', () => {
       0,
     );
   });
+  // WF-04 / AD-7 (FE-16): an open FaultEvent hides its connector from search; resolving shows it again.
+  async function openFault(
+    connectorId: number | null,
+    source = 'ocpp',
+    errorCode: string | null = 'GroundFailure',
+  ) {
+    const [{ charge_point_id: cp }] = (await q(
+      'SELECT charge_point_id FROM connectors WHERE id=$1',
+      [connector],
+    )) as [{ charge_point_id: string }];
+    return (
+      await q(
+        `INSERT INTO fault_events(charge_point_id,connector_id,source,error_code)
+        VALUES($1,$2,$3,$4) RETURNING id`,
+        [cp, connectorId, source, errorCode],
+      )
+    )[0]!.id as string;
+  }
+  const listedGuns = async () =>
+    (await service.findStations(driver, vehicle)).items.flatMap((s) =>
+      s.connectors.map((c) => c.connector_no),
+    );
+  it('WF-04 search hides a connector while its FaultEvent is open and shows it again when resolved', async () => {
+    await q(
+      `INSERT INTO connectors(charge_point_id,connector_no,status,status_changed_at)
+      SELECT charge_point_id,2,'Available',now() FROM connectors WHERE id=$1`,
+      [connector],
+    );
+    const fault = await openFault(connector);
+    for (const open of ['raised', 'acknowledged', 'resetting']) {
+      await q('UPDATE fault_events SET status=$2 WHERE id=$1', [fault, open]);
+      expect(await listedGuns()).toEqual([2]);
+    }
+    await q("UPDATE fault_events SET status='resolved',resolved_at=now() WHERE id=$1", [fault]);
+    expect(await listedGuns()).toEqual([1, 2]);
+  });
+  it('WF-04 search hides every connector of a charge point with an open whole-charge-point FaultEvent', async () => {
+    const other = await extraSite('T16-OTHER', 'Trạm khác');
+    await openFault(null, 'ocpp', 'Offline');
+    const result = await service.findStations(driver, vehicle);
+    expect(result.total).toBe(1);
+    expect(result.items.map((s) => s.site_id)).toEqual([other]);
+  });
+  it('WF-04 search keeps a connector listed when its open FaultEvent comes from a driver report', async () => {
+    await openFault(connector, 'driver_report', null);
+    expect(await listedGuns()).toEqual([1]);
+  });
   it('T72 search excludes administrative disable and inactive operators independently of connectivity', async () => {
     await q("UPDATE operators SET status='suspended'");
     expect((await service.findStations(driver, vehicle)).total).toBe(0);

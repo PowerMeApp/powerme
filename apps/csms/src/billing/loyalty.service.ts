@@ -194,14 +194,24 @@ export class LoyaltyService {
     opts: { requestedPoints?: number; asOf?: Date } = {},
   ): Promise<Quote> {
     validateQuoteInput(amountVnd, opts.requestedPoints);
-    const asOf = opts.asOf ?? (await this.dbNow(exec));
+    const live = await this.livePoints(exec, driverId, opts.asOf);
+    return computeQuote(live, amountVnd, opts.requestedPoints);
+  }
+
+  /**
+   * Điểm còn sống của tài xế lúc `asOf` (mặc định `now()` của DB), theo lô earn (D11). Chỉ đọc,
+   * không khoá. Chưa có tài khoản loyalty → 0. Dùng cho hiển thị (quote top-up, T32 Phần 5).
+   *
+   * @throws LoyaltyLedgerCorrupt sổ điểm sai dạng.
+   */
+  async livePoints(exec: LedgerClient, driverId: number, asOf?: Date): Promise<number> {
+    const at = asOf ?? (await this.dbNow(exec));
     const acc = (
       await exec.query<{ id: string }>('SELECT id FROM loyalty_accounts WHERE driver_id=$1', [
         driverId,
       ])
     ).rows[0];
-    const live = acc ? replayLots(await this.loadRows(exec, Number(acc.id)), asOf).livePoints : 0;
-    return computeQuote(live, amountVnd, opts.requestedPoints);
+    return acc ? replayLots(await this.loadRows(exec, Number(acc.id)), at).livePoints : 0;
   }
 
   /**

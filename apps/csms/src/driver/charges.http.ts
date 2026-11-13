@@ -84,7 +84,7 @@ function idempotencyKey(raw: unknown): string {
 }
 
 /** Đúng một header Idempotency-Key (Node nối nhiều header lạ bằng ", " nên phải đếm rawHeaders). */
-function headerKey(req: IncomingMessage): string {
+export function headerKey(req: IncomingMessage): string {
   const count = req.rawHeaders.filter(
     (_, i) => i % 2 === 0 && req.rawHeaders[i]?.toLowerCase() === 'idempotency-key',
   ).length;
@@ -93,7 +93,7 @@ function headerKey(req: IncomingMessage): string {
 }
 
 /** id bigint hợp lệ nhưng vượt số an toàn của JS: không thể là dòng nào service đọc được → 404. */
-function safeId(id: string): number {
+export function safeId(id: string): number {
   const value = Number(id);
   if (!Number.isSafeInteger(value)) throw new DriverApiError(404, 'not_found');
   return value;

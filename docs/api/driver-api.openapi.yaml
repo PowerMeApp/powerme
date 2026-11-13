@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: PowerMe CSMS — Driver API
-  version: 0.6.0
+  version: 0.9.0
   summary: Hợp đồng REST cho app tài xế (T77, phiếu v1.3 §3.2g)
   description: |
     Hợp đồng giữa CSMS (WP2) và app tài xế Flutter (WP3) cho trạng thái súng sạc, thời gian còn lại,
@@ -19,13 +19,15 @@ info:
       đường `sessions/*` trả cả phiên đó nếu `driver_id` khớp; `charges/*` chỉ có với phiên bắt đầu
       từ app.
   x-owner: Trí (WP2) — hợp đồng; Sơn (WP3) — route và client Dart
-  x-status: MB03 — brief 07/11 smart station search, address search and canonical road routes implemented locally; BE-21 email/password register, login and refresh implemented; BE-22 charges, sessions (progress/stop/statement) and credit implemented; time-left remains planned
+  x-status: MB03 — brief 07/11 smart station search, address search and canonical road routes implemented locally; BE-21 email/password register, login and refresh implemented; BE-30 login by email or phone number (E.164); BE-22 charges, sessions (progress/stop/statement) and credit implemented; BE-34 vehicle models and add/set-default/remove vehicles (soft delete) implemented; T32 Phần 5 billing/top-ups implemented but not for app use until T32 Phần 6 and 8 merge; time-left remains planned
 servers:
   - url: http://localhost:3000/api/driver/v1
     description: CSMS cục bộ (cùng tiến trình với console /api/admin)
 tags:
   - name: auth
-    description: UC-ACC-01 đăng ký (kèm consent BR-P05), đăng nhập email + mật khẩu, làm mới access token (BE-21)
+    description: UC-ACC-01 đăng ký (kèm consent BR-P05), đăng nhập email hoặc số điện thoại + mật khẩu (BE-21, BE-30), làm mới access token
+  - name: vehicles
+    description: UC-ACC-03 / màn hình 13 Profile & Vehicles — danh mục mẫu xe, thêm / đặt mặc định / gỡ xe của chính tài xế (BE-34)
   - name: stations
     description: UC-CHG-01 tìm trạm, trạng thái từng súng (BR-P38, BR-P39)
   - name: time-left
@@ -36,6 +38,11 @@ tags:
     description: UC-CHG-03 dừng, UC-CHG-04 theo dõi, bảng kê sau phiên
   - name: credit
     description: UC-PAY-02 / màn hình 9 — số dư Charging Credit và lịch sử sổ cái của chính tài xế (BE-22)
+  - name: top-ups
+    description: |
+      UC-PAY-01 nạp Charging Credit qua VNPay (WF-02 SD-2a, T32 Phần 5). CHƯA DÙNG CHO APP tới khi
+      T32 Phần 6 (IPN cộng tiền, trang return `/billing/vnpay/return`) và Phần 8 (quét top-up quá hạn)
+      merge — xem mô tả từng đường dẫn.
 
 security:
   - bearerAuth: []
@@ -50,7 +57,10 @@ paths:
       description: |
         Không cần bearer. Thiếu `consent: true` hoặc `consent_version` → 400 `consent_required`,
         không ghi dòng nào. Email được trim + lowercase; trùng (không phân biệt hoa/thường) → 409
-        `email_taken`. Mật khẩu 8–128 ký tự, không ép quy tắc độ phức tạp. Một transaction tạo
+        `email_taken`. `phone_number` tuỳ chọn (BE-30): chuẩn hoá về E.164 theo quy tắc ở schema
+        `PhoneNumberInput`, không nhận ra → 400 `invalid_input`; số đã có tài khoản (so sau chuẩn
+        hoá, mọi định dạng) → 409 `phone_taken`. Email trùng được báo trước số trùng.
+        Mật khẩu 8–128 ký tự, không ép quy tắc độ phức tạp. Một transaction tạo
         `users` (role driver, active, mật khẩu băm scrypt) và `drivers` (consent_version,
         consent_given_at = now). Không tạo ví credit/loyalty ở bước này. Trả token như login.
       security: []
@@ -70,10 +80,15 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
         '405': { $ref: '#/components/responses/AuthMethodNotAllowed' }
         '409':
-          description: '`email_taken` — email đã có tài khoản (không phân biệt hoa/thường)'
+          description: |
+            `email_taken` — email đã có tài khoản (không phân biệt hoa/thường);
+            `phone_taken` — số điện thoại (sau chuẩn hoá E.164) đã có tài khoản (BE-30)
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
+              examples:
+                email_taken: { value: { error: email_taken, detail: email_taken } }
+                phone_taken: { value: { error: phone_taken, detail: phone_taken } }
         '413': { $ref: '#/components/responses/PayloadTooLarge' }
         '415': { $ref: '#/components/responses/UnsupportedMediaType' }
         '429': { $ref: '#/components/responses/TooManyAttempts' }
@@ -84,21 +99,31 @@ paths:
     post:
       tags: [auth]
       operationId: loginDriver
-      x-status: implemented — BE-21
-      summary: Đăng nhập email + mật khẩu, nhận access token (900 s) và refresh token
+      x-status: implemented — BE-21 (email), BE-30 (số điện thoại)
+      summary: Đăng nhập bằng email HOẶC số điện thoại + mật khẩu, nhận access token (900 s) và refresh token
       description: |
-        Sai email và sai mật khẩu trả cùng 401 `invalid_credentials` (không phân biệt; khi không có
-        user CSMS vẫn băm một lần để thời gian tương đương). User không phải driver hoặc chưa có
-        dòng `drivers` cũng là `invalid_credentials`. Tài khoản `suspended`/`closed` (F-13) → 403
-        `account_locked`, chỉ trả khi mật khẩu đúng. 5 lần sai / 60 s theo email + IP (hoặc 20 lần
-        theo IP) → 429 `too_many_attempts` trong 15 phút, kể cả khi mật khẩu đúng; bộ đếm trong
-        bộ nhớ một tiến trình.
+        Body có đúng MỘT định danh: `{email, password}` (như BE-21, không đổi) hoặc
+        `{phone_number, password}` (BE-30). Có cả hai khoá (kể cả giá trị null) hoặc không có khoá
+        nào → 400 `invalid_input`. Số điện thoại được chuẩn hoá như khi đăng ký (`PhoneNumberInput`),
+        nên `0901234567`, `+84 901 234 567`, `84901234567` cùng là một tài khoản.
+
+        Sai định danh và sai mật khẩu trả cùng 401 `invalid_credentials` (không phân biệt; khi không
+        có user — kể cả số không chuẩn hoá được — CSMS vẫn băm một lần để thời gian tương đương).
+        User không phải driver hoặc chưa có dòng `drivers` cũng là `invalid_credentials`. Tài khoản
+        `suspended`/`closed` (F-13) → 403 `account_locked`, chỉ trả khi mật khẩu đúng. 5 lần sai /
+        60 s theo định danh đã chuẩn hoá + IP (hoặc 20 lần theo IP) → 429 `too_many_attempts` trong
+        15 phút, kể cả khi mật khẩu đúng; email và số của cùng một tài khoản đếm riêng; bộ đếm trong
+        bộ nhớ một tiến trình. Không có OTP/SMS hay đăng nhập Google (ngoài phạm vi, ADR-0017).
       security: []
       requestBody:
         required: true
         content:
           application/json:
             schema: { $ref: '#/components/schemas/LoginRequest' }
+            examples:
+              email: { value: { email: app.ds01@powerme.test, password: '<mật khẩu>' } }
+              phone_e164: { value: { phone_number: '+84900000101', password: '<mật khẩu>' } }
+              phone_local: { value: { phone_number: '0900 000 101', password: '<mật khẩu>' } }
       responses:
         '200':
           description: Access + refresh token
@@ -107,7 +132,7 @@ paths:
               schema: { $ref: '#/components/schemas/LoginTokens' }
         '400': { $ref: '#/components/responses/AuthBadRequest' }
         '401':
-          description: '`invalid_credentials` — sai email hoặc mật khẩu (cùng một mã)'
+          description: '`invalid_credentials` — sai email / số điện thoại hoặc mật khẩu (cùng một mã)'
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
@@ -271,8 +296,9 @@ paths:
       x-status: implemented — MB03 backend discovery slice
       description: |
         Chỉ đọc tài xế từ JWT và DB, không nhận identity từ query. Token lấy từ `/auth/login`,
-        `/auth/register` hoặc `/auth/refresh` (BE-21). Không có OTP, cập nhật profile/xe hoặc
-        truy vấn phiên trong slice này.
+        `/auth/register` hoặc `/auth/refresh` (BE-21). Không có OTP, cập nhật profile hoặc
+        truy vấn phiên trong slice này. `vehicles[]` chỉ gồm xe **chưa gỡ** (BE-34), xe mặc định
+        đứng đầu rồi theo thứ tự thêm; thêm / gỡ / đổi mặc định qua `/vehicles` (BE-34).
       responses:
         '200':
           description: Own driver and vehicles
@@ -285,6 +311,172 @@ paths:
         '405': { $ref: '#/components/responses/MethodNotAllowed' }
         '503': { $ref: '#/components/responses/AuthUnavailable' }
         '500': { $ref: '#/components/responses/InternalError' }
+  /vehicle-models:
+    get:
+      tags: [vehicles]
+      operationId: listVehicleModels
+      x-status: implemented — BE-34
+      summary: Danh mục mẫu xe để chọn khi thêm xe
+      description: |
+        Mọi mẫu trong `vehicle_models`, sắp theo hãng rồi tên mẫu. Không nhận query (có → 400
+        `invalid_input`). `is_vinfast` quyết định bộ lọc trạm VinFast-only (BR-P03);
+        `connector_type` quyết định súng tương thích. Số đo có thể null (mẫu thiếu thông số →
+        gợi ý trạm trả `smart_unavailable_reason = missing_vehicle_specs`).
+      responses:
+        '200':
+          description: Danh mục mẫu xe
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/VehicleModel' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+        '503': { $ref: '#/components/responses/AuthUnavailable' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /vehicles:
+    post:
+      tags: [vehicles]
+      operationId: addVehicle
+      x-status: implemented — BE-34
+      summary: Thêm xe cho tài xế đang đăng nhập
+      description: |
+        Body `application/json` ≤ 16 KiB, trường lạ → 400 `invalid_input`; `vehicle_model_id` là
+        **chuỗi** số. Không có query.
+
+        **Biển số:** NFKC, in hoa, bỏ mọi khoảng trắng; giữ `-` và `.` để hiển thị
+        (`" 51k-901.01 "` → `"51K-901.01"`). Chỉ chữ A–Z, số, `-`/`.` ở giữa (không hai dấu liền
+        nhau); dạng lưu ≤ 12 ký tự; phần chữ + số 5–10 ký tự. Sai → 400 `invalid_plate_number`.
+        So trùng theo phần chữ + số: `51K-901.01`, `51k 901.01`, `51K90101` là MỘT biển. Biển đang
+        thuộc một xe chưa gỡ của **bất kỳ ai** (kể cả chính tài xế) → 409 `plate_taken` (không cho
+        biết xe của ai). Biển của xe đã gỡ đăng ký lại được.
+
+        **Xe mặc định:** tài xế chưa có xe mặc định (xe đầu tiên) → xe mới là mặc định bất kể
+        `is_default`; `is_default: true` → xe mới thành mặc định, xe mặc định cũ thôi (một
+        transaction, luôn đúng một xe mặc định).
+
+        **Không có `Idempotency-Key`:** biển số là khoá tự nhiên. Mất phản hồi rồi gửi lại → 409
+        `plate_taken`, không tạo xe thứ hai; app tải lại `GET /me` để thấy xe đã thêm.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AddVehicleRequest' }
+            examples:
+              vf8:
+                value: { plate_number: '51K-901.01', vehicle_model_id: '4', is_default: true }
+      responses:
+        '201':
+          description: Xe vừa thêm — cùng hình dạng phần tử `vehicles[]` của `/me`
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OwnVehicle' }
+        '400':
+          description: |
+            `invalid_input` (JSON hỏng, không phải object, trường lạ, `vehicle_model_id` không phải
+            chuỗi số, `is_default` không phải boolean, có query); `invalid_plate_number`;
+            `unknown_vehicle_model` (không có mẫu xe với id đó)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '405': { $ref: '#/components/responses/PostOnly' }
+        '409':
+          description: '`plate_taken` — biển đã thuộc một xe chưa gỡ (của bất kỳ ai)'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '413': { $ref: '#/components/responses/PayloadTooLarge' }
+        '415': { $ref: '#/components/responses/UnsupportedMediaType' }
+        '503': { $ref: '#/components/responses/AuthUnavailable' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /vehicles/{vehicle_id}:
+    parameters:
+      - name: vehicle_id
+        in: path
+        required: true
+        description: Chuỗi số; sai dạng → 400 `invalid_input`
+        schema: { $ref: '#/components/schemas/Id' }
+    patch:
+      tags: [vehicles]
+      operationId: setDefaultVehicle
+      x-status: implemented — BE-34
+      summary: Đặt xe làm xe mặc định
+      description: |
+        Body đúng `{"is_default": true}` (gì khác, kể cả `false`, → 400 `invalid_input`; muốn bỏ
+        cờ mặc định thì đặt xe khác làm mặc định). Xe mặc định cũ thôi trong cùng transaction. Xe
+        đã là mặc định → 200, không đổi gì. Xe không có / của tài xế khác / đã gỡ → 404 như nhau.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SetDefaultVehicleRequest' }
+      responses:
+        '200':
+          description: Xe sau khi đặt mặc định
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OwnVehicle' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '405':
+          description: '`method_not_allowed`, Allow PATCH, DELETE, OPTIONS'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '413': { $ref: '#/components/responses/PayloadTooLarge' }
+        '415': { $ref: '#/components/responses/UnsupportedMediaType' }
+        '500': { $ref: '#/components/responses/InternalError' }
+    delete:
+      tags: [vehicles]
+      operationId: removeVehicle
+      x-status: implemented — BE-34
+      summary: Gỡ xe (xoá mềm, giữ lịch sử phiên)
+      description: |
+        Không body. Xe không bị xoá khỏi DB: `removed_at` được ghi (migration 0018), lịch sử phiên
+        và yêu cầu sạc vẫn trỏ tới xe (BR-P17). Sau khi gỡ, xe biến khỏi `/me`; dùng `vehicle_id`
+        đó ở `/stations`, `/connectors/by-code`, `/places/*`, `/stations/{site_id}/route`,
+        `PATCH`/`DELETE /vehicles/{id}` → 404 `not_found`, ở `POST /charges` → 400
+        `vehicle_not_owned_or_incompatible`. Biển số được giải phóng.
+
+        Xe còn yêu cầu sạc chưa xong (intent chưa `rejected`/`settled`/`released`, gồm cả phiên đã
+        dừng nhưng chưa quyết toán) hoặc phiên chưa kết thúc (`pending`, `active`, `paused`,
+        `stopping`, `orphaned`) → 409 `vehicle_in_use`.
+
+        Gỡ xe mặc định mà còn xe khác → xe còn lại **thêm sớm nhất** thành mặc định. Gỡ xe cuối
+        cùng → `vehicles[]` rỗng; xe thêm sau đó tự thành mặc định. App: sau 204 tải lại `/me`; nếu
+        đang lưu `vehicle_id` đã gỡ để tìm trạm thì chuyển sang xe mặc định mới (hoặc yêu cầu thêm
+        xe nếu không còn xe).
+      responses:
+        '204': { description: Đã gỡ }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '405':
+          description: '`method_not_allowed`, Allow PATCH, DELETE, OPTIONS'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '409':
+          description: '`vehicle_in_use` — xe đang có yêu cầu sạc chưa xong hoặc phiên chưa kết thúc'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '413': { $ref: '#/components/responses/PayloadTooLarge' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
   /stations:
     get:
       tags: [stations]
@@ -308,6 +500,12 @@ paths:
         tính thời gian); không mở rộng bán kính người dùng đã nhập. Smart không bảo đảm top ba
         toàn mạng ngoài bán kính. UI lấy page_size=3 nếu muốn ba gợi ý.
         Tham số lạ/trùng, chuỗi điều khiển, SoC không hữu hạn hoặc không thỏa 0≤soc<target≤80 trả 400.
+        Súng đang có sự cố mở (`fault_events.status` khác `resolved`) bị ẩn khỏi kết quả (WF-04,
+        AD-7); sự cố cả trụ (`connector_id` null, vd. `Offline`) ẩn mọi súng của trụ đó. Trạm không
+        còn súng nào thì không xuất hiện và không tính vào `total`. Áp dụng cho mọi kiểu sắp xếp,
+        kể cả smart và danh sách trạm gần nhất dự phòng, nên súng lỗi không bao giờ là
+        `best_connector_id`. Sự cố do tài xế báo (`driver_report`) không ẩn súng. Sự cố `resolved`
+        thì súng hiện lại.
       parameters:
         - $ref: '#/components/parameters/vehicleId'
         - name: q
@@ -649,7 +847,217 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '405': { $ref: '#/components/responses/MethodNotAllowed' }
 
+  /billing/top-ups/quote:
+    get:
+      tags: [top-ups]
+      operationId: quoteTopUp
+      x-status: implemented — T32 Phần 5; chưa dùng cho app tới khi T32 Phần 6 và 8 merge
+      summary: Báo giá dùng điểm cho một số tiền nạp (BR-P35)
+      description: |
+        Chỉ đọc, không tạo gì. App gọi trước khi tạo top-up để hiện số được giảm. `points_available`
+        là điểm còn sống (lô chưa hết hạn), không phải `points_balance`. `max_points` =
+        min(điểm còn sống, trần 50 % số tiền nạp, tính theo 1 điểm = 10 ₫); dưới 500 điểm thì
+        `max_points = 0`, `max_discount_vnd = 0` (không phải lỗi). Giá chỉ để hiển thị: lúc tạo,
+        CSMS kiểm lại; điểm **không** bị trừ lúc tạo (chỉ trừ khi tiền được cộng).
+
+        **Chưa dùng cho app** tới khi T32 Phần 6 (IPN cộng tiền; trang return
+        `/billing/vnpay/return` — trước đó thanh toán sandbox xong sẽ quay về 404) và Phần 8 (quét
+        top-up quá hạn) merge.
+      parameters:
+        - name: amount_vnd
+          in: query
+          required: true
+          description: Số tiền nạp định tạo (BR-P22 50.000–2.000.000)
+          schema: { type: string, pattern: '^[0-9]{1,15}$' }
+      responses:
+        '200':
+          description: Báo giá
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TopUpQuote' }
+              examples:
+                du_diem: { value: { points_available: 3000, max_points: 3000, max_discount_vnd: 30000 } }
+                thieu_diem: { value: { points_available: 499, max_points: 0, max_discount_vnd: 0 } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+        '422':
+          description: '`amount_out_of_range`'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              examples:
+                amount_out_of_range:
+                  value: { error: amount_out_of_range, detail: 'Mỗi lần nạp từ 50.000 ₫ đến 2.000.000 ₫' }
+        '503': { $ref: '#/components/responses/PaymentUnconfigured' }
+
+  /billing/top-ups:
+    post:
+      tags: [top-ups]
+      operationId: createTopUp
+      x-status: implemented — T32 Phần 5; chưa dùng cho app tới khi T32 Phần 6 và 8 merge
+      summary: Tạo top-up VNPay (SD-2a) và nhận URL thanh toán
+      description: |
+        Ánh xạ `TopUpService.create`. Tạo top-up `pending`, `expires_at = created_at + 15 phút`, trả
+        `payment_url` đã ký (VNPay 2.1.0, `vnp_Amount = amount_paid_vnd × 100`). Không cộng tiền,
+        không trừ điểm: tiền chỉ được cộng khi VNPay báo đã trả qua IPN có chữ ký (Phần 6) hoặc
+        querydr (Phần 8). Return URL chỉ để hiển thị — app poll `GET /billing/top-ups/{id}` để biết
+        kết quả.
+
+        Gửi lại cùng `Idempotency-Key` + cùng body → **200** cùng top-up (không báo giá lại); tạo mới
+        → **201**. Cùng key khác body → 409 `idempotency_conflict`. Key theo từng tài xế.
+
+        Body `application/json` ≤ 16 KiB, trường lạ → 400 `invalid_input`. `points_to_redeem`:
+        số nguyên ≥ 0, bỏ trống hoặc `null` = 0 (không dùng điểm).
+
+        Mỗi tài khoản tối đa **một** top-up `pending`. Bị chặn thì phân biệt bằng `error`, **không**
+        dựa vào việc có hay không có `payment_url`:
+        - `top_up_pending` (pending chưa quá `expires_at`): hỏi "tiếp tục thanh toán?" và mở lại
+          `payment_url` kèm theo;
+        - `pending_top_up_confirming` (pending đã quá `expires_at`, CSMS đang chờ VNPay xác nhận): báo
+          "giao dịch trước đang được xác nhận, thử lại sau ít phút". Không có `payment_url`.
+
+        **Chưa dùng cho app** tới khi T32 Phần 6 (IPN cộng tiền; trang return
+        `/billing/vnpay/return` — trước đó thanh toán sandbox xong sẽ quay về 404) và Phần 8 (quét
+        top-up quá hạn) merge: trước Phần 8 không có gì chuyển top-up bỏ dở sang `expired`, nên tài
+        xế bị chặn `pending_top_up_confirming` mãi.
+      parameters:
+        - $ref: '#/components/parameters/idempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateTopUpRequest' }
+            examples:
+              khong_diem: { value: { amount_vnd: 200000 } }
+              dung_diem: { value: { amount_vnd: 200000, points_to_redeem: 600 } }
+      responses:
+        '201':
+          description: Đã tạo top-up `pending`
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TopUp' }
+              examples:
+                tao_moi: { $ref: '#/components/examples/TopUpPending' }
+        '200':
+          description: Gửi lại cùng key cùng body — top-up đã tạo trước đó (trạng thái hiện tại)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TopUp' }
+              examples:
+                gui_lai_da_het_han: { $ref: '#/components/examples/TopUpExpired' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '405': { $ref: '#/components/responses/PostOnly' }
+        '409':
+          description: |
+            `idempotency_conflict` (cùng key khác body); `account_closed`; `top_up_pending` (kèm
+            `top_up_id`, `payment_url`); `pending_top_up_confirming` (kèm `top_up_id`)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TopUpConflict' }
+              examples:
+                idempotency_conflict:
+                  value: { error: idempotency_conflict, detail: 'Idempotency-Key này đã dùng cho một yêu cầu nạp khác' }
+                account_closed:
+                  value: { error: account_closed, detail: 'Tài khoản đã đóng' }
+                top_up_pending:
+                  value:
+                    error: top_up_pending
+                    detail: 'Còn giao dịch nạp chưa thanh toán; có thể tiếp tục thanh toán giao dịch đó'
+                    top_up_id: '41'
+                    payment_url: 'https://sandbox.vnpayment.vn/paymentv2/vpcpay.html?vnp_Amount=20000000&…&vnp_SecureHash=…'
+                pending_top_up_confirming:
+                  value:
+                    error: pending_top_up_confirming
+                    detail: 'Giao dịch trước đang được xác nhận, thử lại sau ít phút'
+                    top_up_id: '41'
+        '413': { $ref: '#/components/responses/PayloadTooLarge' }
+        '415': { $ref: '#/components/responses/UnsupportedMediaType' }
+        '422':
+          description: |
+            Lỗi luật nghiệp vụ. BR-P22 (ADR-0013): `amount_out_of_range` (mỗi lần 50.000–2.000.000 ₫),
+            `balance_limit_exceeded` (số dư + `amount_vnd` > 5.000.000 ₫; tính đủ `amount_vnd` dù trả
+            bớt bằng điểm). BR-P35: `points_below_minimum` (< 500 điểm), `points_unavailable` (nhiều
+            hơn điểm còn hiệu lực), `points_exceed_cap` (vượt 50 % số tiền nạp). CSMS không tự hạ số
+            điểm — app gọi lại `quote`.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              examples:
+                amount_out_of_range:
+                  value: { error: amount_out_of_range, detail: 'Mỗi lần nạp từ 50.000 ₫ đến 2.000.000 ₫' }
+                balance_limit_exceeded:
+                  value: { error: balance_limit_exceeded, detail: 'Số dư sau khi nạp không được vượt 5.000.000 ₫' }
+                points_below_minimum:
+                  value: { error: points_below_minimum, detail: 'Cần dùng ít nhất 500 điểm' }
+                points_unavailable:
+                  value: { error: points_unavailable, detail: 'Không đủ điểm còn hiệu lực' }
+                points_exceed_cap:
+                  value: { error: points_exceed_cap, detail: 'Điểm dùng không được vượt 50 % số tiền nạp' }
+        '503': { $ref: '#/components/responses/PaymentUnconfigured' }
+
+  /billing/top-ups/{topUpId}:
+    get:
+      tags: [top-ups]
+      operationId: getTopUp
+      x-status: implemented — T32 Phần 5; chưa dùng cho app tới khi T32 Phần 6 và 8 merge
+      summary: Trạng thái một top-up của tài xế (poll sau khi thanh toán)
+      description: |
+        App poll sau khi quay về từ trang VNPay. `payment_url` chỉ có khi `status = pending` và chưa
+        quá `expires_at`; còn lại `null`. Top-up của tài xế khác hoặc không có → 404 `not_found`.
+
+        **Chưa dùng cho app** tới khi T32 Phần 6 (IPN cộng tiền; trang return
+        `/billing/vnpay/return` — trước đó thanh toán sandbox xong sẽ quay về 404) và Phần 8 (quét
+        top-up quá hạn) merge: trước Phần 6 trạng thái không rời `pending`.
+      parameters:
+        - name: topUpId
+          in: path
+          required: true
+          schema: { $ref: '#/components/schemas/Id' }
+      responses:
+        '200':
+          description: Top-up
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TopUp' }
+              examples:
+                pending: { $ref: '#/components/examples/TopUpPending' }
+                expired: { $ref: '#/components/examples/TopUpExpired' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+        '503': { $ref: '#/components/responses/PaymentUnconfigured' }
+
 components:
+  examples:
+    TopUpPending:
+      value:
+        top_up_id: '41'
+        status: pending
+        amount_vnd: 200000
+        points_redeemed: 600
+        points_discount_vnd: 6000
+        amount_paid_vnd: 194000
+        created_at: '2026-11-12T17:30:00.000Z'
+        expires_at: '2026-11-12T17:45:00.000Z'
+        payment_url: 'https://sandbox.vnpayment.vn/paymentv2/vpcpay.html?vnp_Amount=19400000&…&vnp_SecureHash=…'
+    TopUpExpired:
+      value:
+        top_up_id: '40'
+        status: expired
+        amount_vnd: 100000
+        points_redeemed: 0
+        points_discount_vnd: 0
+        amount_paid_vnd: 100000
+        created_at: '2026-11-11T08:00:00.000Z'
+        expires_at: '2026-11-11T08:15:00.000Z'
+        payment_url: null
+
   securitySchemes:
     bearerAuth:
       type: http
@@ -758,7 +1166,8 @@ components:
       description: |
         `consent_required` (thiếu `consent: true` hoặc `consent_version`, BR-P05), `invalid_email`,
         `invalid_password` (ngoài 8–128 ký tự), `invalid_input` (JSON hỏng, không phải object,
-        trường lạ, tên/điện thoại sai, có query string)
+        trường lạ, tên/điện thoại sai, có query string; login gửi cả `email` lẫn `phone_number`
+        hoặc không có cái nào)
       content:
         application/json:
           schema: { $ref: '#/components/schemas/Error' }
@@ -812,6 +1221,17 @@ components:
       content:
         application/json:
           schema: { $ref: '#/components/schemas/Error' }
+    PaymentUnconfigured:
+      description: |
+        `payment_unconfigured` — tạo top-up khi CSMS chưa có VNPAY_TMN_CODE / VNPAY_HASH_SECRET
+        (không ghi dòng nào); hoặc server chạy không kèm module billing (mọi route top-up). `quote`
+        và GET vẫn trả 200 khi chỉ thiếu mã VNPay.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          examples:
+            payment_unconfigured:
+              value: { error: payment_unconfigured, detail: 'Cổng thanh toán chưa được cấu hình' }
 
   schemas:
     AddressCandidate:
@@ -917,17 +1337,38 @@ components:
         password: { type: string, minLength: 8, maxLength: 128, writeOnly: true }
         full_name: { type: string, minLength: 1, maxLength: 100 }
         phone_number:
-          type: [string, 'null']
-          pattern: '^\+[1-9][0-9]{6,14}$'
-          description: E.164, tối đa 16 ký tự
+          oneOf:
+            - $ref: '#/components/schemas/PhoneNumberInput'
+            - type: 'null'
         consent_version: { type: string, pattern: '^[A-Za-z0-9._-]{1,20}$', examples: ['tos-2026-11'] }
         consent: { type: boolean, const: true, description: 'BR-P05: đồng ý xử lý dữ liệu trước khi lưu' }
+    PhoneNumberInput:
+      type: string
+      maxLength: 32
+      examples: ['0901234567', '+84 901 234 567', '84901234567', '+14155550123']
+      description: |
+        BE-30. CSMS chuẩn hoá về E.164 rồi mới lưu / so sánh (`src/driver/phone-number.ts`):
+        1. Bỏ khoảng trắng, `.`, `-`, `(`, `)`; chuỗi gốc dài hơn 32 ký tự → không nhận.
+        2. Còn lại phải là `+` (tuỳ chọn, chỉ ở đầu) rồi toàn chữ số ASCII.
+        3. Việt Nam: `0` + NSN, `84` + NSN, `+84` + NSN hoặc `+840` + NSN, với NSN 9–10 chữ số không
+           bắt đầu bằng 0 → `+84` + NSN (vd `0901234567` → `+84901234567`).
+        4. Nước khác: `+` + 7–15 chữ số, chữ số đầu khác 0, mã nước khác 84 → giữ nguyên E.164
+           (không kiểm độ dài theo từng nước).
+        5. Còn lại (vd `901234567` không có 0 / 84 đầu) → register 400 `invalid_input`;
+           login coi như không có tài khoản (401 `invalid_credentials`).
+        Kết quả luôn khớp `^\+[1-9][0-9]{6,14}$` (≤ 16 ký tự) và là duy nhất trong `users`.
     LoginRequest:
       type: object
       additionalProperties: false
-      required: [email, password]
+      description: 'Đúng một trong `email` / `phone_number` (BE-30); cả hai hoặc không có → 400 `invalid_input`.'
+      oneOf:
+        - required: [email, password]
+          not: { required: [phone_number] }
+        - required: [phone_number, password]
+          not: { required: [email] }
       properties:
         email: { type: string, maxLength: 254 }
+        phone_number: { $ref: '#/components/schemas/PhoneNumberInput' }
         password: { type: string, maxLength: 128, writeOnly: true }
     RefreshRequest:
       type: object
@@ -963,6 +1404,40 @@ components:
           type: array
           items: { $ref: '#/components/schemas/OwnVehicle' }
 
+    VehicleModel:
+      type: object
+      required: [vehicle_model_id, brand, model_name, connector_type, is_vinfast, battery_capacity_kwh, rated_range_km, max_dc_kw]
+      properties:
+        vehicle_model_id: { $ref: '#/components/schemas/Id' }
+        brand: { type: string }
+        model_name: { type: string }
+        connector_type: { $ref: '#/components/schemas/ConnectorType' }
+        is_vinfast: { type: boolean }
+        battery_capacity_kwh: { type: [number, 'null'] }
+        rated_range_km: { type: [integer, 'null'] }
+        max_dc_kw: { type: [number, 'null'] }
+
+    AddVehicleRequest:
+      type: object
+      additionalProperties: false
+      required: [plate_number, vehicle_model_id]
+      properties:
+        plate_number:
+          type: string
+          description: Biển số; chuẩn hoá NFKC, in hoa, bỏ khoảng trắng; dạng lưu ≤ 12 ký tự
+          examples: ['51K-901.01']
+        vehicle_model_id: { $ref: '#/components/schemas/Id' }
+        is_default:
+          type: boolean
+          description: true → xe mới thành mặc định. Xe đầu tiên luôn mặc định.
+
+    SetDefaultVehicleRequest:
+      type: object
+      additionalProperties: false
+      required: [is_default]
+      properties:
+        is_default: { type: boolean, const: true }
+
     OwnVehicle:
       type: object
       required: [vehicle_id, plate_number, is_default, vehicle_model_id, brand, model_name, connector_type, is_vinfast, battery_capacity_kwh, rated_range_km, max_dc_kw]
@@ -985,7 +1460,8 @@ components:
         Trạng thái hướng tài xế (BR-P38): `available` = Available; `in_use` = Preparing, Charging,
         SuspendedEV, SuspendedEVSE; `freeing_soon` = Finishing; `unavailable` = Reserved,
         Unavailable, Faulted; `offline` = không có bản tin quá ngưỡng offline; `unknown` = chưa
-        từng có StatusNotification.
+        từng có StatusNotification. Súng có sự cố mở (trừ `driver_report`) không được trả về, nên
+        `unavailable` / `offline` chỉ còn gặp khi sự cố chưa được ghi (vd. trước ngưỡng 900 s).
       enum: [available, in_use, freeing_soon, unavailable, offline, unknown]
     StatusQuality:
       type: string
@@ -1297,3 +1773,64 @@ components:
         total: { type: integer, minimum: 0 }
         page: { type: integer, minimum: 1 }
         page_size: { type: integer, minimum: 1, maximum: 100 }
+
+    CreateTopUpRequest:
+      type: object
+      additionalProperties: false
+      required: [amount_vnd]
+      description: Trường lạ → 400 `invalid_input`. Ngoài khoảng BR-P22 là 422, không phải 400.
+      properties:
+        amount_vnd:
+          type: integer
+          description: Số tiền nạp (VND, số nguyên). Ví được cộng đủ số này dù trả bớt bằng điểm.
+          examples: [200000]
+        points_to_redeem:
+          type: [integer, 'null']
+          minimum: 0
+          default: 0
+          description: Số điểm muốn dùng (BR-P35, 1 điểm = 10 ₫); số nguyên ≥ 0, bỏ trống hoặc `null` = 0
+          examples: [600]
+
+    TopUp:
+      type: object
+      additionalProperties: false
+      required: [top_up_id, status, amount_vnd, points_redeemed, points_discount_vnd, amount_paid_vnd, created_at, expires_at, payment_url]
+      properties:
+        top_up_id: { $ref: '#/components/schemas/Id' }
+        status:
+          type: string
+          enum: [pending, credited, failed, expired, refunded]
+          description: STM-4. Phần 5 chỉ tạo `pending`; các trạng thái khác do Phần 6–9 ghi
+        amount_vnd: { type: integer, description: Số được cộng vào ví khi thanh toán thành công }
+        points_redeemed: { type: integer, minimum: 0 }
+        points_discount_vnd: { type: integer, minimum: 0 }
+        amount_paid_vnd: { type: integer, description: '= amount_vnd − points_discount_vnd; số trả trên VNPay' }
+        created_at: { $ref: '#/components/schemas/Timestamp' }
+        expires_at:
+          allOf: [{ $ref: '#/components/schemas/Timestamp' }]
+          description: created_at + 15 phút (= vnp_ExpireDate)
+        payment_url:
+          type: [string, 'null']
+          format: uri
+          description: URL VNPay đã ký; chỉ có khi `status = pending` và chưa quá `expires_at`, còn lại null
+
+    TopUpQuote:
+      type: object
+      additionalProperties: false
+      required: [points_available, max_points, max_discount_vnd]
+      properties:
+        points_available: { type: integer, minimum: 0, description: Điểm còn sống (lô chưa hết hạn) }
+        max_points: { type: integer, minimum: 0, description: 0 khi dưới 500 điểm }
+        max_discount_vnd: { type: integer, minimum: 0 }
+
+    TopUpConflict:
+      description: Error, thêm `top_up_id` (top_up_pending, pending_top_up_confirming) và `payment_url` (chỉ top_up_pending)
+      type: object
+      required: [error, detail]
+      properties:
+        error:
+          type: string
+          enum: [idempotency_conflict, account_closed, top_up_pending, pending_top_up_confirming]
+        detail: { type: string }
+        top_up_id: { $ref: '#/components/schemas/Id' }
+        payment_url: { type: string, format: uri }

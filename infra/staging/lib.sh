@@ -63,41 +63,65 @@ check_env() {
   if [ -n "$v" ] && ! [[ "$v" =~ ^[A-Za-z0-9._~:/@+=,-]{12,128}$ ]]; then
     die "DEMO_DRIVER_PASSWORD phải 12..128 ký tự, không có khoảng trắng/nháy/\$/# (sinh: openssl rand -hex 8)"
   fi
+  v="$(env_get DEMO_STAFF_PASSWORD)"
+  if [ -n "$v" ] && ! [[ "$v" =~ ^[A-Za-z0-9._~:/@+=,-]{12,128}$ ]]; then
+    die "DEMO_STAFF_PASSWORD phải 12..128 ký tự, không có khoảng trắng/nháy/\$/# (sinh: openssl rand -hex 8)"
+  fi
   check_driver_api_env
+  check_dashboard_env
 }
 
-# Driver API (BE-27). CẢNH BÁO chứ không dừng khi cả ba biến JWT đều trống: CI deploy bằng `.env` đang
-# có trên VPS, `.env` tạo trước BE-27 chưa có các biến này, và CSMS vẫn khởi động bình thường (chỉ
-# /api/driver trả 503 auth_unavailable). DỪNG khi đặt thiếu hoặc sai dạng: loadDriverApiConfig
-# (apps/csms/src/driver/driver-auth.ts) sẽ ném lỗi lúc khởi động, nên chặn ở đây — trước sao lưu và
-# migrate — thay vì để deploy hỏng ở bước kiểm sức khoẻ. Không bao giờ in khoá.
-check_driver_api_env() {
-  local secret issuer audience ttl canon bytes
-  secret="$(env_get DRIVER_API_JWT_SECRET_BASE64)"
-  issuer="$(env_get DRIVER_API_JWT_ISSUER)"
-  audience="$(env_get DRIVER_API_JWT_AUDIENCE)"
+# check_jwt_trio PREFIX "hậu quả khi trống" — luật chung của <PREFIX>_SECRET_BASE64, _ISSUER, _AUDIENCE,
+# giống loadDriverApiConfig (driver/driver-auth.ts) và loadDashboardAuthConfig (users/auth.ts).
+# CẢNH BÁO chứ không dừng khi cả ba đều trống: CI deploy bằng `.env` đang có trên VPS, `.env` cũ chưa
+# có các biến này, và CSMS vẫn khởi động bình thường (chỉ route tương ứng trả 503 auth_unavailable).
+# DỪNG khi đặt thiếu hoặc sai dạng: hàm load* sẽ ném lỗi lúc khởi động, nên chặn ở đây — trước sao lưu
+# và migrate — thay vì để deploy hỏng ở bước kiểm sức khoẻ. Không bao giờ in khoá.
+check_jwt_trio() {
+  local p="$1" off="$2" secret issuer audience canon bytes
+  secret="$(env_get "${p}_SECRET_BASE64")"
+  issuer="$(env_get "${p}_ISSUER")"
+  audience="$(env_get "${p}_AUDIENCE")"
   if [ -z "$secret$issuer$audience" ]; then
-    warn "Driver API chưa cấu hình (DRIVER_API_JWT_* trống): app tài xế sẽ nhận 503 auth_unavailable."
+    warn "$off (${p}_* trống)."
     warn "   Bổ sung mà không đổi mật khẩu cũ: ./init-env.sh --add-missing, rồi deploy lại."
-  else
-    [ -n "$secret" ] && [ -n "$issuer" ] && [ -n "$audience" ] \
-      || die "DRIVER_API_JWT_SECRET_BASE64, _ISSUER, _AUDIENCE phải đặt đủ cả ba hoặc để trống cả ba"
-    # Cùng luật với driver-auth.ts: base64 chuẩn (giải mã rồi mã hoá lại ra đúng chuỗi cũ), >= 32 byte.
-    canon=""
-    bytes=0
-    if [[ "$secret" =~ ^[A-Za-z0-9+/]+={0,2}$ ]]; then
-      canon="$(printf '%s' "$secret" | base64 -d 2>/dev/null | base64 -w 0 2>/dev/null || true)"
-      bytes="$(printf '%s' "$secret" | base64 -d 2>/dev/null | wc -c || true)"
-    fi
-    [ "$canon" = "$secret" ] && [ "${bytes// /}" -ge 32 ] \
-      || die "DRIVER_API_JWT_SECRET_BASE64 phải là base64 chuẩn của >= 32 byte (sinh: openssl rand -base64 32)"
-    [[ "$issuer" =~ ^[A-Za-z0-9._:/-]{1,100}$ ]] || die "DRIVER_API_JWT_ISSUER chỉ gồm chữ/số và . _ : / -"
-    [[ "$audience" =~ ^[A-Za-z0-9._:/-]{1,100}$ ]] || die "DRIVER_API_JWT_AUDIENCE chỉ gồm chữ/số và . _ : / -"
+    return 0
   fi
+  [ -n "$secret" ] && [ -n "$issuer" ] && [ -n "$audience" ] \
+    || die "${p}_SECRET_BASE64, _ISSUER, _AUDIENCE phải đặt đủ cả ba hoặc để trống cả ba"
+  # Base64 chuẩn (giải mã rồi mã hoá lại ra đúng chuỗi cũ), >= 32 byte.
+  canon=""
+  bytes=0
+  if [[ "$secret" =~ ^[A-Za-z0-9+/]+={0,2}$ ]]; then
+    canon="$(printf '%s' "$secret" | base64 -d 2>/dev/null | base64 -w 0 2>/dev/null || true)"
+    bytes="$(printf '%s' "$secret" | base64 -d 2>/dev/null | wc -c || true)"
+  fi
+  [ "$canon" = "$secret" ] && [ "${bytes// /}" -ge 32 ] \
+    || die "${p}_SECRET_BASE64 phải là base64 chuẩn của >= 32 byte (sinh: openssl rand -base64 32)"
+  [[ "$issuer" =~ ^[A-Za-z0-9._:/-]{1,100}$ ]] || die "${p}_ISSUER chỉ gồm chữ/số và . _ : / -"
+  [[ "$audience" =~ ^[A-Za-z0-9._:/-]{1,100}$ ]] || die "${p}_AUDIENCE chỉ gồm chữ/số và . _ : / -"
+}
+
+# Driver API (BE-27): ba biến JWT theo check_jwt_trio, cộng TTL refresh token.
+check_driver_api_env() {
+  local ttl
+  check_jwt_trio DRIVER_API_JWT "Driver API chưa cấu hình: app tài xế sẽ nhận 503 auth_unavailable"
   ttl="$(env_get DRIVER_API_REFRESH_TTL_S)"
   if [ -n "$ttl" ]; then
     [[ "$ttl" =~ ^[1-9][0-9]{0,8}$ ]] && [ "$ttl" -ge 3600 ] && [ "$ttl" -le 7776000 ] \
       || die "DRIVER_API_REFRESH_TTL_S phải là số nguyên 3600..7776000 (hoặc để trống = 30 ngày)"
+  fi
+}
+
+# Dashboard (T128, FE-01a, ADR-0018): cùng chính sách ba-biến với Driver API — trống cả ba chỉ cảnh báo
+# (.env tạo trước T128 vẫn deploy được, /api/auth/v1/login trả 503), thiếu một/sai dạng thì dừng. Khoá
+# trùng khoá Driver API cũng dừng: ADR-0018 đòi khoá riêng (lộ một khoá không được mở cả hai bề mặt).
+check_dashboard_env() {
+  local dash
+  check_jwt_trio DASHBOARD_JWT "Dashboard chưa cấu hình: đăng nhập dashboard sẽ nhận 503 auth_unavailable"
+  dash="$(env_get DASHBOARD_JWT_SECRET_BASE64)"
+  if [ -n "$dash" ] && [ "$dash" = "$(env_get DRIVER_API_JWT_SECRET_BASE64)" ]; then
+    die "DASHBOARD_JWT_SECRET_BASE64 phải KHÁC DRIVER_API_JWT_SECRET_BASE64 (ADR-0018; sinh: openssl rand -base64 32)"
   fi
 }
 
@@ -117,10 +141,13 @@ require_demo_password() {
 
 # Chạy tập lệnh Node trong image csms. Mật khẩu đi qua biến môi trường (không lên argv).
 #
-# DEMO_DRIVER_PASSWORD (BE-27) chỉ đi vào container chạy một lần này, không vào csms đang chạy.
+# DEMO_DRIVER_PASSWORD (BE-27) và DEMO_STAFF_PASSWORD (T128) chỉ đi vào container chạy một lần này,
+# không vào csms đang chạy.
 run_csms_script() {
   DEMO_CHARGE_POINT_PASSWORD="$(demo_cp_password)" DEMO_DRIVER_PASSWORD="$(env_get DEMO_DRIVER_PASSWORD)" \
-    docker compose run --rm -T -e DEMO_CHARGE_POINT_PASSWORD -e DEMO_DRIVER_PASSWORD csms node "$@"
+    DEMO_STAFF_PASSWORD="$(env_get DEMO_STAFF_PASSWORD)" \
+    docker compose run --rm -T -e DEMO_CHARGE_POINT_PASSWORD -e DEMO_DRIVER_PASSWORD \
+    -e DEMO_STAFF_PASSWORD csms node "$@"
 }
 
 # Simulator đang chạy? (profile sim không hiện trong `ps` thường).

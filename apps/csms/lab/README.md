@@ -13,6 +13,7 @@ Dụng cụ đo, **không phải sản phẩm**. BE-02 thật dựng trên NestJ
 | `trace-to-mermaid.mjs` | Dựng sequence diagram từ trace |
 | `exp-02-dat-cho.mjs` | Kịch bản EXP-02 |
 | `simulator/` | Cấu hình cho SAP simulator — template trụ D1, idtags, config |
+| `rq1/` | Harness thí nghiệm RQ1 / NFR-02: 3 kịch bản đứt kết nối × 30 lần × 3 cấu hình, có sự thật nền và seed — xem `rq1/README.md` |
 
 ## Simulator nào là thật
 

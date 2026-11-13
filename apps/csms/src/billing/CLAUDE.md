@@ -8,7 +8,7 @@
 - **ORM:** Drizzle (`drizzle-orm`). Schema TS ở `apps/csms/src/db/schema/` (bảng billing: `billing.ts`, enum: `enums.ts`).
 - **Migration:** SQL **viết tay** trong `apps/csms/drizzle/NNNN_<ten>.sql`, áp tuần tự bởi `apps/csms/scripts/migrate.mjs` (bảng `_migrations`). **Không dùng `drizzle-kit generate`** (ADR-0008). Mỗi migration đi kèm: sửa schema TS cho khớp, một test `test/migration-NNNN.integration.test.ts`, một nhật ký `docs/NHAT-KY-MIGRATION-NNNN.md`, cập nhật `docs/THIET-KE-CSDL-VAT-LY.md`. Sửa `scripts/migrate.mjs` thì sửa cả `test/helpers/apply-migrations.ts`.
 - **Bảng billing đã có từ migration 0003 (T73):** `credit_accounts`, `credit_transactions`, `top_ups`, `e_invoices`, `invoice_adjustments`, `loyalty_accounts`, `loyalty_transactions`, kèm nhiều CHECK. **Migration 0015 (T32 Phần 1):** bảng `refunds` (`requested_by` → `admins`), cột trạng thái/lịch quét cho `invoice_adjustments`, `e_invoices.next_attempt_at` (DEFAULT `now()`, CHECK không NULL khi còn chờ), index quét D7, bỏ `top_ups.refunded_by` (B5: Admin hoàn nằm ở `refunds.requested_by`); xem `docs/NHAT-KY-MIGRATION-0015.md`. **Từ BE-16 (0010–0012):** bảng `admins` (ISA), `credit_transactions.reservation_id` + `reservation_fee`, mọi FK phải có index (test A5), FK sổ cái → ví là `ON DELETE RESTRICT` (test C3); FK mới để NO ACTION trừ khi vào danh sách C3. Đọc `billing.ts` trước khi đề xuất thay đổi schema.
-- **Chưa có HTTP qua Nest:** `main.ts` dùng `createApplicationContext`. Route HTTP viết kiểu thuần trong `src/console/` (`console.http.ts`, `console.router.ts`, cổng 3000): tài xế `/api/driver/v1/*`, admin `/api/admin/*`. Theo `docs/api/DRIVER-API-HOP-DONG.md`: chưa thêm Nest controller cho đến khi có RolesGuard; xác thực dev bằng header `X-Driver-Id` khi `DRIVER_API_DEV_AUTH=true`.
+- **Chưa có HTTP qua Nest:** `main.ts` dùng `createApplicationContext`. HTTP viết kiểu thuần, cùng cổng 3000 do `ConsoleServer` (`src/console/console.server.ts`) chọn handler. **Route tài xế** `/api/driver/v1/*` ở `src/driver/` (`driver.http.ts`; sạc/credit `charges.http.ts`; top-up `top-ups.http.ts`, T32 Phần 5), xác thực **JWT thật** (`authenticateDriver`, `driver-auth.ts`); `X-Driver-Id` chỉ còn là đường dev của `driver-auth.ts` khi `DRIVER_API_DEV_AUTH=true`, billing không dựa vào. Service billing truyền vào route qua `createDriverListener` (`ConsoleModule` import `BillingModule`). Admin `/api/admin/*` vẫn ở `src/console/`. Theo `docs/api/DRIVER-API-HOP-DONG.md`: chưa thêm Nest controller cho đến khi có RolesGuard.
 - **Chưa có** module `users`, `realtime`, BullMQ. Redis có trong `infra/docker-compose.yml` nhưng chưa dùng. Hẹn giờ hiện dùng `Scheduler` (`src/common/scheduler.ts`, `setTimeout`, mỗi service tự quét DB lúc khởi động để dựng lại).
 - **WP3 đã ghi vào bảng billing:** `src/sessions/charge-settlement.service.ts` tự INSERT `credit_transactions` (`session_debit`), UPDATE `credit_accounts.balance_vnd`/`status = in_shortfall`, tạo `loyalty_accounts` và ghi điểm `earn` bằng SQL thô. `driver-charging.service.ts` và `reconciliation.service.ts` đọc `credit_accounts`/`credit_transactions`. **Không sửa các file này**; xem mục Còn mở trong decisions.
 - **Lệnh:**
@@ -77,10 +77,10 @@ Decisions khác diagram thì theo diagram và sửa decisions. Diagram mâu thu�
 
 | Luồng | Diagram | Decisions | State machine | Test |
 |---|---|---|---|---|
-| Tạo top-up | SD-2a | D2 | STM-4 #1 | TC-STM4-01/11/16/18 |
+| Tạo top-up | SD-2a | D2 | STM-4 #1 | TC-STM4-01 + test theo nội dung: `test/billing-top-up.integration.test.ts`, `test/driver-top-ups.integration.test.ts`, `test/migration-0019.integration.test.ts`, `src/billing/vnpay.adapter.spec.ts` |
 | IPN cộng tiền | SD-2b | D3 | STM-4 #2 #3, STM-5 | TC-STM4-02/03/08/09/10, TC-STM5-* |
 | Xuất hoá đơn, retry | SD-2c | D5 | STM-7 | TC-STM7-* |
-| Timeout, thanh toán trễ | SD-2d | D4 | STM-4 #4–#6 | TC-STM4-04/05/06/07/15 |
+| Timeout, thanh toán trễ | SD-2d | D4 | STM-4 #4, #6 | TC-STM4-04/05/06/07/15 |
 | Admin hoàn, gửi refund, retry | SD-2e | D1 | STM-4 #7, STM-10 | TC-STM4-12/13/14, TC-STM10-* |
 | Đóng tài khoản (tài xế đóng, hệ thống tự hoàn) | SD-2f | D6 | STM-5, STM-10 | (theo test case của nhóm) |
 | Worker quét DB | (không vẽ) | D7 | | |

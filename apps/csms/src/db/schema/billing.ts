@@ -94,8 +94,16 @@ export const topUps = pgTable(
     /** Dẫn xuất = amount_vnd - points_discount_vnd; ghi lúc tạo top-up. */
     amountPaidVnd: bigint('amount_paid_vnd', { mode: 'number' }).notNull(),
     status: topUpStatusEnum('status').notNull().default('pending'),
-    /** Khoá chống tạo trùng từ app khi retry (UNIQUE). */
-    idempotencyKey: varchar('idempotency_key', { length: 64 }).notNull(),
+    /**
+     * Header Idempotency-Key của app (8–100 ký tự). UNIQUE theo tài khoản
+     * `(credit_account_id, idempotency_key)` từ 0019: hai tài xế trùng key không chặn nhau.
+     */
+    idempotencyKey: varchar('idempotency_key', { length: 100 }).notNull(),
+    /**
+     * sha256 hex của `JSON.stringify([amount_vnd, points_to_redeem])` tài xế gửi (0019), cùng cách
+     * băm `driver_charge_intents.request_hash`. NULL = dòng không tạo qua API (seed / trước 0019).
+     */
+    requestHash: varchar('request_hash', { length: 64 }),
     /** vnp_TransactionNo — mã phía VNPay, ghi khi IPN/querydr báo đã trả (SD-2b). UNIQUE khi có. */
     gatewayTransactionNo: varchar('gateway_transaction_no', { length: 20 }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
@@ -107,7 +115,10 @@ export const topUps = pgTable(
      * refunds.requestedBy (kind top_up) — cột refunded_by bỏ ở 0015 (B5).
      */
     refundedAt: timestamp('refunded_at', { withTimezone: true }),
-    /** Thanh toán sau cửa sổ 1 giờ (BR-P13, SD-2c D): ba cột late_* ghi cùng lúc, chỉ khi expired. */
+    /**
+     * Khoản trễ (BR-P13, SD-2d): thanh toán thành công tới sau khi top-up đã `expired` (hoặc
+     * `failed`, D4 ⊕), không cộng ví, chờ Admin hoàn. Ba cột late_* ghi cùng lúc.
+     */
     lateGatewayRef: varchar('late_gateway_ref', { length: 100 }),
     latePaidAt: timestamp('late_paid_at', { withTimezone: true }),
     lateAmountVnd: bigint('late_amount_vnd', { mode: 'number' }),
@@ -120,13 +131,17 @@ export const topUps = pgTable(
   },
   (t) => [
     unique('top_ups_gateway_reference_key').on(t.gatewayReference),
-    unique('top_ups_idempotency_key_key').on(t.idempotencyKey),
+    // 0019: cột đầu credit_account_id nên UNIQUE này cũng là index của FK (thay index một cột).
+    unique('top_ups_account_idempotency_key_key').on(t.creditAccountId, t.idempotencyKey),
     unique('top_ups_late_gateway_ref_key').on(t.lateGatewayRef),
     // Một giao dịch VNPay cộng cho đúng một top-up (BR-P13); partial vì NULL tới khi cổng báo trả.
     uniqueIndex('top_ups_gateway_transaction_no_key')
       .on(t.gatewayTransactionNo)
       .where(sql`${t.gatewayTransactionNo} IS NOT NULL`),
-    index('top_ups_credit_account_id_idx').on(t.creditAccountId),
+    // Mỗi tài khoản tối đa một top-up pending (WF-02 D2, 0019).
+    uniqueIndex('top_ups_one_pending_per_account_key')
+      .on(t.creditAccountId)
+      .where(sql`${t.status} = 'pending'`),
     // Quét top-up pending quá hạn 15 phút (SD-2d, D7; migration 0015).
     index('top_ups_status_expires_at_idx').on(t.status, t.expiresAt),
     check(
@@ -149,7 +164,7 @@ export const topUps = pgTable(
       'top_ups_late_refunded_check',
       sql`${t.lateRefundedAt} IS NULL OR (${t.latePaidAt} IS NOT NULL AND ${t.lateRefundedAt} >= ${t.latePaidAt})`,
     ),
-    // Chỉ top-up expired nhận khoản muộn (SD-2c D). Cửa sổ 1 giờ do service kiểm (tham số cấu hình).
+    // Hiện CHECK chỉ cho khoản trễ trên `expired`; migration Phần 6 (0017) nới thêm `failed` (D4 ⊕).
     check(
       'top_ups_late_payment_status_check',
       sql`${t.lateGatewayRef} IS NULL OR ${t.status} = 'expired'`,

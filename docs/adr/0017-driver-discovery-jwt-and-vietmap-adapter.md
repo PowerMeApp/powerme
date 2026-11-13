@@ -32,6 +32,19 @@ reuse the scrypt format of ADR-0011. The synthetic local token script stays for 
 OTP, Google and Firebase sign-in are **out of scope** until after Defense 1.1; the intended
 direction is a route that exchanges a verified Firebase ID token for a CSMS JWT of the same shape.
 
+**Update 2026-11-12 (BE-30):** `/auth/login` also accepts `{phone_number, password}` instead of
+`{email, password}` (exactly one identifier; both or neither → 400 `invalid_input`). Phone numbers
+are normalized to E.164 by one shared function (`src/driver/phone-number.ts`: Vietnamese `0…`,
+`84…`, `+84…` forms → `+84` + 9–10 digit national number; other `+` numbers kept if 7–15 digits) on
+register and login, and migration 0017 normalizes stored numbers the same way and makes
+`users.phone_number` UNIQUE (NULLs allowed; it refuses to run and lists user ids if two users share
+a number). Register with a number already in use → 409 `phone_taken`. Every BE-21 guarantee holds
+on both paths: one 401 `invalid_credentials` for unknown identifier or wrong password with a dummy
+scrypt when no user matches, 403 `account_locked` only after a correct password, and failed-login
+limits keyed by the normalized identifier + IP. The phone number is only a login identifier: there
+is no OTP/SMS proof of ownership. **OTP/SMS and Google/Firebase sign-in remain out of scope until
+after Defense 1.1**, unchanged from the BE-21 note above.
+
 The shared listener refuses all hosts except `127.0.0.1` and `::1`, including a configured
 wildcard. Driver JWT does not authenticate the existing admin console. This intentionally
 blocks a deployment configuration that tries to expose the shared unauthenticated console;

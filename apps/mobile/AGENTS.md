@@ -13,6 +13,7 @@ Phạm vi ghi chỉ `apps/mobile`; giữ diagrams/backend/scaffold/WIP người 
 - Ghi trace vào phần tiến độ screens.md: view/function → FR/UC/BR/NFR → class/package → dependencies/DEC → acceptance/tests. Đối chiếu method signatures và dependencies architecture.md trước thêm class.
 - Research code/tests nguồn chính chủ proportionate trước new feature; ghi URLs/commit/license/phần áp dụng. Không tải/chạy dependency chưa được phép.
 - Implement bounded slice; cập nhật status screens.md và contract extension architecture.md trong cùng slice. Ghi **đang làm / local đã kiểm / pending integration** trung thực; không đánh Done theo UI đẹp hoặc fixture pass.
+- Khi đã nối API thật và kiểm chứng luồng tương ứng với backend thật (test fixture riêng chưa đủ), dọn ngay trong cùng slice các mock repository, dữ liệu, provider, cấu hình ghép nối và fallback dùng khi chạy app cho luồng đó. Xóa entrypoint preview đã lỗi thời nếu không còn nơi dùng. Giữ mock của luồng chưa tích hợp và tách an toàn phần dùng chung trước khi xóa. Fake và fixture chỉ dùng trong test được giữ riêng khỏi đường chạy app. Khi dọn, cập nhật tài liệu, chạy `flutter analyze` và các test liên quan.
 - Chạy format/analyze/test/build phù hợp trong nested mobile; TMP/TEMP E:/Project/PowerMe/.review. Không outer checker trỏ app standalone cũ. Báo actual results và limits README; không commit/push/deploy tự động.
 
 ## User override mới nhất — 28/10
@@ -22,6 +23,10 @@ Phạm vi ghi chỉ `apps/mobile`; giữ diagrams/backend/scaffold/WIP người 
 Giữ exact brand gold D4AF37, teal 00E0C2, black 0A0A0A, graphite 141414 và crops logo thật; 20px gutters/8px spacing/12px card/48px targets. UI dùng font fallback nếu chưa có Montserrat/license, không tự cài. [design-system](docs/design-system.md) là visual support; [mock-scenarios](docs/mock-scenarios.md) là future scenario plan; không là canonical requirement/architecture thứ ba. Historical mb-01-foundation chỉ research record.
 
 ## Coding boundaries
+
+URL, cổng và giá trị theo môi trường phải đọc từ cấu hình. Không đặt URL mặc định trong Dart. Asset mobile chỉ chứa cấu hình công khai.
+
+**Bắt buộc khi dùng API VM:** Làm theo [hướng dẫn SSH tunnel](docs/api-tunnel.md). Flutter chỉ gọi API nghiệp vụ qua tunnel do người quản lý VM cấp. Cấm chạy CSMS local thứ hai trỏ vào DB staging hoặc tự chuyển sang CSMS local/mock khi mất tunnel.
 
 Riverpod/go_router đã có; không dependency mới nếu chưa được phép. Feature-first domain/interface/data/application/presentation; adapters/store/scope chọn tại app/composition. Widget render/intent, không import mock/DTO/HTTP hoặc filter dataset/tính money/credit/points/rank. StationsController/StationRepository/StationOption theo WF01, async find(vehicleId,query); future suggest không giả implemented. Domain thuần Dart, no generated WP2 contract giả.
 

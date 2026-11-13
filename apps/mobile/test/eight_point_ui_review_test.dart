@@ -1,4 +1,4 @@
-import 'package:driver_app/app/composition/demo_app.dart';
+import 'support/driver_app_test_harness.dart';
 import 'package:driver_app/app/powerme_app.dart';
 import 'package:driver_app/app/router.dart';
 import 'package:driver_app/core/theme/powerme_theme.dart';
@@ -31,7 +31,7 @@ void viewport(WidgetTester tester, double width, double scale) {
 }
 
 Future<ProviderContainer> boot(WidgetTester tester) async {
-  await tester.pumpWidget(const DemoApp());
+  await tester.pumpWidget(const DriverAppTestHarness());
   await tester.pumpAndSettle();
   await signIn(tester);
   return ProviderScope.containerOf(tester.element(find.byType(PowerMeApp)));

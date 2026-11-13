@@ -1,6 +1,6 @@
 # WF-02 – Quyết định thiết kế
 
-> Đặt tại `docs/spec/WF-02_decisions.md`. Cập nhật: 10/11/2026.
+> Đặt tại `docs/spec/WF-02_decisions.md`. Cập nhật: 12/11/2026 (D2 theo T32 Phần 5).
 > **Nguồn chính là diagram trong `diagrams/report4/class/CD-2/` + `diagrams/report4/sequence/SD-2a…2f/`** (CD-2, SD-2a…2f v2.0, 01/11/2026, bản đã chia sẻ vào tài liệu chung của nhóm). File này chỉ ghi lại:
 > (1) những điểm trong diagram mà code phải bám, viết ra cho dễ tra;
 > (2) cách khớp diagram với repo hiện tại;
@@ -15,7 +15,7 @@
 | SD-2a `diagrams/report4/sequence/SD-2a/SD-2a.puml` | Tài xế tạo top-up, chuyển sang trang thanh toán | STM-4 |
 | SD-2b `diagrams/report4/sequence/SD-2b/SD-2b.puml` | IPN cộng tiền đúng một lần | STM-4, STM-5, STM-7 |
 | SD-2c `diagrams/report4/sequence/SD-2c/SD-2c.puml` | Xuất e-invoice chạy nền, có retry | STM-7 |
-| SD-2d `diagrams/report4/sequence/SD-2d/SD-2d.puml` | Quá 15 phút chưa có kết quả; thanh toán trễ | STM-4 |
+| SD-2d `diagrams/report4/sequence/SD-2d/SD-2d.puml` | Hết hạn 15 phút, thêm 2 phút vẫn chưa có kết quả; thanh toán trễ | STM-4 |
 | SD-2e `diagrams/report4/sequence/SD-2e/SD-2e.puml` | Admin hoàn top-up; gửi refund về nguồn thanh toán | STM-4, STM-10, STM-7 |
 | SD-2f `diagrams/report4/sequence/SD-2f/SD-2f.puml` | Tài xế đóng tài khoản, hệ thống tự hoàn số dư (D6) | STM-5, STM-10 |
 
@@ -81,13 +81,34 @@ Nghĩa của cột đã có:
 
 ## D2. Tạo top-up (SD-2a)
 
-- `POST …/billing/top-ups {amountVnd, redeemPoints}`, header `Idempotency-Key`. Cùng key trả lại cùng top-up.
-- Kiểm tra: tài khoản chưa đóng, hạn mức **BR-P22 theo ADR-0013**: mỗi lần nạp 50.000–2.000.000 VND, số dư sau nạp ≤ 5.000.000 VND; không có top-up đang mở khác. Sai → `TopUpRejected(reason)` → 409 / 422 `{reason}`.
+> **Viết lại theo T32 Phần 5 (Khang, 12/11).** Code: `billing/top-up.service.ts`, `billing/vnpay.adapter.ts`, route `driver/top-ups.http.ts`, migration 0019. Hợp đồng: `docs/api/DRIVER-API-HOP-DONG.md` §14, `driver-api.openapi.yaml`. **Chưa dùng cho app** tới khi Phần 6 (IPN, trang return) và Phần 8 (quét quá hạn) merge.
+
+- ~~`POST …/billing/top-ups {amountVnd, redeemPoints}`, header `Idempotency-Key`. Cùng key trả lại cùng top-up.~~ → thay bởi T32 Phần 5 12/11:
+  - `POST /api/driver/v1/billing/top-ups` body `{amount_vnd, points_to_redeem?}` (snake_case, hợp đồng §8; `points_to_redeem` bỏ trống / `null` = 0; trường lạ → 400), header `Idempotency-Key` (8–100 ký tự, dùng chung `headerKey` của route charges). Tạo mới **201**, gửi lại cùng key cùng body **200** cùng top-up, cùng key khác body → 409 `idempotency_conflict`.
+  - Idempotency **theo tài khoản** (UNIQUE `(credit_account_id, idempotency_key)`, 0019). `request_hash` = sha256 hex của `JSON.stringify([amount_vnd, points_to_redeem])`, cùng cách `driver-charging.service.ts`; chỉ băm giá trị tài xế gửi (không băm số server tính), nên gửi lại sau khi điểm đổi vẫn trả top-up cũ, không báo giá lại. Dòng `request_hash` NULL (seed / trước 0019) → `idempotency_conflict`.
+  - ⊕ `GET …/billing/top-ups/quote?amount_vnd=` → `{points_available, max_points, max_discount_vnd}` (`TopUpService.quote`, chỉ đọc; dưới 500 điểm → 0, không phải lỗi). `GET …/billing/top-ups/{id}` → top-up của tài xế; của người khác / không có → 404 `not_found`.
+  - Một schema `TopUp` cho cả ba chỗ: `{top_up_id, status, amount_vnd, points_redeemed, points_discount_vnd, amount_paid_vnd, created_at, expires_at, payment_url}`; `payment_url` chỉ có khi `pending` và chưa quá `expires_at`, còn lại null.
+- ~~Kiểm tra: tài khoản chưa đóng, hạn mức **BR-P22 theo ADR-0013** …; không có top-up đang mở khác. Sai → `TopUpRejected(reason)` → 409 / 422 `{reason}`.~~ → thay bởi T32 Phần 5 12/11. Một DB transaction, thứ tự:
+  1. `ensureAccounts(driverId)` (D9), rồi `credit_accounts … FOR UPDATE` trước mọi kiểm tra;
+  2. tìm theo `(credit_account_id, idempotency_key)`, so `request_hash`;
+  3. tài khoản `closed` → 409 `account_closed` (`active` và `in_shortfall` đều tạo được — SD-2a);
+  4. có top-up `pending` (`TopUpStateMachine.isOpen`) → hai ca ở dưới;
+  5. BR-P22: `amount_vnd` 50.000–2.000.000 → ngoài khoảng 422 `amount_out_of_range`; `balance_vnd + amount_vnd > 5.000.000` → 422 `balance_limit_exceeded` (cộng đủ `amount_vnd`, vì ví được cộng đủ số nạp dù trả bớt bằng điểm);
+  6. `points_to_redeem > 0` → `quoteRedemption(…, {requestedPoints})`; `below_minimum` / `insufficient_points` / `exceeds_cap` → 422 `points_below_minimum` / `points_unavailable` / `points_exceed_cap`. Không tự hạ số điểm;
+  7. INSERT `pending` (`initial()`), `expires_at = now() + PENDING_TIMEOUT` (đồng hồ DB).
+  
+  Lỗi là `TopUpRejected(code, extra?)` (`billing-errors.ts`) → `{error, detail}` (+ `top_up_id`, `payment_url` cùng cấp). Chưa cấu hình VNPay (thiếu `VNPAY_TMN_CODE` / `VNPAY_HASH_SECRET`) → 503 `payment_unconfigured`, không ghi dòng nào.
+- ⊕ Ba lớp chống trùng: Idempotency-Key + `request_hash`; khoá `credit_accounts` (hai request cùng key → request sau chờ khoá rồi thấy dòng ở bước 2; khác key → thấy pending ở bước 4); partial UNIQUE `top_ups_one_pending_per_account_key` + UNIQUE key (0019). Vẫn lọt 23505 trên hai ràng buộc này (ghi ngoài API) → chạy lại transaction một lần, trả như bước 2 / 4, không 500.
 - `redeemPoints` và còn ≥ 500 điểm → tính `discountVnd`. ⊕ `LoyaltyService.quoteRedemption` nhận `requestedPoints?` (bỏ trống = dùng tối đa `min(điểm còn sống, trần 50 %)`), không bắt bội số 100 (1 điểm = 10 VND), chỉ tính điểm còn sống (D11). Chốt 10/11, T32 Phần 4. **Chỉ trừ điểm khi cộng tiền** (SD-2b). Điểm hết hạn trong lúc chờ thanh toán: xem D3 ⊕.
-- Lưu top-up `pending`, `expiresAt = now + 15 phút`; `VnpayAdapter.buildPaymentUrl(topUp, amountVnd − discountVnd)`; trả **201 `{topUpId, paymentUrl}`**.
-- Return URL chỉ hiển thị. Chỉ IPN có chữ ký (SD-2b) hoặc querydr sau 15 phút (SD-2d) mới cộng tiền.
-- ⊕ "Top-up đang mở" chỉ tính `pending`; `expired` (kể cả trong cửa sổ trễ 1 giờ) không chặn tạo mới. SRS BR-P22 sửa theo (chốt 09/11).
-- ⊕ Khi bị chặn vì có top-up `pending`: 409 trả thêm `topUpId` và `paymentUrl` để app hỏi "tiếp tục thanh toán?".
+- ~~Lưu top-up `pending`, `expiresAt = now + 15 phút`; `VnpayAdapter.buildPaymentUrl(topUp, amountVnd − discountVnd)`; trả **201 `{topUpId, paymentUrl}`**.~~ → thay bởi T32 Phần 5 12/11: `VnpayAdapter.buildPaymentUrl(topUp, cfg, ip)` là hàm thuần, URL **không lưu DB** mà dựng lại từ dòng `top_ups` + cấu hình mỗi lần cần (tạo, gửi lại key, GET, lỗi `top_up_pending`). Tham số VNPay 2.1.0: `vnp_Amount = amount_paid_vnd × 100`, `vnp_TxnRef = gateway_reference` (`PM` + 14 ký tự `[0-9A-Z]`, sinh lại khi trùng UNIQUE, tối đa 5 lần), `vnp_CreateDate` / `vnp_ExpireDate` = `created_at` / `expires_at` theo GMT+7, `vnp_OrderType = other`, `vnp_Locale = vn`; ký HMAC-SHA512 trên chuỗi tham số đã sắp xếp và encode kiểu PHP `urlencode`.
+  - ⊕ `vnp_IpAddr` lấy từ socket của request hiện tại (`clientIp`, bỏ tiền tố `::ffff:`). **Sau Caddy / tunnel staging đây là IP proxy**: Phần 5 chưa tin `X-Forwarded-For`. Cần chốt nếu VNPay bắt IP thật của tài xế (tin header của proxy nào, cấu hình ra sao).
+- Return URL chỉ hiển thị. Chỉ IPN có chữ ký (SD-2b) hoặc querydr sau `expires_at + 2 phút` (SD-2d) mới cộng tiền. Route return `/billing/vnpay/return` (D8) có từ Phần 6; trước đó thanh toán sandbox xong quay về 404. App poll `GET …/top-ups/{id}`.
+- ⊕ "Top-up đang mở" chỉ tính `pending`; `expired` không chặn tạo mới. SRS BR-P22 sửa theo (chốt 09/11).
+- ⊕ Khi bị chặn vì có top-up `pending` (T117 11/11), hai ca, app phân biệt bằng ~~`reason`~~ `error` (T32 Phần 5 12/11), **không** dựa vào việc có hay không có `payment_url`:
+  - `pending` **chưa** quá `expires_at` → 409 `{error: 'top_up_pending', detail, top_up_id, payment_url}` để app hỏi "tiếp tục thanh toán?" (tên chốt ở Phần 5);
+  - `pending` **đã** quá `expires_at` (đang chờ querydr chốt, D4 ⊕) → 409 `{error: 'pending_top_up_confirming', detail, top_up_id}`, báo "giao dịch trước đang được xác nhận, thử lại sau ít phút". **Không** trả `payment_url` cũ (`vnp_ExpireDate` đã qua).
+  - ⊕ **Không tự chuyển pending đã quá hạn sang `expired`** khi tạo top-up (T32 Phần 5): theo D4 ⊕ ĐIỀU KIỆN chỉ querydr trả lời dứt khoát "chưa trả" (Phần 8) mới được. Tài xế chờ (thường ~2 phút sau `expires_at`, tối đa ~1 giờ) là hành vi cố ý.
+- ⊕ **Không hẹn timeout ở Phần 5**: top-up quá hạn do vòng quét `top_ups (status, expires_at)` của Phần 8 xử lý (D7). Hệ quả tới khi Phần 8 merge: không có gì chuyển `pending` sang `expired`, tài xế bỏ dở thanh toán bị chặn `pending_top_up_confirming` mãi (staging dọn tay: `docs/NHAT-KY-MIGRATION-0019.md` mục 5); tới khi Phần 6 merge chưa có IPN để cộng tiền. Vì vậy route top-up chưa dùng cho app tới khi Phần 6 và 8 merge.
 
 ## D3. IPN cộng tiền (SD-2b)
 
@@ -128,24 +149,32 @@ Cộng tiền, dòng sổ cái và điểm nằm trong **một** DB transaction,
 
 ## D4. Timeout và thanh toán trễ (SD-2d)
 
-> **Chốt 09/11 (Khang), thay phần cửa sổ trễ 1 giờ bên dưới:** bỏ cửa sổ trễ. `expired` là trạng thái cuối: mọi kết quả thành công đến sau khi hết hạn đều ghi thành khoản trễ (không cộng, không hoá đơn, Admin hoàn `late_payment`). Vòng quét timeout chạy lúc `expires_at + 2 phút` rồi querydr (IPN đang trên đường vẫn kịp tới). `vnp_ExpireDate` = `expires_at`. Báo tài xế MSG26. SRS BR-P13/BR-P22, STM-4 v1.1, SD-2d đã sửa theo; code (`top-up-state-machine.ts`: bỏ `withinLateWindow`, chuyển #5) và `LATE_WINDOW` ở D7 còn phải sửa (Khang).
+> **Bỏ cửa sổ trễ 1 giờ: Ân đề xuất 09/11, Khang đồng ý 10/11 kèm điều kiện (T117).** SRS (bản nộp 09/11), STM-4 v1.1, SD-2d đã sửa theo; còn lệch: `report3-srs.md` trên repo vẫn BR-P13/BR-P22 cũ, và STM-4 v1.1 `c1 --> expired : [else]` chưa thể hiện điều kiện querydr dứt khoát (xem Còn mở). `top-up-state-machine.ts` bỏ chuyển #5 và guard `withinLateWindow` / `limitsOk`, D7 bỏ `LATE_WINDOW` (T117 11/11).
 
-- 15 phút sau khi tạo mà chưa có IPN: `TopUpService.onPendingTimeout(topUpId)`; nếu vẫn `pending` thì `VnpayAdapter.queryTransaction(ref)` (querydr, 10 s). Đã trả → `pending → credited` + ghi sổ; chưa trả → `pending → expired`.
-- IPN đến khi top-up `expired`:
-  - trong vòng 1 giờ sau khi hết hạn và chưa áp dụng → `expired → credited` + ghi sổ;
-  - quá 1 giờ → ghi khoản trễ (`late_*`), top-up vẫn `expired`, đưa lên Billing Exceptions để Admin hoàn (SD-2e, `late_payment`).
-  - Trả 00.
-- ⊕ Mọi đường cộng tiền ở đây (querydr, IPN trễ) làm giống nhánh "đã trả" của SD-2b: trừ điểm đã dùng (điểm hết hạn thì ghi `adjust` cho phần thiếu, D3 ⊕) và yêu cầu e-invoice.
-- ⊕ Trước khi cộng tiền trễ, **kiểm tra lại** tài khoản chưa đóng và số dư sau nạp ≤ 5.000.000. Vi phạm → không cộng, ghi thành khoản trễ để Admin hoàn.
-- ⊕ querydr lỗi hoặc timeout → giữ `pending`, hẹn quét lại; không chuyển `expired` khi chưa biết kết quả.
-- ⊕ **Thành công tới khi top-up đã `failed`** (VNPay báo lỗi/huỷ trước, rồi báo đã trả): giữ `failed`, ghi khoản trễ như IPN sau cửa sổ (không cộng, không hoá đơn, Admin hoàn `late_payment`). Không xét cửa sổ trễ hay hạn mức. Chốt 04/11.
+- `expired` là **trạng thái cuối**. Kết quả thành công tới sau khi top-up đã `expired` → **khoản trễ** (#6): ghi `late_*`, top-up vẫn `expired`, không cộng, không hoá đơn, đưa lên Billing Exceptions để Admin hoàn (SD-2e, `late_payment`). Trả 00.
+- `vnp_ExpireDate` = `expires_at`. Báo tài xế MSG26 khi top-up `expired`.
+- ~~15 phút sau khi tạo~~ → thay bởi T117 11/11: vòng quét lúc **`expires_at + 2 phút`** (IPN đang trên đường vẫn kịp tới), nếu top-up vẫn `pending` thì `TopUpService.onPendingTimeout(topUpId)` gọi `VnpayAdapter.queryTransaction(ref)` (querydr, 10 s):
+  - đã trả → `pending → credited` (#2) + ghi sổ;
+  - chưa trả / thất bại, **dứt khoát** → `pending → expired` (#4, `TIMEOUT_NOT_PAID`);
+  - chưa ngã ngũ → theo khối ĐIỀU KIỆN dưới đây.
+- ⊕ **ĐIỀU KIỆN của Khang (làm ở Phần 8):**
+  - chỉ chuyển `pending → expired` (`TIMEOUT_NOT_PAID`) khi querydr trả lời **dứt khoát** là chưa thanh toán / thất bại;
+  - kết quả chưa ngã ngũ (đang xử lý / chưa hoàn tất, lỗi, timeout, sai chữ ký) → **giữ `pending`**, hẹn querydr lại theo lịch lùi dần, tổng tối đa khoảng 1 giờ sau `expires_at` (số cụ thể chốt ở Phần 8). Trong lúc đó IPN thành công tới thì cộng bình thường (#2);
+  - hết giới hạn mà vẫn chưa rõ mới chuyển `expired`; khoản tới sau đó là khoản trễ, Admin hoàn `late_payment`.
+  - Đây là ca duy nhất mà querydr lúc `+2 phút` không tự bắt được (ngân hàng xác nhận chậm).
+- ~~IPN đến khi top-up `expired`: trong vòng 1 giờ sau khi hết hạn và chưa áp dụng → `expired → credited` + ghi sổ~~ → thay bởi T117 11/11 (không còn #5).
+- ~~IPN đến khi top-up `expired`: quá 1 giờ → ghi khoản trễ~~ → thay bởi T117 11/11 (mọi thành công tới sau `expired` là khoản trễ, ý đầu của D4).
+- ⊕ Mọi đường cộng tiền ở đây (querydr, IPN tới khi còn `pending`) làm giống nhánh "đã trả" của SD-2b: trừ điểm đã dùng (điểm hết hạn thì ghi `adjust` cho phần thiếu, D3 ⊕) và yêu cầu e-invoice.
+- ~~⊕ Trước khi cộng tiền trễ, **kiểm tra lại** tài khoản chưa đóng và số dư sau nạp ≤ 5.000.000. Vi phạm → không cộng, ghi thành khoản trễ để Admin hoàn.~~ → thay bởi T117 11/11. Lý do bỏ: tiền chỉ được cộng khi top-up còn `pending`; lúc đó tài khoản không thể đóng (D6 chặn đóng khi có top-up `pending`) và hạn mức đã kiểm lúc tạo.
+- ~~⊕ querydr lỗi hoặc timeout → giữ `pending`, hẹn quét lại; không chuyển `expired` khi chưa biết kết quả.~~ → thay bởi T117 11/11 (gộp vào khối ĐIỀU KIỆN).
+- ⊕ **Thành công tới khi top-up đã `failed`** (VNPay báo lỗi/huỷ trước, rồi báo đã trả): giữ `failed`, ghi khoản trễ như trên `expired` (không cộng, không hoá đơn, Admin hoàn `late_payment`). Chốt 04/11.
 - ⊕ **Khoản trễ đã ghi rồi** (`late_gateway_ref` khác NULL, trên `expired` hoặc `failed`), có kết quả thành công mới:
   - cùng `transactionNo` → no-op `already_applied`, trả 02 (TC-STM4-15);
   - khác `transactionNo` → `conflicting_result`: không ghi gì, service log warn.
-  - Kiểm **trước** guard cửa sổ, vì khoản trễ có thể đã ghi ngay trong cửa sổ khi vượt hạn mức.
-- ⊕ **Cần migration mới** cho ý thứ nhất (số kế tiếp lúc làm Phần 6; 0015 đã merge): CHECK `top_ups_late_payment_status_check` của 0003 đang là `late_gateway_ref IS NULL OR status = 'expired'`, sẽ chặn khoản trễ trên `failed`.
+  - Kiểm khoản trễ đã ghi **trước**, để IPN lặp trả 02 thay vì ghi khoản trễ lần hai. ~~Kiểm **trước** guard cửa sổ, vì khoản trễ có thể đã ghi ngay trong cửa sổ khi vượt hạn mức.~~ → thay bởi T117 11/11.
+- ⊕ **Cần migration mới** cho ý `failed` ở trên (số kế tiếp lúc làm Phần 6 — 0017 đã dùng cho BE-30, 0018 cho BE-34, 0019 cho Phần 5): CHECK `top_ups_late_payment_status_check` của 0003 đang là `late_gateway_ref IS NULL OR status = 'expired'`, sẽ chặn khoản trễ trên `failed`.
   - Nới thành `status IN ('expired','failed')`.
-  - Sửa COMMENT của `late_gateway_ref`.
+  - Sửa COMMENT của `late_gateway_ref` (0003 còn ghi "sau cửa sổ 1 giờ … cửa sổ 1 giờ do service kiểm").
   - Sửa COMMENT của `credit_accounts.closure_refunded_at` theo D1 (chốt 09/11).
   - Test cả ca hợp lệ (khoản trễ trên `failed`) lẫn ca bị chặn (trên `pending` / `credited` / `refunded`).
   - Trí review.
@@ -215,7 +244,7 @@ Diagram chỉ ghi "job" / "queue" / "after commit". Repo chưa có BullMQ (Redis
   - `e_invoices`, `invoice_adjustments`: `status IN ('requested','failed') AND next_attempt_at <= now()` → `EInvoiceService.issue` / điều chỉnh.
   - `top_ups`: `status = 'pending' AND expires_at <= now()` → `TopUpService.onPendingTimeout` (dùng `expires_at` đã có; D4 09/11: chạy lúc `expires_at + 2 phút`). Không có `next_attempt_at`, nên cách giữ chỗ do Phần 5/8 chọn (interface `BackgroundWork.runDue` không ràng buộc).
 - `Scheduler` (`src/common/scheduler.ts`) chỉ để **chạy sớm** (ngay sau commit, đúng `expires_at`); mất khi sập cũng được vì vòng quét bắt lại. Lúc khởi động mỗi worker quét một lần.
-- Lịch retry: `next_attempt_at = now() + 5 phút / 30 phút / 2 giờ`; một helper dùng chung cho e-invoice và refund (`nextRetry` trong `retry-schedule.ts`). `RETRY_LIMIT = 4` là hằng số export ở `refund-state-machine.ts` (không phải biến môi trường). `PENDING_TIMEOUT = 15 phút` đặt ở Phần 5. ~~`LATE_WINDOW = 1 giờ`~~ bỏ theo D4 09/11 (T117 sửa code).
+- Lịch retry: `next_attempt_at = now() + 5 phút / 30 phút / 2 giờ`; một helper dùng chung cho e-invoice và refund (`nextRetry` trong `retry-schedule.ts`). `RETRY_LIMIT = 4` là hằng số export ở `refund-state-machine.ts` (không phải biến môi trường). `PENDING_TIMEOUT = 15 phút`: hằng số export `PENDING_TIMEOUT_MS` ở `top-up.service.ts` (T32 Phần 5, `expires_at = now() + PENDING_TIMEOUT` bằng đồng hồ DB); Phần 5 không hẹn timeout, vòng quét Phần 8 xử lý. ~~`LATE_WINDOW = 1 giờ`~~ bỏ theo D4; đã bỏ trong code (T117).
 - Viết sau interface `BackgroundWork` trong billing để sau đổi sang BullMQ mà không sửa service. ⊕ Runner `BackgroundWorkRunner` (Phần 12): các loại chạy song song, mỗi loại không chạy chồng; `kick` / `kickAt` để chạy sớm; cấu hình `BILLING_WORKER_*` (`infra/.env.example`).
 - Index cần: `(status, next_attempt_at)` trên `e_invoices`, `invoice_adjustments`, `refunds`; `top_ups (status, expires_at)`.
 
@@ -229,6 +258,7 @@ Diagram chỉ ghi "job" / "queue" / "after commit". Repo chưa có BullMQ (Redis
   | Diagram | Code |
   |---|---|
   | `POST /billing/top-ups`, `GET /billing/top-ups/{id}` | `/api/driver/v1/billing/top-ups…` |
+  | ⊕ (chưa vẽ) báo giá dùng điểm | `GET /api/driver/v1/billing/top-ups/quote?amount_vnd=` (D2, T32 Phần 5) |
   | `POST /me/account/close` | `/api/driver/v1/me/account/close` |
   | ⊕ (chưa vẽ) xem trước đóng | `GET /api/driver/v1/me/account/close-preview` (D6) |
   | `POST /admin/billing/…` | `/api/admin/billing/…` |
@@ -239,7 +269,7 @@ Diagram chỉ ghi "job" / "queue" / "after commit". Repo chưa có BullMQ (Redis
   - ~~`CreditTransaction.transactionType` có `reservation_fee`; enum `credit_transaction_type` không có.~~ Hết lệch từ 0010 (BE-16): enum đã có `reservation_fee`, CD-2 đúng.
   - Tiền ghi `number`; code dùng `bigint` VND (Drizzle `mode: 'number'` ở tầng TS, không dùng số thực).
   - CD-2 chỉ có thành viên chính. Code thêm các class / method sau, không mâu thuẫn diagram: `TopUpStateMachine`, `RefundStateMachine`, worker của D7, `BillingExceptionsQuery`, `CreditLedgerService.getBalance`, `ensureAccounts`, `LoyaltyService.quoteRedemption` / `earnForSession` / `expireDueForAccount`.
-- SD-2a ghi "monthly cap": theo ADR-0013 thì BR-P22 không có hạn mức tháng. Code theo ADR-0013; chờ Ân sửa diagram (mục "Còn mở").
+- ~~SD-2a ghi "monthly cap": theo ADR-0013 thì BR-P22 không có hạn mức tháng. Code theo ADR-0013; chờ Ân sửa diagram (mục "Còn mở").~~ Đã vào diagram: SD-2a v2.1 (10/11) bỏ "monthly cap", ghi "no pending top-up".
 
 ## D9. Ranh giới với WP3 và tạo tài khoản ⊕
 
@@ -280,7 +310,8 @@ Chốt 09/11: WP5 làm job hết hạn điểm.
 ## Còn mở (hỏi trước khi code phần liên quan)
 
 - **Diagram chờ Ân vẽ lại** (Khang đã gửi danh sách 09/11):
-  - SD-2a: bỏ "monthly cap"; "no other open top-up" → "no other pending top-up".
+  - ~~SD-2a: bỏ "monthly cap"; "no other open top-up" → "no other pending top-up".~~ Đã vào SD-2a v2.1 (10/11).
+  - SD-2a theo T32 Phần 5 (D2, 12/11): `open_top_up` → `top_up_pending`; thêm ca `pending_top_up_confirming` (pending đã quá `expires_at`, không kèm `payment_url`); thêm `GET /billing/top-ups/quote` + `TopUpService.quote`; body `{amount_vnd, points_to_redeem?}`; 201 tạo mới / 200 gửi lại cùng key; lỗi `{error, detail}` thay `{reason}`.
   - SD-2f: điều kiện "account active, no pending top-up, no open charge intent or unsettled session"; thêm bước xoá phần dư không hoàn được (`adjustment`) và huỷ điểm (`LoyaltyService.forfeitOnClosure(driverId)`, `expire`); response `200 {closed, refundTotalVnd, nonRefundableVnd}`; ghi chú app gọi `close-preview` trước; footer bỏ "R8 Q1, Khang to confirm".
   - CD-2: migration 0003 / 0015; tiền `bigint`; `AccountClosureController.preview()`, `AccountClosureService.previewClosure(driverId)`, `LoyaltyService.forfeitOnClosure(driverId)` và `expireDue(now)`, `AccountClosureService --> LoyaltyService`.
   - Đã xong: ~~bỏ `reservation_fee` ở CD-2~~ (0010 đã thêm vào enum); ~~STM-10 Refund~~ (đã có, v1.0); ~~STM-4 ghi chú ở `failed`~~ (Ân đã làm, PR #95).
@@ -292,6 +323,11 @@ Chốt 09/11: WP5 làm job hết hạn điểm.
   - UC-ADM-08 và §3.4.1: bỏ "Admin executes the closure refund".
   - Màn hình 31: bỏ "closed accounts awaiting their refund".
   - Figure 14: "AD-3" → AD-2.
+- **Theo T117 (bỏ cửa sổ trễ, 11/11), chờ Ân / Nghĩa:**
+  - Ân: `report3-srs.md` còn BR-P13 / BR-P22 bản cũ (cửa sổ trễ 1 giờ).
+  - Ân: STM-4 v1.1 `c1 --> expired : [else]` cần tách: `[chưa trả, dứt khoát] → expired`; `[chưa ngã ngũ] →` ở lại `pending`, hẹn querydr lại (D4 ⊕ ĐIỀU KIỆN).
+  - Ân / Nghĩa: `docs/UC-ADM-08-BILLING-EXCEPTIONS.md` (tab 2 ghi "after `LATE_WINDOW` (1 h)", lọc `status = expired`; dòng TC-STM4-06 "after window") → lọc `late_gateway_ref IS NOT NULL AND late_refunded_at IS NULL`, bỏ chữ cửa sổ.
+- **Lịch querydr lại của D4 ⊕ ĐIỀU KIỆN** (hẹn querydr lại lùi dần khi chưa ngã ngũ) cần lưu lần hỏi kế tiếp cho từng top-up, nhưng `top_ups` chưa có `next_attempt_at` / `attempt_count` (D7, dòng điều kiện quét `top_ups`). Chốt trước khi viết migration của Phần 6/8 (~~0017~~: 0017 đã dùng cho BE-30, 0018 cho BE-34, 0019 cho Phần 5): thêm cột vào migration đó, hay suy lịch từ `expires_at`. Khi chốt thì sửa luôn điều kiện quét ở D7 thành `expires_at + 2 phút <= now()`.
 - **COMMENT `credit_accounts.closure_refunded_at` của 0015** ghi "NULL = chưa xong / không có gì để hoàn", lệch D1 (không tạo refund nào → `= closed_at`). Sửa ở migration Phần 6, cùng migration nới `top_ups_late_payment_status_check` và COMMENT `late_gateway_ref`. Trí review.
 - **Physical ERD v1.1 lệch 0015:** enum `refund_error_kind` riêng (0015 dùng lại `e_invoice_error_kind`); unique đầy đủ thay partial unique `(top_up_id, kind)`; `invoice_adjustments.refund_id` NOT NULL (0015 nullable); thiếu `next_attempt_at`; thiếu `refunds_requested_by_check`. Báo Ân.
 - AD-9 và Physical ERD dẫn BR-P45 cho refund, trong khi BR-P45 là làm tròn tiền phiên. Hỏi Ân.

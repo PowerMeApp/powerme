@@ -8,7 +8,8 @@
 #   tag     tag ảnh sẽ deploy (mặc định lấy từ .env.example; deploy.sh sẽ tự ghi lại khi chạy)
 #   --force ghi đè .env đã có (mất mật khẩu cũ — DB đã tạo bằng mật khẩu cũ sẽ không đăng nhập được!)
 #   --add-missing  sinh những biến chưa có giá trị: khoá JWT + issuer + audience của Driver API,
-#           DEMO_DRIVER_PASSWORD, DEMO_CHARGE_POINT_PASSWORD (khi cả tên mới lẫn tên cũ đều trống).
+#           DEMO_DRIVER_PASSWORD, khoá JWT + issuer + audience của dashboard (T128), DEMO_STAFF_PASSWORD,
+#           DEMO_CHARGE_POINT_PASSWORD (khi cả tên mới lẫn tên cũ đều trống).
 #           KHÔNG đụng biến đã có giá trị (POSTGRES_PASSWORD, mật khẩu trụ, TAG…) và không bao giờ
 #           sinh POSTGRES_PASSWORD (DB đã tạo bằng mật khẩu cũ). Chạy lại nhiều lần không đổi gì.
 #
@@ -26,6 +27,10 @@ usage() {
 # Giá trị không bí mật của Driver API (BE-27). Đổi issuer/audience = token app đang giữ hết hiệu lực.
 DRIVER_ISSUER_DEFAULT=powerme-staging
 DRIVER_AUDIENCE_DEFAULT=powerme-driver-app
+# Dashboard (T128, ADR-0018): issuer/audience riêng, KHÁC Driver API — token tài xế không bao giờ qua
+# được RolesGuard dù khoá có lộ. Đổi = mọi phiên dashboard phải đăng nhập lại.
+DASHBOARD_ISSUER_DEFAULT=powerme-staging-dashboard
+DASHBOARD_AUDIENCE_DEFAULT=powerme-dashboard
 
 DOMAIN_NEW=""
 TAG_NEW=""
@@ -49,14 +54,18 @@ for arg in "$@"; do
 done
 command -v openssl >/dev/null 2>&1 || die "thiếu openssl (apt-get install -y openssl)"
 
-# Khoá HS256: base64 chuẩn của 32 byte ngẫu nhiên (44 ký tự, một dấu '=' đệm) — đúng luật driver-auth.ts.
-gen_jwt_secret() { openssl rand -base64 32 | tr -d '\n'; }
+# Khoá HS256: base64 chuẩn của 32 byte ngẫu nhiên (44 ký tự, một dấu '=' đệm) — đúng luật driver-auth.ts
+# và users/auth.ts (loadDashboardAuthConfig). Mỗi lần gọi một khoá mới: dashboard không dùng lại khoá app.
+# tr bỏ cả \r: openssl trên Windows (Git Bash) in CRLF; trên Linux không có \r, vô hại.
+gen_jwt_secret() { openssl rand -base64 32 | tr -d '\r\n'; }
 gen_driver_issuer() { printf '%s' "$DRIVER_ISSUER_DEFAULT"; }
 gen_driver_audience() { printf '%s' "$DRIVER_AUDIENCE_DEFAULT"; }
+gen_dashboard_issuer() { printf '%s' "$DASHBOARD_ISSUER_DEFAULT"; }
+gen_dashboard_audience() { printf '%s' "$DASHBOARD_AUDIENCE_DEFAULT"; }
 # Mật khẩu tài xế mẫu: 16 ký tự hex — đủ dài (>= 12), gõ được trên điện thoại.
-gen_driver_password() { openssl rand -hex 8; }
+gen_driver_password() { openssl rand -hex 8 | tr -d '\r\n'; }
 # Base64 24 byte: 32 ký tự, không có dấu '=' đệm.
-gen_cp_password() { openssl rand -base64 24 | tr -d '\n'; }
+gen_cp_password() { openssl rand -base64 24 | tr -d '\r\n'; }
 
 # add_if_empty KEY hàm-sinh — chỉ ghi khi KEY trống hoặc chưa có dòng; nhớ TÊN biến, không in giá trị.
 ADDED=()
@@ -80,13 +89,18 @@ if [ "$ADD_MISSING" = true ]; then
   add_if_empty DRIVER_API_JWT_ISSUER gen_driver_issuer
   add_if_empty DRIVER_API_JWT_AUDIENCE gen_driver_audience
   add_if_empty DEMO_DRIVER_PASSWORD gen_driver_password
+  add_if_empty DASHBOARD_JWT_SECRET_BASE64 gen_jwt_secret
+  add_if_empty DASHBOARD_JWT_ISSUER gen_dashboard_issuer
+  add_if_empty DASHBOARD_JWT_AUDIENCE gen_dashboard_audience
+  # Cùng dạng với mật khẩu tài xế mẫu (16 hex, >= 12 ký tự), nhưng là giá trị riêng.
+  add_if_empty DEMO_STAFF_PASSWORD gen_driver_password
   if [ -z "$(demo_cp_password)" ]; then add_if_empty DEMO_CHARGE_POINT_PASSWORD gen_cp_password; fi
   check_env
   if [ "${#ADDED[@]}" -eq 0 ]; then
     log ".env đã đủ biến — không đổi gì"
   else
     log "Đã thêm vào .env (giá trị không in ra): ${ADDED[*]}"
-    log "Bước tiếp: ./deploy.sh $(env_get TAG) --seed   (csms nhận biến mới + nạp dữ liệu mẫu cho app)"
+    log "Bước tiếp: ./deploy.sh $(env_get TAG) --seed   (csms nhận biến mới + nạp dữ liệu mẫu, đặt mật khẩu tài khoản mẫu)"
   fi
   exit 0
 fi
@@ -116,9 +130,14 @@ set_env DRIVER_API_JWT_SECRET_BASE64 "$(gen_jwt_secret)"
 set_env DRIVER_API_JWT_ISSUER "$DRIVER_ISSUER_DEFAULT"
 set_env DRIVER_API_JWT_AUDIENCE "$DRIVER_AUDIENCE_DEFAULT"
 set_env DEMO_DRIVER_PASSWORD "$(gen_driver_password)"
+set_env DASHBOARD_JWT_SECRET_BASE64 "$(gen_jwt_secret)"
+set_env DASHBOARD_JWT_ISSUER "$DASHBOARD_ISSUER_DEFAULT"
+set_env DASHBOARD_JWT_AUDIENCE "$DASHBOARD_AUDIENCE_DEFAULT"
+set_env DEMO_STAFF_PASSWORD "$(gen_driver_password)"
 
 check_env
 log ".env đã tạo (chmod 600) cho DOMAIN=$(env_get DOMAIN), TAG=$(env_get TAG)"
-log "Mật khẩu Postgres, mật khẩu trụ demo, khoá JWT Driver API và mật khẩu tài xế mẫu đã sinh ngẫu nhiên,"
+log "Mật khẩu Postgres, mật khẩu trụ demo, khoá JWT Driver API + dashboard, mật khẩu tài xế mẫu và"
+log "mật khẩu admin/staff mẫu đã sinh ngẫu nhiên,"
 log "chỉ nằm trong .env — đừng dán lên chat/commit."
 log "Bước tiếp: ./deploy.sh $(env_get TAG) --seed"

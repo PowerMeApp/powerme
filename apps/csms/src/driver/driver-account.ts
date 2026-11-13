@@ -1,6 +1,8 @@
 /**
  * BE-21 — đăng ký / đăng nhập / làm mới token cho tài xế bằng email + mật khẩu (F-01, UC-ACC-01).
  * Trí viết hỗ trợ Sơn (chủ F-01); Sơn review.
+ * BE-30 — đăng nhập bằng email HOẶC số điện thoại + mật khẩu; số điện thoại chuẩn hoá về E.164
+ * (`phone-number.ts`) và duy nhất (migration 0017). Không có OTP/SMS hay đăng nhập Google (ADR-0017).
  *
  * Token phát ra:
  * - access token: HS256, header `typ: JWT`, claim `sub` (users.id dạng chuỗi), `role: driver`,
@@ -31,13 +33,17 @@ import {
   type ChargePointLoginLimits,
 } from '../stations/charge-point-login-limiter.js';
 import { DEFAULT_DRIVER_REFRESH_TTL_S, DriverApiConfig, DriverApiError } from './driver-auth.js';
+import { normalizePhoneNumber } from './phone-number.js';
 
 /** Bằng giới hạn trên của `authenticateDriver` (maxTokenAge 900). */
 export const DRIVER_ACCESS_TTL_S = 900;
 const REFRESH_TYP = 'refresh+jwt';
 
 /**
- * Giới hạn thử sai đăng nhập: theo email + IP 5 lần / 60 s → khoá 15 phút; theo IP 20 lần / 60 s.
+ * Giới hạn thử sai đăng nhập: theo định danh (email đã chuẩn hoá, hoặc số E.164 — BE-30) + IP 5 lần
+ * / 60 s → khoá 15 phút; theo IP 20 lần / 60 s. Email luôn có `@`, số E.164 không bao giờ có, nên
+ * hai loại khoá không đụng nhau; một tài khoản có cả hai định danh thì mỗi định danh đếm riêng (trần
+ * theo IP vẫn chung).
  * Trong bộ nhớ một tiến trình (giống trụ sạc, ADR-0002): khởi động lại là mất, nhiều instance thì
  * mỗi instance đếm riêng — chuyển sang Redis khi chạy nhiều instance.
  */
@@ -70,6 +76,9 @@ const REGISTER_KEYS = [
   'consent',
 ] as const;
 const CONTROL = /[\u0000-\u001f\u007f]/;
+const LOGIN_KEYS = ['email', 'phone_number', 'password'] as const;
+/** Chuỗi số điện thoại dài hơn mức này không thể chuẩn hoá được (phone-number.ts: 32). */
+const MAX_PHONE_INPUT = 32;
 
 function onlyKeys(body: Record<string, unknown>, allowed: readonly string[]) {
   for (const key of Object.keys(body))
@@ -136,12 +145,13 @@ export class DriverAccounts {
     const fullName = typeof fullNameRaw === 'string' ? fullNameRaw.trim() : '';
     if (!fullName || [...fullName].length > 100 || CONTROL.test(fullName))
       throw new DriverApiError(400, 'invalid_input');
+    // BE-30: tuỳ chọn; có thì chuẩn hoá về E.164 (phone-number.ts), không nhận ra → 400.
     const phoneRaw = body['phone_number'];
+    let phone: string | null = null;
     if (phoneRaw !== undefined && phoneRaw !== null) {
-      if (typeof phoneRaw !== 'string' || !/^\+[1-9][0-9]{6,14}$/.test(phoneRaw))
-        throw new DriverApiError(400, 'invalid_input');
+      phone = typeof phoneRaw === 'string' ? normalizePhoneNumber(phoneRaw) : null;
+      if (!phone) throw new DriverApiError(400, 'invalid_input');
     }
-    const phone = typeof phoneRaw === 'string' ? phoneRaw : null;
 
     // Băm scrypt tốn CPU: dùng chung trần "đang xử lý" theo IP của limiter đăng nhập.
     const lock = this.limiter.check(email, ip);
@@ -163,6 +173,13 @@ export class DriverAccounts {
         email,
       ]);
       if (taken.rowCount) throw new DriverApiError(409, 'email_taken');
+      // BE-30: số đã chuẩn hoá nên `0901…` và `+84901…` là cùng một số; mọi role đều tính.
+      if (phone) {
+        const phoneTaken = await client.query('SELECT 1 FROM users WHERE phone_number=$1 LIMIT 1', [
+          phone,
+        ]);
+        if (phoneTaken.rowCount) throw new DriverApiError(409, 'phone_taken');
+      }
       userId = (
         await client.query<{ id: string }>(
           `INSERT INTO users(email,full_name,phone_number,role,account_status,password_hash)
@@ -177,9 +194,14 @@ export class DriverAccounts {
       await client.query('COMMIT');
     } catch (error) {
       await client.query('ROLLBACK').catch(() => undefined);
-      // Hai đăng ký cùng email chạy song song: bên sau vấp UNIQUE users_email_key.
-      if ((error as { code?: string }).code === '23505')
-        throw new DriverApiError(409, 'email_taken');
+      // Hai đăng ký cùng email (hoặc cùng số) chạy song song: bên sau vấp UNIQUE
+      // users_email_key / users_phone_number_key (0017).
+      const pg = error as { code?: string; constraint?: string };
+      if (pg.code === '23505')
+        throw new DriverApiError(
+          409,
+          pg.constraint === 'users_phone_number_key' ? 'phone_taken' : 'email_taken',
+        );
       throw error;
     } finally {
       client.release();
@@ -188,45 +210,68 @@ export class DriverAccounts {
   }
 
   /**
-   * Sai email và sai mật khẩu cùng trả 401 `invalid_credentials`; khi không có user (hoặc user
-   * chưa đặt mật khẩu) vẫn chạy một lần scrypt với hash giả để thời gian xử lý tương đương.
-   * Tài khoản không active (F-13) → 403 `account_locked`, chỉ báo SAU khi mật khẩu đúng nên không
-   * dùng để dò tài khoản bị khoá. User không phải driver hoặc thiếu dòng `drivers` → 401 như sai.
+   * Body là `{email, password}` (BE-21, giữ nguyên) HOẶC `{phone_number, password}` (BE-30); có cả
+   * hai khoá định danh hoặc không có khoá nào → 400 `invalid_input`.
+   *
+   * Sai định danh và sai mật khẩu cùng trả 401 `invalid_credentials`; khi không có user (hoặc user
+   * chưa đặt mật khẩu, hoặc số điện thoại không chuẩn hoá được) vẫn chạy một lần scrypt với hash
+   * giả để thời gian xử lý tương đương. Tài khoản không active (F-13) → 403 `account_locked`, chỉ
+   * báo SAU khi mật khẩu đúng nên không dùng để dò tài khoản bị khoá. User không phải driver hoặc
+   * thiếu dòng `drivers` → 401 như sai.
    */
   async login(body: Record<string, unknown>, ip: string): Promise<DriverTokens> {
     this.assertConfigured();
-    onlyKeys(body, ['email', 'password']);
-    if (typeof body['email'] !== 'string' || typeof body['password'] !== 'string')
+    onlyKeys(body, LOGIN_KEYS);
+    const byEmail = 'email' in body;
+    const byPhone = 'phone_number' in body;
+    // Đúng MỘT định danh: cả hai hoặc không có cái nào đều là body sai.
+    if (byEmail === byPhone) throw new DriverApiError(400, 'invalid_input');
+    const raw = byEmail ? body['email'] : body['phone_number'];
+    if (typeof raw !== 'string' || typeof body['password'] !== 'string')
       throw new DriverApiError(400, 'invalid_input');
-    const email = body['email'].trim().toLowerCase();
     const password = body['password'];
-    if (email.length > 254 || [...password].length > 128)
-      throw new DriverApiError(401, 'invalid_credentials');
+    if ([...password].length > 128) throw new DriverApiError(401, 'invalid_credentials');
+    // `identifier` là khoá của bộ đếm thử sai; `lookup` là giá trị so trong DB (null = chắc chắn
+    // không có user, vd số không chuẩn hoá được — vẫn băm giả và tính một lần sai).
+    let identifier: string;
+    let lookup: string | null;
+    if (byEmail) {
+      identifier = lookup = raw.trim().toLowerCase();
+      if (identifier.length > 254) throw new DriverApiError(401, 'invalid_credentials');
+    } else {
+      if (raw.length > MAX_PHONE_INPUT) throw new DriverApiError(401, 'invalid_credentials');
+      lookup = normalizePhoneNumber(raw);
+      identifier = lookup ?? `phone?${raw.trim()}`;
+    }
 
-    const lock = this.limiter.check(email, ip);
+    const lock = this.limiter.check(identifier, ip);
     if (lock.locked) throw new DriverRateLimited(lock.retryAfterS);
     const done = this.limiter.begin(ip);
     try {
-      const row = (
-        await this.db.$client.query<{
-          id: string;
-          role: string;
-          account_status: string;
-          password_hash: string | null;
-          is_driver: boolean;
-        }>(
-          `SELECT u.id::text AS id,u.role,u.account_status,u.password_hash,
-             (d.user_id IS NOT NULL) AS is_driver
-           FROM users u LEFT JOIN drivers d ON d.user_id=u.id WHERE u.email=$1`,
-          [email],
-        )
-      ).rows[0];
+      const row =
+        lookup === null
+          ? undefined
+          : (
+              await this.db.$client.query<{
+                id: string;
+                role: string;
+                account_status: string;
+                password_hash: string | null;
+                is_driver: boolean;
+              }>(
+                `SELECT u.id::text AS id,u.role,u.account_status,u.password_hash,
+                   (d.user_id IS NOT NULL) AS is_driver
+                 FROM users u LEFT JOIN drivers d ON d.user_id=u.id
+                 WHERE ${byEmail ? 'u.email' : 'u.phone_number'}=$1`,
+                [lookup],
+              )
+            ).rows[0];
       const ok = await verifyPassword(password, row?.password_hash ?? (await this.dummyHash));
       if (!row?.password_hash || !ok || row.role !== 'driver' || !row.is_driver) {
-        this.limiter.recordFailure(email, ip);
+        this.limiter.recordFailure(identifier, ip);
         throw new DriverApiError(401, 'invalid_credentials');
       }
-      this.limiter.recordSuccess(email, ip);
+      this.limiter.recordSuccess(identifier, ip);
       if (row.account_status !== 'active') throw new DriverApiError(403, 'account_locked');
       return this.issue(row.id);
     } finally {

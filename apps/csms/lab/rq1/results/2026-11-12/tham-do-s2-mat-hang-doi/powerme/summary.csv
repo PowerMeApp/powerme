@@ -1,0 +1,3 @@
+config,scenario,n,billed_correct,held_correct,held_unnecessary,billed_wrong_silent,lost_or_duplicate,unresolved,harness_error,correct,primary,primary_wilson_lo,primary_wilson_hi,passes_95,lost,duplicate,station_data_wrong,held,hold_precision,hold_recall,billed_n,abs_err_wh_mean,abs_err_wh_ci_lo,abs_err_wh_ci_hi,signed_err_wh_mean,gap_truth,gap_detected,gap_tp,gap_fp,gap_fn,gap_precision,gap_recall
+powerme,s2,10,0,0,0,10,0,0,0,0,0,0,0.2775327998628892,false,0,0,10,0,,0,10,101.3,60.20312642110108,142.39687357889892,-101.3,3,3,3,0,0,1,1
+powerme,all,10,0,0,0,10,0,0,0,0,0,0,0.2775327998628892,false,0,0,10,0,,0,10,101.3,60.20312642110108,142.39687357889892,-101.3,3,3,3,0,0,1,1

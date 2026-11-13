@@ -21,7 +21,9 @@ import { CONFIG, CsmsConfig } from '../config.js';
 import { ConsoleCommands } from './console.commands.js';
 import { ConsoleError, createConsoleListener } from './console.http.js';
 import { ConsoleQueries } from './console.queries.js';
+import { TopUpService } from '../billing/top-up.service.js';
 import { createDriverListener } from '../driver/driver.http.js';
+import { createOperatorApiListener, OPERATOR_API_PATH } from '../operator-api/operator-api.http.js';
 import { DB, Db } from '../db/db.module.js';
 import { DriverChargingService } from '../sessions/driver-charging.service.js';
 import { ChargePointOnboardingService } from '../stations/charge-point-onboarding.service.js';
@@ -38,6 +40,8 @@ export class ConsoleServer implements OnModuleInit, OnModuleDestroy {
     @Optional() @Inject(DB) private readonly db?: Db,
     @Optional() private readonly driver?: DriverChargingService,
     @Optional() private readonly onboarding?: ChargePointOnboardingService,
+    /** T32 Phần 5: route top-up của tài xế (BillingModule). */
+    @Optional() private readonly topUps?: TopUpService,
   ) {}
 
   /** WF-05 (T119): the onboarding service, or 503 when this server was built without it (tests). */
@@ -123,10 +127,34 @@ export class ConsoleServer implements OnModuleInit, OnModuleDestroy {
     );
     const driver =
       this.db && this.driver
-        ? createDriverListener(this.db, this.driver, this.config.driverApi ?? { devAuth: false })
+        ? createDriverListener(
+            this.db,
+            this.driver,
+            this.config.driverApi ?? { devAuth: false },
+            undefined,
+            undefined,
+            this.topUps,
+          )
         : null;
+    // FE-01a: /api/{auth,operator,admin}/v1 → operator-api (JWT, ADR-0018). Matched before the
+    // console so `/api/admin/v1/*` never reaches the unauthenticated `/api/admin/*` routes.
+    const operatorApi = this.db
+      ? createOperatorApiListener(
+          this.db,
+          this.config.dashboardAuth ?? {},
+          this.config.driverApi ?? { devAuth: false },
+        )
+      : null;
     const server = createServer((req, res) => {
-      if (/^\/api\/driver(?:\/|\?|$)/.test(req.url ?? '')) {
+      if (OPERATOR_API_PATH.test(req.url ?? '')) {
+        if (operatorApi) operatorApi(req, res);
+        else {
+          res.writeHead(503, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+          res.end(
+            JSON.stringify({ error: 'auth_unavailable', detail: 'Operator API unavailable' }),
+          );
+        }
+      } else if (/^\/api\/driver(?:\/|\?|$)/.test(req.url ?? '')) {
         if (driver) driver(req, res);
         else {
           res.writeHead(503, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });

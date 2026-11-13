@@ -1,0 +1,173 @@
+import 'package:driver_app/app/composition/api_app.dart';
+import 'package:driver_app/core/api/api_config.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:go_router/go_router.dart';
+
+import 'driver_api_fixture.dart';
+
+final api = ApiConfig.parse('https://fixture.invalid/api/driver/v1');
+
+Future<void> enterAccount(WidgetTester tester) async {
+  for (final field in {
+    'auth-email': 'test@example.invalid',
+    'auth-password': 'fixture password',
+  }.entries) {
+    await tester.enterText(find.byKey(Key(field.key)), field.value);
+  }
+  final submit = find.byKey(const Key('auth-submit'));
+  await tester.ensureVisible(submit);
+  await tester.tap(submit);
+  await tester.pumpAndSettle();
+}
+
+void main() {
+  testWidgets('API profile is read-only, scoped and blocks other routes', (
+    tester,
+  ) async {
+    var forbidden = false;
+    final fixture = DriverApiFixture(
+      (request) async => switch (request.path) {
+        'auth/login' => reply(200, tokens(accessA)),
+        'me' when forbidden => reply(403, {'error': 'forbidden'}),
+        'me' => reply(200, account()),
+        _ => throw StateError('Unexpected path'),
+      },
+    );
+    await tester.pumpWidget(ApiApp(config: api, httpAdapter: fixture));
+    await tester.pumpAndSettle();
+    expect(find.text('Đăng ký hiện chưa khả dụng.'), findsOneWidget);
+    await enterAccount(tester);
+    expect(find.text('Tài xế kiểm thử'), findsOneWidget);
+    expect(find.text('VinFast VF 8'), findsOneWidget);
+    expect(find.textContaining('51A-00001'), findsOneWidget);
+    expect(find.text('Tín dụng sạc'), findsNothing);
+    expect(find.byKey(const Key('edit-profile')), findsNothing);
+    expect(find.byKey(const Key('add-vehicle')), findsNothing);
+    expect(find.byType(NavigationBar), findsNothing);
+    final router = GoRouter.of(tester.element(find.text('Tài xế kiểm thử')));
+    for (final route in [
+      '/credit',
+      '/station/test',
+      '/vehicles/new',
+      '/scan',
+    ]) {
+      router.go(route);
+      await tester.pumpAndSettle();
+      expect(router.routeInformationProvider.value.uri.path, '/profile');
+      expect(find.text('Tài xế kiểm thử'), findsOneWidget);
+    }
+    expect(fixture.requests, hasLength(2));
+    forbidden = true;
+    final reload = find.byKey(const Key('refresh-profile'));
+    await tester.ensureVisible(reload);
+    await tester.tap(reload);
+    await tester.pumpAndSettle();
+    expect(
+      find.text('Tài khoản hiện không có quyền truy cập.'),
+      findsOneWidget,
+    );
+    expect(find.text('Tài xế kiểm thử'), findsNothing);
+    expect(fixture.requests, hasLength(3));
+  });
+
+  testWidgets('API onboarding validates consent and password confirmation', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(800, 950));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final fixture = DriverApiFixture(
+      (request) async => switch (request.path) {
+        'auth/register' => reply(201, tokens(accessA)),
+        'me' => reply(200, account(withVehicle: false)),
+        _ => throw StateError('Unexpected path'),
+      },
+    );
+    final config = ApiConfig.parse(
+      api.baseUrl.toString(),
+      consentVersion: 'fixture-v1',
+    );
+    await tester.pumpWidget(ApiApp(config: config, httpAdapter: fixture));
+    await tester.pumpAndSettle();
+    final register = find.text('Chưa có tài khoản? Đăng ký');
+    await tester.ensureVisible(register);
+    await tester.tap(register);
+    await tester.pumpAndSettle();
+    expect(find.text('Bước 1 / 2'), findsOneWidget);
+    final next = find.byKey(const Key('onboarding-next'));
+    await tester.ensureVisible(next);
+    await tester.tap(next);
+    await tester.pumpAndSettle();
+    expect(
+      find.text('Cần sự đồng ý của bạn để tạo tài khoản.'),
+      findsOneWidget,
+    );
+    expect(fixture.requests, isEmpty);
+    final consent = find.byKey(const Key('consent'));
+    await tester.ensureVisible(consent);
+    await tester.tap(consent);
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(next);
+    await tester.tap(next);
+    await tester.pumpAndSettle();
+    expect(find.text('Bước 2 / 2'), findsOneWidget);
+    final email = find.byKey(const Key('register-email'));
+    final password = find.byKey(const Key('register-password'));
+    final confirmation = find.byKey(const Key('register-confirm-password'));
+    await tester.ensureVisible(email);
+    await tester.enterText(email, 'test@example.invalid.');
+    await tester.ensureVisible(password);
+    await tester.enterText(password, List.filled(129, 'a').join());
+    await tester.ensureVisible(next);
+    await tester.tap(next);
+    await tester.pumpAndSettle();
+    expect(find.text('Nhập họ và tên.'), findsOneWidget);
+    expect(find.text('Nhập email hợp lệ.'), findsOneWidget);
+    expect(find.text('Mật khẩu tối đa 128 ký tự.'), findsOneWidget);
+    expect(fixture.requests, isEmpty);
+    for (final field in {
+      'register-name': 'Tài xế kiểm thử',
+      'register-email': 'test@example.invalid',
+      'register-password': 'fixture password',
+    }.entries) {
+      final input = find.byKey(Key(field.key));
+      await tester.ensureVisible(input);
+      await tester.enterText(input, field.value);
+    }
+    await tester.ensureVisible(next);
+    await tester.tap(next);
+    await tester.pumpAndSettle();
+    expect(find.text('Vui lòng nhập lại mật khẩu.'), findsOneWidget);
+    expect(fixture.requests, isEmpty);
+
+    await tester.ensureVisible(confirmation);
+    await tester.enterText(confirmation, 'fixture password');
+    await tester.ensureVisible(password);
+    await tester.enterText(password, 'fixture password ');
+    await tester.ensureVisible(next);
+    await tester.tap(next);
+    await tester.pumpAndSettle();
+    expect(find.text('Mật khẩu nhập lại không khớp.'), findsOneWidget);
+    expect(fixture.requests, isEmpty);
+
+    await tester.ensureVisible(confirmation);
+    await tester.enterText(confirmation, 'fixture password ');
+    await tester.ensureVisible(next);
+    await tester.tap(next);
+    await tester.tap(next);
+    await tester.pumpAndSettle();
+    expect(fixture.requests.map((request) => request.path), [
+      'auth/register',
+      'me',
+    ]);
+    expect(fixture.requests.first.data, {
+      'email': 'test@example.invalid',
+      'password': 'fixture password ',
+      'full_name': 'Tài xế kiểm thử',
+      'consent': true,
+      'consent_version': 'fixture-v1',
+    });
+    expect(find.text('Chưa có xe trong hồ sơ.'), findsOneWidget);
+    expect(find.text('Tài xế kiểm thử'), findsOneWidget);
+  });
+}

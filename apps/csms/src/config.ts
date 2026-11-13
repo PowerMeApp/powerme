@@ -10,11 +10,14 @@
 import { Global, Module } from '@nestjs/common';
 import { SmartSearchConfig, loadSmartSearchConfig } from './sessions/smart-search.js';
 import { DriverApiConfig, loadDriverApiConfig } from './driver/driver-auth.js';
+import { DashboardAuthConfig, loadDashboardAuthConfig } from './users/auth.js';
 
 export const DEFAULT_REPLAY_SKEW_S = 5;
 
 export interface CsmsConfig {
   driverApi?: DriverApiConfig;
+  /** FE-01a / ADR-0018: dashboard login (Operator Staff, Admin). Empty → operator-api answers 503. */
+  dashboardAuth?: DashboardAuthConfig;
   smartSearch?: SmartSearchConfig;
   /** Chuỗi kết nối Postgres. Bắt buộc khi chạy app; test unit không cần. */
   databaseUrl: string;
@@ -185,6 +188,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): CsmsConfig {
   if (!databaseUrl) throw new Error('Thiếu DATABASE_URL (xem infra/.env.example)');
   return {
     driverApi: loadDriverApiConfig(env),
+    dashboardAuth: loadDashboardAuthConfig(env),
     smartSearch: loadSmartSearchConfig(env),
     databaseUrl,
     ocppPort: intEnv(env, 'OCPP_PORT', intEnv(env, 'CSMS_OCPP_WS_PORT', 9000)),

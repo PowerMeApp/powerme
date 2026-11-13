@@ -2,7 +2,7 @@ import 'dart:async';
 import 'package:driver_app/app/composition/vietmap_config.dart';
 import 'package:driver_app/features/stations/presentation/vietmap_surface.dart';
 import 'package:driver_app/features/stations/domain/station.dart';
-import 'package:driver_app/app/composition/demo_app.dart';
+import 'support/driver_app_test_harness.dart';
 import 'package:driver_app/app/powerme_app.dart';
 import 'package:driver_app/demo/demo_store.dart';
 import 'package:driver_app/features/auth/application/auth_controller.dart';
@@ -219,7 +219,7 @@ void main() {
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
     addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
-    await tester.pumpWidget(const DemoApp());
+    await tester.pumpWidget(const DriverAppTestHarness());
     await tester.pumpAndSettle();
     await signIn(tester);
     return ProviderScope.containerOf(tester.element(find.byType(PowerMeApp)));
@@ -252,7 +252,9 @@ void main() {
       addTearDown(tester.view.resetPhysicalSize);
       addTearDown(tester.view.resetDevicePixelRatio);
       // No provider network or key: exercise the native surface's selection wiring.
-      await tester.pumpWidget(const DemoApp(mapConfig: VietmapConfig('')));
+      await tester.pumpWidget(
+        const DriverAppTestHarness(mapConfig: VietmapConfig('')),
+      );
       await tester.pumpAndSettle();
       await signIn(tester);
       final container = ProviderScope.containerOf(

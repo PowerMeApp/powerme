@@ -6,7 +6,7 @@ import 'package:driver_app/demo/demo_store.dart';
 import 'package:driver_app/demo/payment_store.dart';
 import 'package:driver_app/demo/station_actions_store.dart';
 import 'package:driver_app/features/auth/application/auth_controller.dart';
-import 'package:driver_app/features/auth/data/mock_auth_repository.dart';
+import 'support/fake_auth_repository.dart';
 import 'package:driver_app/features/auth/domain/auth_scope.dart';
 import 'package:driver_app/features/charging/application/charging_controller.dart';
 import 'package:driver_app/features/charging/data/mock_charging_repository.dart';
@@ -98,7 +98,7 @@ void main() {
       ProviderScope(
         overrides: [
           authControllerProvider.overrideWith(_SignedIn.new),
-          authRepositoryProvider.overrideWithValue(MockAuthRepository(store)),
+          authRepositoryProvider.overrideWithValue(FakeAuthRepository(store)),
           authScopeProvider.overrideWith((ref) {
             final scope =
                 ref.watch(authControllerProvider).scope ?? signedOutScope;

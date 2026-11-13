@@ -20,7 +20,11 @@ import '../features/payments/presentation/payment_screens.dart';
 import '../features/history/presentation/history_screens.dart';
 import '../features/loyalty/presentation/loyalty_screen.dart';
 
+final accountOnlyRouterProvider = Provider<bool>((ref) => false);
+
 final routerProvider = Provider<GoRouter>((ref) {
+  final accountOnly = ref.watch(accountOnlyRouterProvider);
+  final registrationEnabled = ref.watch(registrationOptionsProvider).enabled;
   final refresh = _RouterRefresh();
   ref.listen(authControllerProvider, (_, _) => refresh.changed());
   String? pendingStation;
@@ -29,6 +33,16 @@ final routerProvider = Provider<GoRouter>((ref) {
     redirect: (context, state) {
       final auth = ref.read(authControllerProvider);
       final path = state.uri.path;
+      if (accountOnly) {
+        if (auth.restoring) return path == '/loading' ? null : '/loading';
+        if (auth.scope == null) {
+          return path == '/login' ||
+                  (path == '/register' && registrationEnabled)
+              ? null
+              : '/login';
+        }
+        return path == '/profile' ? null : '/profile';
+      }
       if (auth.scope == null &&
           RegExp(r'^/station/[a-zA-Z0-9_-]{1,100}$').hasMatch(path)) {
         pendingStation = path;
@@ -46,47 +60,6 @@ final routerProvider = Provider<GoRouter>((ref) {
     },
     routes: [
       GoRoute(
-        path: '/credit',
-        builder: (context, state) => const _PrivatePage(child: CreditScreen()),
-      ),
-      GoRoute(
-        path: '/checkout/:id',
-        builder: (context, state) => _PrivatePage(
-          child: CheckoutScreen(
-            key: ValueKey(state.pathParameters['id']),
-            id: state.pathParameters['id']!,
-          ),
-        ),
-      ),
-      GoRoute(
-        path: '/history',
-        builder: (context, state) => const _PrivatePage(child: HistoryScreen()),
-      ),
-      GoRoute(
-        path: '/invoice/:id',
-        builder: (context, state) =>
-            _PrivatePage(child: InvoiceScreen(id: state.pathParameters['id']!)),
-      ),
-      GoRoute(
-        path: '/loyalty',
-        builder: (context, state) => const _PrivatePage(child: LoyaltyScreen()),
-      ),
-      GoRoute(
-        path: '/start',
-        builder: (context, state) => _PrivatePage(
-          child: StartScreen(
-            key: ValueKey(state.uri.queryParameters['connector'] ?? ''),
-            connector: state.uri.queryParameters['connector'] ?? '',
-          ),
-        ),
-      ),
-      GoRoute(
-        path: '/statement/:id',
-        builder: (context, state) => _PrivatePage(
-          child: StatementScreen(id: state.pathParameters['id']!),
-        ),
-      ),
-      GoRoute(
         path: '/loading',
         builder: (context, state) => const Scaffold(
           body: Center(
@@ -101,79 +74,133 @@ final routerProvider = Provider<GoRouter>((ref) {
         path: '/register',
         builder: (context, state) => const OnboardingScreen(),
       ),
-      ShellRoute(
-        builder: (context, state, child) => _PrivatePage(
-          child: _AppShell(path: state.uri.path, child: child),
-        ),
-        routes: [
-          GoRoute(
-            path: '/',
-            builder: (context, state) => const DiscoveryScreen(),
-          ),
-          GoRoute(
-            path: '/scan',
-            builder: (context, state) => const QrConnectScreen(),
-          ),
-          GoRoute(
-            path: '/charging',
-            builder: (context, state) => const ActiveSessionScreen(),
-          ),
-          GoRoute(
-            path: '/profile',
-            builder: (context, state) => const ProfileScreen(),
-          ),
-        ],
-      ),
-      GoRoute(
-        path: '/station/:id',
-        builder: (context, state) => _PrivatePage(
-          child: StationDetailScreen(id: state.pathParameters['id']!),
-        ),
-      ),
-      GoRoute(
-        path: '/suggestions',
-        builder: (context, state) => _PrivatePage(
-          child: SuggestionsScreen(
-            initialMode: state.uri.queryParameters['mode'] == 'nearest'
-                ? SuggestionMode.nearest
-                : SuggestionMode.fastest,
+      if (accountOnly)
+        GoRoute(
+          path: '/profile',
+          builder: (context, state) => const _PrivatePage(
+            child: Scaffold(body: ProfileScreen(readOnly: true)),
           ),
         ),
-      ),
-      // GoRoute(
-      //   path: '/reserve',
-      //   builder: (context, state) => _PrivatePage(
-      //     child: ReservationScreen(
-      //       key: ValueKey(state.uri.queryParameters['connector'] ?? ''),
-      //       connector: state.uri.queryParameters['connector'] ?? '',
-      //     ),
-      //   ),
-      // ),
-      GoRoute(
-        path: '/report',
-        builder: (context, state) => _PrivatePage(
-          child: ReportScreen(
-            key: ValueKey(state.uri.queryParameters['connector'] ?? ''),
-            connector: state.uri.queryParameters['connector'] ?? '',
+      if (!accountOnly) ...[
+        GoRoute(
+          path: '/credit',
+          builder: (context, state) =>
+              const _PrivatePage(child: CreditScreen()),
+        ),
+        GoRoute(
+          path: '/checkout/:id',
+          builder: (context, state) => _PrivatePage(
+            child: CheckoutScreen(
+              key: ValueKey(state.pathParameters['id']),
+              id: state.pathParameters['id']!,
+            ),
           ),
         ),
-      ),
-      GoRoute(
-        path: '/profile/edit',
-        builder: (context, state) =>
-            const _PrivatePage(child: ProfileEditScreen()),
-      ),
-      GoRoute(
-        path: '/vehicles/new',
-        builder: (context, state) =>
-            const _PrivatePage(child: VehicleEditScreen()),
-      ),
-      GoRoute(
-        path: '/vehicles/:id/edit',
-        builder: (context, state) => _PrivatePage(
-          child: VehicleEditScreen(id: state.pathParameters['id']),
+        GoRoute(
+          path: '/history',
+          builder: (context, state) =>
+              const _PrivatePage(child: HistoryScreen()),
         ),
-      ),
+        GoRoute(
+          path: '/invoice/:id',
+          builder: (context, state) => _PrivatePage(
+            child: InvoiceScreen(id: state.pathParameters['id']!),
+          ),
+        ),
+        GoRoute(
+          path: '/loyalty',
+          builder: (context, state) =>
+              const _PrivatePage(child: LoyaltyScreen()),
+        ),
+        GoRoute(
+          path: '/start',
+          builder: (context, state) => _PrivatePage(
+            child: StartScreen(
+              key: ValueKey(state.uri.queryParameters['connector'] ?? ''),
+              connector: state.uri.queryParameters['connector'] ?? '',
+            ),
+          ),
+        ),
+        GoRoute(
+          path: '/statement/:id',
+          builder: (context, state) => _PrivatePage(
+            child: StatementScreen(id: state.pathParameters['id']!),
+          ),
+        ),
+        ShellRoute(
+          builder: (context, state, child) => _PrivatePage(
+            child: _AppShell(path: state.uri.path, child: child),
+          ),
+          routes: [
+            GoRoute(
+              path: '/',
+              builder: (context, state) => const DiscoveryScreen(),
+            ),
+            GoRoute(
+              path: '/scan',
+              builder: (context, state) => const QrConnectScreen(),
+            ),
+            GoRoute(
+              path: '/charging',
+              builder: (context, state) => const ActiveSessionScreen(),
+            ),
+            GoRoute(
+              path: '/profile',
+              builder: (context, state) => const ProfileScreen(),
+            ),
+          ],
+        ),
+        GoRoute(
+          path: '/station/:id',
+          builder: (context, state) => _PrivatePage(
+            child: StationDetailScreen(id: state.pathParameters['id']!),
+          ),
+        ),
+        GoRoute(
+          path: '/suggestions',
+          builder: (context, state) => _PrivatePage(
+            child: SuggestionsScreen(
+              initialMode: state.uri.queryParameters['mode'] == 'nearest'
+                  ? SuggestionMode.nearest
+                  : SuggestionMode.fastest,
+            ),
+          ),
+        ),
+        // GoRoute(
+        //   path: '/reserve',
+        //   builder: (context, state) => _PrivatePage(
+        //     child: ReservationScreen(
+        //       key: ValueKey(state.uri.queryParameters['connector'] ?? ''),
+        //       connector: state.uri.queryParameters['connector'] ?? '',
+        //     ),
+        //   ),
+        // ),
+        GoRoute(
+          path: '/report',
+          builder: (context, state) => _PrivatePage(
+            child: ReportScreen(
+              key: ValueKey(state.uri.queryParameters['connector'] ?? ''),
+              connector: state.uri.queryParameters['connector'] ?? '',
+            ),
+          ),
+        ),
+        GoRoute(
+          path: '/profile/edit',
+          builder: (context, state) =>
+              const _PrivatePage(child: ProfileEditScreen()),
+        ),
+        GoRoute(
+          path: '/vehicles/new',
+          builder: (context, state) =>
+              const _PrivatePage(child: VehicleEditScreen()),
+        ),
+        GoRoute(
+          path: '/vehicles/:id/edit',
+          builder: (context, state) => _PrivatePage(
+            child: VehicleEditScreen(id: state.pathParameters['id']),
+          ),
+        ),
+      ],
     ],
     errorBuilder: (context, state) => Scaffold(
       body: SafeArea(

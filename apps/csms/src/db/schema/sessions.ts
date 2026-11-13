@@ -93,6 +93,8 @@ export const vehicles = pgTable(
       .notNull()
       .references(() => vehicleModels.id),
     isDefault: boolean('is_default').notNull().default(false),
+    /** Xoá mềm (migration 0018, BE-34): NULL = đang dùng. Xe đã gỡ giữ dòng cho lịch sử phiên. */
+    removedAt: timestamp('removed_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true })
       .notNull()
@@ -100,13 +102,17 @@ export const vehicles = pgTable(
       .$onUpdate(() => new Date()),
   },
   (t) => [
-    unique('vehicles_plate_number_key').on(t.plateNumber),
     index('vehicles_driver_id_idx').on(t.driverId),
     index('vehicles_vehicle_model_id_idx').on(t.vehicleModelId),
-    // Mỗi tài xế chỉ một xe mặc định.
+    // Mỗi tài xế chỉ một xe mặc định (xe đã gỡ không thể mặc định — CHECK dưới).
     uniqueIndex('vehicles_one_default_per_driver')
       .on(t.driverId)
       .where(sql`${t.isDefault}`),
+    // 0018: biển số duy nhất trong xe đang dùng, so theo chữ + số in hoa (= PLATE_KEY_SQL).
+    uniqueIndex('vehicles_plate_key_active')
+      .on(sql`(upper(regexp_replace(${t.plateNumber}, '[^A-Za-z0-9]', '', 'g')))`)
+      .where(sql`${t.removedAt} IS NULL`),
+    check('vehicles_removed_not_default', sql`${t.removedAt} IS NULL OR NOT ${t.isDefault}`),
   ],
 );
 

@@ -1,4 +1,5 @@
 import type { IncomingMessage, RequestListener, ServerResponse } from 'node:http';
+import type { TopUpService } from '../billing/top-up.service.js';
 import type { Db } from '../db/db.module.js';
 import type { DriverChargingService } from '../sessions/driver-charging.service.js';
 import { ChargingError } from '../sessions/charging-error.js';
@@ -12,6 +13,13 @@ import {
   isChargePath,
 } from './charges.http.js';
 import { handleRoad, isRoadPath } from './road.http.js';
+import {
+  handleVehicleRoute,
+  isVehiclePath,
+  VEHICLE_JSON,
+  vehicleRouteAllow,
+} from './vehicles.http.js';
+import { handleTopUpRoute, isTopUpPath, topUpRouteMethod } from './top-ups.http.js';
 import { RoadDiscovery } from './road-discovery.js';
 import { ProviderUnavailable, VietmapAdapter } from './vietmap.js';
 
@@ -27,6 +35,8 @@ export function createDriverListener(
   config: DriverApiConfig,
   road = new RoadDiscovery(db, new VietmapAdapter(config.searchKey), undefined),
   accounts = new DriverAccounts(db, config),
+  /** T32 Phần 5: route top-up; không có → 503 payment_unconfigured. */
+  topUps?: TopUpService,
 ): RequestListener {
   return (req, res) => {
     void handle(req, res).catch(() => {
@@ -51,14 +61,25 @@ export function createDriverListener(
         return;
       }
       if (req.method === 'OPTIONS') {
-        // BE-22: route POST của charges/sessions cần thêm Content-Type và Idempotency-Key.
+        // BE-22 / T32 Phần 5: route POST của charges/sessions/top-ups cần thêm Content-Type và
+        // Idempotency-Key.
+        // BE-34: route xe ghi (POST/PATCH/DELETE) cần Content-Type, không dùng Idempotency-Key.
+        const preflightPath = new URL(req.url ?? '', 'http://driver.local').pathname;
         const write =
-          chargeRouteMethod(new URL(req.url ?? '', 'http://driver.local').pathname) === 'POST';
-        res.setHeader('Access-Control-Allow-Methods', write ? 'POST, OPTIONS' : 'GET, OPTIONS');
+          chargeRouteMethod(preflightPath) === 'POST' || topUpRouteMethod(preflightPath) === 'POST';
+        const vehicleAllow = vehicleRouteAllow(preflightPath);
+        res.setHeader(
+          'Access-Control-Allow-Methods',
+          vehicleAllow ?? (write ? 'POST, OPTIONS' : 'GET, OPTIONS'),
+        );
         const headers = config.devAuth ? 'Authorization, X-Driver-Id' : 'Authorization';
         res.setHeader(
           'Access-Control-Allow-Headers',
-          write ? `${headers}, Content-Type, Idempotency-Key` : headers,
+          write
+            ? `${headers}, Content-Type, Idempotency-Key`
+            : vehicleAllow && vehicleAllow !== 'GET, OPTIONS'
+              ? `${headers}, Content-Type`
+              : headers,
         );
         res.writeHead(204);
         res.end();
@@ -100,6 +121,33 @@ export function createDriverListener(
         send(res, result.status, result.body);
         return;
       }
+      if (isVehiclePath(path)) {
+        const result = await handleVehicleRoute({
+          req,
+          path,
+          q,
+          driverId,
+          db,
+          readBody: () => readJsonObject(req, res),
+          drainBody: () => drainBody(req, res),
+          setAllow: (methods) => res.setHeader('Allow', methods),
+        });
+        send(res, result.status, result.body);
+        return;
+      }
+      if (isTopUpPath(path)) {
+        const result = await handleTopUpRoute({
+          req,
+          path,
+          q,
+          driverId,
+          topUps,
+          readBody: () => readJsonObject(req, res),
+          setAllow: (methods) => res.setHeader('Allow', methods),
+        });
+        send(res, result.status, result.body);
+        return;
+      }
       const connector = new RegExp(`^${BASE}/connectors/by-code/([^/]+)/([^/]+)$`).exec(path);
       if (path.startsWith(`${BASE}/connectors/by-code/`) && !connector)
         throw new DriverApiError(400, 'invalid_connector_reference');
@@ -114,12 +162,9 @@ export function createDriverListener(
         const row = (
           await db.$client.query(
             `SELECT u.id::text AS user_id,u.full_name,u.role,u.account_status,
-            coalesce((SELECT jsonb_agg(jsonb_build_object('vehicle_id',v.id::text,'plate_number',v.plate_number,
-              'is_default',v.is_default,'vehicle_model_id',m.id::text,'brand',m.brand,'model_name',m.model_name,
-              'connector_type',m.connector_type,'is_vinfast',m.is_vinfast,
-              'battery_capacity_kwh',m.battery_capacity_kwh::float8,'rated_range_km',m.rated_range_km,
-              'max_dc_kw',m.max_dc_kw::float8) ORDER BY v.is_default DESC,v.id)
-              FROM vehicles v JOIN vehicle_models m ON m.id=v.vehicle_model_id WHERE v.driver_id=u.id),'[]'::jsonb) AS vehicles
+            coalesce((SELECT jsonb_agg(${VEHICLE_JSON} ORDER BY v.is_default DESC,v.id)
+              FROM vehicles v JOIN vehicle_models m ON m.id=v.vehicle_model_id
+              WHERE v.driver_id=u.id AND v.removed_at IS NULL),'[]'::jsonb) AS vehicles
            FROM users u JOIN drivers d ON d.user_id=u.id WHERE u.id=$1 AND u.role='driver' AND u.account_status='active'`,
             [driverId],
           )
@@ -319,6 +364,11 @@ function only(q: URLSearchParams, allowed: string[]) {
 }
 
 function send(res: ServerResponse, status: number, body: unknown) {
+  if (status === 204) {
+    res.writeHead(204, { 'Cache-Control': 'no-store' });
+    res.end();
+    return;
+  }
   const value = JSON.stringify(body);
   res.writeHead(status, {
     'Content-Type': 'application/json; charset=utf-8',

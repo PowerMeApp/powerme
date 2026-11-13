@@ -15,15 +15,20 @@ export const users = pgTable(
     id: bigint('id', { mode: 'number' }).primaryKey().generatedAlwaysAsIdentity(),
     email: varchar('email', { length: 254 }).notNull(),
     fullName: text('full_name').notNull(),
+    /** E.164, chuẩn hoá bởi Driver API (BE-30, `driver/phone-number.ts`); UNIQUE từ 0017. */
     phoneNumber: varchar('phone_number', { length: 16 }),
     role: userRoleEnum('role').notNull(),
     accountStatus: userAccountStatusEnum('account_status').notNull().default('active'),
-    /** Băm argon2; null với tài khoản chưa đặt mật khẩu (đăng nhập OTP / social). */
+    /** Băm scrypt (`scrypt$N$r$p$salt$hash`, ADR-0011); null khi chưa đặt mật khẩu. */
     passwordHash: text('password_hash'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [unique('users_email_key').on(t.email), index('users_phone_number_idx').on(t.phoneNumber)],
+  // 0017: UNIQUE thường (NULL không đụng nhau) thay index thường users_phone_number_idx của 0000.
+  (t) => [
+    unique('users_email_key').on(t.email),
+    unique('users_phone_number_key').on(t.phoneNumber),
+  ],
 );
 
 /** Bảng mở rộng của User với role = driver. PK = FK tới users. */

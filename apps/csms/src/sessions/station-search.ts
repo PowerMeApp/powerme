@@ -126,7 +126,7 @@ export async function searchStations(
   const vehicle = (
     await c.query(
       `SELECT m.connector_type,m.is_vinfast,m.battery_capacity_kwh::float8,m.rated_range_km,m.max_dc_kw::float8 FROM vehicles v
-    JOIN vehicle_models m ON m.id=v.vehicle_model_id WHERE v.id=$1 AND v.driver_id=$2`,
+    JOIN vehicle_models m ON m.id=v.vehicle_model_id WHERE v.id=$1 AND v.driver_id=$2 AND v.removed_at IS NULL`,
       [vehicleId, driverId],
     )
   ).rows[0];
@@ -181,6 +181,11 @@ export async function searchStations(
       JOIN charge_points cp ON cp.site_id=st.id AND cp.lifecycle='in_service'
       JOIN connectors c ON c.charge_point_id=cp.id AND c.connector_type=$1
       WHERE ($2 OR NOT st.vinfast_only)
+        -- WF-04/AD-7: an open FaultEvent hides its connector; a whole-charge-point one (connector_id
+        -- NULL, e.g. Offline) hides all of them. Driver reports only label (BR-P41/P42), never hide.
+        AND NOT EXISTS(SELECT 1 FROM fault_events f WHERE f.charge_point_id=cp.id
+          AND (f.connector_id=c.id OR f.connector_id IS NULL)
+          AND f.status<>'resolved' AND f.source<>'driver_report')
     ), classified AS (
       SELECT *,CASE WHEN offline THEN 'offline'
         WHEN status='Available' AND (status_quality<>'fresh' OR occupied) THEN 'unknown'

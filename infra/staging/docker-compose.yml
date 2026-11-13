@@ -5,7 +5,7 @@
 # qua `environment:` — không dùng `env_file`, để secret của Postgres/simulator không lọt sang
 # dịch vụ khác. Khác với kit ban đầu, KHÔNG có: dashboard (apps/dashboard chưa có mã build —
 # thêm lại khi WP4 có), redis (apps/csms không dùng), JWT_SECRET/VNPay/e-invoice (code không đọc;
-# JWT của app tài xế là DRIVER_API_JWT_*, có ở dịch vụ csms).
+# JWT của app tài xế là DRIVER_API_JWT_*, của dashboard là DASHBOARD_JWT_*, cả hai ở dịch vụ csms).
 name: powerme
 
 x-logging: &default-logging
@@ -83,6 +83,14 @@ services:
       # PHẢI false trên staging: true cho phép giả danh tài xế bằng header X-Driver-Id (chỉ dành cho
       # máy dev). Cố định ở đây, không đọc từ .env.
       DRIVER_API_DEV_AUTH: 'false'
+      # T128 (FE-01a, ADR-0018): đăng nhập dashboard (/api/auth/v1/login, /api/operator/v1/*,
+      # /api/admin/v1/*) — cùng listener cổng 3000, nên cũng chỉ qua SSH tunnel. Khoá RIÊNG, khác
+      # Driver API. Cùng luật ba-biến: trống cả ba → 503 auth_unavailable; thiếu một hoặc khoá không
+      # phải base64 chuẩn >= 32 byte → CSMS không khởi động (check_env chặn trước). Sinh bằng
+      # ./init-env.sh (hoặc --add-missing cho .env cũ).
+      DASHBOARD_JWT_SECRET_BASE64: ${DASHBOARD_JWT_SECRET_BASE64:-}
+      DASHBOARD_JWT_ISSUER: ${DASHBOARD_JWT_ISSUER:-}
+      DASHBOARD_JWT_AUDIENCE: ${DASHBOARD_JWT_AUDIENCE:-}
       # WF-05 (T119, #111): người thao tác các route onboarding của console (đăng ký trụ, onboard).
       # Là id user lấy từ log seed ("WF-05 console actors: ..."), KHÔNG lấy từ body. Trống → 503.
       CONSOLE_ACTOR_ADMIN_ID: ${CONSOLE_ACTOR_ADMIN_ID:-}

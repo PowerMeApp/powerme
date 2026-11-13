@@ -41,6 +41,8 @@ Candidate 26/10 chờ hội đồng Review 2 duyệt: WP2 status/time-left, WP4 
 
 Làm từng slice: nền composition/domain/theme → Auth/Profile → Stations → Charging → Payments/History/Loyalty → Support/Should reservation. Đối chiếu visual/docs và ghi khác biệt trước mở rộng. Mock local là cấu hình chủ động, không tự fallback API lỗi sang mock. Contract/client generated để bước API sau với OpenAPI WP2 và toolchain pin.
 
+Sau khi nối và kiểm chứng luồng với API trên backend thật, dọn mock của luồng đó trong cùng slice. Kết quả test fixture riêng chưa đủ để dọn. Rà soát và xóa mock repository, dữ liệu, provider, cấu hình ghép nối và fallback dùng khi chạy app. Bỏ entrypoint preview lỗi thời nếu không còn nơi dùng. Tách phần dùng chung an toàn để giữ mock cho các luồng chưa tích hợp. Fake và fixture phục vụ test được giữ riêng khỏi đường chạy app. Cập nhật tài liệu theo trạng thái mới, chạy `flutter analyze` và các test liên quan khi thực hiện việc dọn.
+
 Comment mới/sửa chỉ 1–2 dòng ngắn, lý giải dài vào docs. Không thêm lớp rỗng hoặc rewrite toàn app chỉ vì đã research.
 
 ## Kiểm tra/bàn giao

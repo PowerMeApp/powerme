@@ -12,7 +12,7 @@ o2 = U(RI, -28, "UC-OPS-02", "Monitor Charge Point Status")
 o5 = U(RI, -16, "UC-OPS-05", "Resolve Unattributed Session")
 o6 = U(RI, 17, "UC-OPS-06", "Configure Tariff Schedule")
 o7 = U(RI, 29, "UC-OPS-07", "Manage Promotions")
-o9 = U(RI, 41, "UC-OPS-09", "View Revenue Share")
+o9 = U(RI, 41, "UC-OPS-09", "View Station Revenue")
 # outer column — fault handling: base + extensions
 o4 = U(RO, -9, "UC-OPS-04", "Send Remote Charge Point Command")
 o3 = U(RO, 0.5, "UC-OPS-03", "View Fault Alerts", ep=["remote reset", "maintenance ticket"])

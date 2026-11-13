@@ -118,14 +118,31 @@ ON CONFLICT ON CONSTRAINT vehicle_models_brand_model_name_key DO NOTHING;
 --   app.ds01@powerme.test  DS-01  200.000 VND, VF 8 Plus (mặc định) + Nissan Leaf
 --   app.ds02@powerme.test  DS-02   30.000 VND (dưới CHARGE_MINIMUM_START_VND 50.000), VF e34
 --   app.ds03@powerme.test  DS-03  100.000 VND + 600 điểm (>= 500 điểm tối thiểu để dùng), Ioniq 5 + MiniEV
+-- Số điện thoại GIẢ dạng E.164 để đăng nhập bằng SĐT (BE-30; users_phone_number_key UNIQUE từ 0017).
+-- Số đã có người khác dùng thì tài xế mẫu không có số, thay vì làm hỏng cả seed.
 INSERT INTO users (email, full_name, phone_number, role, account_status)
-SELECT v.email, v.full_name, v.phone, 'driver', 'active'
+SELECT v.email, v.full_name,
+       CASE WHEN EXISTS (SELECT 1 FROM users x WHERE x.phone_number = v.phone) THEN NULL ELSE v.phone END,
+       'driver', 'active'
 FROM (VALUES
   ('app.ds01@powerme.test', 'Tran Van Du Tien', '+84900000101'),
   ('app.ds02@powerme.test', 'Le Thi It Tien',   '+84900000102'),
   ('app.ds03@powerme.test', 'Pham Van Co Diem', '+84900000103')
 ) AS v(email, full_name, phone)
 ON CONFLICT ON CONSTRAINT users_email_key DO NOTHING;
+
+-- Tài xế mẫu đã có từ trước mà chưa có số (vd số bị chiếm lúc tạo): điền số nếu số còn trống.
+-- Không bao giờ ghi đè một số đã có (app / người vận hành có thể đã đổi).
+UPDATE users u
+SET phone_number = v.phone, updated_at = now()
+FROM (VALUES
+  ('app.ds01@powerme.test', '+84900000101'),
+  ('app.ds02@powerme.test', '+84900000102'),
+  ('app.ds03@powerme.test', '+84900000103')
+) AS v(email, phone)
+WHERE u.email = v.email
+  AND u.phone_number IS NULL
+  AND NOT EXISTS (SELECT 1 FROM users x WHERE x.phone_number = v.phone);
 
 INSERT INTO drivers (user_id, consent_version, consent_given_at)
 SELECT u.id, '2026-09', now()
@@ -149,7 +166,12 @@ JOIN drivers d ON d.user_id = u.id
 JOIN vehicle_models m ON m.brand = v.brand AND m.model_name = v.model
 -- Tài xế đã tự đặt xe mặc định khác (qua app) thì xe seed vào không mặc định, khỏi vấp unique index.
 WHERE NOT (v.is_default AND EXISTS (SELECT 1 FROM vehicles x WHERE x.driver_id = d.user_id AND x.is_default))
-ON CONFLICT ON CONSTRAINT vehicles_plate_number_key DO NOTHING;
+-- BE-34 (0018): biển đã có — kể cả xe tài xế đã GỠ qua app — thì không nạp lại (seed không hồi sinh
+-- xe đã gỡ). So theo khoá chữ + số như index vehicles_plate_key_active.
+  AND NOT EXISTS (SELECT 1 FROM vehicles x
+                  WHERE upper(regexp_replace(x.plate_number, '[^A-Za-z0-9]', '', 'g'))
+                      = upper(regexp_replace(v.plate, '[^A-Za-z0-9]', '', 'g')))
+ON CONFLICT DO NOTHING;
 
 -- Ví credit: số dư = sổ cái (một top_up gốc + một dòng credit_transactions entry 1) ---------------
 -- Chỉ nạp khi ví CHƯA có dòng sổ cái nào: ví đã phát sinh giao dịch (app đã sạc/nạp) thì giữ nguyên,
@@ -176,7 +198,8 @@ FROM (VALUES
 JOIN users u ON u.email = v.email
 JOIN credit_accounts ca ON ca.driver_id = u.id
 WHERE NOT EXISTS (SELECT 1 FROM credit_transactions ct WHERE ct.credit_account_id = ca.id)
-ON CONFLICT ON CONSTRAINT top_ups_idempotency_key_key DO NOTHING;
+-- Không chỉ tên constraint (đổi tên ở 0019; seed còn chạy trên DB trước 0019, xem seed.sql).
+ON CONFLICT DO NOTHING;
 
 INSERT INTO credit_transactions (
   credit_account_id, entry_no, transaction_type, amount_vnd, balance_after_vnd, top_up_id

@@ -11,13 +11,66 @@ import '../../auth/application/auth_controller.dart';
 import '../../payments/application/payments_controller.dart';
 
 class ProfileScreen extends ConsumerWidget {
-  const ProfileScreen({super.key});
+  const ProfileScreen({super.key, this.readOnly = false});
+  final bool readOnly;
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final state = ref.watch(profileControllerProvider);
     final profile = state.profile;
     final copy = AppCopy(profile.language);
     final text = Theme.of(context).textTheme;
+    if (readOnly) {
+      return AppPage(
+        children: [
+          Text(copy.profile, style: text.headlineSmall),
+          const SizedBox(height: 20),
+          HeroCard(
+            accent: PowerMeColors.gold,
+            child: ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: const Icon(Icons.person_outline_rounded),
+              title: Text(profile.displayName, style: text.titleLarge),
+              subtitle: const Text('Tài xế'),
+            ),
+          ),
+          const SizedBox(height: 20),
+          Text('Xe của bạn', style: text.titleMedium),
+          const SizedBox(height: 12),
+          InfoCard(
+            children: [
+              if (profile.vehicles.isEmpty)
+                const Text('Chưa có xe trong hồ sơ.'),
+              for (final vehicle in profile.vehicles)
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: const Icon(Icons.directions_car_outlined),
+                  title: Text(vehicle.label),
+                  subtitle: Text(
+                    [
+                      if (vehicle.plateNumber case final String plate) plate,
+                      ...vehicle.connectors,
+                      if (profile.selectedVehicleId == vehicle.id)
+                        'Xe mặc định',
+                    ].join(' · '),
+                  ),
+                ),
+            ],
+          ),
+          if (state.failure != null)
+            const FailureNotice('Chưa tải được hồ sơ mới. Vui lòng thử lại.'),
+          const SizedBox(height: 16),
+          OutlinedButton.icon(
+            key: const Key('refresh-profile'),
+            onPressed: state.busy
+                ? null
+                : () => ref.read(profileControllerProvider.notifier).refresh(),
+            icon: const Icon(Icons.refresh),
+            label: Text(state.busy ? 'Đang tải hồ sơ…' : 'Tải lại hồ sơ'),
+          ),
+          _SignOutButton(copy: copy),
+        ],
+      );
+    }
     final paymentState = ref.watch(paymentsControllerProvider);
     return AppPage(
       children: [
@@ -346,39 +399,7 @@ class ProfileScreen extends ConsumerWidget {
           const SizedBox(height: 10),
         ],
         const SizedBox(height: 20),
-        OutlinedButton.icon(
-          key: const Key('logout'),
-          onPressed: () async {
-            final confirmed = await showDialog<bool>(
-              context: context,
-              builder: (dialogContext) => AlertDialog(
-                title: Text(copy.text('Đăng xuất?', 'Sign out?')),
-                content: Text(
-                  copy.text(
-                    'Bạn có thể đăng nhập lại để tiếp tục.',
-                    'You can sign in again to continue.',
-                  ),
-                ),
-                actions: [
-                  TextButton(
-                    onPressed: () => Navigator.pop(dialogContext, false),
-                    child: Text(copy.text('Ở lại', 'Stay')),
-                  ),
-                  TextButton(
-                    key: const Key('confirm-logout'),
-                    onPressed: () => Navigator.pop(dialogContext, true),
-                    child: Text(copy.text('Đăng xuất', 'Sign out')),
-                  ),
-                ],
-              ),
-            );
-            if (confirmed == true && context.mounted) {
-              ref.read(authControllerProvider.notifier).signOut();
-            }
-          },
-          icon: const Icon(Icons.logout),
-          label: Text(copy.text('Đăng xuất', 'Sign out')),
-        ),
+        _SignOutButton(copy: copy),
         const SizedBox(height: 8),
         TextButton(
           key: const Key('request-closure'),
@@ -429,4 +450,47 @@ class ProfileScreen extends ConsumerWidget {
       ],
     );
   }
+}
+
+class _SignOutButton extends ConsumerWidget {
+  const _SignOutButton({required this.copy});
+  final AppCopy copy;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) => OutlinedButton.icon(
+    key: const Key('logout'),
+    onPressed: () async {
+      final scope = ref.read(authControllerProvider).scope;
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: Text(copy.text('Đăng xuất?', 'Sign out?')),
+          content: Text(
+            copy.text(
+              'Bạn có thể đăng nhập lại để tiếp tục.',
+              'You can sign in again to continue.',
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: Text(copy.text('Ở lại', 'Stay')),
+            ),
+            TextButton(
+              key: const Key('confirm-logout'),
+              onPressed: () => Navigator.pop(dialogContext, true),
+              child: Text(copy.text('Đăng xuất', 'Sign out')),
+            ),
+          ],
+        ),
+      );
+      if (confirmed == true &&
+          context.mounted &&
+          identical(scope, ref.read(authControllerProvider).scope)) {
+        ref.read(authControllerProvider.notifier).signOut();
+      }
+    },
+    icon: const Icon(Icons.logout),
+    label: Text(copy.text('Đăng xuất', 'Sign out')),
+  );
 }
