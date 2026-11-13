@@ -22,6 +22,7 @@ import { LoyaltyService } from '../src/billing/loyalty.service.js';
 import {
   GATEWAY_REFERENCE_ATTEMPTS,
   PENDING_TIMEOUT_MS,
+  QUERYDR_FIRST_DELAY_MS,
   topUpRequestHash,
   TopUpService,
 } from '../src/billing/top-up.service.js';
@@ -234,11 +235,17 @@ describeDb('billing: tạo top-up VNPay — TopUpService (T32 Phần 5, SD-2a)',
       expect(PENDING_TIMEOUT_MS).toBe(15 * 60 * 1000);
 
       const row = await one(
-        `SELECT t.*, (t.expires_at - t.created_at) = interval '15 minutes' AS exact
+        `SELECT t.*, (t.expires_at - t.created_at) = interval '15 minutes' AS exact,
+           (t.next_attempt_at - t.expires_at) = interval '2 minutes' AS querydr_at
          FROM top_ups t WHERE id=$1`,
         [topUp.topUpId],
       );
       expect(row['exact']).toBe(true);
+      // T32 Phần 6 (T127): lần querydr đầu = expires_at + 2 phút, bằng đồng hồ DB.
+      expect(row['querydr_at']).toBe(true);
+      expect(QUERYDR_FIRST_DELAY_MS).toBe(2 * 60 * 1000);
+      expect(row['completed_at']).toBeNull();
+      expect(row['exception_kind']).toBeNull();
       expect(row['idempotency_key']).toBe(k);
       expect(row['request_hash']).toBe(topUpRequestHash(200_000, 0));
       expect(row['gateway_reference']).toMatch(/^PM[0-9A-Z]{14}$/);

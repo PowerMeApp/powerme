@@ -20,20 +20,26 @@
  * `apply` trả `outcome`:
  *   - `transition`: đổi trạng thái theo bảng.
  *   - `already_applied`: kết quả thanh toán lặp, không ghi gì (BR-P13 → RspCode 02).
- *   - `late_payment`: đã trả nhưng không cộng; giữ trạng thái, ghi `late_*` để Admin hoàn.
- *   - `conflicting_result`: kết quả mâu thuẫn với kết quả đã ghi; không ghi gì, service log warn:
- *       thành công với transactionNo KHÁC giao dịch đã cộng / khoản trễ đã ghi (có thể là lần trả
- *       thứ hai cho cùng top-up — cách hoàn còn mở, decisions), hoặc báo lỗi sau khi đã cộng.
+ *   - `late_payment`: đã trả nhưng không cộng; giữ trạng thái, ghi `late_*` để Admin hoàn. Có trên
+ *       MỌI trạng thái trừ `pending` (T116, Ân 12/11): `expired` (#6), `failed`, và lần trả thứ hai
+ *       (transactionNo khác giao dịch đã cộng) cho top-up `credited` / `refunded`.
+ *   - `conflicting_result`: kết quả mâu thuẫn với kết quả đã ghi; không ghi gì, service log error để
+ *       Admin xử lý ngoài hệ thống: khoản thứ ba (đã có khoản trễ với transactionNo khác), hoặc báo
+ *       lỗi sau khi đã cộng.
  *   - `stale`: timeout đến khi đã rời `pending` (đua với IPN qua Scheduler); bỏ qua.
  *   - `rejected`: guard số dư của #7 sai (TC-STM4-12/13); service đổi thành RefundNotAllowed → 422.
  * Chỉ ADMIN_REFUND khi không ở `credited` mới ném `InvalidTransition` (vd. hoàn hai lần, TC-STM4-14).
  *
- * Bổ sung ⊕ chưa có trong diagram (decisions D4, chốt 04/11):
- *   - Thành công tới khi đã `failed` → `late_payment`, giữ `failed` (cần nới CHECK
- *     `top_ups_late_payment_status_check` ở migration của Phần 6).
- *   - Đã có khoản trễ (`recordedLateRef`): cùng transactionNo → `already_applied`, khác →
- *     `conflicting_result`. Kiểm khoản trễ đã ghi TRƯỚC, để IPN lặp trả 02 thay vì ghi khoản trễ
- *     lần hai.
+ * Bổ sung ⊕ chưa có trong diagram (decisions D4, chốt 04/11; T116 12/11):
+ *   - Thành công tới khi đã `failed` → `late_payment`, giữ `failed`.
+ *   - Thành công tới khi đã `credited` / `refunded` (T32 Phần 6), thứ tự kiểm:
+ *       1. transactionNo = giao dịch đã cộng → `already_applied`;
+ *       2. đã có khoản trễ: cùng transactionNo → `already_applied`, khác → `conflicting_result`;
+ *       3. còn lại → `late_payment` (lần trả thứ hai), giữ trạng thái.
+ *   - Đã có khoản trễ (`recordedLateRef`) trên `failed` / `expired`: cùng transactionNo →
+ *     `already_applied`, khác → `conflicting_result`. Kiểm khoản trễ đã ghi TRƯỚC, để IPN lặp trả 02
+ *     thay vì ghi khoản trễ lần hai.
+ *   CHECK `top_ups_late_payment_status_check` cho khoản trễ trên mọi trạng thái trừ `pending` (0021).
  *
  * Bộ 5 × 4 = 20 cặp (trạng thái, event): 16 được nhận · 4 ném InvalidTransition.
  */
@@ -63,7 +69,10 @@ export interface TopUpGuards {
   transactionNo?: string;
   /** PAYMENT_SUCCEEDED trên credited/refunded: `top_ups.gateway_transaction_no` đã ghi khi cộng. */
   appliedTransactionNo?: string;
-  /** PAYMENT_SUCCEEDED: `top_ups.late_gateway_ref` hiện tại; `null` = chưa có khoản trễ. */
+  /**
+   * PAYMENT_SUCCEEDED trên mọi trạng thái trừ pending: `top_ups.late_gateway_ref` hiện tại;
+   * `null` = chưa có khoản trễ.
+   */
   recordedLateRef?: string | null;
   /** ADMIN_REFUND (#7): số dư ≥ số tiền top-up (không hoàn một phần). */
   balanceCoversAmount?: boolean;
@@ -150,7 +159,12 @@ export class TopUpStateMachine {
       case 'refunded': {
         const applied = need(g, 'appliedTransactionNo', from, event);
         const txn = need(g, 'transactionNo', from, event);
-        return stay(from, applied === txn ? 'already_applied' : 'conflicting_result');
+        const late = need(g, 'recordedLateRef', from, event);
+        if (applied === txn) return stay(from, 'already_applied');
+        if (late !== null)
+          return stay(from, late === txn ? 'already_applied' : 'conflicting_result');
+        // Lần trả thứ hai cho top-up đã cộng (T116): ghi khoản trễ, không cộng lần hai.
+        return stay(from, 'late_payment');
       }
       case 'failed':
       case 'expired': {

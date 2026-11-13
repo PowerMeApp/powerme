@@ -1,13 +1,17 @@
 /**
- * Unit test VnpayAdapter.buildPaymentUrl (T32 Phần 5). Chuỗi ký mong đợi viết TAY theo tài liệu
+ * Unit test VnpayAdapter.buildPaymentUrl (T32 Phần 5) và kiểm chữ ký IPN / phân loại kết quả /
+ * `parseVnpDate` (T32 Phần 6). Chuỗi ký mong đợi viết TAY theo tài liệu
  * VNPay 2.1.0 (sắp xếp tên, encode kiểu PHP urlencode, dấu cách → `+`), chữ ký tính độc lập bằng
  * node:crypto — không gọi lại hàm của adapter để so.
  */
 import { createHmac } from 'node:crypto';
 import {
   buildPaymentUrl,
+  classifyIpn,
   clientIp,
   newGatewayReference,
+  parseVnpDate,
+  verifyIpnSignature,
   vnpDate,
   vnpEncode,
   VnpayAdapter,
@@ -143,4 +147,102 @@ describe('loadVnpayConfig', () => {
       'invalid_vnpay_config: VNPAY_URL',
     );
   });
+});
+
+describe('verifyIpnSignature (T32 Phần 6)', () => {
+  /** Chữ ký tính độc lập: chuỗi ký viết tay theo code mẫu PHP (urlencode, sắp tên). */
+  const IPN: Record<string, string> = {
+    vnp_Amount: '20000000',
+    vnp_BankCode: 'NCB',
+    vnp_OrderInfo: "Nạp tiền #1 & 50% (ưu đãi)! *'~",
+    vnp_PayDate: '20261113103000',
+    vnp_ResponseCode: '00',
+    vnp_TmnCode: 'TESTTMN1',
+    vnp_TransactionNo: '14123456',
+    vnp_TransactionStatus: '00',
+    vnp_TxnRef: 'PMABC123',
+  };
+  const SIGN_DATA = [
+    'vnp_Amount=20000000',
+    'vnp_BankCode=NCB',
+    'vnp_OrderInfo=N%E1%BA%A1p+ti%E1%BB%81n+%231+%26+50%25+%28%C6%B0u+%C4%91%C3%A3i%29%21+%2A%27%7E',
+    'vnp_PayDate=20261113103000',
+    'vnp_ResponseCode=00',
+    'vnp_TmnCode=TESTTMN1',
+    'vnp_TransactionNo=14123456',
+    'vnp_TransactionStatus=00',
+    'vnp_TxnRef=PMABC123',
+  ].join('&');
+  const hash = createHmac('sha512', CFG.hashSecret).update(SIGN_DATA, 'utf8').digest('hex');
+  const signed = { ...IPN, vnp_SecureHash: hash };
+
+  it('chữ ký đúng (ký tự đặc biệt trong vnp_OrderInfo) → ok', () => {
+    expect(verifyIpnSignature(signed, CFG)).toEqual({ ok: true });
+  });
+  it('chữ ký hex viết hoa vẫn nhận; vnp_SecureHashType và tham số không có tiền tố vnp_ bị bỏ qua', () => {
+    expect(
+      verifyIpnSignature(
+        { ...signed, vnp_SecureHash: hash.toUpperCase(), vnp_SecureHashType: 'HmacSHA512', x: '1' },
+        CFG,
+      ),
+    ).toEqual({ ok: true });
+  });
+  it.each([
+    ['thiếu chữ ký', { ...IPN }],
+    ['chữ ký sai độ dài', { ...signed, vnp_SecureHash: 'ab' }],
+    ['sửa giá trị sau khi ký', { ...signed, vnp_Amount: '20000001' }],
+    ['thêm tham số vnp_ sau khi ký', { ...signed, vnp_Extra: '1' }],
+  ])('%s → signature', (_l, params) => {
+    expect(verifyIpnSignature(params, CFG)).toEqual({ ok: false, reason: 'signature' });
+  });
+  it('sai secret → signature', () => {
+    expect(verifyIpnSignature(signed, { ...CFG, hashSecret: 'OTHER' })).toEqual({
+      ok: false,
+      reason: 'signature',
+    });
+  });
+  it('vnp_TmnCode khác cấu hình (ký đúng) → tmn_code', () => {
+    expect(verifyIpnSignature(signed, { ...CFG, tmnCode: 'OTHERTMN' })).toEqual({
+      ok: false,
+      reason: 'tmn_code',
+    });
+  });
+  it('tham số dựng lại từ URL thanh toán (decode + → dấu cách) ký lại vẫn khớp', () => {
+    const url = new URL(buildPaymentUrl(TOP_UP, CFG, '10.0.0.5'));
+    const params = Object.fromEntries(url.searchParams);
+    expect(verifyIpnSignature(params, CFG)).toEqual({ ok: true });
+  });
+});
+
+describe('classifyIpn (D3, chốt 12–13/11)', () => {
+  it.each([
+    ['00', '00', 'succeeded', false],
+    ['07', '00', 'unresolved', true],
+    ['07', '07', 'unresolved', false],
+    ['99', '01', 'unresolved', false],
+    ['99', '04', 'unresolved', false],
+    ['00', '02', 'unresolved', true],
+    ['24', '00', 'unresolved', true],
+    ['24', '02', 'failed', false],
+    ['51', '02', 'failed', false],
+    [undefined, undefined, 'failed', false],
+  ] as const)(
+    'ResponseCode %s, TransactionStatus %s → %s (oneZero %s)',
+    (rc, ts, kind, oneZero) => {
+      expect(classifyIpn(rc, ts)).toEqual({ kind, oneZero });
+    },
+  );
+});
+
+describe('parseVnpDate', () => {
+  it('yyyyMMddHHmmss GMT+7 → UTC; ngược của vnpDate', () => {
+    expect(parseVnpDate('20261113003000')?.toISOString()).toBe('2026-11-12T17:30:00.000Z');
+    expect(vnpDate(parseVnpDate('20261231235959')!)).toBe('20261231235959');
+  });
+  it.each([undefined, '', '2026111300300', '20260231120000', '20261113256000', 'abcdefghijklmn'])(
+    '%j → null',
+    (s) => {
+      expect(parseVnpDate(s)).toBeNull();
+    },
+  );
 });

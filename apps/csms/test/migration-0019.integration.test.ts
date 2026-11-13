@@ -272,6 +272,8 @@ describeDb('migration 0019 — top-up idempotency theo tài khoản, một pendi
       expect(names).toEqual([
         'top_ups_gateway_transaction_no_key',
         'top_ups_one_pending_per_account_key',
+        // 0021 (T32 Phần 6): vòng quét querydr; không phải index một cột của FK.
+        'top_ups_pending_next_attempt_idx',
         'top_ups_status_expires_at_idx',
       ]);
       const pending = config.indexes.find(

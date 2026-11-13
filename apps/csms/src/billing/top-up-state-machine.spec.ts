@@ -3,7 +3,8 @@
  *
  * Một test cho MỖI chuyển của STM-4 (#2–#4, #6, #7; #5 đã bỏ; tên test = số chuyển), các nhánh
  * guard, kết quả lặp / mâu thuẫn của BR-P13, timeout đến muộn (`stale`), các ⊕ của decisions D4
- * (thành công sau `failed`, khoản trễ đã ghi), rồi quét TOÀN BỘ 5 trạng thái × 4 event = 20 cặp:
+ * (thành công sau `failed`, khoản trễ đã ghi, lần trả thứ hai cho top-up đã cộng — T116), rồi quét
+ * TOÀN BỘ 5 trạng thái × 4 event = 20 cặp:
  * 16 cặp được nhận, 4 cặp ném InvalidTransition (ADMIN_REFUND khi không ở credited).
  */
 import { topUpStatusEnum } from '../db/schema/enums.js';
@@ -45,7 +46,7 @@ describe('TopUpStateMachine — các chuyển của STM-4', () => {
       'pending',
       'TIMEOUT_NOT_PAID',
       'expired',
-      'quá expires_at + 2 phút, querydr báo chưa trả dứt khoát (TC-STM4-04)',
+      'quá expires_at + 2 phút, querydr báo chưa trả dứt khoát',
     ],
     ['#7', 'credited', 'ADMIN_REFUND', 'refunded', 'Admin hoàn, số dư đủ (UC-ADM-08)'],
   ];
@@ -62,7 +63,7 @@ describe('TopUpStateMachine — các chuyển của STM-4', () => {
 });
 
 describe('TopUpStateMachine — thanh toán thành công tới khi chưa / đã expired', () => {
-  it('TC-STM4-05: thành công khi còn pending → credited (#2)', () => {
+  it('TC-STM4-04 (bước IPN): pending đã quá expires_at, thành công → credited (#2)', () => {
     // Máy không xét đồng hồ: top-up còn `pending` thì cộng, kể cả khi đã quá `expires_at` (đang
     // chờ querydr chốt, D4 ⊕). Test mức service (vòng quét + querydr) là việc của Phần 8.
     expect(sm.apply('pending', 'PAYMENT_SUCCEEDED', OK)).toEqual({
@@ -72,7 +73,7 @@ describe('TopUpStateMachine — thanh toán thành công tới khi chưa / đã 
     });
   });
 
-  it('#6 / TC-STM4-06: thành công khi đã expired → late_payment, giữ expired', () => {
+  it('#6: thành công khi đã expired → late_payment, giữ expired', () => {
     expect(sm.apply('expired', 'PAYMENT_SUCCEEDED', OK)).toEqual({
       to: 'expired',
       outcome: 'late_payment',
@@ -90,7 +91,7 @@ describe('TopUpStateMachine — thanh toán thành công tới khi chưa / đã 
 });
 
 describe('TopUpStateMachine — ⊕ D4: thành công tới khi đã failed', () => {
-  it('chưa có khoản trễ → ghi khoản trễ, giữ failed', () => {
+  it('TC-STM4-05: chưa có khoản trễ → ghi khoản trễ, giữ failed', () => {
     expect(sm.apply('failed', 'PAYMENT_SUCCEEDED', OK)).toEqual({
       to: 'failed',
       outcome: 'late_payment',
@@ -110,7 +111,7 @@ describe('TopUpStateMachine — ⊕ D4: thành công tới khi đã failed', () 
 describe('TopUpStateMachine — ⊕ D4: khoản trễ đã ghi rồi', () => {
   const cases = ['failed', 'expired'] as const;
 
-  it.each(cases)('%s: cùng transactionNo → already_applied (TC-STM4-15)', (from) => {
+  it.each(cases)('%s: khoản trễ lặp, cùng transactionNo → already_applied', (from) => {
     const step = sm.apply(from, 'PAYMENT_SUCCEEDED', {
       ...OK,
       recordedLateRef: 'VNP-1',
@@ -140,17 +141,6 @@ describe('TopUpStateMachine — BR-P13: kết quả tới khi đã có kết qu�
   });
 
   it.each(['credited', 'refunded'] as const)(
-    '%s: thành công với transactionNo KHÁC giao dịch đã cộng → conflicting_result (lần trả thứ hai?)',
-    (from) => {
-      const step = sm.apply(from, 'PAYMENT_SUCCEEDED', {
-        transactionNo: 'VNP-2',
-        appliedTransactionNo: 'VNP-1',
-      });
-      expect(step).toEqual({ to: from, outcome: 'conflicting_result', no: null });
-    },
-  );
-
-  it.each(['credited', 'refunded'] as const)(
     '%s: báo lỗi sau khi đã cộng tiền → conflicting_result, không đổi trạng thái',
     (from) => {
       expect(sm.apply(from, 'PAYMENT_FAILED')).toEqual({
@@ -160,6 +150,49 @@ describe('TopUpStateMachine — BR-P13: kết quả tới khi đã có kết qu�
       });
     },
   );
+});
+
+describe('TopUpStateMachine — T116: thành công tới khi đã credited / refunded', () => {
+  const cases = ['credited', 'refunded'] as const;
+
+  it.each(cases)(
+    '%s: transactionNo KHÁC giao dịch đã cộng, chưa có khoản trễ → late_payment (lần trả thứ hai)',
+    (from) => {
+      const step = sm.apply(from, 'PAYMENT_SUCCEEDED', {
+        transactionNo: 'VNP-2',
+        appliedTransactionNo: 'VNP-1',
+        recordedLateRef: null,
+      });
+      expect(step).toEqual({ to: from, outcome: 'late_payment', no: null });
+    },
+  );
+
+  it.each(cases)('%s: khoản trễ lặp (cùng transactionNo đã ghi) → already_applied', (from) => {
+    const step = sm.apply(from, 'PAYMENT_SUCCEEDED', {
+      transactionNo: 'VNP-2',
+      appliedTransactionNo: 'VNP-1',
+      recordedLateRef: 'VNP-2',
+    });
+    expect(step).toEqual({ to: from, outcome: 'already_applied', no: null });
+  });
+
+  it.each(cases)('%s: khoản thứ ba (khác cả hai) → conflicting_result', (from) => {
+    const step = sm.apply(from, 'PAYMENT_SUCCEEDED', {
+      transactionNo: 'VNP-3',
+      appliedTransactionNo: 'VNP-1',
+      recordedLateRef: 'VNP-2',
+    });
+    expect(step).toEqual({ to: from, outcome: 'conflicting_result', no: null });
+  });
+
+  it.each(cases)('%s: IPN lặp của giao dịch đã cộng thắng dù đã có khoản trễ', (from) => {
+    const step = sm.apply(from, 'PAYMENT_SUCCEEDED', {
+      transactionNo: 'VNP-1',
+      appliedTransactionNo: 'VNP-1',
+      recordedLateRef: 'VNP-2',
+    });
+    expect(step).toEqual({ to: from, outcome: 'already_applied', no: null });
+  });
 });
 
 describe('TopUpStateMachine — TIMEOUT_NOT_PAID đến muộn (đua với IPN qua Scheduler) → stale', () => {
@@ -213,6 +246,9 @@ describe('TopUpStateMachine — thiếu guard thì ném MissingGuard, không đo
     ['failed', 'PAYMENT_SUCCEEDED', { transactionNo: 'VNP-1' }],
     ['credited', 'PAYMENT_SUCCEEDED', { transactionNo: 'VNP-1' }],
     ['refunded', 'PAYMENT_SUCCEEDED', { appliedTransactionNo: 'VNP-1' }],
+    // T116: credited / refunded cần cả recordedLateRef.
+    ['credited', 'PAYMENT_SUCCEEDED', { transactionNo: 'VNP-1', appliedTransactionNo: 'VNP-1' }],
+    ['refunded', 'PAYMENT_SUCCEEDED', { transactionNo: 'VNP-2', appliedTransactionNo: 'VNP-1' }],
     ['credited', 'ADMIN_REFUND', {}],
   ] as const)('%s --%s--> thiếu guard %j', (from, event, guards) => {
     expect(() => sm.apply(from, event, guards)).toThrow(MissingGuard);

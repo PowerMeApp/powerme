@@ -25,7 +25,8 @@ không suy ra OTP/login đã hoàn thành. Thay đổi chưa merge/commit/push k
 migration 0018) — xem §13.
 **T32 Phần 5 (12/11/2026, OpenAPI 0.9.0, WP5 — Khang):** thêm `GET /billing/top-ups/quote`,
 `POST /billing/top-ups`, `GET /billing/top-ups/{id}` (nạp Charging Credit qua VNPay, WF-02 SD-2a)
-— xem §2, §7 và §14. **Chưa dùng cho app** tới khi T32 Phần 6 và Phần 8 merge.
+— xem §2, §7 và §14. **Chưa dùng cho app** tới khi T32 Phần 8 merge (IPN và trang return đã có từ
+T32 Phần 6, 13/11).
 
 ---
 
@@ -308,10 +309,10 @@ Content-Type: application/json
 
 ## 14. Top-up (WF-02) — nạp Charging Credit qua VNPay (T32 Phần 5)
 
-> **Chưa dùng cho app** tới khi T32 Phần 6 và Phần 8 merge. Trước Phần 6 chưa có IPN, nên tiền
-> không bao giờ được cộng và trang return `/billing/vnpay/return` chưa có: thanh toán sandbox xong
-> sẽ quay về 404. Trước Phần 8 không có gì chuyển top-up bỏ dở sang `expired`, nên tài xế đã tạo
-> một top-up rồi bỏ sẽ bị chặn `pending_top_up_confirming` mãi.
+> **Chưa dùng cho app** tới khi T32 Phần 8 merge. Từ T32 Phần 6 (13/11) đã có IPN
+> (`/billing/vnpay/ipn`, cộng tiền) và trang return `/billing/vnpay/return` (chỉ báo "đang xác
+> nhận", app poll `GET /billing/top-ups/{id}`). Trước Phần 8 không có gì chuyển top-up bỏ dở sang
+> `expired`, nên tài xế đã tạo một top-up rồi bỏ sẽ bị chặn `pending_top_up_confirming` mãi.
 
 Route ở `driver/top-ups.http.ts`, luật ở `billing/top-up.service.ts`; ánh xạ lỗi ở `topUpErrorJson`.
 Luật: WF-02 decisions D2, BR-P22 theo ADR-0013, BR-P35.
