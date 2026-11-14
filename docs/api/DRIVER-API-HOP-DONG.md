@@ -267,7 +267,7 @@ lạ → 400 `invalid_input`. Phần tử xe trả về **cùng hình dạng** p
 
 | Route | Body | Thành công | Lỗi |
 |---|---|---|---|
-| `GET /vehicle-models` | — | 200 `{items: [{vehicle_model_id, brand, model_name, connector_type, is_vinfast, battery_capacity_kwh, rated_range_km, max_dc_kw}]}` sắp theo hãng, tên mẫu | — |
+| `GET /vehicle-models` | — | 200 `{items: [{vehicle_model_id, brand, model_name, connector_type, is_vinfast, battery_capacity_kwh, rated_range_km, max_dc_kw, image_url, image_credit}]}` sắp theo hãng, tên mẫu | — |
 | `POST /vehicles` | `{plate_number, vehicle_model_id, is_default?}` | 201 + xe vừa thêm | 400 `invalid_input`, `invalid_plate_number`, `unknown_vehicle_model`; 409 `plate_taken` |
 | `PATCH /vehicles/{id}` | đúng `{"is_default": true}` | 200 + xe | 400 `invalid_input`; 404 `not_found` |
 | `DELETE /vehicles/{id}` | — | 204 (không body) | 404 `not_found`; 409 `vehicle_in_use` |
@@ -280,8 +280,17 @@ Content-Type: application/json
 {"plate_number": "51k-901.01", "vehicle_model_id": "4", "is_default": true}
 → 201 {"vehicle_id":"6","plate_number":"51K-901.01","is_default":true,"vehicle_model_id":"4",
        "brand":"VinFast","model_name":"VF 8 Plus","connector_type":"ccs2","is_vinfast":true,
-       "battery_capacity_kwh":87.7,"rated_range_km":457,"max_dc_kw":150}
+       "battery_capacity_kwh":87.7,"rated_range_km":457,"max_dc_kw":150,
+       "image_url":"https://commons.wikimedia.org/wiki/Special:FilePath/VinFast_VF_8_DSC_8474.jpg?width=640",
+       "image_credit":"Alexander Migl / Wikimedia Commons, CC BY-SA 4.0"}
 ```
+
+**Ảnh mẫu xe (BE-38, OpenAPI 0.11.0).** `GET /vehicle-models`, mỗi phần tử `vehicles[]` của `GET /me` và kết quả `POST` / `PATCH /vehicles` có thêm `image_url` và `image_credit` (cả hai có thể `null`).
+
+- `image_url` là ảnh ở máy chủ ngoài (Wikimedia Commons), **không** đi qua Driver API: app tải thẳng bằng `Image.network`, không gửi `Authorization`. URL trả 302 tới ảnh JPEG rộng khoảng 640–960 px; đổi `width=` trong URL để lấy cỡ khác.
+- `null` hoặc tải lỗi (mất mạng, ảnh bị gỡ) → hiện ảnh mặc định của app, không để ô trống.
+- `image_credit` khác `null` → hiện dòng này cạnh ảnh hoặc ở màn chi tiết xe. Ảnh dùng giấy phép CC BY-SA 4.0, điều kiện là ghi tên tác giả và giấy phép.
+- 8 mẫu xe trong seed đều có ảnh. Mẫu xe thêm sau chưa có ảnh thì trả `null`.
 
 - **Biển số.** NFKC, in hoa, bỏ mọi khoảng trắng; `-` và `.` giữ nguyên để hiển thị. Chỉ A–Z, 0–9,
   `-`/`.` nằm giữa (không đầu/cuối, không hai dấu liền nhau), dạng lưu ≤ 12 ký tự, phần chữ + số

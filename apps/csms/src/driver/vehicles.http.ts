@@ -52,7 +52,7 @@ export const VEHICLE_JSON = `jsonb_build_object('vehicle_id',v.id::text,'plate_n
   'is_default',v.is_default,'vehicle_model_id',m.id::text,'brand',m.brand,'model_name',m.model_name,
   'connector_type',m.connector_type,'is_vinfast',m.is_vinfast,
   'battery_capacity_kwh',m.battery_capacity_kwh::float8,'rated_range_km',m.rated_range_km,
-  'max_dc_kw',m.max_dc_kw::float8)`;
+  'max_dc_kw',m.max_dc_kw::float8,'image_url',m.image_url,'image_credit',m.image_credit)`;
 
 export interface NormalizedPlate {
   /** Dạng lưu và hiển thị: in hoa, không khoảng trắng, giữ `-` `.`. */
@@ -147,7 +147,8 @@ async function listModels(db: Db) {
   return (
     await db.$client.query(
       `SELECT id::text AS vehicle_model_id,brand,model_name,connector_type,is_vinfast,
-         battery_capacity_kwh::float8 AS battery_capacity_kwh,rated_range_km,max_dc_kw::float8 AS max_dc_kw
+         battery_capacity_kwh::float8 AS battery_capacity_kwh,rated_range_km,max_dc_kw::float8 AS max_dc_kw,
+         image_url,image_credit
        FROM vehicle_models ORDER BY brand,model_name,id`,
     )
   ).rows;

@@ -114,6 +114,36 @@ FROM (VALUES
 ) AS v(brand, model, kind, kwh, km, dc_kw, vinfast)
 ON CONFLICT ON CONSTRAINT vehicle_models_brand_model_name_key DO NOTHING;
 
+-- Ảnh mẫu xe (BE-38, migration 0022): ảnh trên Wikimedia Commons, giấy phép CC BY-SA 4.0, kèm dòng
+-- ghi công phải hiện cạnh ảnh. `Special:FilePath/<tên file>?width=640` chuyển hướng tới ảnh thu nhỏ.
+-- Chỉ điền khi mẫu xe CHƯA có ảnh: chạy lại seed không ghi đè ảnh đã đổi tay.
+-- Bọc trong DO + EXECUTE: file seed này còn được nạp trên schema TRƯỚC 0022 (test các migration cũ
+-- dựng DB ở đúng phiên bản của chúng), khi đó cột chưa có và khối này tự bỏ qua.
+DO $seed$
+BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.columns
+             WHERE table_schema = current_schema() AND table_name = 'vehicle_models'
+               AND column_name = 'image_url') THEN
+    EXECUTE $sql$
+UPDATE vehicle_models m
+   SET image_url = 'https://commons.wikimedia.org/wiki/Special:FilePath/' || v.file || '?width=640',
+       image_credit = v.credit
+FROM (VALUES
+  ('VinFast', 'VF 3',             'VinFast_VF_3_HCMC.jpg',                                  'Vnsg304 / Wikimedia Commons, CC BY-SA 4.0'),
+  ('VinFast', 'VF 5 Plus',        '2025_VinFast_VF_5_in_Vinfast_Blue,_front_left.jpg',      'Ethan Llamas / Wikimedia Commons, CC BY-SA 4.0'),
+  ('VinFast', 'VF e34',           '2024_VinFast_VFe34,_06-14-2024.jpg',                     'Ethan Llamas / Wikimedia Commons, CC BY-SA 4.0'),
+  ('VinFast', 'VF 8 Plus',        'VinFast_VF_8_DSC_8474.jpg',                              'Alexander Migl / Wikimedia Commons, CC BY-SA 4.0'),
+  ('Hyundai', 'Ioniq 5',          'Hyundai_Ioniq_5_IAA_2021_1X7A0189.jpg',                  'Alexander Migl / Wikimedia Commons, CC BY-SA 4.0'),
+  ('BYD',     'Atto 3',           'BYD_Atto_3_1X7A6495.jpg',                                'Alexander Migl / Wikimedia Commons, CC BY-SA 4.0'),
+  ('Nissan',  'Leaf',             'Nissan_Leaf_(ZE1)_DSC_7096.jpg',                         'Alexander Migl / Wikimedia Commons, CC BY-SA 4.0'),
+  ('Wuling',  'HongGuang MiniEV', '2021_Wuling_Hongguang_Mini_EV_side_trimmed.jpg',         'Lamva / Wikimedia Commons, CC BY-SA 4.0')
+) AS v(brand, model, file, credit)
+WHERE m.brand = v.brand AND m.model_name = v.model AND m.image_url IS NULL;
+    $sql$;
+  END IF;
+END
+$seed$;
+
 -- Tài xế mẫu theo kịch bản BM04 (mật khẩu do seed-demo.mjs đặt từ DEMO_DRIVER_PASSWORD) --------
 --   app.ds01@powerme.test  DS-01  200.000 VND, VF 8 Plus (mặc định) + Nissan Leaf
 --   app.ds02@powerme.test  DS-02   30.000 VND (dưới CHARGE_MINIMUM_START_VND 50.000), VF e34
