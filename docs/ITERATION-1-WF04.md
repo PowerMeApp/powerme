@@ -262,3 +262,24 @@ The WF-04 §6 questions still apply. New ones from this iteration:
 | FaultService error is only logged (no retry or sweep): a `Faulted` that fails to write never raises an alert | should fix | **Deferred** to after Review 2 — sweep `connector_status_events` for `Faulted` rows without a `fault_events` row | — |
 | Hard reset recorded `failed` (HTTP 502) when the charge point reboots before sending CALLRESULT | minor | **Deferred** — the fault still closes through t7 when the connector reports a working status | — |
 | *(re-review)* stale guard compares charge point time with server time: a charge point clock 10 min slow makes the replayed recovery look older than the live `Faulted`, so the fault stays `raised` | should fix | **Deferred** — fix before Review 2 if time allows (allow a skew window or compare receive order) | — |
+
+---
+
+## 11. Iteration 2 — operator fault API (FE-04a, 13/11/2026)
+
+The dashboard (screen 21) acts through a logged-in API instead of the dev console (W7, D37–D42).
+
+- `console/fault-actions.ts` holds list / acknowledge / reset / close for **both** the console and the operator API; the console passes no actor and keeps its behaviour (§3.4).
+- Routes behind RolesGuard `operator_staff` (ADR-0018), `operator-api/operator-faults.ts`:
+
+| Method | Path | Result / errors |
+|---|---|---|
+| GET | `/api/operator/v1/faults?status=open\|all\|raised\|acknowledged\|resetting\|resolved&page=&page_size=` | `{ items, total, page, page_size }` (contract §2.4: default `open`, page 1, 50 rows, max 100), server order open → severity → newest on every page · 400 for any other query |
+| POST | `/api/operator/v1/faults/{id}/acknowledge` | `{id, status}` · 404 · 409 `invalid_transition` |
+| POST | `/api/operator/v1/faults/{id}/reset` body `{type: Soft\|Hard, force?: boolean}` | `{fault_id, command_id, reset_status, fault_status, forced}` · 400 · 409 `fault_not_acknowledged` / `station_offline` / `reset_in_progress` / `sessions_active` (+ `sessions: [{connector_no, session_id}]`) · 502 `station_error` |
+| POST | `/api/operator/v1/faults/{id}/close` | `{id, status}` · 404 · 409 |
+
+- **Scoping:** `FaultService.list/get` take the token's Operator (`charge_points.site_id → sites.operator_id`); another Operator's FaultEvent is **404** (BR-P16).
+- **Actor:** `fault_events.acknowledged_by`, `remote_commands.requested_by` and, on close, `fault_reports.cleared_by` = staff user id. Manager and technician may both act (D42).
+- **Each item** carries `kind` (`faulted` / `offline` / `driver_report`), `severity` + `hint` (ErrorCodeGuide), `reset.deadline` while `resetting` (`requested_at + FAULT_RESET_TIMEOUT_S`), and `report_count` (driver reports attached, F-05), and `allowed_actions` from STM-6 (D38), so the dashboard has no copy of the state machine.
+- Tests: `test/fe04-operator-faults.integration.test.ts` (7): 401 / 403 F-13, per-Operator list and 404, actor recorded, reset 400 / `sessions_active` / `force`, offline charge point with an attached driver report cleared on close, bad queries.
