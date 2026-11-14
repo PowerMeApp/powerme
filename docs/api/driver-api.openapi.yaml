@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: PowerMe CSMS — Driver API
-  version: 0.10.0
+  version: 0.11.0
   summary: Hợp đồng REST cho app tài xế (T77, phiếu v1.3 §3.2g)
   description: |
     Hợp đồng giữa CSMS (WP2) và app tài xế Flutter (WP3) cho trạng thái súng sạc, thời gian còn lại,
@@ -1451,7 +1451,7 @@ components:
 
     VehicleModel:
       type: object
-      required: [vehicle_model_id, brand, model_name, connector_type, is_vinfast, battery_capacity_kwh, rated_range_km, max_dc_kw]
+      required: [vehicle_model_id, brand, model_name, connector_type, is_vinfast, battery_capacity_kwh, rated_range_km, max_dc_kw, image_url, image_credit]
       properties:
         vehicle_model_id: { $ref: '#/components/schemas/Id' }
         brand: { type: string }
@@ -1461,6 +1461,18 @@ components:
         battery_capacity_kwh: { type: [number, 'null'] }
         rated_range_km: { type: [integer, 'null'] }
         max_dc_kw: { type: [number, 'null'] }
+        image_url:
+          type: [string, 'null']
+          format: uri
+          description: |
+            URL https của ảnh mẫu xe (0.11.0, BE-38); `null` = chưa có ảnh, app hiện ảnh mặc định.
+            Ảnh nằm ở máy chủ ngoài (Wikimedia Commons): app tải thẳng, không gửi `Authorization`,
+            phải theo chuyển hướng (302) và có ảnh thay thế khi tải lỗi.
+        image_credit:
+          type: [string, 'null']
+          description: |
+            Ghi công của ảnh (tác giả + giấy phép, vd. "Alexander Migl / Wikimedia Commons, CC BY-SA 4.0").
+            Khác `null` thì app PHẢI hiện dòng này cạnh ảnh hoặc ở màn chi tiết (điều kiện giấy phép).
 
     AddVehicleRequest:
       type: object
@@ -1485,7 +1497,7 @@ components:
 
     OwnVehicle:
       type: object
-      required: [vehicle_id, plate_number, is_default, vehicle_model_id, brand, model_name, connector_type, is_vinfast, battery_capacity_kwh, rated_range_km, max_dc_kw]
+      required: [vehicle_id, plate_number, is_default, vehicle_model_id, brand, model_name, connector_type, is_vinfast, battery_capacity_kwh, rated_range_km, max_dc_kw, image_url, image_credit]
       properties:
         vehicle_id: { $ref: '#/components/schemas/Id' }
         plate_number: { type: string }
@@ -1498,6 +1510,18 @@ components:
         battery_capacity_kwh: { type: [number, 'null'] }
         rated_range_km: { type: [integer, 'null'] }
         max_dc_kw: { type: [number, 'null'] }
+        image_url:
+          type: [string, 'null']
+          format: uri
+          description: |
+            URL https của ảnh mẫu xe (0.11.0, BE-38); `null` = chưa có ảnh, app hiện ảnh mặc định.
+            Ảnh nằm ở máy chủ ngoài (Wikimedia Commons): app tải thẳng, không gửi `Authorization`,
+            phải theo chuyển hướng (302) và có ảnh thay thế khi tải lỗi.
+        image_credit:
+          type: [string, 'null']
+          description: |
+            Ghi công của ảnh (tác giả + giấy phép, vd. "Alexander Migl / Wikimedia Commons, CC BY-SA 4.0").
+            Khác `null` thì app PHẢI hiện dòng này cạnh ảnh hoặc ở màn chi tiết (điều kiện giấy phép).
 
     DriverConnectorStatus:
       type: string

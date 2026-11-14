@@ -164,7 +164,7 @@ Khoá: UNIQUE `(charge_point_id, epoch)`.
 **`rfid_cards`** — sổ đăng ký thẻ (ADR-0012 gọi `id_tags`). Người vận hành phát hành thẻ nên biết thẻ nào là thẻ ví.
 Cột: `card_identifier` (BK — giá trị idTag trên dây, `varchar(20)` theo OCPP 1.6 IdToken — thay CHECK cũ ở 0014), `card_kind` (`online` · `free_vend`; `wallet` bỏ ở 0016 — T109, thẻ ví cũ thành `online`), `driver_id` (FK → `drivers`, null khi chưa gán), `status` (`unlinked` · `active` · `blocked`), `issued_at`.
 
-**`vehicle_models`** — danh mục mẫu xe. UNIQUE `(brand, model_name)`; `connector_type`, `battery_capacity_kwh`, `rated_range_km`, `max_dc_kw`, `is_vinfast`.
+**`vehicle_models`** — danh mục mẫu xe. UNIQUE `(brand, model_name)`; `connector_type`, `battery_capacity_kwh`, `rated_range_km`, `max_dc_kw`, `is_vinfast`; `image_url` (https, nullable) và `image_credit` (ghi công ảnh, chỉ có khi có `image_url`) từ migration 0022 (BE-38).
 
 **`vehicles`** — xe của tài xế. `plate_number` (BK trong xe đang dùng), `driver_id` (FK → `drivers`), `vehicle_model_id` (FK), `is_default`, `removed_at` (0018 / BE-34: xoá mềm — tài xế gỡ xe, dòng giữ cho lịch sử phiên). Partial UNIQUE `(driver_id) WHERE is_default` — một xe mặc định mỗi tài xế; CHECK `vehicles_removed_not_default` (xe đã gỡ không mặc định). Từ 0018 biển số duy nhất theo unique index `vehicles_plate_key_active` trên `upper(regexp_replace(plate_number, '[^A-Za-z0-9]', '', 'g')) WHERE removed_at IS NULL` (thay UNIQUE `vehicles_plate_number_key`): `51K-901.01` và `51k90101` là một biển; biển của xe đã gỡ đăng ký lại được.
 

@@ -72,13 +72,25 @@ export const vehicleModels = pgTable(
     ratedRangeKm: integer('rated_range_km'),
     maxDcKw: numeric('max_dc_kw', { precision: 6, scale: 2 }),
     isVinfast: boolean('is_vinfast').notNull().default(false),
+    imageUrl: text('image_url'),
+    imageCredit: text('image_credit'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true })
       .notNull()
       .defaultNow()
       .$onUpdate(() => new Date()),
   },
-  (t) => [unique('vehicle_models_brand_model_name_key').on(t.brand, t.modelName)],
+  (t) => [
+    unique('vehicle_models_brand_model_name_key').on(t.brand, t.modelName),
+    check(
+      'vehicle_models_image_url_check',
+      sql`${t.imageUrl} IS NULL OR (${t.imageUrl} ~ '^https://[^[:space:]]+$' AND char_length(${t.imageUrl}) <= 500)`,
+    ),
+    check(
+      'vehicle_models_image_credit_check',
+      sql`${t.imageCredit} IS NULL OR (${t.imageUrl} IS NOT NULL AND char_length(${t.imageCredit}) BETWEEN 1 AND 200)`,
+    ),
+  ],
 );
 
 export const vehicles = pgTable(
