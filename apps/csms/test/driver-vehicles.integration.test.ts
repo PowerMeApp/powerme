@@ -27,6 +27,10 @@ const describeDb = url ? describe : describe.skip;
 const secret = randomBytes(32);
 const issuer = 'powerme-be34-test';
 const audience = 'powerme-driver-test';
+// BE-38 (0022): ảnh mẫu xe; mẫu không có ảnh trả null.
+const VF8_IMAGE =
+  'https://commons.wikimedia.org/wiki/Special:FilePath/VinFast_VF_8_DSC_8474.jpg?width=640';
+const VF8_CREDIT = 'Alexander Migl / Wikimedia Commons, CC BY-SA 4.0';
 
 describeDb('BE-34 driver vehicles over HTTP and dedicated Postgres', () => {
   let db: Db;
@@ -149,8 +153,9 @@ describeDb('BE-34 driver vehicles over HTTP and dedicated Postgres', () => {
     fresh = await addDriver('be34-c@example.invalid');
     vf8 = (
       await q(
-        `INSERT INTO vehicle_models(brand,model_name,connector_type,battery_capacity_kwh,rated_range_km,max_dc_kw,is_vinfast)
-         VALUES('VinFast','VF 8 Plus','ccs2',87.7,457,150,true) RETURNING id::text AS id`,
+        `INSERT INTO vehicle_models(brand,model_name,connector_type,battery_capacity_kwh,rated_range_km,max_dc_kw,is_vinfast,image_url,image_credit)
+         VALUES('VinFast','VF 8 Plus','ccs2',87.7,457,150,true,$1,$2) RETURNING id::text AS id`,
+        [VF8_IMAGE, VF8_CREDIT],
       )
     )[0]!.id;
     leaf = (
@@ -225,6 +230,8 @@ describeDb('BE-34 driver vehicles over HTTP and dedicated Postgres', () => {
         battery_capacity_kwh: null,
         rated_range_km: null,
         max_dc_kw: null,
+        image_url: null,
+        image_credit: null,
       },
       {
         vehicle_model_id: vf8,
@@ -235,6 +242,8 @@ describeDb('BE-34 driver vehicles over HTTP and dedicated Postgres', () => {
         battery_capacity_kwh: 87.7,
         rated_range_km: 457,
         max_dc_kw: 150,
+        image_url: VF8_IMAGE,
+        image_credit: VF8_CREDIT,
       },
     ]);
     expect((await call('GET', '/vehicle-models?brand=VinFast')).status).toBe(400);
@@ -263,6 +272,8 @@ describeDb('BE-34 driver vehicles over HTTP and dedicated Postgres', () => {
       battery_capacity_kwh: 87.7,
       rated_range_km: 457,
       max_dc_kw: 150,
+      image_url: VF8_IMAGE,
+      image_credit: VF8_CREDIT,
     });
     // Cùng hình dạng phần tử /me.
     expect(await me()).toEqual([res.body]);

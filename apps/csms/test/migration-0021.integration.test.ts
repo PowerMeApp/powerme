@@ -32,6 +32,8 @@ const DATABASE_URL = process.env['DATABASE_URL'];
 const describeDb = DATABASE_URL ? describe : describe.skip;
 
 const M0021 = '0021_top-up-ipn-ngoai-le';
+// Migration đến sau 0021 (0022 …): migrate() áp cả chúng sau 0021.
+const AFTER = listMigrations().filter((n) => n > M0021);
 const BEFORE_0021 = listMigrations().filter((n) => n < '0021');
 const DEMO = path.join(__dirname, '..', 'demo');
 const SEED_SQL = readFileSync(path.join(DEMO, 'seed.sql'), 'utf8');
@@ -148,7 +150,7 @@ describeDb('migration 0021 — top-up IPN, khoản trễ, querydr, ngoại lệ 
     });
 
     it('áp 0021; dữ liệu top-up cũ giữ nguyên; backfill next_attempt_at = expires_at + 2 phút chỉ cho pending', async () => {
-      expect(applied).toEqual([M0021]);
+      expect(applied).toEqual([M0021, ...AFTER]);
       expect(
         await q('SELECT id, status, expires_at, completed_at FROM top_ups ORDER BY id'),
       ).toEqual(before);
@@ -276,7 +278,7 @@ describeDb('migration 0021 — top-up IPN, khoản trễ, querydr, ngoại lệ 
       ).toEqual([]);
 
       await q(`DELETE FROM loyalty_transactions WHERE top_up_id = $1 AND entry_no = 2`, [dup]);
-      expect(await migrate(db.$client)).toEqual([M0021]);
+      expect(await migrate(db.$client)).toEqual([M0021, ...AFTER]);
     });
   });
 
