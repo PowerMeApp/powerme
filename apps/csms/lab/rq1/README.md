@@ -6,6 +6,7 @@ Dụng cụ đo, không phải sản phẩm. Không sửa mã CSMS, không chỉ
 
 | Trạng thái (12/11/2026) | |
 |---|---|
+| **Thời gian thật (T130, 13/11/2026)** | **Đã chạy**: PowerMe trên staging `review-15`, tắt đối soát và SteVe trên máy dev, 90 lần mỗi cấu hình, MeterValues 10 s / ân hạn 120 s. PowerMe 90/90 đúng — xem `results/2026-11-13-thoi-gian-that/` và mục "Kết quả lần chạy 13/11/2026" |
 | PowerMe, PowerMe tắt đối soát | **Đã chạy thật** 30 × 3 mỗi cấu hình trên máy dev — xem `results/2026-11-12/` |
 | SteVe | **Đã chạy 12/11/2026** trên máy dev (Docker Desktop, SteVe 3.14.1 + MariaDB 10.11.16): 90 lần, `--concurrency 1` (xem mối đe doạ 8). Kết quả trong `results/2026-11-12/steve/`. Cách dựng: [`infra/lab/steve/README.md`](../../../../infra/lab/steve/README.md) |
 | Ba kịch bản | Tiêu đề **chính thức** (phiếu đăng ký v1.3); tham số hoá chi tiết là **đề xuất, chờ Ân duyệt** |
@@ -54,11 +55,15 @@ Mỗi lệnh `run.mjs` chạy **một** cấu hình trên DB sạch (DB `powerme
 | `--out` | `lab/rq1/results/<ngày>` | Ghi vào `<out>/<config>/` |
 | `--concurrency` | `10` | Số trụ chạy song song (mỗi lần chạy một trụ + một thẻ + một tài xế riêng) |
 | `--interval-s`, `--grace-s` | `2`, `5` | Nhịp MeterValues và `OFFLINE_GRACE_S` của thí nghiệm (đã rút ngắn, xem dưới) |
-| `--url` (+ `--db-url`) | — | Trỏ vào CSMS có sẵn thay vì tự dựng; PowerMe cần thêm chuỗi kết nối Postgres để nạp định danh và đọc kết quả. `CP_PASSWORD` nếu trụ cần Basic Auth. **Chưa thử với staging** |
+| `--url` (+ `--db-url`) | — | Trỏ vào CSMS có sẵn thay vì tự dựng; PowerMe cần thêm chuỗi kết nối Postgres để nạp định danh và đọc kết quả. `CP_PASSWORD` nếu trụ cần Basic Auth. Đã chạy với staging 13/11 (T130), kèm `--hidden-site` |
 | `--pg-port`, `--pg-dir`, `--ocpp-port` | `54490`, thư mục tạm, `9190` | Cụm Postgres nhúng và cổng OCPP khi tự dựng |
 | `--batch` | theo seed | Tiền tố định danh trụ/thẻ; đổi khi chạy lại trên CSMS không xoá dữ liệu |
 | `--steve-compose`, `--steve-schema` | `infra/lab/steve/docker-compose.yml`, `evse` | Cách truy vấn MariaDB của SteVe; `connector` cho bản SteVe cũ |
 | `--register-only`, `--print-sql` | — | (SteVe) chỉ đăng ký trụ + thẻ / chỉ in SQL đăng ký |
+| `--offline-extra-max-s` | `9` | Phần cộng thêm tối đa trên ân hạn khi rút độ dài đứt (đứt = ân hạn + 1 + U(0, giá trị này) giây) |
+| `--stagger-s` | `0` | Nghỉ tối thiểu giữa hai lần **bắt đầu** chạy. SteVe chạy song song được khi đặt 4–5 s (xem mối đe doạ 8) |
+| `--hidden-site` | — | (PowerMe + `--url`) đặt trụ ở trạm ẩn `RQ1-LAB-01` của operator `suspended` (app tài xế không thấy), băm `CP_PASSWORD` làm credential cho từng trụ, và **cất** từng trụ ngay sau lần chạy của nó (gỡ credential, `disabled`, khoá thẻ, `suspended` tài xế). Dùng cho staging |
+| `--target-note` | — | Ghi chú về CSMS có sẵn (tag, biến môi trường đã kiểm tay) vào `meta.json` |
 | `--s2-queue-lost-p` | `0` | **Thăm dò, ngoài 3 kịch bản**: xác suất S2 làm mất hẳn hàng đợi MeterValues. Khác 0 thì không dùng cho NFR-02 |
 
 ## Ba kịch bản
@@ -107,7 +112,53 @@ Nhóm (`class`): `billed_correct`, `held_correct`, `held_unnecessary`, `billed_w
 
 `E_bill` lấy từ đâu: PowerMe (bật và tắt đối soát) đọc `sessions.energy_wh` khi phiên `reconciled`; phiên `review` không có `E_bill`. SteVe: `stop_value − start_value` của view `transaction`.
 
-## Kết quả lần chạy 12/11/2026
+## Kết quả lần chạy 13/11/2026 — thời gian thật (T130)
+
+Đây là lần chạy dùng để xét NFR-02; lần 12/11 bên dưới (thời gian rút ngắn) giữ làm bản thử. Dữ liệu thô và báo cáo: [`results/2026-11-13-thoi-gian-that/`](results/2026-11-13-thoi-gian-that/summary.md). 3 kịch bản × 30 lần × 3 cấu hình = **270 lần chạy**, seed 20261112, không lần nào lỗi harness.
+
+Tham số theo sản phẩm: MeterValues **10 s**, `OFFLINE_GRACE_S` **120 s**, ngưỡng khe hở 3 × 10 = **30 s**, độ dài đứt **121–181 s** (`--offline-extra-max-s 60`; DS-05/DS-06 trên staging dùng 150 s), `REPLAY_SKEW_THRESHOLD_S` 5 s, dung sai 1 Wh.
+
+| Cấu hình | Chạy ở đâu | Thời gian |
+|---|---|---|
+| PowerMe (đối soát bật) | **Staging `review-15`** (commit `6da4c34`; VM Azure 2 vCPU / 4 GB, Japan East, Postgres 16.4, TLS qua Caddy, Basic Auth cho trụ). Trụ giả chạy từ máy dev ở Việt Nam. Biến môi trường của CSMS đã kiểm tay qua SSH (ghi trong `meta.json`) | 1896,6 s, 10 trụ song song |
+| PowerMe tắt đối soát | Máy dev, CSMS + Postgres nhúng tự dựng (không đổi cấu hình staging dùng chung) | 1851,8 s, 10 trụ song song |
+| SteVe 3.14.1 | Máy dev, Docker Desktop | 1885,3 s, 10 trụ song song, `--stagger-s 5` |
+
+| Cấu hình | Kịch bản | n | Tính tiền đúng | Giữ lại đúng | Giữ lại thừa | Sai im lặng | Mất/trùng | Tỉ lệ đúng | CI Wilson 95% |
+|---|---|---|---|---|---|---|---|---|---|
+| PowerMe | S1 | 30 | 30 | 0 | 0 | 0 | 0 | 100% | 88,6 – 100% |
+| PowerMe | S2 | 30 | 0 | 30 | 0 | 0 | 0 | 100% | 88,6 – 100% |
+| PowerMe | S3 | 30 | 30 | 0 | 0 | 0 | 0 | 100% | 88,6 – 100% |
+| PowerMe | **gộp** | 90 | 60 | 30 | 0 | **0** | 0 | 100% | **95,9** – 100% |
+| Tắt đối soát | S2 | 30 | 0 | 0 | 0 | **30** | 0 | 0% | 0 – 11,4% |
+| Tắt đối soát | **gộp** | 90 | 60 | 0 | 0 | **30** | 0 | 66,7% | 56,4 – 75,5% |
+| SteVe | S2 | 30 | 0 | 0 | 0 | **30** | 0 | 0% | 0 – 11,4% |
+| SteVe | **gộp** | 90 | 60 | 0 | 0 | **30** | 0 | 66,7% | 56,4 – 75,5% |
+
+(S1 và S3 của hai cấu hình đối chứng: 30/30 tính tiền đúng.)
+
+**Xét theo luật đạt NFR-02** (`docs/NFR-02-CHI-SO-DOI-SOAT.md` mục 3: cận dưới Wilson 95% trên 90 lần gộp ≥ 95% và W1 = 0): PowerMe **đạt** (90/90, cận dưới 95,9%, W1 = 0). PowerMe tốt hơn cả hai cấu hình đối chứng; khác biệt nằm hoàn toàn ở S2.
+
+- **Giữ phiên lại** (PowerMe): precision 30/30, recall 30/30.
+- **Sai số Wh** trên phiên đã tính tiền: PowerMe 0 Wh (60 phiên). Tắt đối soát và SteVe ở S2: tính thiếu trung bình **586,4 Wh** mỗi phiên (CI 95%: 456,7 – 716,1), tức thiếu trung bình 46,4% năng lượng thật. Hai cấu hình đối chứng cho số giống hệt nhau vì cùng lấy `meterStop − meterStart` của cùng kế hoạch.
+- **Mất / trùng**: 0 ở cả ba cấu hình.
+- **Khe hở** (`meter_gap`, chỉ PowerMe ghi): S1 có 11 khe hở thật, bắt 11/11. S2 có **12 bản ghi báo nhầm** (precision S2 0/12, gộp 11/23), xem dưới.
+
+### Kiểm lại ngưỡng khe hở (12 `meter_gap` báo nhầm ở S2)
+
+Ở thời gian thật vẫn có đúng 12 bản ghi như lần 12/11, nên việc này **không do ngưỡng bị rút ngắn**. Dữ liệu cho thấy nguyên nhân: bản ghi sinh ra ở 12/12 phiên S2 mà trụ sạc offline từ 3 nhịp trở lên (4 phiên 3 nhịp, 8 phiên 4 nhịp), và ở 0/18 phiên chỉ 1–2 nhịp. Lúc `StopTransaction` phát lại tới, CSMS chưa nhận các mẫu phát bù, nên khoảng từ mẫu live cuối tới `cp_stopped_at` là ≥ 30 s (3 nhịp × 10 s) và vượt ngưỡng `RECONCILE_GAP_FACTOR × nhịp`. Các mẫu phát bù tới ngay sau đó lấp kín khoảng trống (khoảng trống lớn nhất của chuỗi đã giao ở S2: 10,0 s), nhưng bản ghi `meter_gap` là append-only nên ở lại trong hàng đợi của operator.
+
+Chỉnh ngưỡng không sửa được: tăng `RECONCILE_GAP_FACTOR` để nuốt 4 nhịp sẽ làm lọt khe hở thật ngắn ở S1. Hướng sửa nằm ở CSMS (chưa làm, cần Ân/Trí quyết): với phiên `delivered_offline`, hoãn xét khe hở tới khi hết một khoảng chờ mẫu phát bù, hoặc đánh dấu bản ghi `meter_gap` là đã hết hiệu lực khi mẫu đến sau lấp kín. 12 bản ghi này không ảnh hưởng chỉ số chính: cả 12 phiên đều bị giữ lại đúng vì `meterStop` cũ.
+
+### Điều lần chạy này chưa nói được
+
+- **PowerMe và hai cấu hình đối chứng chạy ở hai nơi khác nhau** (staging qua mạng thật và TLS; đối chứng qua loopback trên máy dev). Chỉ số là đúng/sai của từng phiên chứ không phải thời gian, và ba cấu hình nhận cùng kế hoạch theo seed, nhưng đây vẫn không phải so sánh cùng điều kiện.
+- Phiên S2 vẫn đi qua `reconciled` trước khi vào `review` ở 30/30 lần (phát hiện 1 bên dưới): chưa gây sai vì phiên thẻ RFID chưa được quyết toán (G5).
+- Biến thể S2 mất hẳn hàng đợi MeterValues (phát hiện 2 bên dưới) **không chạy lại** ở thời gian thật.
+- Một lần chạy cho mỗi cấu hình; dữ liệu thí nghiệm ở lại staging (operator `LOADTEST01`, trạm `RQ1-LAB-01`, 90 trụ `RQ1-B61112-P-*` đã `disabled` + 3 trụ thử `RQ1-T1-P-*`), sạch hẳn chỉ bằng `./seed.sh --reset`.
+- Các mối đe doạ 2, 3, 4, 7 ở cuối file vẫn nguyên; mối đe doạ 1 (thời gian rút ngắn) và 5 (Postgres nhúng, một máy) không còn áp dụng cho cấu hình PowerMe của lần chạy này.
+
+## Kết quả lần chạy 12/11/2026 (bản thử, thời gian rút ngắn)
 
 Dữ liệu thô và báo cáo: [`results/2026-11-12/`](results/2026-11-12/) (`summary.md` gộp hai cấu hình). CSMS ở commit `885b38e` (= `origin/main`, không sửa `src/`), seed 20261112, 30 lần × 3 kịch bản × 2 cấu hình = **180 lần chạy**, 10 trụ song song, mỗi cấu hình mất **~189 s** (189,6 s và 188,6 s), Node 24.18.1, Windows, Postgres nhúng 17 beta. Không lần chạy nào bị lỗi harness.
 
@@ -145,7 +196,7 @@ Dữ liệu thô và báo cáo: [`results/2026-11-12/`](results/2026-11-12/) (`s
 5. **Postgres nhúng 17 beta, một máy, một tiến trình CSMS.** Staging và CI dùng Postgres 16. Trụ và CSMS chạy trên cùng máy qua loopback: không có trễ mạng, không mất gói, đồng hồ trụ và CSMS trùng nhau.
 6. **Chạy song song 10 trụ.** Mỗi lần chạy có trụ, thẻ, tài xế riêng nên không đụng dữ liệu của nhau, nhưng CSMS chịu tải của 10 trụ cùng lúc; chưa đo lại với `--concurrency 1` để so.
 7. **Cỡ mẫu.** Với n = 30, kể cả 30/30 đúng thì cận dưới Wilson 95% là 88,6%: ngưỡng "cận dưới ≥ 95% ở cả 3 kịch bản" của NFR-02 **không thể đạt** với 30 lần mỗi kịch bản. Gộp 90 lần thì 90/90 cho 95,9%. Cần Ân xác nhận ngưỡng áp cho từng kịch bản hay cho mẫu gộp (hoặc tăng số lần chạy lên ≥ 73 mỗi kịch bản).
-8. **SteVe chạy tuần tự, PowerMe chạy song song.** Khi nhiều trụ mới cùng gửi `StatusNotification` đầu tiên, SteVe 3.14.1 trả lỗi nội bộ (`Deadlock found when trying to get lock` lúc chèn bảng `evse`, thấy trong log SteVe; lần chạy thử 3 trụ song song hỏng 2/3). Vì vậy cấu hình SteVe chạy `--concurrency 1` (1869,6 s cho 90 lần), còn hai cấu hình PowerMe chạy 10 trụ song song. Cả ba cấu hình chạy trên cùng một máy dev (không còn khác máy như dự định ban đầu), nhưng tải đồng thời khác nhau; chưa đo lại PowerMe với `--concurrency 1` để so.
+8. **SteVe chạy tuần tự, PowerMe chạy song song.** Khi nhiều trụ mới cùng gửi `StatusNotification` đầu tiên, SteVe 3.14.1 trả lỗi nội bộ (`Deadlock found when trying to get lock` lúc chèn bảng `evse`, thấy trong log SteVe; lần chạy thử 3 trụ song song hỏng 2/3). Vì vậy ở lần 12/11 cấu hình SteVe chạy `--concurrency 1` (1869,6 s cho 90 lần); lần 13/11 chạy 10 trụ song song với `--stagger-s 5` (các trụ bắt đầu cách nhau 5 s), thử trước 12 lần ở `--stagger-s 4` và cả 90 lần chính thức không gặp lỗi này. Ở lần 12/11 hai cấu hình PowerMe chạy 10 trụ song song. Cả ba cấu hình chạy trên cùng một máy dev (không còn khác máy như dự định ban đầu), nhưng tải đồng thời khác nhau; chưa đo lại PowerMe với `--concurrency 1` để so.
 
 ## Chỗ phải đoán
 

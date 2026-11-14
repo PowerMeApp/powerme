@@ -16,6 +16,14 @@
  */
 const IDENT_RE = /^[A-Za-z0-9-]{1,40}$/;
 
+/**
+ * Trạm ẩn cho lần chạy trên CSMS dùng chung (staging, T130): thuộc operator `suspended` của dữ liệu
+ * đo tải (lab/nfr03), nên tìm trạm / gợi ý dọc đường / bắt đầu sạc từ app đều không thấy; đường OCPP
+ * không xét trạng thái operator nên trụ vẫn nối và sạc bằng thẻ được.
+ */
+export const HIDDEN_OPERATOR_TAX_CODE = 'LOADTEST01';
+export const HIDDEN_SITE_CODE = 'RQ1-LAB-01';
+
 export function powermeOutcome(session) {
   if (session.status === 'review') return 'held';
   if (session.status === 'reconciled' && session.energy_wh !== null) return 'billed';
@@ -28,7 +36,13 @@ const num = (v) => (v === null || v === undefined ? null : Number(v));
  * @param opts.db        đối tượng có `query(sql, params)` kiểu pg.Client
  * @param opts.endpoint  ws://host:port/ocpp
  */
-export function createPowermeAdapter({ db, endpoint, name = 'powerme' }) {
+export function createPowermeAdapter({
+  db,
+  endpoint,
+  name = 'powerme',
+  siteCode = 'HCM-DEMO-01',
+  hashPassword = null,
+}) {
   return {
     name,
     endpoint,
@@ -40,11 +54,30 @@ export function createPowermeAdapter({ db, endpoint, name = 'powerme' }) {
           throw new Error(`định danh không hợp lệ: ${run.chargePoint} / ${run.idTag}`);
         }
       }
-      const site = await db.query(
-        "SELECT s.id FROM sites s WHERE s.site_code = 'HCM-DEMO-01' LIMIT 1",
-      );
-      if (!site.rows[0]) throw new Error('thiếu site HCM-DEMO-01 — chưa nạp demo/seed.sql?');
+      if (siteCode === HIDDEN_SITE_CODE) {
+        await db.query(
+          `INSERT INTO operators (tax_code, legal_name, address, status)
+           VALUES ($1, 'LOAD-TEST NFR-03 (khong phai don vi that)', 'Du lieu do tai, an khoi app', 'suspended')
+           ON CONFLICT ON CONSTRAINT operators_tax_code_key DO NOTHING`,
+          [HIDDEN_OPERATOR_TAX_CODE],
+        );
+        await db.query(
+          `INSERT INTO sites (site_code, operator_id, site_name, address, latitude, longitude)
+           SELECT $2, o.id, 'RQ1-LAB (thi nghiem doi soat)', 'Du lieu thi nghiem (Point Nemo)',
+                  -48.876667, -123.393333
+           FROM operators o WHERE o.tax_code = $1
+           ON CONFLICT ON CONSTRAINT sites_site_code_key DO NOTHING`,
+          [HIDDEN_OPERATOR_TAX_CODE, HIDDEN_SITE_CODE],
+        );
+      }
+      const site = await db.query('SELECT s.id FROM sites s WHERE s.site_code = $1 LIMIT 1', [
+        siteCode,
+      ]);
+      if (!site.rows[0]) throw new Error(`thiếu site ${siteCode} — chưa nạp demo/seed.sql?`);
       const siteId = site.rows[0].id;
+      // CSMS bật kiểm credential (staging): mỗi trụ một salt riêng, băm TRƯỚC transaction.
+      const hashes = [];
+      if (hashPassword) for (let i = 0; i < runs.length; i++) hashes.push(await hashPassword());
       await db.query('BEGIN');
       try {
         for (const [i, run] of runs.entries()) {
@@ -57,6 +90,16 @@ export function createPowermeAdapter({ db, endpoint, name = 'powerme' }) {
              ON CONFLICT ON CONSTRAINT charge_points_serial_number_key DO NOTHING`,
             [run.chargePoint, `PM-${run.chargePoint}`, siteId],
           );
+          if (hashPassword) {
+            // Chỉ đụng trụ của chính trạm thí nghiệm (không ghi đè credential trụ khác trùng serial).
+            const set = await db.query(
+              `UPDATE charge_points SET basic_auth_password_hash = $2, updated_at = now()
+               WHERE serial_number = $1 AND site_id = $3`,
+              [run.chargePoint, hashes[i], siteId],
+            );
+            if (set.rowCount !== 1)
+              throw new Error(`trụ ${run.chargePoint} đã tồn tại ở trạm khác — đổi --batch`);
+          }
           await db.query(
             `INSERT INTO connectors (charge_point_id, connector_no, connector_type, max_power_kw)
              SELECT cp.id, n.no, 'ccs2', 60 FROM charge_points cp CROSS JOIN (VALUES (1), (2)) AS n(no)
@@ -165,6 +208,45 @@ export function createPowermeAdapter({ db, endpoint, name = 'powerme' }) {
         result.sessions.length > 0 &&
         result.sessions.every((s) => s.status === 'reconciled' || s.status === 'review')
       );
+    },
+
+    /**
+     * Cất trụ thí nghiệm trên CSMS dùng chung sau khi chạy (không xoá: nhật ký OCPP và lịch sử phiên
+     * là append-only): gỡ credential, `in_service → disabled` (để OfflineAlertService không mở sự cố
+     * Offline sau 900 s), khoá thẻ, `suspended` tài khoản tài xế của lô.
+     */
+    async park(runs) {
+      const serials = runs.map((r) => r.chargePoint);
+      const idTags = runs.map((r) => r.idTag);
+      const emails = idTags.map((t) => `${t.toLowerCase()}@rq1.powerme.test`);
+      await db.query('BEGIN');
+      try {
+        const cps = await db.query(
+          `UPDATE charge_points cp
+              SET basic_auth_password_hash = NULL,
+                  lifecycle = CASE WHEN cp.lifecycle = 'in_service'
+                                   THEN 'disabled'::charge_point_lifecycle ELSE cp.lifecycle END,
+                  updated_at = now()
+             FROM sites s
+            WHERE s.id = cp.site_id AND s.site_code = $1 AND cp.serial_number = ANY($2::text[])`,
+          [siteCode, serials],
+        );
+        const cards = await db.query(
+          `UPDATE rfid_cards SET status = 'blocked'
+            WHERE card_identifier = ANY($1::text[]) AND status <> 'blocked'`,
+          [idTags],
+        );
+        const drivers = await db.query(
+          `UPDATE users SET account_status = 'suspended', updated_at = now()
+            WHERE email = ANY($1::text[]) AND role = 'driver' AND account_status = 'active'`,
+          [emails],
+        );
+        await db.query('COMMIT');
+        return { chargePoints: cps.rowCount, cards: cards.rowCount, drivers: drivers.rowCount };
+      } catch (err) {
+        await db.query('ROLLBACK').catch(() => {});
+        throw err;
+      }
     },
 
     async close() {},

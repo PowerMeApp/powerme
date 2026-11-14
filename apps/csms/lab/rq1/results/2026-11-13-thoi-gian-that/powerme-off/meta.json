@@ -1,0 +1,47 @@
+{
+  "config": "powerme-off",
+  "seed": 20261112,
+  "batch": "B61112",
+  "scenarios": ["s1", "s2", "s3"],
+  "runsPerScenario": 30,
+  "concurrency": 10,
+  "staggerS": 0,
+  "timing": {
+    "intervalS": 10,
+    "graceS": 120,
+    "offlineExtraMaxS": 60,
+    "retransmitGapS": 1,
+    "gapFactor": 3,
+    "gapThresholdS": 30
+  },
+  "target": {
+    "kind": "local",
+    "endpoint": "ws://127.0.0.1:9190/ocpp",
+    "env": {
+      "OCPP_PORT": "9190",
+      "CONSOLE_ENABLED": "false",
+      "ALLOW_LEGACY_NO_CREDENTIAL": "true",
+      "RECONCILIATION_ENABLED": "false",
+      "OFFLINE_GRACE_S": "120",
+      "METER_VALUE_SAMPLE_INTERVAL_S": "10",
+      "RECONCILE_GAP_FACTOR": "3",
+      "RECONCILE_ENERGY_TOLERANCE_WH": "1",
+      "REPLAY_SKEW_THRESHOLD_S": "5",
+      "SESSION_START_TIMEOUT_S": "120",
+      "SESSION_HARD_CAP_H": "24",
+      "OCPP_HEARTBEAT_INTERVAL_SECONDS": "300"
+    }
+  },
+  "rows": 90,
+  "startedAt": "2026-11-13T15:46:45.999Z",
+  "finishedAt": "2026-11-13T16:17:37.792Z",
+  "wallClockS": 1851.8,
+  "git": {
+    "commit": "6da4c348101df963b3a40f5a72bda6ff17c5671d",
+    "branch": "feat/t130-rq1-thoi-gian-that",
+    "dirty": false
+  },
+  "node": "v24.18.1",
+  "platform": "win32-x64",
+  "tolWh": 1
+}

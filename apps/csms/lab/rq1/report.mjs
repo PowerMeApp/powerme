@@ -346,7 +346,11 @@ export function renderMarkdown(rows, { metas = [], title = 'Kết quả RQ1 / NF
     const t = metas[0].timing;
     if (t) {
       out.push(
-        `Tham số thời gian ĐÃ RÚT NGẮN (mối đe doạ tính hợp lệ, xem README): nhịp MeterValues ` +
+        `${
+          t.intervalS === 10 && t.graceS === 120
+            ? 'Tham số thời gian THEO SẢN PHẨM'
+            : 'Tham số thời gian ĐÃ RÚT NGẮN (mối đe doạ tính hợp lệ, xem README)'
+        }: nhịp MeterValues ` +
           `${t.intervalS} s (sản phẩm 10 s), \`OFFLINE_GRACE_S\` = ${t.graceS} s (sản phẩm 120 s), ` +
           `độ dài đứt ${t.graceS + 1}–${t.graceS + 1 + t.offlineExtraMaxS} s, ngưỡng khe hở ` +
           `${t.gapThresholdS} s. Dung sai tol = 1 Wh.`,

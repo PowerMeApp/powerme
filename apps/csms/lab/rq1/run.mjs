@@ -26,6 +26,13 @@
  *   --register-only / --print-sql        (steve) chỉ đăng ký trụ + thẻ / chỉ in SQL đăng ký rồi thoát
  *   --s2-queue-lost-p 0..1               THĂM DÒ, ngoài 3 kịch bản chính thức: xác suất S2 làm mất hẳn
  *                                        hàng đợi MeterValues (mặc định 0). Khác 0 thì KHÔNG dùng cho NFR-02.
+ *   --offline-extra-max-s N              phần cộng thêm tối đa trên ân hạn khi rút độ dài đứt (mặc định 9)
+ *   --stagger-s N                        nghỉ tối thiểu giữa hai lần BẮT ĐẦU chạy (mặc định 0). SteVe cần
+ *                                        > 0 khi chạy song song: nhiều trụ mới nối cùng lúc làm nó deadlock
+ *   --hidden-site                        (powerme* + --url) đặt trụ ở trạm ẩn RQ1-LAB-01 của operator
+ *                                        `suspended` thay vì HCM-DEMO-01, băm CP_PASSWORD làm credential
+ *                                        cho từng trụ, và CẤT trụ sau khi chạy. Dùng cho staging (T130)
+ *   --target-note <chữ>                  ghi chú về CSMS có sẵn (tag, biến môi trường đã kiểm tay) → meta.json
  * Biến môi trường: CP_PASSWORD (Basic Auth của trụ khi CSMS có sẵn yêu cầu).
  */
 import { execFileSync } from 'node:child_process';
@@ -34,8 +41,9 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { connectDemoDb, CSMS_DIR } from '../../demo/db-embedded.mjs';
-import { createPowermeAdapter } from './adapters/powerme.mjs';
+import { createPowermeAdapter, HIDDEN_SITE_CODE } from './adapters/powerme.mjs';
 import { createSteveAdapter, dockerMariadbQuery, registrationSql } from './adapters/steve.mjs';
+import { loadHasher } from '../nfr03/load-data.mjs';
 import { startLocalCsms } from './local-csms.mjs';
 import { summarizeAll } from './metrics.mjs';
 import { buildPlans, DEFAULT_TIMING, SCENARIOS } from './plan.mjs';
@@ -63,7 +71,7 @@ function parseArgs(argv) {
     const a = argv[i];
     if (!a.startsWith('--')) throw new Error(`tham số lạ: ${a}`);
     const key = a.slice(2);
-    if (['register-only', 'print-sql', 'help'].includes(key)) out[key] = true;
+    if (['register-only', 'print-sql', 'help', 'hidden-site'].includes(key)) out[key] = true;
     else out[key] = argv[++i];
   }
   return out;
@@ -96,6 +104,46 @@ export function buildRuns({ config, plans, batch }) {
       idTag: `T${batch}${letter}${sc}${nn}`.slice(0, 20),
     };
   });
+}
+
+/**
+ * `pg.Client` tự nối lại: lần chạy qua SSH tunnel kéo dài cả giờ, tunnel rớt một lần không được làm
+ * mất các dòng kết quả còn lại. Mỗi câu lệnh thử lại tối đa 5 lần (chỉ SELECT và các lệnh idempotent
+ * của adapter đi qua đây; transaction của `prepare` / `park` hỏng giữa chừng thì ném lỗi như cũ).
+ */
+export async function resilientDb(url, { connect = connectDemoDb, onRetry = () => {} } = {}) {
+  let client = await connect(url);
+  client.on?.('error', () => {});
+  let inTx = false;
+  return {
+    async query(sql, params) {
+      const text = typeof sql === 'string' ? sql.trim().toUpperCase() : '';
+      for (let attempt = 1; ; attempt++) {
+        try {
+          const res = await client.query(sql, params);
+          if (text === 'BEGIN') inTx = true;
+          if (text === 'COMMIT' || text === 'ROLLBACK') inTx = false;
+          return res;
+        } catch (err) {
+          const lost =
+            /ECONNRESET|ECONNREFUSED|EPIPE|terminat|Connection|not queryable|timeout/i.test(
+              String(err?.message ?? err),
+            );
+          if (!lost || inTx || attempt >= 5) throw err;
+          onRetry(attempt, err);
+          await sleep(2000 * attempt);
+          await client.end().catch(() => {});
+          try {
+            client = await connect(url);
+            client.on?.('error', () => {});
+          } catch {
+            // lần thử kế tiếp sẽ nối lại
+          }
+        }
+      }
+    },
+    end: () => client.end(),
+  };
 }
 
 async function collectWhenSettled(adapter, run, { timeoutMs, stepMs = 400 }) {
@@ -145,6 +193,9 @@ async function main() {
     ...DEFAULT_TIMING,
     ...(args['interval-s'] ? { intervalS: Number(args['interval-s']) } : {}),
     ...(args['grace-s'] ? { graceS: Number(args['grace-s']) } : {}),
+    ...(args['offline-extra-max-s']
+      ? { offlineExtraMaxS: Number(args['offline-extra-max-s']) }
+      : {}),
     gapFactor,
   };
   timing.gapThresholdS = gapFactor * timing.intervalS;
@@ -167,7 +218,18 @@ async function main() {
   let adapter;
   let local = null;
   let externalDb = null;
-  const meta = { config, seed, batch, scenarios, runsPerScenario: runsPer, concurrency, timing };
+  const staggerS = Number(args['stagger-s'] ?? 0);
+  if (!(staggerS >= 0)) throw new Error('--stagger-s phải ≥ 0');
+  const meta = {
+    config,
+    seed,
+    batch,
+    scenarios,
+    runsPerScenario: runsPer,
+    concurrency,
+    staggerS,
+    timing,
+  };
   if (s2QueueLostP > 0) meta.exploratory = { s2QueueLostP };
   const cleanup = async () => {
     if (externalDb) await externalDb.end().catch(() => {});
@@ -200,10 +262,29 @@ async function main() {
       };
     } else if (args.url) {
       if (!args['db-url']) throw new Error('--url với powerme* cần --db-url để đọc kết quả');
-      externalDb = await connectDemoDb(args['db-url']);
-      adapter = createPowermeAdapter({ db: externalDb, endpoint: args.url, name: config });
+      externalDb = await resilientDb(args['db-url'], {
+        onRetry: (n, err) => log(`DB mất kết nối (${err?.message ?? err}) — nối lại lần ${n}…`),
+      });
+      let hashPassword = null;
+      if (args['hidden-site']) {
+        if (!process.env.CP_PASSWORD) throw new Error('--hidden-site cần CP_PASSWORD');
+        const hasher = await loadHasher();
+        hashPassword = () => hasher(process.env.CP_PASSWORD);
+      }
+      adapter = createPowermeAdapter({
+        db: externalDb,
+        endpoint: args.url,
+        name: config,
+        ...(args['hidden-site'] ? { siteCode: HIDDEN_SITE_CODE, hashPassword } : {}),
+      });
       // CSMS có sẵn: harness KHÔNG kiểm được RECONCILIATION_ENABLED / OFFLINE_GRACE_S của nó.
-      meta.target = { kind: 'external', endpoint: args.url, envVerified: false };
+      meta.target = {
+        kind: 'external',
+        endpoint: args.url,
+        envVerified: false,
+        hiddenSite: Boolean(args['hidden-site']),
+        ...(args['target-note'] ? { note: String(args['target-note']) } : {}),
+      };
     } else {
       mkdirSync(outDir, { recursive: true });
       local = await startLocalCsms({
@@ -230,7 +311,17 @@ async function main() {
     mkdirSync(outDir, { recursive: true });
     const startedAt = new Date();
     let done = 0;
+    // CSMS ở xa (staging): chờ kết quả lâu hơn vì có trễ mạng và đọc DB qua tunnel.
+    const settleTimeoutMs = meta.target.kind === 'external' ? 30_000 : 10_000;
+    let lastStartMs = 0;
+    const parked = { attempted: 0, chargePoints: 0, errors: [] };
     const tasks = runs.map((run) => async () => {
+      if (staggerS > 0) {
+        // Đặt chỗ đồng bộ (không có await giữa đọc và ghi) nên hai lần chạy không trùng chỗ.
+        const slot = Math.max(Date.now(), lastStartMs + staggerS * 1000);
+        lastStartMs = slot;
+        await sleep(slot - Date.now());
+      }
       const station = new LabStation({
         endpoint: adapter.endpoint,
         identity: run.chargePoint,
@@ -238,7 +329,9 @@ async function main() {
         meterStartWh: run.plan.meterStartWh,
       });
       // Chặn trên cho một lần chạy: trụ treo không được giữ cả thí nghiệm.
-      const budgetMs = 120_000 + run.plan.offlineS * 2000;
+      const p = run.plan;
+      const budgetMs =
+        120_000 + p.offlineS * 2000 + (p.preTicks + p.postTicks + 4) * p.intervalS * 1000;
       const truth = await Promise.race([
         runScenario(station, run.plan, run.idTag),
         sleep(budgetMs).then(async () => {
@@ -261,12 +354,22 @@ async function main() {
       };
       let collected;
       try {
-        collected = await collectWhenSettled(adapter, run, { timeoutMs: 10_000 });
+        collected = await collectWhenSettled(adapter, run, { timeoutMs: settleTimeoutMs });
         // Mẫu phát bù đến sau StopTransaction có thể đổi kết luận (T13 #19): đọc lại sau một nhịp.
         await sleep(1000);
         collected = await adapter.collect(run);
       } catch (err) {
         collected = { sessions: [], error: `đọc kết quả lỗi: ${err?.message ?? err}` };
+      }
+      if (args['hidden-site'] && adapter.park) {
+        // Cất NGAY sau khi đọc kết quả: trụ đã xong mà còn `in_service` quá 900 s sẽ bị mở sự cố Offline.
+        parked.attempted++;
+        try {
+          const r = await adapter.park([run]);
+          parked.chargePoints += r.chargePoints;
+        } catch (err) {
+          parked.errors.push(`${run.chargePoint}: ${err?.message ?? err}`);
+        }
       }
       const row = buildRow({
         config,
@@ -286,6 +389,10 @@ async function main() {
     });
     const rows = await pool(tasks, concurrency);
     const finishedAt = new Date();
+    if (parked.attempted) {
+      meta.parked = parked;
+      log(`đã cất trụ thí nghiệm: ${JSON.stringify(parked)}`);
+    }
 
     // ---- Ghi đầu ra -----------------------------------------------------------------------
     Object.assign(meta, {
