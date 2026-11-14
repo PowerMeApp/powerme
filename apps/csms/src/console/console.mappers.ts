@@ -94,6 +94,7 @@ export type ReconciliationKind =
   | 'conflict'
   | 'tariff_clock_fallback'
   | 'gap_detected'
+  | 'gap_closed'
   | 'replay'
   | 'duplicate'
   | 'orphan_stop'
@@ -105,7 +106,8 @@ export type ReconciliationKind =
  * "Loại hiển thị" của bản ghi đối soát.
  *  - `conflict` → conflict.
  *  - `late_sample` → kết luận nằm ở tiền tố resolution ("conflict (late_sample): …" → conflict,
- *    "gap_detected (late_sample): …" → gap_detected); không đọc được thì giữ nguyên late_sample.
+ *    "gap_detected (late_sample): …" → gap_detected, "gap_closed (late_sample): …" → gap_closed:
+ *    mẫu muộn đã lấp kín một khe hở ghi trước đó, T132); không đọc được thì giữ nguyên late_sample.
  *  - `meter_gap` → gap_detected, hoặc (DỮ LIỆU CŨ trước 0001) conflict nếu resolution mở đầu
  *    bằng "conflict".
  */
@@ -117,6 +119,7 @@ export function reconciliationKind(
   if (recordType === 'late_sample') {
     if (resolution?.startsWith('conflict')) return 'conflict';
     if (resolution?.startsWith('gap_detected')) return 'gap_detected';
+    if (resolution?.startsWith('gap_closed')) return 'gap_closed';
     return 'late_sample';
   }
   if (recordType === 'meter_gap') {

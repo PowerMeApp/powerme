@@ -32,6 +32,8 @@ export const COLUMNS = [
   'gap_true',
   'max_delivered_gap_s',
   'meter_gap_records',
+  'gap_closed_records',
+  'open_gap_records',
   'conflict_records',
   'late_sample_records',
   'replay_records',
@@ -87,6 +89,9 @@ export function buildRow({ config, seed, run, truth, collected, gapThresholdS })
     gap_true: truth.maxDeliveredGapS === null ? null : truth.maxDeliveredGapS > gapThresholdS,
     max_delivered_gap_s: truth.maxDeliveredGapS,
     meter_gap_records: rec('meter_gap'),
+    // T132: bản ghi đóng khe hở và số khe hở còn mở sau khi mẫu phát bù đã tới.
+    gap_closed_records: rec('gap_closed'),
+    open_gap_records: rec('open_gap'),
     conflict_records: rec('conflict'),
     late_sample_records: rec('late_sample'),
     replay_records: rec('replay'),
@@ -141,6 +146,8 @@ const NUMERIC = new Set([
   'E_bill',
   'max_delivered_gap_s',
   'meter_gap_records',
+  'gap_closed_records',
+  'open_gap_records',
   'conflict_records',
   'late_sample_records',
   'replay_records',
@@ -427,8 +434,10 @@ export function renderMarkdown(rows, { metas = [], title = 'Kết quả RQ1 / NF
         'Mất',
         'Trùng',
         'Khe hở thật',
-        'meter_gap P',
-        'meter_gap R',
+        'Khe hở còn mở P',
+        'Khe hở còn mở R',
+        'meter_gap thô (phiên)',
+        'Đã đóng (phiên)',
       ],
       groups.map((g) => [
         g.config,
@@ -442,11 +451,18 @@ export function renderMarkdown(rows, { metas = [], title = 'Kết quả RQ1 / NF
         String(g.gap.truth),
         frac(g.gap.precision, g.gap.tp, g.gap.detected),
         frac(g.gap.recall, g.gap.tp, g.gap.truth),
+        String(g.gap.rawSessions),
+        String(g.gap.closedSessions),
       ]),
     ),
     '',
     'Sai số Wh chỉ tính trên phiên đã tính tiền (phiên bị giữ không có `E_bill`). "Khe hở thật" = ' +
       'chuỗi mẫu trụ ĐÃ GIAO (kể cả mốc bắt đầu và mốc dừng) có khoảng trống lớn hơn ngưỡng khe hở.',
+    '',
+    '"Khe hở còn mở" (T132): phiên còn ít nhất một bản ghi kết luận khe hở CHƯA có bản ghi đóng ' +
+      '(`gap_closed`) sau khi mọi mẫu phát bù đã tới; precision / recall tính trên số này. ' +
+      '"meter_gap thô" là số phiên có bản ghi `meter_gap` bất kể đã đóng hay chưa. Lần chạy trước ' +
+      'T132 không có bản ghi đóng nên hai số bằng nhau.',
     '',
   );
 

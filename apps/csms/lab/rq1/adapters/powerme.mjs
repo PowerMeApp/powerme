@@ -172,6 +172,22 @@ export function createPowermeAdapter({
           [s.id],
         );
         const records = Object.fromEntries(rec.rows.map((r) => [r.t, r.n]));
+        // T132: khe hở "còn mở" = bản ghi kết luận gap_detected chưa có bản ghi gap_closed trỏ tới.
+        // `gap_closed` / `open_gap` không phải record_type của CSMS, chỉ là hai số đếm của harness.
+        const gaps = await db.query(
+          `SELECT count(*) FILTER (WHERE r.resolution LIKE 'gap_closed%')::int AS closed,
+                  count(*) FILTER (
+                    WHERE r.resolution LIKE 'gap_detected%' AND NOT EXISTS (
+                      SELECT 1 FROM reconciliation_records c
+                      WHERE c.session_id = r.session_id AND c.resolution LIKE 'gap_closed%'
+                        AND c.resolution ~ ('(^|\\s)closes_record_no=' || r.record_no || '(\\s|$)')
+                    )
+                  )::int AS open
+           FROM reconciliation_records r WHERE r.session_id = $1`,
+          [s.id],
+        );
+        records.gap_closed = gaps.rows[0].closed;
+        records.open_gap = gaps.rows[0].open;
         const debit = await db.query(
           `SELECT coalesce(sum(amount_vnd), 0)::bigint AS vnd, count(*)::int AS n
            FROM credit_transactions WHERE session_id = $1 AND transaction_type = 'session_debit'`,

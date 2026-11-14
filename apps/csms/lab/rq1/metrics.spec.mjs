@@ -165,6 +165,28 @@ describe('summarize', () => {
     expect(s.holdRecall).toBe(0);
   });
 
+  it('T132: khe hở đã được đóng không tính là báo khe hở; dữ liệu cũ không có cột thì dùng số thô', () => {
+    const g = summarize([
+      // S2 sau T132: có meter_gap lúc dừng, mẫu phát bù đóng lại → không còn khe hở mở.
+      row('held_correct', {
+        gap_true: false,
+        meter_gap_records: 1,
+        gap_closed_records: 1,
+        open_gap_records: 0,
+      }),
+      // S1 mất hàng đợi: khe hở thật, còn mở.
+      row('billed_correct', {
+        gap_true: true,
+        meter_gap_records: 1,
+        gap_closed_records: 0,
+        open_gap_records: 1,
+      }),
+      // Dòng của lần chạy trước T132 (không có hai cột mới): vẫn tính theo meter_gap_records.
+      row('held_correct', { gap_true: false, meter_gap_records: 1 }),
+    ]).gap;
+    expect(g).toMatchObject({ tp: 1, fp: 1, fn: 0, rawSessions: 3, closedSessions: 1 });
+  });
+
   it('precision/recall khe hở theo bản ghi meter_gap', () => {
     const s = summarize([
       row('billed_correct', { gap_true: true, meter_gap_records: 1 }),

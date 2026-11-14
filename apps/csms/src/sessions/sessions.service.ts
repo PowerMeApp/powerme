@@ -728,6 +728,8 @@ export class SessionsService {
       kind: 'late_sample',
       replayed: ctx.replay.replayed,
     });
+    // T132: mẫu muộn lấp kín khe hở đã ghi lúc dừng → ghi thêm bản ghi đóng khe hở.
+    await this.reconciliation.recordClosedGaps(tx, session.id, verdict);
     if (session.status === 'reconciled' && verdict.outcome === 'conflict') {
       if (await this.reconciliation.hasSessionDebit(tx, session.id)) {
         this.logger.warn(
