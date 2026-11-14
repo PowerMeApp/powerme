@@ -23,10 +23,21 @@
  *            CP_PASSWORD → Boot, both connectors Available, then stays online for --hold-s seconds
  *   ds-10    WF-05 (T119): connects with a WRONG password on purpose → success = CSMS answers 401
  *            (ignores CP_PASSWORD). Usually run by demo/onboard-sim.mjs with --id SIM-0005
+ *   app      BM04 DS-01 / DS-02 (BE-39): trụ nối, Boot, rồi ĐỨNG CHỜ lệnh từ CSMS trong --hold-s giây.
+ *            RemoteStartTransaction (tài xế bấm sạc trên app) → Accepted → cắm súng, StartTransaction,
+ *            MeterValues mỗi nhịp (+ --tick-wh Wh) cho tới khi CSMS gửi RemoteStopTransaction (tài xế
+ *            dừng, hoặc chạm giới hạn kWh) → StopTransaction reason=Remote → Available, chờ lệnh tiếp.
+ *            --reject-start: trả Rejected cho RemoteStart (đường ngoại lệ).
+ *   fault    BM04 DS-07 / DS-08 (BE-39): trụ nối, Boot, báo súng Faulted (--error-code, mặc định
+ *            InternalError) rồi chờ lệnh Reset trong --hold-s giây. --reset accept (mặc định): trả
+ *            Accepted, ngắt, khởi động lại sau --reboot-s giây, Boot, súng Available (DS-07).
+ *            --reset reject: trả Rejected, súng vẫn Faulted (DS-08).
  *
  * Tuỳ chọn: --id RH24D1-00001  --url ws://localhost:9000/ocpp  --connector 1
  *           --interval-s 10 (nhịp MeterValues)  --offline-s 60 (độ dài đứt mạng)  --fast (3 s / 15 s)
- *           --tag <idTag>  --hold-s 60 (ds-09: seconds to stay connected)
+ *           --tag <idTag>  --hold-s 60 (ds-09 / app / fault: seconds to stay connected)
+ *           --tick-wh 170 (app: Wh cộng mỗi nhịp; 2500 để chạm giới hạn 10 kWh sau 4 nhịp)
+ *           --reject-start (app)  --error-code InternalError  --reset accept|reject  --reboot-s 5 (fault)
  * Biến môi trường: CP_PASSWORD (mật khẩu Basic Auth của trụ; cần khi nối vào staging)
  */
 import { createRequire } from 'node:module';
@@ -59,6 +70,8 @@ const connectorStatus = new Map([
   [2, 'Available'],
 ]);
 let client = null;
+/** Lệnh CSMS → trụ mà kịch bản đang chạy muốn xử lý (app, fault); null = trả NotImplemented. */
+const hooks = { remoteStart: null, remoteStop: null, reset: null };
 
 async function connect({ boot, password = process.env.CP_PASSWORD }) {
   client = new RPCClient({
@@ -93,6 +106,23 @@ async function connect({ boot, password = process.env.CP_PASSWORD }) {
     });
     return { status: 'Accepted' };
   });
+  // Lệnh từ CSMS: trả lời NGAY (như trụ thật), việc phải làm chạy sau khi CALLRESULT đã gửi.
+  for (const [method, key] of [
+    ['RemoteStartTransaction', 'remoteStart'],
+    ['RemoteStopTransaction', 'remoteStop'],
+    ['Reset', 'reset'],
+  ]) {
+    client.handle(method, ({ params }) => {
+      if (!hooks[key]) throw createRPCError('NotImplemented', `${method} không được hỗ trợ`);
+      const { status, then } = hooks[key](params);
+      log(`  ⇐ ${method} ${JSON.stringify(params)} → ${status}`);
+      if (then)
+        setImmediate(() => {
+          then().catch((e) => log(`✗ sau ${method}:`, e.message));
+        });
+      return { status };
+    });
+  }
   client.handle(({ method }) => {
     throw createRPCError('NotImplemented', `${method} không được hỗ trợ`);
   });
@@ -110,15 +140,15 @@ async function connect({ boot, password = process.env.CP_PASSWORD }) {
   }
 }
 
-async function notify(connectorId, status) {
+async function notify(connectorId, status, errorCode = 'NoError') {
   connectorStatus.set(connectorId, status);
   await client.call('StatusNotification', {
     connectorId,
     status,
-    errorCode: 'NoError',
+    errorCode,
     timestamp: now(),
   });
-  log(`  connector ${connectorId} → ${status}`);
+  log(`  connector ${connectorId} → ${status}${errorCode === 'NoError' ? '' : ` (${errorCode})`}`);
 }
 
 /** Ngắt đột ngột (không close frame) — CSMS thấy mã 1006, giống rút cáp mạng. */
@@ -319,6 +349,94 @@ const SCENARIOS = {
       throw err;
     }
     throw new Error('the CSMS accepted a wrong password');
+  },
+
+  async app() {
+    const holdS = Number(opt('hold-s', 600));
+    const tickWh = Number(opt('tick-wh', SAMPLE_WH));
+    const rejectStart = argv.includes('--reject-start');
+    const done = [];
+    let active = null; // { tx, idTag, connectorId, wh, stopping }
+
+    const finish = async (reason) => {
+      const a = active;
+      if (!a || a.stopping) return;
+      a.stopping = true;
+      await notify(a.connectorId, 'Finishing');
+      await stopTx(a.tx, a.idTag, a.wh, reason);
+      await notify(a.connectorId, 'Available');
+      done.push({ tx: a.tx, wh: a.wh, reason });
+      active = null;
+    };
+
+    hooks.remoteStart = ({ connectorId = CONNECTOR, idTag }) => {
+      if (rejectStart || active) return { status: 'Rejected' };
+      active = { tx: null, idTag, connectorId, wh: 0, stopping: false };
+      return {
+        status: 'Accepted',
+        then: async () => {
+          const a = active;
+          await notify(connectorId, 'Preparing');
+          a.tx = await startTx(connectorId, idTag);
+          await notify(connectorId, 'Charging');
+          while (active === a && !a.stopping) {
+            await sleep(INTERVAL_S * 1000);
+            if (active !== a || a.stopping) break;
+            a.wh += tickWh;
+            await sendMeter(connectorId, a.tx, a.wh);
+          }
+        },
+      };
+    };
+    hooks.remoteStop = ({ transactionId }) => {
+      if (!active || active.tx !== transactionId) return { status: 'Rejected' };
+      return { status: 'Accepted', then: () => finish('Remote') };
+    };
+
+    await connect({ boot: true });
+    log(`  online; chờ lệnh từ CSMS trong ${holdS} s (Ctrl+C để dừng sớm)`);
+    const end = Date.now() + holdS * 1000;
+    while (Date.now() < end) await sleep(500);
+    if (active?.tx) await finish('Local');
+    return { sessions: done };
+  },
+
+  async fault() {
+    const holdS = Number(opt('hold-s', 600));
+    const errorCode = opt('error-code', 'InternalError');
+    const mode = opt('reset', 'accept');
+    if (!['accept', 'reject'].includes(mode)) throw new Error('--reset phải là accept | reject');
+    const rebootS = Number(opt('reboot-s', 5));
+    const resets = [];
+    let rebooted = false;
+
+    hooks.reset = ({ type }) => {
+      if (mode === 'reject') {
+        resets.push({ type, status: 'Rejected' });
+        return { status: 'Rejected' };
+      }
+      resets.push({ type, status: 'Accepted' });
+      return {
+        status: 'Accepted',
+        then: async () => {
+          await sleep(300); // để CALLRESULT đi hết trước khi ngắt
+          await dropLink();
+          log(`  khởi động lại (${type}), ${rebootS} s…`);
+          await sleep(rebootS * 1000);
+          connectorStatus.set(CONNECTOR, 'Available'); // lỗi hết sau khi khởi động lại
+          await connect({ boot: true });
+          rebooted = true;
+        },
+      };
+    };
+
+    await connect({ boot: true });
+    await notify(CONNECTOR, 'Faulted', errorCode);
+    log(`  súng ${CONNECTOR} Faulted; chờ lệnh Reset trong ${holdS} s (--reset ${mode})`);
+    const end = Date.now() + holdS * 1000;
+    while (Date.now() < end && !(mode === 'accept' && rebooted)) await sleep(500);
+    if (mode === 'accept' && rebooted) await sleep(3000); // giữ kết nối đủ lâu để CSMS ghi nhận
+    return { resets, rebooted, connector: connectorStatus.get(CONNECTOR) };
   },
 
   async 'ds-03d'() {
