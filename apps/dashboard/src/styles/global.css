@@ -319,3 +319,104 @@ textarea.input {
     display: none;
   }
 }
+
+/* FE-04b — screen 21: alert list, pills, confirm dialog. */
+.tabs,
+.btn-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.tabs {
+  margin-bottom: 16px;
+}
+.btn.small {
+  padding: 6px 14px;
+  font-size: 14px;
+}
+.alerts {
+  display: grid;
+  gap: 12px;
+}
+.card.alert {
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+}
+.alert-bar {
+  width: 4px;
+  align-self: stretch;
+  border-radius: 4px;
+  background: var(--muted);
+}
+.alert-bar.critical {
+  background: var(--danger);
+}
+.alert-bar.major {
+  background: var(--warning);
+}
+.alert-bar.minor {
+  background: var(--teal);
+}
+.alert-body {
+  flex: 1;
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+.alert-title {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.pill {
+  padding: 2px 10px;
+  border-radius: var(--radius-pill);
+  background: var(--teal-soft);
+  color: var(--teal);
+  font-size: 13px;
+}
+.pill.critical {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+.pill.major {
+  background: var(--warning-soft);
+  color: var(--warning);
+}
+.pill.muted,
+.pill.none {
+  background: var(--muted-soft);
+  color: var(--muted);
+}
+.note {
+  margin: 4px 0 0;
+}
+.note.ok {
+  color: var(--teal);
+}
+.note.warn {
+  color: var(--warning);
+}
+.note.error {
+  color: var(--danger);
+}
+.backdrop {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: rgba(0, 0, 0, 0.6);
+  z-index: 10;
+}
+.dialog {
+  width: min(480px, 100%);
+}
+.dialog fieldset {
+  border: 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}

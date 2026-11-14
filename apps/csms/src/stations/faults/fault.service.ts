@@ -54,6 +54,7 @@ import {
   faultEvents,
   faultReports,
   remoteCommands,
+  sites,
 } from '../../db/schema/index.js';
 import {
   CHARGE_POINT_ERROR_CODES,
@@ -182,9 +183,13 @@ export interface FaultListItem {
   resolvedAt: Date | null;
   resetCommandId: number | null;
   resetCommandStatus: string | null;
+  /** When the pending Reset was requested; its wait ends `resetTimeoutS` later. */
+  resetRequestedAt: Date | null;
   isOnline: boolean;
   /** Số báo cáo của tài xế gắn vào sự cố (F-05: Operator thấy báo cáo). */
   reportCount: number;
+  /** Charging Station name (`sites.site_name`); null for a charge point not yet on a site. */
+  siteName: string | null;
 }
 
 /**
@@ -756,7 +761,12 @@ export class FaultService implements OnApplicationBootstrap, OnApplicationShutdo
    * Danh sách cảnh báo: sự cố mở trước, nặng trước, mới trước — sắp XẾP TRONG SQL rồi mới LIMIT, để
    * 25 lỗi nhẹ mới hơn không đẩy một lỗi nghiêm trọng cũ ra khỏi trang (review #61).
    */
-  async list(filter: 'open' | 'all', limit: number): Promise<FaultListItem[]> {
+  async list(
+    filter: 'open' | 'all',
+    limit: number,
+    /** Only this Operator's charge points (BR-P16); omitted = all (dev console). */
+    operatorId?: number,
+  ): Promise<FaultListItem[]> {
     const rows = await this.db
       .select({
         id: faultEvents.id,
@@ -771,14 +781,22 @@ export class FaultService implements OnApplicationBootstrap, OnApplicationShutdo
         resolvedAt: faultEvents.resolvedAt,
         resetCommandId: faultEvents.resetCommandId,
         resetCommandStatus: remoteCommands.status,
+        resetRequestedAt: remoteCommands.requestedAt,
         isOnline: chargePoints.isOnline,
         reportCount: sql<number>`(SELECT count(*)::int FROM fault_reports r WHERE r.fault_event_id = ${faultEvents.id})`,
+        siteName: sites.siteName,
       })
       .from(faultEvents)
       .innerJoin(chargePoints, eq(chargePoints.id, faultEvents.chargePointId))
+      .leftJoin(sites, eq(sites.id, chargePoints.siteId))
       .leftJoin(connectors, eq(connectors.id, faultEvents.connectorId))
       .leftJoin(remoteCommands, eq(remoteCommands.id, faultEvents.resetCommandId))
-      .where(filter === 'open' ? ne(faultEvents.status, 'resolved') : undefined)
+      .where(
+        and(
+          filter === 'open' ? ne(faultEvents.status, 'resolved') : undefined,
+          operatorId === undefined ? undefined : eq(sites.operatorId, operatorId),
+        ),
+      )
       .orderBy(
         sql`(${faultEvents.status} = 'resolved')`,
         severityRankSql(faultEvents.errorCode),
@@ -797,8 +815,11 @@ export class FaultService implements OnApplicationBootstrap, OnApplicationShutdo
     });
   }
 
-  /** Một sự cố (không khoá) — để người gọi kiểm trước khi gửi lệnh. */
-  async get(faultId: number) {
+  /**
+   * Một sự cố (không khoá) — để người gọi kiểm trước khi gửi lệnh. With `operatorId`, a FaultEvent of
+   * another Operator's charge point is "not found" (404, never 403: no hint that it exists).
+   */
+  async get(faultId: number, operatorId?: number) {
     const [row] = await this.db
       .select({
         id: faultEvents.id,
@@ -808,7 +829,13 @@ export class FaultService implements OnApplicationBootstrap, OnApplicationShutdo
       })
       .from(faultEvents)
       .innerJoin(chargePoints, eq(chargePoints.id, faultEvents.chargePointId))
-      .where(eq(faultEvents.id, faultId));
+      .leftJoin(sites, eq(sites.id, chargePoints.siteId))
+      .where(
+        and(
+          eq(faultEvents.id, faultId),
+          operatorId === undefined ? undefined : eq(sites.operatorId, operatorId),
+        ),
+      );
     if (!row) throw new FaultNotFoundError(faultId);
     return row;
   }

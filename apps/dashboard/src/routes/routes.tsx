@@ -8,6 +8,7 @@ import { useAppSelector } from '../core/store/store';
 import { AppShell } from '../layouts/AppShell';
 import { AdminHomePage } from '../pages/admin/AdminHomePage';
 import { LoginPage } from '../pages/LoginPage';
+import { FaultAlertsPage } from '../pages/operator/FaultAlertsPage';
 import { OperatorHomePage } from '../pages/operator/OperatorHomePage';
 import { RequireRole } from './RequireRole';
 
@@ -29,6 +30,7 @@ export const routes: RouteObject[] = [
     ),
     children: [
       { index: true, element: <OperatorHomePage /> }, // 17
+      { path: 'faults', element: <FaultAlertsPage /> }, // 21
       { path: '*', element: <Navigate to="/operator" replace /> },
     ],
   },
