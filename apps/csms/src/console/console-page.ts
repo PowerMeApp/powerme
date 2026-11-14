@@ -323,6 +323,9 @@ header button:hover:not(:disabled) { background: var(--accent); color: var(--pan
         return 'meterStop ' + wh(r.meter_stop_minus_start_wh) + ' mâu thuẫn chuỗi đo ' + wh(r.series_last_wh) + ' — lệch ' + wh(r.energy_difference_wh) + late;
       case 'gap_detected':
         return 'Chuỗi đo bị đứt ' + hms(r.gap_start) + ' → ' + hms(r.gap_end) + ', chênh ' + wh(r.energy_difference_wh) + late;
+      case 'gap_closed':
+        var closes = /closes_record_no=(\d+)/.exec(r.resolution || '');
+        return 'Mẫu phát bù đã lấp kín chỗ đứt ' + hms(r.gap_start) + ' → ' + hms(r.gap_end) + (closes ? ' (bản ghi #' + closes[1] + ' không còn là khe hở)' : '');
       case 'replay':
         return 'Bản tin ' + (act ? act[1] : '?') + ' bị phát hiện là PHÁT LẠI từ hàng đợi offline của trụ';
       case 'duplicate':

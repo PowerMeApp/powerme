@@ -4,8 +4,10 @@
 import type { CsmsConfig } from '../config.js';
 import type { Db } from '../db/db.module.js';
 import {
+  closedRecordNo,
   EnergySample,
   evaluateSeries,
+  gapStillOpen,
   ReconciliationInput,
   ReconciliationService,
 } from './reconciliation.service.js';
@@ -270,5 +272,44 @@ describe('ReconciliationService — công tắc RECONCILIATION_ENABLED (G6)', ()
     await expect(
       make(true).recordVerdict(explosive, 1, conflict, { kind: 'stop', replayed: true }),
     ).rejects.toThrow('ablation');
+  });
+});
+
+describe('T132 — khe hở đã ghi còn mở hay đã được lấp kín', () => {
+  const gap = (a: string, b: string) => ({ start: t(a), end: t(b) });
+  const recorded = gap('2026-11-14T03:00:20.000Z', '2026-11-14T03:01:00.000Z');
+
+  it('không còn khe hở nào → đã đóng', () => {
+    expect(gapStillOpen(recorded, [])).toBe(false);
+  });
+
+  it('khe hở mới nằm trong khoảng đã ghi (mẫu muộn chỉ lấp một phần) → còn mở', () => {
+    expect(
+      gapStillOpen(recorded, [gap('2026-11-14T03:00:29.000Z', '2026-11-14T03:01:00.000Z')]),
+    ).toBe(true);
+  });
+
+  it('khe hở ở chỗ khác của phiên, chỉ chạm mép → không tính là còn mở', () => {
+    expect(
+      gapStillOpen(recorded, [gap('2026-11-14T03:01:00.000Z', '2026-11-14T03:02:00.000Z')]),
+    ).toBe(false);
+    expect(
+      gapStillOpen(recorded, [gap('2026-11-14T02:59:00.000Z', '2026-11-14T03:00:20.000Z')]),
+    ).toBe(false);
+  });
+
+  it('khe hở rộng hơn trùm lên khoảng đã ghi → còn mở', () => {
+    expect(
+      gapStillOpen(recorded, [gap('2026-11-14T03:00:00.000Z', '2026-11-14T03:02:00.000Z')]),
+    ).toBe(true);
+  });
+
+  it('closedRecordNo đọc số bản ghi được đóng; chuỗi lạ → null', () => {
+    expect(closedRecordNo('gap_closed (late_sample): closes_record_no=12 samples=7 gaps=0')).toBe(
+      12,
+    );
+    expect(closedRecordNo('gap_closed (late_sample): xcloses_record_no=12')).toBeNull();
+    expect(closedRecordNo('conflict (late_sample): diff=3')).toBeNull();
+    expect(closedRecordNo(null)).toBeNull();
   });
 });

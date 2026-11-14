@@ -103,6 +103,9 @@ describe('reconciliationKind / resolutionNumber / mapReconciliation', () => {
     expect(reconciliationKind('conflict', null)).toBe('conflict');
     // late_sample: kết luận đọc từ tiền tố resolution
     expect(reconciliationKind('late_sample', 'conflict (late_sample): diff=801')).toBe('conflict');
+    expect(
+      reconciliationKind('late_sample', 'gap_closed (late_sample): closes_record_no=1 gaps=0'),
+    ).toBe('gap_closed');
     expect(reconciliationKind('late_sample', 'gap_detected (late_sample): diff=0')).toBe(
       'gap_detected',
     );

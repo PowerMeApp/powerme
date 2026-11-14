@@ -17,6 +17,9 @@
  *   - conflict        → conflict (khi kích hoạt bởi StopTransaction), resolution bắt đầu "conflict"
  *   - đối soát lại do mẫu muộn → late_sample (dù kết luận là conflict hay gap_detected); kết luận
  *     nằm ở tiền tố resolution: "conflict (late_sample): …" / "gap_detected (late_sample): …"
+ *   - mẫu muộn LẤP KÍN một khe hở đã ghi → late_sample với tiền tố "gap_closed (late_sample): …"
+ *     (T132). Bản ghi khe hở cũ không bị sửa hay xoá (append-only): khe hở "còn mở" = bản ghi
+ *     gap_detected chưa có bản ghi gap_closed nào trỏ tới (`closes_record_no=`).
  *   - bản tin phát lại chạm phiên → replay; StartTransaction/MeterValues trùng → duplicate;
  *     StopTransaction cho phiên đã dừng → orphan_stop; idTag lạ → unknown_id_tag (ADR-0012).
  * Trước 0001 conflict và mẫu muộn được lưu là meter_gap + tiền tố resolution; bản ghi cũ còn nguyên
@@ -37,7 +40,7 @@
  * tx3 vào `review` (conflict, lệch 801 Wh) cho operator quyết (UC-OPS-05).
  */
 import { Inject, Injectable, Logger } from '@nestjs/common';
-import { and, desc, eq, inArray, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, isNotNull, sql } from 'drizzle-orm';
 import { CONFIG, CsmsConfig } from '../config.js';
 import { DB, Db, DbExecutor } from '../db/db.module.js';
 import { creditTransactions, reconciliationRecords } from '../db/schema/index.js';
@@ -141,6 +144,26 @@ export function evaluateSeries(input: ReconciliationInput): ReconciliationVerdic
   };
 }
 
+/** Tiền tố resolution của bản ghi "khe hở đã được mẫu muộn lấp kín" (T132). */
+export const GAP_CLOSED_PREFIX = 'gap_closed';
+
+/**
+ * Khe hở đã ghi còn mở không, xét theo chuỗi mẫu HIỆN TẠI? Còn mở khi có ít nhất một khe hở của
+ * lần đối soát mới (`current`, đã lọc theo ngưỡng) chồng lên khoảng `[start, end]` đã ghi. Mẫu muộn
+ * chỉ lấp một phần (phần còn lại vẫn vượt ngưỡng) thì khe hở chưa đóng. Hàm thuần.
+ */
+export function gapStillOpen(recorded: Gap, current: Gap[]): boolean {
+  return current.some(
+    (g) => g.start.getTime() < recorded.end.getTime() && g.end.getTime() > recorded.start.getTime(),
+  );
+}
+
+/** Số bản ghi mà một bản ghi gap_closed trỏ tới (`closes_record_no=N`), null nếu không đọc được. */
+export function closedRecordNo(resolution: string | null): number | null {
+  const m = /(?:^|\s)closes_record_no=(\d+)(?:\s|$)/.exec(resolution ?? '');
+  return m && m[1] !== undefined ? Number(m[1]) : null;
+}
+
 /** Nguồn kích hoạt một lần đối soát — ghi vào resolution để đọc lại được. */
 export interface ReconcileTrigger {
   kind: 'stop' | 'late_sample';
@@ -224,6 +247,66 @@ export class ReconciliationService {
       energyDifferenceWh: verdict.energyDifferenceWh,
       resolution,
     });
+  }
+
+  /**
+   * T132: sau khi một mẫu muộn tới, đóng các khe hở ĐÃ GHI mà chuỗi mẫu hiện tại đã lấp kín.
+   *
+   * Vì sao: StopTransaction phát lại tới TRƯỚC các MeterValues phát bù (thứ tự của EXP-01), nên lúc
+   * dừng chuỗi mẫu có khoảng trống tạm thời > ngưỡng và engine ghi `meter_gap`. Các mẫu phát bù tới
+   * ngay sau đó lấp kín, nhưng bản ghi append-only ở lại như một khe hở thật trong hàng đợi của
+   * operator (RQ1 13/11: 12/30 phiên S2). Không sửa bản ghi cũ: ghi THÊM một bản ghi `late_sample`
+   * có tiền tố `gap_closed`, cùng `gap_start` / `gap_end`, trỏ về bản ghi gốc.
+   *
+   * Xét mọi bản ghi kết luận gap_detected (lúc dừng: `meter_gap`; do mẫu muộn: `late_sample`) chưa
+   * có bản ghi đóng. Trả số bản ghi đóng vừa ghi.
+   */
+  async recordClosedGaps(
+    ex: DbExecutor,
+    sessionId: number,
+    verdict: ReconciliationVerdict,
+  ): Promise<number> {
+    if (!this.enabled) return 0;
+    const rows = await ex
+      .select({
+        recordNo: reconciliationRecords.recordNo,
+        gapStart: reconciliationRecords.gapStart,
+        gapEnd: reconciliationRecords.gapEnd,
+        resolution: reconciliationRecords.resolution,
+      })
+      .from(reconciliationRecords)
+      .where(
+        and(
+          eq(reconciliationRecords.sessionId, sessionId),
+          inArray(reconciliationRecords.recordType, ['meter_gap', 'late_sample']),
+          isNotNull(reconciliationRecords.gapStart),
+          isNotNull(reconciliationRecords.gapEnd),
+        ),
+      )
+      .orderBy(asc(reconciliationRecords.recordNo));
+    const closed = new Set<number>();
+    for (const r of rows) {
+      if (!r.resolution?.startsWith(GAP_CLOSED_PREFIX)) continue;
+      const no = closedRecordNo(r.resolution);
+      if (no !== null) closed.add(no);
+    }
+    let written = 0;
+    for (const r of rows) {
+      if (!r.resolution?.startsWith('gap_detected') || closed.has(r.recordNo)) continue;
+      if (!r.gapStart || !r.gapEnd) continue;
+      if (gapStillOpen({ start: r.gapStart, end: r.gapEnd }, verdict.gaps)) continue;
+      await this.insert(ex, sessionId, {
+        recordType: 'late_sample',
+        gapStart: r.gapStart,
+        gapEnd: r.gapEnd,
+        energyDifferenceWh: null,
+        resolution:
+          `${GAP_CLOSED_PREFIX} (late_sample): closes_record_no=${r.recordNo} ` +
+          `samples=${verdict.sampleCount} gaps=${verdict.gaps.length} outcome=${verdict.outcome}`,
+      });
+      written++;
+    }
+    return written;
   }
 
   /** Bản tin bị ReplayDetector phán là phát lại đã chạm vào phiên này. */
@@ -399,6 +482,8 @@ export class ReconciliationService {
         and(
           eq(reconciliationRecords.sessionId, sessionId),
           inArray(reconciliationRecords.recordType, ['meter_gap', 'conflict', 'late_sample']),
+          // Bản ghi gap_closed (T132) không mang kết luận đối soát: bỏ qua khi so "kết luận gần nhất".
+          sql`coalesce(${reconciliationRecords.resolution}, '') NOT LIKE ${`${GAP_CLOSED_PREFIX}%`}`,
         ),
       )
       .orderBy(desc(reconciliationRecords.recordNo))

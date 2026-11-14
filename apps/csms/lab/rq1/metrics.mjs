@@ -136,12 +136,18 @@ export function summarize(rows) {
   const absErr = meanCi(billed.map((r) => Math.abs(r.E_bill - r.E_true)));
   const signedErr = meanCi(billed.map((r) => r.E_bill - r.E_true));
 
-  // Phát hiện khe hở theo bản ghi meter_gap (SRS NFR-REC-01).
+  // Phát hiện khe hở (SRS NFR-REC-01). Từ T132 một phiên "bị báo khe hở" khi còn bản ghi khe hở
+  // CHƯA được đóng (`open_gap_records`); dữ liệu trước T132 không có cột này thì dùng số bản ghi
+  // meter_gap thô như cũ. Số thô và số phiên có bản ghi đóng vẫn được báo riêng.
   let gapTp = 0;
   let gapFp = 0;
   let gapFn = 0;
+  let rawSessions = 0;
+  let closedSessions = 0;
   for (const r of rows) {
-    const detected = Number(r.meter_gap_records ?? 0) > 0;
+    if (Number(r.meter_gap_records ?? 0) > 0) rawSessions++;
+    if (Number(r.gap_closed_records ?? 0) > 0) closedSessions++;
+    const detected = Number(r.open_gap_records ?? r.meter_gap_records ?? 0) > 0;
     const truth = r.gap_true === true;
     if (detected && truth) gapTp++;
     else if (detected && !truth) gapFp++;
@@ -175,6 +181,10 @@ export function summarize(rows) {
       fn: gapFn,
       precision: ratio(gapTp, gapTp + gapFp),
       recall: ratio(gapTp, gapTp + gapFn),
+      /** Số phiên có ít nhất một bản ghi meter_gap (kể cả đã được đóng sau đó). */
+      rawSessions,
+      /** Số phiên có ít nhất một bản ghi đóng khe hở (T132). */
+      closedSessions,
     },
   };
 }
