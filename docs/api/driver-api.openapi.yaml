@@ -40,9 +40,9 @@ tags:
     description: UC-PAY-02 / màn hình 9 — số dư Charging Credit và lịch sử sổ cái của chính tài xế (BE-22)
   - name: top-ups
     description: |
-      UC-PAY-01 nạp Charging Credit qua VNPay (WF-02 SD-2a, T32 Phần 5). CHƯA DÙNG CHO APP tới khi
-      T32 Phần 8 (quét top-up quá hạn) merge; IPN cộng tiền và trang return `/billing/vnpay/return`
-      đã có từ T32 Phần 6 — xem mô tả từng đường dẫn.
+      UC-PAY-01 nạp Charging Credit qua VNPay (WF-02 SD-2a, T32 Phần 5). Dùng được cho app từ
+      T32 Phần 8 (quét top-up quá hạn + querydr); IPN cộng tiền và trang return
+      `/billing/vnpay/return` có từ T32 Phần 6. Chưa có e-invoice, chưa thử sandbox VNPay thật.
 
 security:
   - bearerAuth: []
@@ -897,7 +897,7 @@ paths:
     get:
       tags: [top-ups]
       operationId: quoteTopUp
-      x-status: implemented — T32 Phần 5; chưa dùng cho app tới khi T32 Phần 8 merge (IPN có từ Phần 6)
+      x-status: implemented — T32 Phần 5; dùng được cho app từ T32 Phần 8 (IPN Phần 6, querydr Phần 8)
       summary: Báo giá dùng điểm cho một số tiền nạp (BR-P35)
       description: |
         Chỉ đọc, không tạo gì. App gọi trước khi tạo top-up để hiện số được giảm. `points_available`
@@ -906,8 +906,8 @@ paths:
         `max_points = 0`, `max_discount_vnd = 0` (không phải lỗi). Giá chỉ để hiển thị: lúc tạo,
         CSMS kiểm lại; điểm **không** bị trừ lúc tạo (chỉ trừ khi tiền được cộng).
 
-        **Chưa dùng cho app** tới khi T32 Phần 8 (quét top-up quá hạn) merge. IPN cộng tiền và
-        trang return `/billing/vnpay/return` đã có từ T32 Phần 6.
+        **Dùng được cho app từ T32 Phần 8** (quét top-up quá hạn + querydr). IPN cộng tiền và
+        trang return `/billing/vnpay/return` có từ T32 Phần 6.
       parameters:
         - name: amount_vnd
           in: query
@@ -941,7 +941,7 @@ paths:
     post:
       tags: [top-ups]
       operationId: createTopUp
-      x-status: implemented — T32 Phần 5; chưa dùng cho app tới khi T32 Phần 8 merge (IPN có từ Phần 6)
+      x-status: implemented — T32 Phần 5; dùng được cho app từ T32 Phần 8 (IPN Phần 6, querydr Phần 8)
       summary: Tạo top-up VNPay (SD-2a) và nhận URL thanh toán
       description: |
         Ánh xạ `TopUpService.create`. Tạo top-up `pending`, `expires_at = created_at + 15 phút`, trả
@@ -963,9 +963,10 @@ paths:
         - `pending_top_up_confirming` (pending đã quá `expires_at`, CSMS đang chờ VNPay xác nhận): báo
           "giao dịch trước đang được xác nhận, thử lại sau ít phút". Không có `payment_url`.
 
-        **Chưa dùng cho app** tới khi T32 Phần 8 (quét top-up quá hạn) merge: trước Phần 8 không có
-        gì chuyển top-up bỏ dở sang `expired`, nên tài xế bị chặn `pending_top_up_confirming` mãi.
-        IPN cộng tiền và trang return `/billing/vnpay/return` đã có từ T32 Phần 6.
+        **Dùng được cho app từ T32 Phần 8**: top-up bỏ dở được vòng quét hỏi VNPay (querydr) từ
+        `expires_at + 2 phút`, tối đa tới `expires_at + 60 phút`, rồi chuyển `credited` / `failed` /
+        `expired`; trong lúc đó tạo mới trả `pending_top_up_confirming`. IPN cộng tiền và trang
+        return `/billing/vnpay/return` có từ T32 Phần 6.
       parameters:
         - $ref: '#/components/parameters/idempotencyKey'
       requestBody:
@@ -1047,15 +1048,15 @@ paths:
     get:
       tags: [top-ups]
       operationId: getTopUp
-      x-status: implemented — T32 Phần 5; chưa dùng cho app tới khi T32 Phần 8 merge (IPN có từ Phần 6)
+      x-status: implemented — T32 Phần 5; dùng được cho app từ T32 Phần 8 (IPN Phần 6, querydr Phần 8)
       summary: Trạng thái một top-up của tài xế (poll sau khi thanh toán)
       description: |
         App poll sau khi quay về từ trang VNPay. `payment_url` chỉ có khi `status = pending` và chưa
         quá `expires_at`; còn lại `null`. Top-up của tài xế khác hoặc không có → 404 `not_found`.
 
-        **Chưa dùng cho app** tới khi T32 Phần 8 (quét top-up quá hạn) merge. Từ T32 Phần 6 IPN cộng
-        tiền (`credited`) / báo lỗi (`failed`); trang return `/billing/vnpay/return` chỉ báo "đang
-        xác nhận", app poll route này.
+        **Dùng được cho app từ T32 Phần 8.** Từ T32 Phần 6 IPN cộng tiền (`credited`) / báo lỗi
+        (`failed`); từ Phần 8 querydr của vòng quét cũng cộng / báo lỗi / chuyển `expired`. Trang
+        return `/billing/vnpay/return` chỉ báo "đang xác nhận", app poll route này.
       parameters:
         - name: topUpId
           in: path

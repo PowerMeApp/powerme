@@ -3,13 +3,13 @@
  *
  * Vì sao tồn tại: refund (Phần 9), e-invoice / điều chỉnh (Phần 7) và timeout top-up (Phần 8) cùng cần
  * một chỗ quét lúc khởi động, quét định kỳ, chạy sớm sau commit và dừng sạch. DB là nguồn sự thật
- * (`status` + `next_attempt_at`, hoặc `expires_at` cho top-up); hẹn giờ trong RAM chỉ để đánh thức,
+ * (`status` + `next_attempt_at`, cả `top_ups` từ 0021); hẹn giờ trong RAM chỉ để đánh thức,
  * mất khi sập cũng được vì vòng quét bắt lại.
  *
  * Hợp đồng:
  * - Mỗi loại việc cài `BackgroundWork.runDue(limit, signal)`: tự lấy việc đến hạn, tự quản transaction,
  *   **không giữ transaction qua lời gọi bên ngoài**. Bảng có `next_attempt_at` dùng `due-rows.ts`
- *   (giữ chỗ có hạn). `top_ups` đến hạn theo `expires_at`; Phần 5/8 tự chọn cách giữ chỗ.
+ *   (giữ chỗ có hạn); `top_ups` cũng vậy (`top-up-timeout`, T32 Phần 8).
  * - Service đăng ký bằng `register(this)` trong `onModuleInit`; sau commit gọi `kick(name)`, hoặc
  *   `kickAt(name, at)` để chạy đúng một thời điểm (vd. `expires_at + 2 phút`, D4). Điều kiện đến hạn dùng
  *   `now()` của DB, nên đánh thức sớm cũng không sai.

@@ -45,6 +45,8 @@ Decisions khác diagram thì theo diagram và sửa decisions. Diagram mâu thu�
   - đăng ký bằng `BackgroundWorkRunner.register(this)` trong `onModuleInit`, sau commit gọi `kick(name)` / `kickAt(name, at)`. **Luôn register trong `onModuleInit`, kể cả khi `BILLING_WORKER_ENABLED=false`**: `kick` một tên chưa đăng ký sẽ ném sau commit. Có test kiểm việc đăng ký;
   - lịch retry dùng `nextRetry` (`retry-schedule.ts`), không tự viết 5 phút / 30 phút / 2 giờ.
 - Thứ tự khoá dòng khi cần nhiều bảng: **`top_ups` → `credit_accounts` → `loyalty_accounts`** (tránh deadlock; WP3 cũng khoá `credit_accounts` trước `loyalty_accounts`). `CreditLedgerService.post` chỉ khoá `credit_accounts`, nên luồng nào cần khoá `top_ups` (IPN, timeout, hoàn) thì phải khoá **trước** khi gọi `post`. `LoyaltyService` khoá `loyalty_accounts`, nên gọi **sau** `post`.
+  - Đã theo thứ tự này: IPN, vòng quét querydr và `recheckTopUp` (T32 Phần 8: `top_ups` → `credit_accounts` → `loyalty_accounts`). `TopUpService.create` khoá `credit_accounts` rồi INSERT `top_ups` (không khoá dòng `top_ups` có sẵn) nên hiện không deadlock.
+  - **Phần 9 (Admin hoàn) và Phần 11 (đóng tài khoản) không được khoá `credit_accounts` rồi mới `SELECT … FOR UPDATE` `top_ups`**: đi ngược thứ tự với IPN / querydr → deadlock. Cần khoá top-up thì khoá `top_ups` trước.
 - `post` / `earnForSession` nhận client của transaction bên gọi (`LedgerClient = Pick<PoolClient, 'query'>`) và **không tự BEGIN/COMMIT**. Lỗi nghiệp vụ (`LedgerPostRejected`, `LedgerEntryExists`, `CreditAccountNotFound` trong `billing-errors.ts`) ném ra trước khi có câu SQL lỗi, nên transaction bên gọi vẫn dùng được. DB không có CHECK dấu tiền: `post` kiểm dấu theo loại dòng.
 - Tiền là `bigint` VND, không dùng số thực.
 - **Sổ điểm** (T32 Phần 4, decisions D3/D11):
@@ -80,7 +82,7 @@ Decisions khác diagram thì theo diagram và sửa decisions. Diagram mâu thu�
 | Tạo top-up | SD-2a | D2 | STM-4 #1 | TC-STM4-01 + test theo nội dung: `test/billing-top-up.integration.test.ts`, `test/driver-top-ups.integration.test.ts`, `test/migration-0019.integration.test.ts`, `src/billing/vnpay.adapter.spec.ts` |
 | IPN cộng tiền | SD-2b | D3 | STM-4 #2 #3, STM-5 | TC-STM4-02/03/04 (bước IPN)/05 + test theo nội dung (khoản trễ trên `expired` / `refunded`, kiểm request, điểm, race, route): `test/billing-ipn.integration.test.ts`, `test/vnpay-ipn-route.integration.test.ts`, `test/migration-0021.integration.test.ts`, `src/billing/top-up-state-machine.spec.ts`, `src/billing/vnpay.adapter.spec.ts` |
 | Xuất hoá đơn, retry | SD-2c | D5 | STM-7 | TC-STM7-* |
-| Timeout, thanh toán trễ | SD-2d | D4 | STM-4 #4, #6 | TC-STM4-04/05/06/07/15 |
+| Timeout, thanh toán trễ | SD-2d | D4, D7 | STM-4 #2 #3 #4, #6 | TC-STM4-04 (bước querydr) + test theo nội dung (bảng querydr 3.1, lịch hẹn lại, hết lịch `unresolved_04/07`, đua IPN, hai runner, sập sau tx1, `recheckTopUp`): `test/billing-top-up-timeout.integration.test.ts`, `src/billing/vnpay-querydr.spec.ts`, `src/billing/top-up-timeout.spec.ts` |
 | Admin hoàn, gửi refund, retry | SD-2e | D1 | STM-4 #7, STM-10 | TC-STM4-12/13/14, TC-STM10-* |
 | Đóng tài khoản (tài xế đóng, hệ thống tự hoàn) | SD-2f | D6 | STM-5, STM-10 | (theo test case của nhóm) |
 | Worker quét DB | (không vẽ) | D7 | | |

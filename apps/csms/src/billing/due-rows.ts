@@ -20,14 +20,26 @@ import { Logger } from '@nestjs/common';
 import type { PoolClient } from 'pg';
 import type { LedgerClient } from './credit-ledger.service.js';
 
-export type LeasedTable = 'refunds' | 'e_invoices' | 'invoice_adjustments';
+export type LeasedTable = 'refunds' | 'e_invoices' | 'invoice_adjustments' | 'top_ups';
 
 /** Enum của cột `status` (cast tham số để dùng được index `(status, next_attempt_at)`). */
 const STATUS_ENUM: Record<LeasedTable, string> = {
   refunds: 'refund_status',
   e_invoices: 'e_invoice_status',
   invoice_adjustments: 'e_invoice_status',
+  top_ups: 'top_up_status',
 };
+
+/**
+ * Điều kiện trạng thái viết HẰNG cho bảng chỉ có partial index (T32 Phần 8): `top_ups_pending_next_attempt_idx`
+ * là `(next_attempt_at) WHERE status = 'pending'`; câu `status = ANY($1)` có tham số không khớp được
+ * predicate của partial index trong generic plan (EXPLAIN trên powerme_test, 14/11). Bảng có mặt ở đây
+ * chỉ nhận đúng `statuses` đã ghi; vẫn không nhận SQL từ bên gọi.
+ */
+const FIXED_DUE_STATUS: Partial<Record<LeasedTable, { statuses: readonly string[]; sql: string }>> =
+  {
+    top_ups: { statuses: ['pending'], sql: "status = 'pending'" },
+  };
 
 export interface LeaseSpec {
   table: LeasedTable;
@@ -44,6 +56,14 @@ export interface LeasedRow {
 function check(spec: LeaseSpec, limit: number): void {
   if (!(spec.table in STATUS_ENUM)) throw new Error(`due_rows_unknown_table: ${spec.table}`);
   if (spec.statuses.length === 0) throw new Error('due_rows_no_status');
+  const fixed = FIXED_DUE_STATUS[spec.table];
+  if (
+    fixed &&
+    (spec.statuses.length !== fixed.statuses.length ||
+      spec.statuses.some((s, i) => s !== fixed.statuses[i]))
+  ) {
+    throw new Error(`due_rows_fixed_status: ${spec.table} chỉ nhận [${fixed.statuses.join(',')}]`);
+  }
   if (!Number.isSafeInteger(spec.leaseMs) || spec.leaseMs < 1) {
     throw new Error('due_rows_invalid_lease');
   }
@@ -62,19 +82,24 @@ export async function claimDue(
 ): Promise<LeasedRow[]> {
   check(spec, spec.limit);
   const t = spec.table;
+  const fixed = FIXED_DUE_STATUS[t];
+  // Bảng có điều kiện hằng không truyền danh sách trạng thái; $n đánh số theo từng nhánh.
+  const [statusSql, params] = fixed
+    ? [fixed.sql, [spec.limit, spec.leaseMs]]
+    : [`status = ANY($3::${STATUS_ENUM[t]}[])`, [spec.limit, spec.leaseMs, spec.statuses]];
   const { rows } = await tx.query<{ id: string; lease_token: string }>(
     `WITH due AS (
        SELECT id FROM ${t}
-       WHERE status = ANY($1::${STATUS_ENUM[t]}[]) AND next_attempt_at <= now()
+       WHERE ${statusSql} AND next_attempt_at <= now()
        ORDER BY next_attempt_at, id
-       LIMIT $2
+       LIMIT $1
        FOR UPDATE SKIP LOCKED
      )
      UPDATE ${t} AS r
-     SET next_attempt_at = now() + $3 * interval '1 millisecond', updated_at = now()
+     SET next_attempt_at = now() + $2 * interval '1 millisecond', updated_at = now()
      FROM due WHERE r.id = due.id
      RETURNING r.id, r.next_attempt_at::text AS lease_token`,
-    [spec.statuses, spec.limit, spec.leaseMs],
+    params,
   );
   return rows
     .map((r) => ({ id: Number(r.id), leaseToken: r.lease_token }))
