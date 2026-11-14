@@ -102,6 +102,9 @@ services:
       VNPAY_HASH_SECRET: ${VNPAY_HASH_SECRET:-}
       VNPAY_URL: ${VNPAY_URL:-}
       VNPAY_RETURN_URL: ${VNPAY_RETURN_URL:-}
+      # T32 Phần 8: querydr (gọi ra ngoài, Caddy không đổi). Trống → sandbox / 127.0.0.1.
+      VNPAY_API_URL: ${VNPAY_API_URL:-}
+      VNPAY_SERVER_IP: ${VNPAY_SERVER_IP:-}
       # MB-03: khoá Vietmap phía server cho /places/* và /stations/{id}/route (khác khoá tile của app).
       # Secret: chỉ nằm trong .env trên VM. Trống → các route đó báo lỗi nhà cung cấp, phần còn lại vẫn chạy.
       VIETMAP_SEARCH_API_KEY: ${VIETMAP_SEARCH_API_KEY:-}

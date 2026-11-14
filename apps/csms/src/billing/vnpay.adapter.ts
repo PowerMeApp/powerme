@@ -1,7 +1,7 @@
 /**
- * VnpayAdapter (CD-2 «port») — Phần 5: `buildPaymentUrl`; Phần 6: `verifyIpn` (kiểm chữ ký IPN).
- * Đều là hàm THUẦN, không gọi mạng, không đọc DB hay đồng hồ. querydr (Phần 8), refund (Phần 9)
- * thêm sau.
+ * VnpayAdapter (CD-2 «port») — Phần 5: `buildPaymentUrl`; Phần 6: `verifyIpn` (kiểm chữ ký IPN);
+ * Phần 8: `queryTransaction` (querydr). Phần dựng / kiểm là hàm THUẦN (không gọi mạng, không đọc DB
+ * hay đồng hồ); lớp `VnpayAdapter` chỉ bọc cấu hình và HTTP của querydr. Refund (Phần 9) thêm sau.
  *
  * URL thanh toán **không lưu DB**: dựng lại từ dòng `top_ups` + cấu hình mỗi lần cần (tạo, gửi lại
  * cùng key, GET), nên `vnp_CreateDate` / `vnp_ExpireDate` lấy từ `created_at` / `expires_at` của
@@ -18,8 +18,14 @@
  *   - `vnp_TxnRef` Alphanumeric[1,100], không trùng trong ngày (DB: UNIQUE `gateway_reference`).
  */
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
-import { Inject, Injectable } from '@nestjs/common';
-import { VNPAY_CONFIG, VnpayConfig } from './vnpay.config.js';
+import { Inject, Injectable, Optional } from '@nestjs/common';
+import {
+  DEFAULT_VNPAY_API_CONFIG,
+  VNPAY_API_CONFIG,
+  VNPAY_CONFIG,
+  VnpayApiConfig,
+  VnpayConfig,
+} from './vnpay.config.js';
 
 export const VNP_VERSION = '2.1.0';
 /** Trang không có bảng danh mục hàng hoá; `other` là giá trị duy nhất thấy trong ví dụ. */
@@ -202,9 +208,207 @@ export function clientIp(remoteAddress: string | undefined): string {
   return raw.length >= 7 && raw.length <= 45 ? raw : '127.0.0.1';
 }
 
+// ---------------------------------------------------------------------------------------------
+// querydr (T32 Phần 8, SD-2d) — tài liệu `truy-van-hoan-tien/querydr&refund.html` (đọc 14/11):
+//   - POST JSON tới `VNPAY_API_URL`; `vnp_RequestId` Alphanumeric[1,32], không trùng trong ngày;
+//   - chuỗi ký request / response: các giá trị nối bằng `|` theo THỨ TỰ CỐ ĐỊNH của tài liệu, không
+//     sắp xếp, không encode (tài liệu không ghi encode); HMAC-SHA512 như PAY 2.1.0;
+//   - trường tuỳ chọn của response (`vnp_PayDate`, `vnp_PromotionCode`, `vnp_PromotionAmount`) thiếu
+//     thì đưa chuỗi rỗng vào chuỗi ký (chờ thử sandbox);
+//   - `vnp_Amount` của response coi là VND × 100 như IPN (tài liệu querydr không ghi; chờ sandbox).
+// ---------------------------------------------------------------------------------------------
+
+/** Thứ tự chuỗi ký request querydr (tài liệu VNPay). */
+export const QUERYDR_REQUEST_SIGN_FIELDS = [
+  'vnp_RequestId',
+  'vnp_Version',
+  'vnp_Command',
+  'vnp_TmnCode',
+  'vnp_TxnRef',
+  'vnp_TransactionDate',
+  'vnp_CreateDate',
+  'vnp_IpAddr',
+  'vnp_OrderInfo',
+] as const;
+
+/** Thứ tự chuỗi ký response querydr (tài liệu VNPay). */
+export const QUERYDR_RESPONSE_SIGN_FIELDS = [
+  'vnp_ResponseId',
+  'vnp_Command',
+  'vnp_ResponseCode',
+  'vnp_Message',
+  'vnp_TmnCode',
+  'vnp_TxnRef',
+  'vnp_Amount',
+  'vnp_BankCode',
+  'vnp_PayDate',
+  'vnp_TransactionNo',
+  'vnp_TransactionType',
+  'vnp_TransactionStatus',
+  'vnp_OrderInfo',
+  'vnp_PromotionCode',
+  'vnp_PromotionAmount',
+] as const;
+
+/** Timeout của một lần querydr (D4: 10 s). */
+export const QUERYDR_TIMEOUT_MS = 10_000;
+
+function joinFields(fields: readonly string[], values: Record<string, unknown>): string {
+  return fields.map((f) => (typeof values[f] === 'string' ? (values[f] as string) : '')).join('|');
+}
+
+export function querydrRequestSignData(params: Record<string, string>): string {
+  return joinFields(QUERYDR_REQUEST_SIGN_FIELDS, params);
+}
+
+export function querydrResponseSignData(body: Record<string, unknown>): string {
+  return joinFields(QUERYDR_RESPONSE_SIGN_FIELDS, body);
+}
+
+/** `vnp_RequestId` mới: 32 ký tự hex ngẫu nhiên (trùng trong ngày gần như không xảy ra). */
+export function newQuerydrRequestId(): string {
+  return randomBytes(16).toString('hex');
+}
+
+/** Đủ để hỏi querydr: các cột của dòng `top_ups`. */
+export interface QueryTopUp {
+  gatewayReference: string;
+  /** `top_ups.created_at` — `vnp_TransactionDate` = `vnp_CreateDate` của lệnh pay. */
+  createdAt: Date;
+  amountPaidVnd: number;
+}
+
+/** Body JSON đã ký của một querydr. Hàm thuần: `now`, `requestId` do bên gọi đưa vào. */
+export function querydrRequest(
+  topUp: Pick<QueryTopUp, 'gatewayReference' | 'createdAt'>,
+  cfg: Pick<VnpayConfig, 'tmnCode' | 'hashSecret'> & Pick<VnpayApiConfig, 'serverIp'>,
+  now: Date,
+  requestId: string,
+): Record<string, string> {
+  if (!/^[A-Za-z0-9]{1,100}$/.test(topUp.gatewayReference))
+    throw new Error('invalid_gateway_reference');
+  if (!/^[A-Za-z0-9]{1,32}$/.test(requestId)) throw new Error('invalid_request_id');
+  const params: Record<string, string> = {
+    vnp_RequestId: requestId,
+    vnp_Version: VNP_VERSION,
+    vnp_Command: 'querydr',
+    vnp_TmnCode: cfg.tmnCode,
+    vnp_TxnRef: topUp.gatewayReference,
+    vnp_TransactionDate: vnpDate(topUp.createdAt),
+    vnp_CreateDate: vnpDate(now),
+    vnp_IpAddr: cfg.serverIp,
+    // Chỉ chữ, số, dấu cách: chuỗi ký không encode.
+    vnp_OrderInfo: `Truy van giao dich ${topUp.gatewayReference}`,
+  };
+  return {
+    ...params,
+    vnp_SecureHash: vnpSecureHash(querydrRequestSignData(params), cfg.hashSecret),
+  };
+}
+
+export type QueryUnresolvedReason =
+  | 'malformed'
+  | 'signature'
+  | 'tmn_code'
+  | 'txn_ref'
+  | 'response_code'
+  | 'transaction_type'
+  | 'transaction_status'
+  | 'amount_mismatch'
+  | 'network'
+  | 'timeout'
+  | 'http_status';
+
+/** Kết quả querydr đã phân loại (bảng 3.1, Ân 12/11). */
+export type QueryResult =
+  | { kind: 'paid'; transactionNo: string; amount: number; payDate: Date | null }
+  | { kind: 'failed'; responseCode: string; transactionStatus: string }
+  | { kind: 'not_found' }
+  | {
+      kind: 'unresolved';
+      reason: QueryUnresolvedReason;
+      responseCode?: string;
+      transactionStatus?: string;
+    };
+
+/**
+ * Kiểm + phân loại response querydr (hàm thuần, không log). Thứ tự: dạng body (chuẩn hoá giá trị
+ * về chuỗi) → chữ ký (thời gian hằng) → `vnp_TmnCode` → `vnp_TxnRef` → RC `91` (`not_found`) →
+ * RC ≠ `00` → `vnp_TransactionType` ≠ `01` → TS `00` (kiểm `vnp_TransactionNo`, số tiền) / `02` /
+ * khác. Mọi ca không tin được → `unresolved` (giữ `pending`, hẹn lại).
+ */
+export function classifyQuerydrResponse(
+  body: unknown,
+  expect: { tmnCode: string; txnRef: string; amountPaidVnd: number },
+  hashSecret: string,
+): QueryResult {
+  if (body === null || typeof body !== 'object' || Array.isArray(body))
+    return { kind: 'unresolved', reason: 'malformed' };
+  // Chuẩn hoá giá trị JSON về chuỗi trước khi ký / đọc: null / undefined = thiếu (chuỗi rỗng trong
+  // chuỗi ký), số hữu hạn → String(v); object / array / boolean / số không hữu hạn → malformed.
+  const r: Record<string, string> = {};
+  for (const [k, v] of Object.entries(body as Record<string, unknown>)) {
+    if (v === null || v === undefined) continue;
+    if (typeof v === 'string') r[k] = v;
+    else if (typeof v === 'number' && Number.isFinite(v)) r[k] = String(v);
+    else return { kind: 'unresolved', reason: 'malformed' };
+  }
+  const str = (k: string) => r[k] ?? '';
+
+  const given = str('vnp_SecureHash').toLowerCase();
+  if (!/^[0-9a-f]{128}$/.test(given)) return { kind: 'unresolved', reason: 'signature' };
+  const expected = vnpSecureHash(querydrResponseSignData(r), hashSecret);
+  if (!timingSafeEqual(Buffer.from(given, 'hex'), Buffer.from(expected, 'hex')))
+    return { kind: 'unresolved', reason: 'signature' };
+  if (str('vnp_TmnCode') !== expect.tmnCode) return { kind: 'unresolved', reason: 'tmn_code' };
+  if (str('vnp_TxnRef') !== expect.txnRef) return { kind: 'unresolved', reason: 'txn_ref' };
+
+  const responseCode = str('vnp_ResponseCode');
+  if (responseCode === '91') return { kind: 'not_found' };
+  if (responseCode !== '00') return { kind: 'unresolved', reason: 'response_code', responseCode };
+  const transactionStatus = str('vnp_TransactionStatus');
+  const codes = { responseCode, transactionStatus };
+  if (str('vnp_TransactionType') !== '01')
+    return { kind: 'unresolved', reason: 'transaction_type', ...codes };
+  if (transactionStatus === '00') {
+    const transactionNo = str('vnp_TransactionNo');
+    const amountRaw = str('vnp_Amount');
+    if (!/^\d{1,15}$/.test(transactionNo) || !/^\d{1,15}$/.test(amountRaw))
+      return { kind: 'unresolved', reason: 'malformed', ...codes };
+    if (BigInt(amountRaw) !== BigInt(expect.amountPaidVnd) * 100n)
+      return { kind: 'unresolved', reason: 'amount_mismatch', ...codes };
+    return {
+      kind: 'paid',
+      transactionNo,
+      amount: Number(amountRaw) / 100,
+      payDate: parseVnpDate(str('vnp_PayDate') || undefined),
+    };
+  }
+  if (transactionStatus === '02') return { kind: 'failed', ...codes };
+  return { kind: 'unresolved', reason: 'transaction_status', ...codes };
+}
+
+/** Token inject hàm `fetch` (test thay bằng fetch giả, không gọi mạng). */
+export const VNPAY_FETCH = Symbol('BILLING_VNPAY_FETCH');
+/** Token inject timeout querydr (test đặt nhỏ; mặc định `QUERYDR_TIMEOUT_MS`). */
+export const VNPAY_QUERY_TIMEOUT_MS = Symbol('BILLING_VNPAY_QUERY_TIMEOUT_MS');
+
 @Injectable()
 export class VnpayAdapter {
-  constructor(@Inject(VNPAY_CONFIG) private readonly config: VnpayConfig) {}
+  private readonly api: VnpayApiConfig;
+  private readonly request: typeof fetch;
+  private readonly timeoutMs: number;
+
+  constructor(
+    @Inject(VNPAY_CONFIG) private readonly config: VnpayConfig,
+    @Optional() @Inject(VNPAY_API_CONFIG) api?: VnpayApiConfig,
+    @Optional() @Inject(VNPAY_FETCH) request?: typeof fetch,
+    @Optional() @Inject(VNPAY_QUERY_TIMEOUT_MS) timeoutMs?: number,
+  ) {
+    this.api = api ?? DEFAULT_VNPAY_API_CONFIG;
+    this.request = request ?? fetch;
+    this.timeoutMs = timeoutMs ?? QUERYDR_TIMEOUT_MS;
+  }
 
   /** Có đủ TMN code + hash secret chưa (thiếu → tạo top-up trả 503 payment_unconfigured). */
   get configured(): boolean {
@@ -218,5 +422,57 @@ export class VnpayAdapter {
   /** Kiểm chữ ký + `vnp_TmnCode` của IPN. Chỉ gọi khi `configured`. */
   verifyIpn(params: Record<string, string>): IpnSignatureCheck {
     return verifyIpnSignature(params, this.config);
+  }
+
+  /**
+   * querydr (SD-2d `queryTransaction`): POST JSON tới `VNPAY_API_URL`, timeout 10 s. Lỗi mạng,
+   * timeout, HTTP ≠ 200, JSON hỏng → `unresolved` (không ném). Chỉ gọi khi `configured`.
+   */
+  async queryTransaction(topUp: QueryTopUp, signal?: AbortSignal): Promise<QueryResult> {
+    if (!this.config.configured) throw new Error('vnpay_unconfigured');
+    const body = querydrRequest(
+      topUp,
+      {
+        tmnCode: this.config.tmnCode,
+        hashSecret: this.config.hashSecret,
+        serverIp: this.api.serverIp,
+      },
+      new Date(),
+      newQuerydrRequestId(),
+    );
+    const timeout = AbortSignal.timeout(this.timeoutMs);
+    const combined = signal ? AbortSignal.any([timeout, signal]) : timeout;
+    let text: string;
+    try {
+      const response = await this.request(this.api.apiUrl, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', accept: 'application/json' },
+        body: JSON.stringify(body),
+        signal: combined,
+      });
+      if (response.status !== 200) {
+        await response.body?.cancel().catch(() => undefined);
+        return { kind: 'unresolved', reason: 'http_status' };
+      }
+      text = await response.text();
+    } catch {
+      // Không đưa lỗi gốc ra ngoài (có thể chứa URL / body); chỉ phân biệt timeout với lỗi mạng.
+      return { kind: 'unresolved', reason: timeout.aborted ? 'timeout' : 'network' };
+    }
+    let json: unknown;
+    try {
+      json = JSON.parse(text);
+    } catch {
+      return { kind: 'unresolved', reason: 'malformed' };
+    }
+    return classifyQuerydrResponse(
+      json,
+      {
+        tmnCode: this.config.tmnCode,
+        txnRef: topUp.gatewayReference,
+        amountPaidVnd: topUp.amountPaidVnd,
+      },
+      this.config.hashSecret,
+    );
   }
 }
