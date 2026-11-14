@@ -349,7 +349,7 @@ tách theo bề mặt — refresh token không mang `role`, role đọc lại t�
 
 | Endpoint | Role | UC / FR / BR | Trạng thái · người làm | Ghi chú |
 |---|---|---|---|---|
-| `GET /operator/v1/faults` | operator_staff | UC-OPS-03, FR-10, STM-6 | **console** `FaultService.list` · Nghĩa | `status=open\|all`, thêm `charge_point_id`, chuyển sang page/page_size |
+| `GET /operator/v1/faults` | operator_staff | UC-OPS-03, FR-10, STM-6 | **done** FE-04 · `FaultActions` · Nghĩa | `status=open\|all\|raised\|acknowledged\|resetting\|resolved`, page/page_size → `{items, total, page, page_size}`; còn thiếu lọc `charge_point_id` (FE-05) |
 | `POST /operator/v1/faults/{id}/acknowledge` | operator_staff | STM-6 t2 | **console** · Nghĩa | console ghi `acknowledged_by = null`; route mới ghi người gọi |
 | `POST /operator/v1/faults/{id}/reset` | operator_staff | STM-6 t4, BR-P07, WF-04 #12 | **console** `resetFault` · Nghĩa | đồng bộ; `type`/`force` chuyển từ query vào body; Idempotency-Key |
 | `POST /operator/v1/faults/{id}/close` | operator_staff | STM-6 t7, BR-P42 | **console** · Nghĩa | |

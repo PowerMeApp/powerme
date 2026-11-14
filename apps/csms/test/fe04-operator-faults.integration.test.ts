@@ -104,7 +104,7 @@ describeDb('FE-04a operator fault API (D37–D42, BR-P16)', () => {
     return { status: r.status, body: (await r.json()) as any };
   }
   const list = async (who: string, s = 'open') =>
-    (await call('GET', `/faults?status=${s}`, tokens[who])).body.faults as any[];
+    (await call('GET', `/faults?status=${s}`, tokens[who])).body.items as any[];
 
   beforeAll(async () => {
     Logger.overrideLogger(['error']);
@@ -257,6 +257,23 @@ describeDb('FE-04a operator fault API (D37–D42, BR-P16)', () => {
       connector_no: 0,
       charge_point_online: false,
     });
+    // Status filter and total are scoped to the Operator too.
+    const page = async (who: string, qs: string) =>
+      (await call('GET', `/faults?${qs}`, tokens[who])).body;
+    expect(await page('staffA', 'status=raised')).toMatchObject({ total: 1 });
+    expect(await page('staffA', 'status=acknowledged')).toMatchObject({ items: [], total: 0 });
+    expect(await page('staffA', 'status=all&page=2&page_size=1')).toEqual({
+      items: [],
+      total: 1,
+      page: 2,
+      page_size: 1,
+    });
+    expect(await page('staffB', 'status=resolved')).toEqual({
+      items: [],
+      total: 0,
+      page: 1,
+      page_size: 50,
+    });
   });
 
   it('acting on another Operator’s FaultEvent is 404 and changes nothing', async () => {
@@ -381,13 +398,40 @@ describeDb('FE-04a operator fault API (D37–D42, BR-P16)', () => {
     expect(await list('staffB')).toHaveLength(0);
   });
 
+  it('pages through the server order with page/page_size and filters by one status', async () => {
+    const t = tokens['staffA'];
+    await status(2, 'Faulted', 'HighTemperature');
+    const all = (await call('GET', '/faults?status=all&page_size=100', t)).body;
+    expect(all.total).toBe(all.items.length);
+    expect(all.total).toBeGreaterThanOrEqual(2);
+    for (let i = 0; i < all.total; i++) {
+      const one = (await call('GET', `/faults?status=all&page=${i + 1}&page_size=1`, t)).body;
+      expect(one).toMatchObject({
+        total: all.total,
+        page: i + 1,
+        items: [{ id: all.items[i].id }],
+      });
+    }
+    for (const s of ['raised', 'acknowledged', 'resetting', 'resolved']) {
+      const r = (await call('GET', `/faults?status=${s}`, t)).body;
+      expect(r.items.every((f: any) => f.status === s)).toBe(true);
+      expect(r.total).toBe(all.items.filter((f: any) => f.status === s).length);
+    }
+  });
+
   it('rejects bad queries and methods', async () => {
     const t = tokens['staffA'];
     expect((await call('GET', '/faults?status=bogus', t)).status).toBe(400);
     expect((await call('GET', '/faults?status=all&x=1', t)).status).toBe(400);
-    expect((await call('GET', '/faults?limit=0', t)).status).toBe(400);
-    expect((await call('GET', '/faults?limit=201', t)).status).toBe(400);
-    expect((await call('GET', '/faults?limit=5', t)).status).toBe(200);
+    expect((await call('GET', '/faults?limit=5', t)).status).toBe(400);
+    expect((await call('GET', '/faults?page_size=0', t)).status).toBe(400);
+    expect((await call('GET', '/faults?page_size=101', t)).status).toBe(400);
+    expect((await call('GET', '/faults?page_size=5', t)).status).toBe(200);
+    expect((await call('GET', '/faults?page=0', t)).status).toBe(400);
+    expect((await call('GET', '/faults?page=-1', t)).status).toBe(400);
+    expect((await call('GET', '/faults?page=01', t)).status).toBe(400);
+    expect((await call('GET', '/faults?page=10001', t)).status).toBe(400);
+    expect((await call('GET', '/faults?status=raised&page=3', t)).status).toBe(200);
     expect((await call('GET', '/me?x=1', t)).status).toBe(400);
     expect((await call('POST', '/faults/1/acknowledge?x=1', t)).status).toBe(400);
     expect((await call('GET', '/faults/1/close', t)).status).toBe(405);

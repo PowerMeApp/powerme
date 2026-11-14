@@ -13,6 +13,7 @@ import type {
   ApiErrorBody,
   DashboardMe,
   FaultActionResponse,
+  FaultListStatus,
   LoginRequest,
   LoginResponse,
   OperatorFaultList,
@@ -22,6 +23,9 @@ import type {
 } from '@powerme/shared';
 import { loggedOut, type AuthState } from '../auth/authSlice';
 import { env } from '../config/env';
+
+/** Rows per page on screen 21. */
+export const FAULT_PAGE_SIZE = 20;
 
 export interface ApiError {
   /** HTTP status, or 'network' when the CSMS could not be reached. */
@@ -78,8 +82,10 @@ export const api = createApi({
     operatorMe: b.query<DashboardMe, void>({ query: () => 'operator/v1/me' }),
     adminMe: b.query<DashboardMe, void>({ query: () => 'admin/v1/me' }),
     // Screen 21 (FE-04b, UC-OPS-03): FaultEvents of the signed-in staff's Operator.
-    operatorFaults: b.query<OperatorFaultList, 'open' | 'all'>({
-      query: (status) => `operator/v1/faults?status=${status}`,
+    // One page of the server's order (D39); `page` is 1-based.
+    operatorFaults: b.query<OperatorFaultList, { status: FaultListStatus; page: number }>({
+      query: ({ status, page }) =>
+        `operator/v1/faults?status=${status}&page=${page}&page_size=${FAULT_PAGE_SIZE}`,
       providesTags: ['Fault'],
     }),
     acknowledgeFault: b.mutation<FaultActionResponse, string>({

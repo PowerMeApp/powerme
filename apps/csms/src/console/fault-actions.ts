@@ -20,6 +20,7 @@ import { connectors, faultEvents, sessions } from '../db/schema/index.js';
 import type { ConnectionRegistry } from '../ocpp-gateway/connection-registry.js';
 import {
   FaultNotFoundError,
+  FaultListFilter,
   FaultService,
   InvalidFaultTransitionError,
   ResetType,
@@ -88,8 +89,13 @@ export class FaultActions {
   }
 
   /** With an actor: only FaultEvents of that staff's Operator (BR-P11, BR-P16, D3). */
-  async list(filter: 'open' | 'all', limit: number, actor: FaultActor | null = null) {
-    return this.requireFaults().list(filter, limit, actor?.operatorId);
+  async list(filter: FaultListFilter, limit: number, actor: FaultActor | null = null, offset = 0) {
+    return this.requireFaults().list(filter, limit, actor?.operatorId, offset);
+  }
+
+  /** Total rows behind `list` for the same filter and actor (screen 21 pager). */
+  async count(filter: FaultListFilter, actor: FaultActor | null = null) {
+    return this.requireFaults().count(filter, actor?.operatorId);
   }
 
   /** t2. */

@@ -274,7 +274,7 @@ The dashboard (screen 21) acts through a logged-in API instead of the dev consol
 
 | Method | Path | Result / errors |
 |---|---|---|
-| GET | `/api/operator/v1/faults?status=open\|all&limit=1..200` | `{ faults: [...] }` (default `open`, 100), server order open → severity → newest · 400 for any other query |
+| GET | `/api/operator/v1/faults?status=open\|all\|raised\|acknowledged\|resetting\|resolved&page=&page_size=` | `{ items, total, page, page_size }` (contract §2.4: default `open`, page 1, 50 rows, max 100), server order open → severity → newest on every page · 400 for any other query |
 | POST | `/api/operator/v1/faults/{id}/acknowledge` | `{id, status}` · 404 · 409 `invalid_transition` |
 | POST | `/api/operator/v1/faults/{id}/reset` body `{type: Soft\|Hard, force?: boolean}` | `{fault_id, command_id, reset_status, fault_status, forced}` · 400 · 409 `fault_not_acknowledged` / `station_offline` / `reset_in_progress` / `sessions_active` (+ `sessions: [{connector_no, session_id}]`) · 502 `station_error` |
 | POST | `/api/operator/v1/faults/{id}/close` | `{id, status}` · 404 · 409 |

@@ -7,6 +7,8 @@
 export type FaultKind = 'faulted' | 'offline' | 'driver_report';
 export type FaultStatus = 'raised' | 'acknowledged' | 'resetting' | 'resolved';
 export type FaultSeverity = 'critical' | 'major' | 'minor' | 'none';
+/** `status` filter of the list: `open` = not resolved, `all`, or one STM-6 status. */
+export type FaultListStatus = 'open' | 'all' | FaultStatus;
 /** STM-6 transitions an Operator can trigger: t2, t4, t7. */
 export type FaultAction = 'acknowledge' | 'reset' | 'close';
 export type ResetType = 'Soft' | 'Hard';
@@ -36,9 +38,22 @@ export interface OperatorFault {
   allowed_actions: FaultAction[];
 }
 
-/** GET /api/operator/v1/faults?status=open|all[&limit=1..200] */
+/** GET /api/operator/v1/faults query. Server order (D39) is kept across pages. */
+export interface OperatorFaultQuery {
+  status?: FaultListStatus;
+  /** From 1 (contract §2.4). */
+  page?: number;
+  /** 1..100, default 50. */
+  page_size?: number;
+}
+
+/** GET /api/operator/v1/faults — the contract's list shape (§2.4). */
 export interface OperatorFaultList {
-  faults: OperatorFault[];
+  items: OperatorFault[];
+  /** Rows matching the filter for this Operator. */
+  total: number;
+  page: number;
+  page_size: number;
 }
 
 /** POST /api/operator/v1/faults/{id}/acknowledge | close */

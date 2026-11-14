@@ -48,9 +48,26 @@ const report: OperatorFault = {
 };
 const LIST = 'GET /api/operator/v1/faults';
 const RESET = 'POST /api/operator/v1/faults/7/reset';
-const list = (...faults: OperatorFault[]) => ({ status: 200, body: { faults } });
+const list = (...faults: OperatorFault[]) => ({
+  status: 200,
+  body: { items: faults, total: faults.length, page: 1, page_size: 20 },
+});
+/** Fake list endpoint that answers whatever page was asked (`total` read on every call). */
+function pagedCsms(items: OperatorFault[], total: () => number) {
+  const seen = fakeCsms({});
+  const record = globalThis.fetch as unknown as (r: Request) => Promise<Response>;
+  globalThis.fetch = (async (r: Request) => {
+    await record(r);
+    const page = Number(new URL(r.url).searchParams.get('page') ?? 1);
+    return new Response(JSON.stringify({ items, total: total(), page, page_size: 20 }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }) as typeof fetch;
+  return seen;
+}
 const open = () => renderApp('/operator/faults', session(STAFF));
-const alert = (no: number) => screen.findByRole('article', { name: `Sự cố #${no}` });
+const alert = (no: number) => screen.findByRole('row', { name: `Sự cố #${no}` });
 
 describe('Cảnh báo sự cố (màn 21)', () => {
   it('lists the three kinds with labels; buttons only from allowed_actions; nav link', async () => {
@@ -68,15 +85,66 @@ describe('Cảnh báo sự cố (màn 21)', () => {
     expect(o.getByRole('button', { name: 'Xác nhận' })).toBeInTheDocument();
     expect(o.getByText('Charge Point offline')).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Cảnh báo sự cố' })).toBeInTheDocument();
-    expect(seen[0]).toMatchObject({ search: '?status=open', authorization: 'Bearer token-10' });
+    expect(seen[0]).toMatchObject({
+      search: '?status=open&page=1&page_size=20',
+      authorization: 'Bearer token-10',
+    });
   });
 
-  it('All refetches with status=all; empty list shows the empty state', async () => {
+  it('status filters refetch from page 1; empty states', async () => {
     const seen = fakeCsms({ [LIST]: list() });
     const { user } = open();
     expect(await screen.findByText(/Không có cảnh báo/)).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: 'Tất cả' }));
-    await waitFor(() => expect(seen.some((r) => r.search === '?status=all')).toBe(true));
+    for (const [label, status] of [
+      ['Đang reset', 'resetting'],
+      ['Đã xử lý', 'resolved'],
+      ['Tất cả', 'all'],
+    ] as const) {
+      await user.selectOptions(screen.getByRole('combobox', { name: 'Trạng thái' }), label);
+      await waitFor(() =>
+        expect(seen.some((r) => r.search === `?status=${status}&page=1&page_size=20`)).toBe(true),
+      );
+    }
+    expect(screen.getByRole('combobox', { name: 'Trạng thái' })).toHaveValue('all');
+    expect(screen.getAllByRole('option').map((o) => o.textContent)).toEqual([
+      'Đang mở',
+      'Mới',
+      'Đã xác nhận',
+      'Đang reset',
+      'Đã xử lý',
+      'Tất cả',
+    ]);
+    expect(await screen.findByText('Không có sự cố ở trạng thái này.')).toBeInTheDocument();
+  });
+
+  it('table with pager: range, next page sends page=2, ends disabled', async () => {
+    const seen = pagedCsms([base, offline], () => 22);
+    const { user } = open();
+    expect(await screen.findByRole('columnheader', { name: 'Trạng thái' })).toBeInTheDocument();
+    expect(screen.getByText('Hiển thị 1–2 / 22')).toBeInTheDocument();
+    expect(screen.getByText('Trang 1 / 2')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '‹ Trước' })).toBeDisabled();
+    await user.click(screen.getByRole('button', { name: 'Sau ›' }));
+    await waitFor(() =>
+      expect(seen.some((r) => r.search === '?status=open&page=2&page_size=20')).toBe(true),
+    );
+    expect(await screen.findByText('Trang 2 / 2')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Sau ›' })).toBeDisabled();
+    expect(await screen.findByText('Hiển thị 21–22 / 22')).toBeInTheDocument();
+  });
+
+  it('a page past the end (rows left the filter) falls back to the last page', async () => {
+    let total = 22;
+    const seen = pagedCsms([base], () => total);
+    const { user } = open();
+    await user.click(await screen.findByRole('button', { name: 'Sau ›' }));
+    expect(await screen.findByText('Trang 2 / 2')).toBeInTheDocument();
+    // Closing the last row of page 2 refetches; the list now fits on one page.
+    total = 20;
+    await user.click(within(await alert(1007)).getByRole('button', { name: 'Đóng' }));
+    await user.click(screen.getByRole('button', { name: 'Đóng sự cố' }));
+    expect(await screen.findByText('Trang 1 / 1')).toBeInTheDocument();
+    expect(seen.at(-1)?.search).toBe('?status=open&page=1&page_size=20');
   });
 
   it('Reset sends Soft by default', async () => {

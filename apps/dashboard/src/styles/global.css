@@ -320,57 +320,85 @@ textarea.input {
   }
 }
 
-/* FE-04b — screen 21: alert list, pills, confirm dialog. */
-.tabs,
+/* FE-04 — screen 21: fault table, pager, pills, confirm dialog. */
 .btn-row {
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
 }
-.tabs {
+.filters {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
   margin-bottom: 16px;
+}
+.filters .field {
+  min-width: 200px;
 }
 .btn.small {
   padding: 6px 14px;
   font-size: 14px;
 }
-.alerts {
-  display: grid;
-  gap: 12px;
+.table-card {
+  padding: 0;
+  overflow: hidden;
 }
-.card.alert {
-  display: flex;
-  gap: 14px;
-  align-items: flex-start;
+.table-wrap {
+  overflow-x: auto;
 }
-.alert-bar {
-  width: 4px;
-  align-self: stretch;
-  border-radius: 4px;
-  background: var(--muted);
+table.faults {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
 }
-.alert-bar.critical {
-  background: var(--danger);
+table.faults th,
+table.faults td {
+  padding: 12px 14px;
+  text-align: left;
+  vertical-align: top;
+  border-bottom: 1px solid var(--line);
 }
-.alert-bar.major {
-  background: var(--warning);
+table.faults th {
+  color: var(--muted);
+  font-weight: 600;
+  font-size: 13px;
+  white-space: nowrap;
+  background: var(--graphite-2);
 }
-.alert-bar.minor {
-  background: var(--teal);
+table.faults td {
+  min-width: 90px;
 }
-.alert-body {
-  flex: 1;
-  display: grid;
-  gap: 4px;
+table.faults td:nth-child(2) {
+  min-width: 240px;
+}
+table.faults td > * + * {
+  margin-top: 4px;
+}
+table.faults td.num {
+  font-weight: 700;
   min-width: 0;
+  border-left: 4px solid var(--muted);
 }
-.alert-title {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  flex-wrap: wrap;
+table.faults tr.sev-critical td.num {
+  border-left-color: var(--danger);
+}
+table.faults tr.sev-major td.num {
+  border-left-color: var(--warning);
+}
+table.faults tr.sev-minor td.num {
+  border-left-color: var(--teal);
+}
+.cell-title {
+  font-weight: 600;
+}
+.small {
+  font-size: 13px;
+}
+.nowrap {
+  white-space: nowrap;
 }
 .pill {
+  display: inline-block;
   padding: 2px 10px;
   border-radius: var(--radius-pill);
   background: var(--teal-soft);
@@ -401,6 +429,20 @@ textarea.input {
 }
 .note.error {
   color: var(--danger);
+}
+.pager {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 12px 14px;
+}
+.pager .btn-row {
+  align-items: center;
+}
+.pager-page {
+  font-size: 14px;
 }
 .backdrop {
   position: fixed;

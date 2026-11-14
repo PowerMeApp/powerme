@@ -167,6 +167,9 @@ export interface BeginResetResult {
 export type ResetOutcome =
   { status: 'Accepted' | 'Rejected'; response?: unknown } | { error: string };
 
+/** List filter: `open` = not resolved, `all`, or exactly one STM-6 status (screen 21). */
+export type FaultListFilter = 'open' | 'all' | FaultStatus;
+
 /** Một dòng của danh sách cảnh báo (console, sau này dashboard FE-04). */
 export interface FaultListItem {
   id: number;
@@ -762,10 +765,11 @@ export class FaultService implements OnApplicationBootstrap, OnApplicationShutdo
    * 25 lỗi nhẹ mới hơn không đẩy một lỗi nghiêm trọng cũ ra khỏi trang (review #61).
    */
   async list(
-    filter: 'open' | 'all',
+    filter: FaultListFilter,
     limit: number,
     /** Only this Operator's charge points (BR-P16); omitted = all (dev console). */
     operatorId?: number,
+    offset = 0,
   ): Promise<FaultListItem[]> {
     const rows = await this.db
       .select({
@@ -791,19 +795,15 @@ export class FaultService implements OnApplicationBootstrap, OnApplicationShutdo
       .leftJoin(sites, eq(sites.id, chargePoints.siteId))
       .leftJoin(connectors, eq(connectors.id, faultEvents.connectorId))
       .leftJoin(remoteCommands, eq(remoteCommands.id, faultEvents.resetCommandId))
-      .where(
-        and(
-          filter === 'open' ? ne(faultEvents.status, 'resolved') : undefined,
-          operatorId === undefined ? undefined : eq(sites.operatorId, operatorId),
-        ),
-      )
+      .where(this.listWhere(filter, operatorId))
       .orderBy(
         sql`(${faultEvents.status} = 'resolved')`,
         severityRankSql(faultEvents.errorCode),
         desc(faultEvents.raisedAt),
         desc(faultEvents.id),
       )
-      .limit(limit);
+      .limit(limit)
+      .offset(offset);
     return rows.map((r) => {
       const g = guideFor(r.errorCode);
       return {
@@ -813,6 +813,28 @@ export class FaultService implements OnApplicationBootstrap, OnApplicationShutdo
         hint: g.hint,
       };
     });
+  }
+
+  /** Rows `list` would page through (same filter and Operator scope), for the pager's total. */
+  async count(filter: FaultListFilter, operatorId?: number): Promise<number> {
+    const [row] = await this.db
+      .select({ n: sql<number>`count(*)::int` })
+      .from(faultEvents)
+      .innerJoin(chargePoints, eq(chargePoints.id, faultEvents.chargePointId))
+      .leftJoin(sites, eq(sites.id, chargePoints.siteId))
+      .where(this.listWhere(filter, operatorId));
+    return row?.n ?? 0;
+  }
+
+  private listWhere(filter: FaultListFilter, operatorId?: number) {
+    return and(
+      filter === 'open'
+        ? ne(faultEvents.status, 'resolved')
+        : filter === 'all'
+          ? undefined
+          : eq(faultEvents.status, filter),
+      operatorId === undefined ? undefined : eq(sites.operatorId, operatorId),
+    );
   }
 
   /**
