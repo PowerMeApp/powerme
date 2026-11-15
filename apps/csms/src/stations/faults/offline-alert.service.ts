@@ -15,7 +15,7 @@
  * import ocpp-gateway (ADR-0016 D-F: gateway phụ thuộc stations, không ngược lại).
  *
  * Khác OfflineGraceService (ADR-0016 D-A, 120 s): đó quyết định PHIÊN có bị orphan không; đây là
- * CẢNH BÁO cho operator (900 s). Hai ngưỡng độc lập.
+ * CẢNH BÁO cho operator (840 s + một nhịp quét ≤ 900 s, T118). Hai ngưỡng độc lập.
  */
 import {
   Inject,
