@@ -157,8 +157,10 @@ thời hạn:
 `LoginResponse` / `RefreshRequest` / `RefreshResponse` trong `packages/shared/src/api/auth.ts`;
 `infra/staging` có `DASHBOARD_JWT_REFRESH_TTL_S` (tuỳ chọn, trống = mặc định); test thêm ca refresh
 token dùng làm access và ngược lại, token tài xế, khoá tài khoản / Operator giữa hai lần refresh,
-nhân viên bị chuyển Operator. Dashboard (FE-01b) gọi refresh khi nhận 401 làm ở PR dashboard riêng
-của T125; trước khi PR đó merge, dashboard đọc `expires_in` nên chỉ phải đăng nhập lại sau 15 phút.
+nhân viên bị chuyển Operator. Dashboard (FE-01b, cùng PR): gặp 401 thì gọi refresh **một lần** (các
+request hỏng cùng lúc chờ chung), có access mới thì gửi lại; refresh bị từ chối → đăng xuất; mất mạng
+khi refresh → giữ phiên. Phiên kết thúc khi refresh token hết hạn (`apps/dashboard/src/core/api/api.ts`,
+`core/auth/authSlice.ts`).
 
 ### 2.2a RolesGuard, CORS, query string (hành vi hiện tại)
 
