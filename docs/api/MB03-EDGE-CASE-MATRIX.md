@@ -5,6 +5,17 @@ Kết quả local ngày **09/11/2026**, nhánh `wp3/mb-03-vietmap-search-suggest
 Ưu tiên [brief 07/11](../requirements/smart-station-search-brief-20261107.md);
 [API/cách chạy](MB03-BACKEND-DISCOVERY.md), [quyết định và nghiên cứu](../adr/0017-driver-discovery-jwt-and-vietmap-adapter.md).
 
+Các kết quả ngày 09/11 ghi nhận thuật toán brief. [Quyết định T96 hiện hành](DRIVER-API-HOP-DONG.md#16-t96--xếp-hạng-gợi-ý-theo-đường-bộ-vietmap)
+thay hành vi xếp hạng này bằng Vietmap Route khi có consent và đủ điều kiện, với brief làm dự phòng.
+
+## Kiểm thử bổ sung T96
+
+Ngày 14/11/2026, 5 suite Driver API chạy trên Postgres nhúng với transport Vietmap giả lập:
+141/141 đạt, trong đó 68/68 thuộc `driver-smart.integration.test.ts`. Các ca bổ sung kiểm tra
+quyền sở hữu và consent, trả kết nối DB trước khi gọi Route, thứ tự theo đường bộ trước phân
+trang, cache, giới hạn 6 ứng viên và 2 lời gọi đồng thời, fallback khi thiếu tuyến hoặc quá
+4 giây, và thứ tự `sort=name|distance` khi có SoC. Kết quả này xác nhận hành vi local.
+
 ## Nguồn để chọn rủi ro
 
 - [OWASP API1:2023](https://api-security.owasp.org/editions/2023/en/0xa1-broken-object-level-authorization/): quyền sở hữu phải được kiểm trên từng tài nguyên, kể cả cache hit.

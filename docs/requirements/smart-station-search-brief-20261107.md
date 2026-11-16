@@ -8,6 +8,21 @@ Nguồn nguyên byte: [brief 07/11](sources/PowerMe-Smart-Station-Recommendation
 11.626 byte, SHA-256 `43f38f10a5147571081c4734287798a601fa364d11e3ab180d4d4e1e900e3959`.
 Nguồn đọc từ Downloads; bản triển khai/bằng chứng lưu trực tiếp trên E.
 
+## Điều chỉnh T96 — Vietmap Route ưu tiên, brief dự phòng
+
+Giữ tài liệu nguồn 07/11 để đối chiếu. Khi có `sort=smart&location_consent=true`, vị trí hợp lệ,
+SoC hợp lệ và xe sở hữu đủ thông số, áp dụng BR-P33/BR-P41 theo [Report 3](report3-srs.md) cập nhật.
+Sau khi lọc bán kính, chọn tối đa 6 trạm có tổng thời gian tính được và cổng tốt nhất có trạng thái
+fresh, dựa trên phút chờ + sạc rồi `site_id`. CSMS kết thúc giao dịch DB trước khi lấy Route v4.
+
+- Đủ tuyến trong ngân sách 4 giây cho cả lượt, tối đa 2 tuyến đồng thời: xếp nhóm theo reach,
+  tổng phút chạy + chờ + sạc, mét ùn tắc nặng khi cả nhóm có số liệu, mét đường bộ, `site_id`.
+  Dùng ETA Vietmap một lần, nối các mục còn lại theo brief rồi cắt trang.
+  API trả `ranking_source: vietmap_route` và `road_estimate` cho từng trạm có tuyến.
+- Thiếu consent, điều kiện, ứng viên phù hợp hoặc một kết quả tuyến: xếp toàn bộ theo brief với
+  `ranking_source: brief`. App dùng `road_estimate` cho km đường bộ và thời gian di chuyển.
+  Mục không có trường này sẽ không hiện các số đo đường bộ. Xem [hợp đồng Driver API](../api/DRIVER-API-HOP-DONG.md#16-t96--xếp-hạng-gợi-ý-theo-đường-bộ-vietmap).
+
 ## Áp dụng cho MVP
 
 - Giữ `GET /api/driver/v1/stations`, thêm `soc_percent`, `target_soc_percent` mặc định 80 và `sort=smart`.
@@ -40,8 +55,7 @@ MVP này dùng B3, chờ hằng số, max tariff, không cắt bỏ cứng risky
 `/stations/suggestions` đã bỏ (404), không duy trì hai thuật toán. SRS/AD-5 gốc giữ để đối chiếu;
 ghi chú này có phạm vi hẹp, không sửa lại nguồn gốc.
 
-Vietmap address/place và đường thật tới trạm đã chọn vẫn có API riêng, không tham gia xếp hạng
-smart hoặc chứng minh kẹt xe trực tiếp. Không dùng lỗi Vietmap để bịa đường.
+Address/place và đường tới một trạm vẫn có API riêng. Thời gian Vietmap là ước tính di chuyển.
 
 ## Trạng thái và phần để sau
 
@@ -49,7 +63,7 @@ Backend đọc DB, không dùng fixture làm response sản phẩm. Test dùng P
 giả lập chỉ trong test. Xem [bảng test](../api/MB03-EDGE-CASE-MATRIX.md) và [cách chạy](../api/MB03-BACKEND-DISCOVERY.md).
 
 Theo phạm vi đã duyệt, để sau: seed mẫu xe hãng có nguồn thật/trụ 30 kW demo, `last_known_soc`,
-reservation, wait thực, đường thực cho ranking, taper >80%, Cheapest/reliability nâng cao.
+reservation, wait thực, taper >80%, Cheapest/reliability nâng cao.
 Flutter/client, login/OTP/refresh, API charge/stop/progress/statement, RFID credit/settlement và clock
 billing chung không thuộc lượt search này. Test local không chứng minh staging, thiết bị, hiệu năng
 toàn mạng hoặc Definition of Done đã đạt. Kết quả kiểm tra local ngày 09/11/2026; trạng thái

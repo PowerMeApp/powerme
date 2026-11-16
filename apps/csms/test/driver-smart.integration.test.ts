@@ -23,6 +23,7 @@ type Endpoint = (typeof endpoints)[number];
   let fixture: Awaited<ReturnType<typeof seedRoadFixture>>;
   let calls = 0;
   let fault = '';
+  let routeSummary: typeof fetch | undefined;
   const secret = randomBytes(32);
   const q = async (sql: string, args: unknown[] = []) => (await db.$client.query(sql, args)).rows;
   const address = {
@@ -77,6 +78,8 @@ type Endpoint = (typeof endpoints)[number];
     calls++;
     const u = new URL(String(input));
     expect(options?.redirect).toBe('error');
+    if (routeSummary && u.searchParams.get('points_encoded') === 'true')
+      return routeSummary(input, options);
     if (/^\d+$/.test(fault))
       return new Response('synthetic-private-key', { status: Number(fault) });
     if (fault === 'network') throw new Error('synthetic-private-key in URL');
@@ -151,19 +154,20 @@ type Endpoint = (typeof endpoints)[number];
     const bound = server.address();
     if (!bound || typeof bound === 'string') throw new Error('Missing bound port');
     base = `http://127.0.0.1:${bound.port}`;
-    resetListener = (overrides = {}) => {
+    resetListener = (overrides = {}, timeoutMs = 30) => {
       listener = createDriverListener(
         db,
         service,
         { devAuth: false, secret, issuer: 'smart-test', audience: 'driver-test', ...overrides },
-        new RoadDiscovery(db, new VietmapAdapter('synthetic-private-key', network, 30)),
+        new RoadDiscovery(db, new VietmapAdapter('synthetic-private-key', network, timeoutMs)),
       );
     };
   });
-  let resetListener: (overrides?: Partial<DriverApiConfig>) => void;
+  let resetListener: (overrides?: Partial<DriverApiConfig>, timeoutMs?: number) => void;
   beforeEach(async () => {
     calls = 0;
     fault = '';
+    routeSummary = undefined;
     resetListener();
     await q(
       "UPDATE vehicle_models SET connector_type='ccs2',battery_capacity_kwh=87,rated_range_km=300,max_dc_kw=120 WHERE id=$1",
@@ -190,6 +194,230 @@ type Endpoint = (typeof endpoints)[number];
   afterAll(async () => {
     if (server) await new Promise<void>((resolve) => server.close(() => resolve()));
     await db?.$client.end();
+  });
+
+  const smartRoad = '&sort=smart&soc_percent=15';
+  const consent = '&location_consent=true';
+  const summary = (distance: number, time: number) =>
+    Response.json({ code: 'OK', paths: [{ distance, time }] });
+
+  it.each([true, false])(
+    'breaks equal reach and ETA ties only with batch-wide traffic coverage (%s)',
+    async (fullCoverage) => {
+      for (const site of fixture.sites)
+        await q('UPDATE connectors SET max_power_kw=60 WHERE id=$1', [site.connector]);
+      routeSummary = async (input) => {
+        const params = new URL(String(input)).searchParams;
+        expect(params.get('annotations')).toBe('congestion,congestion_distance');
+        const east = Number(params.getAll('point')[1]!.split(',')[1]);
+        const [distance, congested] =
+          east < 0.05 ? [4000, 900] : east < 0.1 ? [5000, 100] : [6000, 700];
+        return Response.json({
+          code: 'OK',
+          paths: [
+            {
+              distance,
+              time: 360000,
+              points_encoded: true,
+              points: '???A',
+              annotations: {
+                congestion: [
+                  { first: 0, last: 1, value: !fullCoverage && east >= 0.1 ? 'unknown' : 'heavy' },
+                ],
+                congestion_distance: [{ first: 0, last: 1, value: congested }],
+              },
+            },
+          ],
+        });
+      };
+      const { status, body } = await get(search(smartRoad + consent));
+      expect(status).toBe(200);
+      expect(body.ranking_source).toBe('vietmap_route');
+      expect(body.items.map((site: any) => site.site_id)).toEqual(
+        (fullCoverage ? [1, 2, 0] : [0, 1, 2]).map((index) => fixture.sites[index]!.id),
+      );
+      for (const station of body.items) {
+        expect(station.est_drive_min).toBe(6);
+        expect(station.est_total_min).toBeCloseTo(
+          6 + station.est_wait_min + station.est_charge_min,
+        );
+      }
+      expect(body.items[fullCoverage ? 0 : 1].road_estimate.congested_distance_m).toBe(100);
+      if (!fullCoverage)
+        expect(body.items[2].road_estimate).not.toHaveProperty('congested_distance_m');
+    },
+  );
+
+  it('ranks by Route reach, then drive + wait + charge; shares cached summaries across pages', async () => {
+    await q("UPDATE connectors SET status='Finishing' WHERE id=$1", [fixture.sites[2]!.connector]);
+    const brief = await get(search(smartRoad));
+    expect(brief.body.ranking_source).toBe('brief');
+    expect(brief.body.items[0].site_id).toBe(fixture.sites[1]!.id);
+    routeSummary = async (input) => {
+      const east = Number(new URL(String(input)).searchParams.getAll('point')[1]!.split(',')[1]);
+      if (east < 0.05) return summary(35000, 500);
+      if (east < 0.1) return summary(12000, 4_800_000);
+      return summary(22002.5, 480001);
+    };
+    let dbReleasedBeforeRoute = true;
+    const originalSummary = routeSummary;
+    routeSummary = (input, options) => {
+      dbReleasedBeforeRoute &&= db.$client.idleCount === db.$client.totalCount;
+      return originalSummary(input, options);
+    };
+    const response = await get(search(smartRoad + consent));
+    expect(response.status).toBe(200);
+    expect(dbReleasedBeforeRoute).toBe(true);
+    expect(response.body.ranking_source).toBe('vietmap_route');
+    expect(response.body.items.map((site: any) => site.site_id)).toEqual([
+      fixture.sites[2]!.id,
+      fixture.sites[1]!.id,
+      fixture.sites[0]!.id,
+    ]);
+    const [first, , last] = response.body.items;
+    expect(first).toMatchObject({
+      reach: 'ok',
+      est_wait_min: 5,
+      road_estimate: { distance_m: 22002.5, duration_s: 481, computed_at: expect.any(String) },
+    });
+    expect(Number.isFinite(Date.parse(first.road_estimate.computed_at))).toBe(true);
+    expect(Object.keys(first.road_estimate).sort()).toEqual([
+      'computed_at',
+      'distance_m',
+      'duration_s',
+    ]);
+    expect(first.est_drive_min).toBeCloseTo(481 / 60);
+    expect(first.est_total_min).toBeCloseTo(481 / 60 + 5 + first.est_charge_min);
+    expect(last.reach).toBe('risky');
+    const next = await get(search(smartRoad + consent + '&page_size=1&page=2'));
+    expect(next.body.items[0]).toEqual(response.body.items[1]);
+    expect(calls).toBe(3);
+  });
+
+  it('requires consent, explicit smart, prerequisites and ownership before sending a request', async () => {
+    for (const args of [
+      smartRoad,
+      smartRoad + '&location_consent=false',
+      '&sort=smart' + consent,
+    ]) {
+      expect((await get(search(args))).body.ranking_source).toBe('brief');
+    }
+    expect((await get(search(smartRoad + consent), null)).status).toBe(401);
+    expect(
+      (await get(search(smartRoad + consent).replace(fixture.vehicle, fixture.otherVehicle)))
+        .status,
+    ).toBe(404);
+    expect((await get(search(smartRoad + '&location_consent=yes'))).status).toBe(400);
+    expect((await get(search(smartRoad + consent + consent))).status).toBe(400);
+    expect(calls).toBe(0);
+  });
+
+  it.each(['name', 'distance'])(
+    'keeps explicit %s ordering with valid SoC and consent',
+    async (sort) => {
+      const siteId = fixture.sites[0]!.id;
+      const [{ site_name: originalName }] = await q('SELECT site_name FROM sites WHERE id=$1', [
+        siteId,
+      ]);
+      await q("UPDATE sites SET site_name='Zulu' WHERE id=$1", [siteId]);
+      try {
+        const baseline = (await get(search(`&sort=${sort}`))).body;
+        const result = await get(search(`&sort=${sort}&soc_percent=15` + consent));
+        expect(result.status).toBe(200);
+        expect(result.body.items.map((site: any) => site.site_id)).toEqual(
+          baseline.items.map((site: any) => site.site_id),
+        );
+        expect(result.body.ranking_source).toBeUndefined();
+        expect(result.body.items.every((site: any) => !('road_estimate' in site))).toBe(true);
+        expect(calls).toBe(0);
+      } finally {
+        await q('UPDATE sites SET site_name=$2 WHERE id=$1', [siteId, originalName]);
+      }
+    },
+  );
+
+  it('skips Vietmap for an empty explicit radius or when all matching statuses are stale', async () => {
+    const empty = await get(search(smartRoad + consent + '&radius_km=1'));
+    expect(empty.body).toMatchObject({ ranking_source: 'brief', items: [], total: 0 });
+    for (const site of fixture.sites)
+      await q("UPDATE charge_points SET last_message_at=now()-interval '11 minutes' WHERE id=$1", [
+        site.cp,
+      ]);
+    const stale = await get(search(smartRoad + consent));
+    expect(stale.body).toMatchObject({ ranking_source: 'brief', total: 3 });
+    expect(calls).toBe(0);
+  });
+
+  it('returns brief on the ranking deadline while shared Route work is still pending', async () => {
+    resetListener({}, 10000);
+    const path = search(smartRoad);
+    const brief = await get(path);
+    let finishRoute!: (value: Response) => void;
+    const routeResponse = new Promise<Response>((resolve) => {
+      finishRoute = resolve;
+    });
+    routeSummary = async () => (await routeResponse).clone();
+    try {
+      const result = await get(path + consent);
+      expect(result).toMatchObject({ status: 200, body: brief.body });
+      expect(calls).toBe(2);
+    } finally {
+      finishRoute(summary(1000, 5000));
+    }
+  });
+
+  it.each(['no_route', 'network', '429', 'partial'])(
+    'returns complete brief fallback on %s',
+    async (failure) => {
+      const brief = await get(search(smartRoad));
+      if (failure === 'partial') {
+        routeSummary = async () =>
+          calls === 1 ? summary(1000, 5000) : Response.json({ code: 'ZERO_RESULTS' });
+      } else {
+        fault = failure;
+      }
+      const result = await get(search(smartRoad + consent));
+      expect(calls).toBeGreaterThan(0);
+      expect(result).toMatchObject({ status: 200, body: brief.body });
+      expect(result.body.items.every((site: any) => !('road_estimate' in site))).toBe(true);
+    },
+  );
+
+  it('bounds the provider shortlist and concurrency independently of pagination', async () => {
+    const extras = [];
+    for (let index = 10; index <= 16; index++) extras.push(await addRoadSite(db, index));
+    try {
+      for (const site of extras) {
+        await q('UPDATE sites SET latitude=0,longitude=0.2 WHERE id=$1', [site.id]);
+        await q("UPDATE connectors SET connector_type='ccs2',max_power_kw=120 WHERE id=$1", [
+          site.connector,
+        ]);
+      }
+      let active = 0;
+      let maxActive = 0;
+      routeSummary = async () => {
+        maxActive = Math.max(maxActive, ++active);
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        active--;
+        return summary(24000, 1200000);
+      };
+      const path = search(smartRoad + consent);
+      const full = (await get(path)).body;
+      expect(full.ranking_source).toBe('vietmap_route');
+      expect(full.items.slice(0, 6).map((site: any) => site.site_id)).toEqual([
+        fixture.sites[1]!.id,
+        ...extras.slice(0, 5).map((site) => site.id),
+      ]);
+      expect(full.items.filter((site: any) => 'road_estimate' in site)).toHaveLength(6);
+      expect(full.total).toBe(10);
+      expect(new Set(full.items.map((site: any) => site.site_id)).size).toBe(10);
+      expect((await get(path + '&page_size=3&page=3')).body.items).toEqual(full.items.slice(6, 9));
+      expect(maxActive).toBe(2);
+      expect(calls).toBe(6);
+    } finally {
+      for (const site of extras)
+        await q("UPDATE charge_points SET lifecycle='disabled' WHERE id=$1", [site.cp]);
+    }
   });
 
   it('B6.1 no SoC preserves legacy distance search with no_soc', async () => {

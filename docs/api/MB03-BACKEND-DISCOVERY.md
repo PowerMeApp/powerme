@@ -1,9 +1,12 @@
 # MB03 backend search/gợi ý — chạy local và bàn giao review
 
-Cập nhật 09/11/2026 trên `wp3/mb-03-vietmap-search-suggest`, base main `6fd720d`.
+Mốc bàn giao 09/11/2026 trên `wp3/mb-03-vietmap-search-suggest`, base main `6fd720d`.
 Ưu tiên [brief 07/11 và khác biệt](../requirements/smart-station-search-brief-20261107.md).
-[OpenAPI 0.4](driver-api.openapi.yaml), [ADR-0017](../adr/0017-driver-discovery-jwt-and-vietmap-adapter.md),
+[OpenAPI Driver API](driver-api.openapi.yaml), [ADR-0017](../adr/0017-driver-discovery-jwt-and-vietmap-adapter.md),
 [edge case/kết quả](MB03-EDGE-CASE-MATRIX.md). Kết quả kiểm tra local ngày 09/11/2026; trạng thái GitHub xem nhánh/commit.
+
+**Quyết định T96** thay hành vi xếp hạng ngày 09/11: ưu tiên Vietmap Route khi có consent và
+đủ điều kiện; brief là phương án dự phòng. Xem [hợp đồng hiện hành §16](DRIVER-API-HOP-DONG.md#16-t96--xếp-hạng-gợi-ý-theo-đường-bộ-vietmap).
 
 ## API hiện thực
 
@@ -13,7 +16,7 @@ Base HTTP console + `/api/driver/v1` (mặc định `http://127.0.0.1:3000`). M�
 | GET route | Hành vi |
 | --- | --- |
 | `/me` | Hồ sơ tối thiểu, xe của active DB Driver từ JWT, không nhận identity query. |
-| `/stations?vehicle_id=...` | Tìm tên/địa chỉ/mã trụ, xe tương thích, trạng thái/freshness. Có SoC/vị trí mặc định smart theo brief. |
+| `/stations?vehicle_id=...` | Tìm tên/địa chỉ/mã trụ, xe tương thích, trạng thái/freshness. Có SoC/vị trí mặc định smart theo brief. `sort=smart&location_consent=true` cho phép dùng Vietmap khi đủ điều kiện. |
 | `/connectors/by-code/{displayCode}/{connectorNo}?vehicle_id=...` | Cổng chuẩn DB, cùng chuẩn đầu cắm owned vehicle; số cổng 1/2. Không suy ID từ site và số cổng. |
 | `/places/autocomplete` | `vehicle_id`, `location_consent=true`, `q` 2–120; latitude/longitude tùy chọn cùng nhau. `{value:[address],computed_at,cached}`. |
 | `/places/resolve` | Owned vehicle, consent, ref `auto:`/`geocode:`; trả địa chỉ/tọa độ, không là ID trạm. |
@@ -24,10 +27,11 @@ với `sort=smart&page_size=3&soc_percent=15&target_soc_percent=80&latitude=...&
 Charge/stop/progress/statement và credit có HTTP từ BE-22 (xem [hợp đồng §12](DRIVER-API-HOP-DONG.md)); time-left vẫn là hợp đồng dự kiến.
 
 JSON snake_case, ID bigint chuỗi, UTC ISO; kW/tọa độ dạng số. Page `{items,total,page,page_size,estimate}`.
-Thiếu SoC/vị trí/spec trả estimate null/lý do. Công thức/giả định công khai, không gọi Route/Matrix
-để xếp hạng; distance_m vẫn haversine. Xếp mọi ứng viên trong bán kính trước phân trang. Thiếu
+Thiếu SoC/vị trí/spec trả estimate null/lý do. Bản 09/11 dùng haversine cho bán kính và brief cho
+xếp hạng; T96 bổ sung Route cho nhóm ứng viên giới hạn theo §16. Cả hai xếp trước phân trang. Thiếu
 công suất/giá giữ null; VND ước tính ceil, khác quyết toán BR-P45. Route thật không fallback đường
-chim bay, traffic unknown; vẫn xem đường tới trạm offline nhưng không xác nhận cổng cho phép Start.
+chim bay; vẫn xem đường tới trạm offline nhưng không xác nhận cổng cho phép Start. T96 bổ sung danh
+sách bước rẽ và đoạn giao thông khi Vietmap có dữ liệu hợp lệ. Xem hợp đồng API §16.
 
 Lỗi 400 input/search/reference; 401 + WWW-Authenticate; 403 role/state/subtype/origin; 404 không có/
 không sở hữu/tương thích; 405 + Allow; 429 + Retry-After 60; 503 auth/policy/provider/location;
@@ -100,8 +104,9 @@ node apps/csms/scripts/vietmap-probe.mjs infra/.env E:/Project/PowerMe/.review/m
 node apps/csms/scripts/vietmap-probe.mjs infra/.env E:/Project/PowerMe/.review/mb03-road-new.json --road-only
 ```
 
-Chưa làm seed xe hãng có nguồn, last-known SoC, reservation, wait thực, reliability, Cheapest/arrival
-tariff, đường thật cho ranking, taper >80%, Flutter/client hoặc auth lifecycle đầy đủ.
+Phạm vi để sau tại mốc 09/11 gồm seed xe hãng có nguồn, last-known SoC, reservation, wait thực,
+reliability, Cheapest/arrival tariff, taper >80%, Flutter/client và auth lifecycle đầy đủ.
+Xếp hạng theo đường bộ đã chuyển sang phạm vi T96.
 MB03 không đổi RFID/settlement hay clock khung giá chung. Upstream BE-19 đã có kiểm
 credit thẻ online; xem [BE-19](../BE-19-CARD-AUTHORIZE.md). Local PG17 không chứng minh staging PG16, thiết bị,
 load toàn mạng hay DoD. Chưa chạy Redocly, Dart generation, Flutter, payment hoặc deployment.

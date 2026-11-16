@@ -51,7 +51,14 @@ export interface SearchStation extends SmartFields {
   latitude: string | null;
   longitude: string | null;
   distance_m: number | null;
+  road_estimate?: RoadEstimate;
   connectors: SearchConnector[];
+}
+export interface RoadEstimate {
+  distance_m: number;
+  duration_s: number;
+  computed_at: string;
+  congested_distance_m?: number;
 }
 export interface StationSearchResult {
   estimate: { soc_percent: number; est_range_km: number; assumptions: SmartSearchConfig } | null;
@@ -60,7 +67,12 @@ export interface StationSearchResult {
   total: number;
   page: number;
   pageSize: number;
+  ranking_source?: 'vietmap_route' | 'brief';
 }
+
+export type EstimateStationRoads = (
+  candidates: readonly SearchStation[],
+) => Promise<readonly RoadEstimate[] | undefined>;
 
 export async function searchStations(
   c: PoolClient,
@@ -70,6 +82,7 @@ export async function searchStations(
   staleAfterMs: number,
   offlineAfterMs: number,
   settings: SmartSearchConfig = DEFAULT_SMART_SEARCH,
+  deferRanking = false,
 ): Promise<StationSearchResult> {
   if (!input || typeof input !== 'object' || Array.isArray(input))
     throw new ChargingError('invalid_search');
@@ -260,16 +273,11 @@ export async function searchStations(
       ],
     )
   ).rows[0]!;
-  let items = row.items.map(({ max_tariff_vnd, ...station }) => {
+  const items = row.items.map(({ max_tariff_vnd, ...station }) => {
     const fields = { ...EMPTY_SMART_FIELDS };
     if (!estimate || station.distance_m === null) return { ...station, ...fields };
     const roadKm = (station.distance_m / 1000) * settings.road_factor;
-    fields.reach =
-      roadKm <= estimate.est_range_km - settings.reserve_km
-        ? 'ok'
-        : roadKm <= estimate.est_range_km
-          ? 'tight'
-          : 'risky';
+    fields.reach = classifyReach(roadKm, estimate.est_range_km, settings.reserve_km);
     const options = station.connectors.flatMap((connector) => {
       const wait =
         connector.driver_status === 'available'
@@ -314,27 +322,93 @@ export async function searchStations(
     );
     return { ...station, ...fields, ...options[0] };
   });
-  if (smart) {
-    const reachOrder = { ok: 0, tight: 1, risky: 2 };
-    items.sort(
-      (a, b) =>
-        Number(a.est_total_min === null) - Number(b.est_total_min === null) ||
-        (a.reach === null ? 3 : reachOrder[a.reach]) -
-          (b.reach === null ? 3 : reachOrder[b.reach]) ||
-        compareNullable(a.est_total_min, b.est_total_min) ||
-        compareNullable(a.distance_m, b.distance_m) ||
-        compareIds(a.site_id, b.site_id),
-    );
-    items = items.slice((page - 1) * pageSize, page * pageSize);
-  }
-  return {
+  const result: StationSearchResult = {
     items,
     total: row.total,
     page,
     pageSize,
     estimate,
+    ...(sort === 'smart' ? { ranking_source: 'brief' as const } : {}),
     ...(reason ? { smart_unavailable_reason: reason } : {}),
   };
+  return deferRanking ? result : rankStationResults(result);
+}
+
+const ROAD_CANDIDATE_LIMIT = 6;
+const reachOrder = { ok: 0, tight: 1, risky: 2 };
+
+export async function rankStationResults(
+  result: StationSearchResult,
+  estimateRoads?: EstimateStationRoads,
+): Promise<StationSearchResult> {
+  const { estimate, page, pageSize } = result;
+  if (!result.ranking_source || !estimate) return result;
+  let items = result.items.sort(compareRank);
+  let ranking_source = result.ranking_source;
+  if (estimateRoads) {
+    const candidates = items
+      .filter(
+        (station) =>
+          station.est_total_min !== null &&
+          station.connectors.some(
+            (connector) =>
+              connector.connector_id === station.best_connector_id &&
+              connector.status_quality === 'fresh',
+          ),
+      )
+      .sort(
+        (a, b) =>
+          a.est_wait_min! + a.est_charge_min! - (b.est_wait_min! + b.est_charge_min!) ||
+          compareIds(a.site_id, b.site_id),
+      )
+      .slice(0, ROAD_CANDIDATE_LIMIT);
+    const roads = candidates.length ? await estimateRoads(candidates) : undefined;
+    if (roads?.length === candidates.length) {
+      const ranked = candidates.map((station, index): SearchStation => {
+        const road_estimate = roads[index]!;
+        const roadKm = road_estimate.distance_m / 1000;
+        const drive = road_estimate.duration_s / 60;
+        return {
+          ...station,
+          road_estimate,
+          reach: classifyReach(roadKm, estimate.est_range_km, estimate.assumptions.reserve_km),
+          est_drive_min: drive,
+          est_total_min: drive + station.est_wait_min! + station.est_charge_min!,
+        };
+      });
+      const compareTraffic = roads.every((road) => road.congested_distance_m !== undefined);
+      const shortlisted = new Set(candidates.map((station) => station.site_id));
+      items = [
+        ...ranked.sort((a, b) => compareRank(a, b, compareTraffic)),
+        ...items.filter((station) => !shortlisted.has(station.site_id)),
+      ];
+      ranking_source = 'vietmap_route';
+    }
+  }
+  return { ...result, ranking_source, items: items.slice((page - 1) * pageSize, page * pageSize) };
+}
+
+function classifyReach(km: number, range: number, reserve: number): SmartFields['reach'] {
+  return km <= range - reserve ? 'ok' : km <= range ? 'tight' : 'risky';
+}
+
+function compareRank(a: SearchStation, b: SearchStation, compareTraffic = false): number {
+  return (
+    Number(a.est_total_min === null) - Number(b.est_total_min === null) ||
+    (a.reach === null ? 3 : reachOrder[a.reach]) - (b.reach === null ? 3 : reachOrder[b.reach]) ||
+    compareNullable(a.est_total_min, b.est_total_min) ||
+    (compareTraffic
+      ? compareNullable(
+          a.road_estimate?.congested_distance_m ?? null,
+          b.road_estimate?.congested_distance_m ?? null,
+        )
+      : 0) ||
+    compareNullable(
+      a.road_estimate?.distance_m ?? a.distance_m,
+      b.road_estimate?.distance_m ?? b.distance_m,
+    ) ||
+    compareIds(a.site_id, b.site_id)
+  );
 }
 
 function compareNullable(a: number | null, b: number | null): number {

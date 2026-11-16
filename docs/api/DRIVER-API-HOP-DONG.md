@@ -9,7 +9,8 @@
 [Brief 07/11](../requirements/smart-station-search-brief-20261107.md) được người dùng ưu tiên cho search/gợi ý:
 `/stations` thêm SoC/target/smart, tính reach và tổng phút trước phân trang; `/stations/suggestions`
 thử nghiệm cũ đã bỏ (404). OpenAPI 0.4 có consent/ownership, GeoJSON lon/lat, nullable estimates và lỗi provider.
-Charge/session/credit HTTP có từ BE-22 (dưới); time-left vẫn chỉ là hợp đồng. Route Vietmap thật tách khỏi xếp hạng theo công thức brief.
+Charge/session/credit HTTP có từ BE-22 (dưới); time-left vẫn chỉ là hợp đồng.
+**T96 (OpenAPI 0.13.0):** gợi ý dùng Vietmap khi tài xế đồng ý chia sẻ điểm đi. Bổ sung bước chỉ đường và giao thông từng đoạn. Xem §16.
 Xem [hướng dẫn MB03](MB03-BACKEND-DISCOVERY.md) cho trạng thái, token local, checks và giới hạn;
 không suy ra OTP/login đã hoàn thành. Thay đổi chưa merge/commit/push khi bàn giao review.
 **BE-21 (09/11/2026, OpenAPI 0.5.0):** thêm `POST /auth/register`, `/auth/login`, `/auth/refresh`
@@ -377,3 +378,49 @@ Luật (WF-04-PLAN Q75–Q81, 11/11/2026):
 - Cùng một tài xế báo nhiều lần chỉ tính một.
 - Nhãn hiện ở `GET /connectors/by-code/{code}/{no}` (`reported_issue`). Nhãn xoá khi sự cố đóng: súng báo `Available`, Operator đóng, hoặc **một phiên trên súng hoàn tất bình thường** (bắt đầu sau khi có sự cố, > 0 Wh, không dừng vì EmergencyStop / PowerLoss / Other) — ADR-0019.
 
+## 16. T96 — xếp hạng gợi ý theo đường bộ Vietmap
+
+`GET /api/driver/v1/stations?vehicle_id=…&sort=smart&latitude=…&longitude=…&soc_percent=…&location_consent=true&page_size=3`.
+Chỉ chuyển tọa độ khi tài xế gửi `sort=smart` và `location_consent=true` rõ ràng, có điểm đi và
+pin hợp lệ, dùng xe sở hữu đủ thông số. Thiếu hoặc gửi `false` dùng brief, kể cả client cũ.
+`sort=name`, `sort=distance` và chế độ tự chọn smart vẫn giữ hành vi tìm kiếm trước đó.
+
+1. CSMS kiểm tra chủ xe, chuẩn cổng, trạng thái và bộ lọc. Haversine xác định bán kính và nhóm
+   gần nhất dự phòng khi bán kính mặc định rỗng. Giữ nguyên bán kính nhập tay.
+2. Sau khi trả kết nối DB, chọn tối đa 6 trạm có thể tính tổng và súng tốt nhất có trạng thái fresh,
+   theo chờ + sạc, rồi `site_id`. Danh sách ứng viên không phụ thuộc số trang.
+3. CSMS gọi Route v4 tối đa 2 lượt đồng thời, ngân sách chờ của cả lượt 4 giây, cache 2 phút theo
+   tài xế. Có đủ tuyến thì xếp nhóm theo reach dựa trên mét đường bộ, tổng phút di chuyển + chờ +
+   sạc, mét ùn tắc tăng dần nếu cả nhóm có dữ liệu đầy đủ, mét đường bộ, cuối cùng `site_id`.
+   Phút di chuyển là `duration_s / 60` từ Vietmap và chỉ cộng một lần vào tổng. Phần ngoài nhóm nối
+   phía sau theo thứ tự brief, rồi mới cắt trang. API trả `ranking_source: vietmap_route`.
+4. Thiếu consent/điều kiện/ứng viên hợp lệ, thiếu tuyến, lỗi hoặc hết quota/thời gian → toàn bộ
+   lượt dùng thứ tự brief và trả `ranking_source: brief`. Không trả `road_estimate` khi fallback.
+
+Mỗi mục có tuyến thật trả `road_estimate: { distance_m, duration_s, computed_at }` với mét,
+giây nguyên và mốc ISO 8601. Giữ `distance_m` cấp trạm cho client cũ và lọc bán kính. Khi thiếu
+`road_estimate`, app bỏ số km và thời gian di chuyển theo đường bộ. `est_drive_min`/reach trong
+brief là giả định xếp hạng. Tải hình học từ `GET /stations/{site_id}/route` khi tài xế chọn xem
+đường. CSMS không dùng Matrix.
+
+### Chỉ đường và giao thông theo đoạn
+
+- `GET /stations/{site_id}/route` có thể trả thêm `instructions`, `traffic_segments` và
+  `congested_distance_m`. Hai mốc `start_index/end_index` tính từ 0, gồm cả hai đầu theo
+  `geometry.coordinates`. Bước rẽ có thể nằm tại một điểm. `sign` giữ dấu gốc, `duration_s`
+  làm tròn lên từ mili giây. `text` dùng tên đường khi thiếu nội dung và có thể rỗng.
+- Đoạn giao thông có ít nhất một cạnh, được sắp theo tuyến và có thể chung điểm đầu/cuối.
+  Mức là `low`, `moderate`, `heavy`, `severe` hoặc `unknown`. Khoảng trống hoặc
+  `unknown` nghĩa là chưa có thông tin. Geometry, khoảng cách và ETA vẫn trả khi thiếu các trường
+  bổ sung. `traffic_quality: unknown` là giá trị tương thích client cũ.
+- Cả truy vấn chi tiết và truy vấn gợi ý xin `annotations=congestion,congestion_distance`.
+  Route và `road_estimate` chỉ trả `congested_distance_m` khi các đoạn có mức đã biết phủ toàn bộ
+  geometry và từng đoạn `heavy/severe` có số mét với cặp chỉ số trùng khớp. Giá trị 0 xác nhận
+  không có mét ùn tắc nặng trong dữ liệu đầy đủ. Dữ liệu khuyết không dùng để phân hạng. Số mét
+  chỉ phá hòa khi cùng reach và cùng tổng phút, không thêm thời gian phạt.
+
+Đối chiếu [Route v4](https://maps.vietmap.vn/docs/vi/map-api/route-version/route-v4/),
+[Routing Agent Doc](https://maps.vietmap.vn/docs/assets/agents/routing.txt) và
+[bản Playground công khai](https://tools.vietmap.vn/playground/assets/index-DQkfeQKM.js).
+Playground dùng `paths[0].annotations` và các hàng `{ first, last, value }`. Mẫu công khai ghi
+nhận mảng số mét có cả mức nhẹ. CSMS ghép theo cặp chỉ số và chỉ cộng heavy/severe.

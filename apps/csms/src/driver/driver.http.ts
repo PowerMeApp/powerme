@@ -3,7 +3,7 @@ import type { TopUpService } from '../billing/top-up.service.js';
 import type { Db } from '../db/db.module.js';
 import type { DriverChargingService } from '../sessions/driver-charging.service.js';
 import { ChargingError } from '../sessions/charging-error.js';
-import type { StationSearchInput } from '../sessions/station-search.js';
+import type { EstimateStationRoads, StationSearchInput } from '../sessions/station-search.js';
 import { DriverAccounts, DriverRateLimited } from './driver-account.js';
 import { authenticateDriver, databaseId, DriverApiConfig, DriverApiError } from './driver-auth.js';
 import {
@@ -260,6 +260,7 @@ export function createDriverListener(
         'include_vinfast_only',
         'soc_percent',
         'target_soc_percent',
+        'location_consent',
       ]);
       const vehicleId = databaseId(q.get('vehicle_id'));
       const input: StationSearchInput = {};
@@ -287,26 +288,53 @@ export function createDriverListener(
         if (value !== 'true' && value !== 'false') throw new DriverApiError(400, 'invalid_search');
         input.includeVinfastOnly = value === 'true';
       }
-      const result = await service.findStations(driverId, vehicleId, input);
-      send(res, 200, {
-        items: result.items.map((station) => ({
-          ...station,
-          latitude: station.latitude === null ? null : Number(station.latitude),
-          longitude: station.longitude === null ? null : Number(station.longitude),
-          connectors: station.connectors.map((c) => ({
-            ...c,
-            max_power_kw: c.max_power_kw === null ? null : Number(c.max_power_kw),
-            rated_power_kw: c.rated_power_kw === null ? null : Number(c.rated_power_kw),
+      const consent = q.get('location_consent');
+      if (consent !== null && consent !== 'true' && consent !== 'false')
+        throw new DriverApiError(400, 'invalid_search');
+      const controller = new AbortController();
+      const cancel = () => controller.abort();
+      const { latitude, longitude } = input;
+      const estimateRoads: EstimateStationRoads | undefined =
+        consent === 'true' &&
+        input.sort === 'smart' &&
+        latitude !== undefined &&
+        longitude !== undefined
+          ? (candidates) =>
+              road.estimateStationRoads(
+                driverId,
+                { latitude, longitude },
+                candidates,
+                controller.signal,
+              )
+          : undefined;
+      res.once('close', cancel);
+      if (res.destroyed) cancel();
+      try {
+        const result = await service.findStations(driverId, vehicleId, input, estimateRoads);
+        if (controller.signal.aborted) return;
+        send(res, 200, {
+          items: result.items.map((station) => ({
+            ...station,
+            latitude: station.latitude === null ? null : Number(station.latitude),
+            longitude: station.longitude === null ? null : Number(station.longitude),
+            connectors: station.connectors.map((c) => ({
+              ...c,
+              max_power_kw: c.max_power_kw === null ? null : Number(c.max_power_kw),
+              rated_power_kw: c.rated_power_kw === null ? null : Number(c.rated_power_kw),
+            })),
           })),
-        })),
-        estimate: result.estimate,
-        ...(result.smart_unavailable_reason
-          ? { smart_unavailable_reason: result.smart_unavailable_reason }
-          : {}),
-        total: result.total,
-        page: result.page,
-        page_size: result.pageSize,
-      });
+          estimate: result.estimate,
+          ...(result.ranking_source ? { ranking_source: result.ranking_source } : {}),
+          ...(result.smart_unavailable_reason
+            ? { smart_unavailable_reason: result.smart_unavailable_reason }
+            : {}),
+          total: result.total,
+          page: result.page,
+          page_size: result.pageSize,
+        });
+      } finally {
+        res.off('close', cancel);
+      }
     } catch (error) {
       if (error instanceof DriverApiError) {
         if (error.status === 429)
