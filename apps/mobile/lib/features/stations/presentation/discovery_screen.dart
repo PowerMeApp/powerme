@@ -468,7 +468,7 @@ class _DiscoveryScreenState extends ConsumerState<DiscoveryScreen> {
                               ),
                               const SizedBox(height: 6),
                               Text(
-                                selected.station.address,
+                                stationAddress(selected.station, copy),
                                 style: text.bodySmall?.copyWith(
                                   color: PowerMeColors.muted,
                                 ),
@@ -852,7 +852,7 @@ class _MapConnector extends StatelessWidget {
         ),
         const SizedBox(height: 10),
         Text(
-          '${connector.powerW ~/ 1000} kW · ${vnd(station.tariffVndPerKwh)}/kWh',
+          '${connectorPower(connector, copy)} · ${vnd(station.tariffVndPerKwh)}/kWh',
           style: const TextStyle(
             color: PowerMeColors.muted,
             fontFeatures: [FontFeature.tabularFigures()],
@@ -1102,7 +1102,7 @@ class _StationCard extends StatelessWidget {
                         Text(station.name, style: text.titleMedium),
                         const SizedBox(height: 4),
                         Text(
-                          station.address,
+                          stationAddress(station, copy),
                           style: text.bodyMedium?.copyWith(
                             color: PowerMeColors.muted,
                           ),

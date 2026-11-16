@@ -10,6 +10,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 const _tunnel = 'http://10.0.2.2:3811/api/driver/v1';
 const _https = 'https://fixture.invalid/api/driver/v1';
+const _tileAsset = 'config/vietmap.local.json';
 
 void main() {
   test('loads the exact configured tunnel URL and consent version', () async {
@@ -70,12 +71,17 @@ void main() {
   testWidgets('main reads the bundled config and opens API sign-in', (
     tester,
   ) async {
-    _mockRootAsset(tester, '{"API_BASE_URL":"$_tunnel"}');
+    _mockRootAsset(
+      tester,
+      '{"API_BASE_URL":"$_tunnel"}',
+      tile: '{"apiKey":"fixture tile"}',
+    );
     await app.main();
     await tester.pumpAndSettle();
 
     final apiApp = tester.widget<ApiApp>(find.byType(ApiApp));
     expect(apiApp.config.baseUrl.toString(), '$_tunnel/');
+    expect(apiApp.vietmapConfig?.configured, true);
     expect(find.text('Đăng ký hiện chưa khả dụng.'), findsOneWidget);
   });
 
@@ -109,18 +115,23 @@ class _ConfigBundle extends CachingAssetBundle {
 ByteData _assetBytes(String source) =>
     ByteData.sublistView(Uint8List.fromList(utf8.encode(source)));
 
-void _mockRootAsset(WidgetTester tester, String? source) {
+void _mockRootAsset(WidgetTester tester, String? source, {String? tile}) {
   final messenger = tester.binding.defaultBinaryMessenger;
   rootBundle.evict(ApiConfig.assetPath);
+  rootBundle.evict(_tileAsset);
   messenger.setMockMessageHandler('flutter/assets', (message) async {
-    if (message != null &&
-        utf8.decode(Uint8List.sublistView(message)) == ApiConfig.assetPath) {
+    final path = message == null
+        ? null
+        : utf8.decode(Uint8List.sublistView(message));
+    if (path == ApiConfig.assetPath) {
       return source == null ? null : _assetBytes(source);
     }
+    if (path == _tileAsset) return tile == null ? null : _assetBytes(tile);
     return messenger.delegate.send('flutter/assets', message);
   });
   addTearDown(() {
     rootBundle.evict(ApiConfig.assetPath);
+    rootBundle.evict(_tileAsset);
     messenger.setMockMessageHandler('flutter/assets', null);
   });
 }

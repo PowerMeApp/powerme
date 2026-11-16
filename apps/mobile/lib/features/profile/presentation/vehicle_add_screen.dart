@@ -11,6 +11,7 @@ import '../application/vehicle_catalog.dart';
 import '../domain/profile_repository.dart';
 import '../domain/vehicle.dart';
 import 'vehicle_management_feedback.dart';
+import 'vehicle_visuals.dart';
 
 class VehicleAddScreen extends ConsumerStatefulWidget {
   const VehicleAddScreen({super.key});
@@ -88,7 +89,6 @@ class _VehicleAddScreenState extends ConsumerState<VehicleAddScreen> {
       }
     });
     final copy = AppCopy(state.profile.language);
-    final text = Theme.of(context).textTheme;
     final models = catalog.asData?.value ?? const [];
     final available = VehicleCatalog(models);
     final selected = available.find(_modelId);
@@ -116,20 +116,12 @@ class _VehicleAddScreenState extends ConsumerState<VehicleAddScreen> {
           Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Semantics(
-                header: true,
-                child: Text(
-                  copy.text('Thêm xe', 'Add vehicle'),
-                  style: text.headlineLarge,
-                ),
-              ),
-              const SizedBox(height: 6),
-              Text(
-                copy.text(
+              VehicleHeading(
+                copy.text('Thêm xe điện mới', 'Add an electric vehicle'),
+                description: copy.text(
                   'Chọn mẫu xe và nhập biển số để thêm vào hồ sơ.',
                   'Select a model and enter its plate number.',
                 ),
-                style: text.bodyMedium?.copyWith(color: PowerMeColors.muted),
               ),
               const SizedBox(height: 20),
               if (catalog.isLoading)
@@ -294,6 +286,7 @@ class _VehicleAddScreenState extends ConsumerState<VehicleAddScreen> {
           const SizedBox(height: 8),
           _ModelCard(
             key: ValueKey('vehicle-model-${model.id}'),
+            copy: copy,
             model: model,
             selected: model.id == _modelId,
             onTap: enabled
@@ -367,11 +360,13 @@ class _VehicleAddScreenState extends ConsumerState<VehicleAddScreen> {
 class _ModelCard extends StatelessWidget {
   const _ModelCard({
     super.key,
+    required this.copy,
     required this.model,
     required this.selected,
     required this.onTap,
   });
 
+  final AppCopy copy;
   final VehicleModel model;
   final bool selected;
   final VoidCallback? onTap;
@@ -403,26 +398,29 @@ class _ModelCard extends StatelessWidget {
             padding: const EdgeInsets.all(12),
             child: Row(
               children: [
-                ExcludeSemantics(
-                  child: Container(
-                    width: 40,
-                    height: 40,
-                    decoration: BoxDecoration(
-                      color: PowerMeColors.black,
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    child: Icon(
-                      Icons.electric_car_outlined,
-                      size: 22,
-                      color: selected ? PowerMeColors.teal : PowerMeColors.gold,
-                    ),
+                SizedBox(
+                  width: 60,
+                  child: VehiclePhoto(
+                    copy: copy,
+                    imageUrl: model.imageUrl,
+                    compact: true,
                   ),
                 ),
                 const SizedBox(width: 12),
                 Expanded(
-                  child: Text(
-                    '${model.brand} ${model.model}',
-                    style: text.titleMedium,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        '${model.brand} ${model.model}',
+                        style: text.titleMedium,
+                      ),
+                      if (model.imageCredit case final String credit
+                          when !selected) ...[
+                        const SizedBox(height: 4),
+                        Text(credit, style: text.bodySmall),
+                      ],
+                    ],
                   ),
                 ),
                 const SizedBox(width: 8),
@@ -483,6 +481,12 @@ class _VehicleSpecs extends StatelessWidget {
         Text(
           '${model.brand} ${model.model}',
           style: text.bodyMedium?.copyWith(color: PowerMeColors.teal),
+        ),
+        const SizedBox(height: 8),
+        VehiclePhoto(
+          copy: copy,
+          imageUrl: model.imageUrl,
+          imageCredit: model.imageCredit,
         ),
         const SizedBox(height: 8),
         for (final (label, value) in specs)

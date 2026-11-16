@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import 'app/composition/api_app.dart';
+import 'app/composition/vietmap_config.dart';
 import 'core/api/api_config.dart';
 import 'core/theme/powerme_theme.dart';
 
@@ -13,7 +14,8 @@ Future<void> main() async {
       rootBundle,
       allowTunnelHttp: kDebugMode,
     );
-    runApp(ApiApp(config: config));
+    final vietmapConfig = await VietmapConfig.load(rootBundle);
+    runApp(ApiApp(config: config, vietmapConfig: vietmapConfig));
   } on FormatException {
     runApp(
       MaterialApp(

@@ -67,6 +67,7 @@ flutter:
     - assets/brand/powerme-wordmark.png
     - assets/brand/powerme-master-icon.png
     - assets/brand/powerme-secondary-icon.png
+    - assets/vehicles/ev-illustration.webp
 
   # To add assets to your application, add an assets section, like this:
   # assets:

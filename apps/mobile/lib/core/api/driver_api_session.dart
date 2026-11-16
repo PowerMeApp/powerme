@@ -109,6 +109,27 @@ class DriverApiSession {
         await _protectedRead(_activeSession(), 'vehicle-models'),
       );
 
+  Future<Map<String, dynamic>> readForVehicle(
+    String path,
+    String vehicleId,
+    Map<String, Object?> query, {
+    CancelToken? cancel,
+  }) async {
+    final session = _activeSession();
+    if (!session.account!.vehicles.any((vehicle) => vehicle.id == vehicleId)) {
+      throw const DriverApiException(DriverApiProblem.http, status: 404);
+    }
+    if (cancel != null) session.reads.add(cancel);
+    try {
+      return await _protectedRead(session, path, {
+        ...query,
+        'vehicle_id': vehicleId,
+      }, cancel);
+    } finally {
+      session.reads.remove(cancel);
+    }
+  }
+
   Future<DriverAccountResponse> addVehicle({
     required String plateNumber,
     required String modelId,
@@ -163,13 +184,15 @@ class DriverApiSession {
 
   Future<Map<String, dynamic>> _protectedRead(
     _Session session,
-    String path,
-  ) async {
+    String path, [
+    Map<String, Object?>? query,
+    CancelToken? cancel,
+  ]) async {
     _requireCurrent(session);
     final accessToken = session.accessToken;
     try {
       try {
-        return await _get(session, path, accessToken);
+        return await _get(session, path, accessToken, query, cancel);
       } on DriverApiException catch (error) {
         if (error.status != 401) rethrow;
       }
@@ -178,7 +201,7 @@ class DriverApiSession {
         await _refreshOnce(session);
       }
       _requireCurrent(session);
-      return await _get(session, path, session.accessToken);
+      return await _get(session, path, session.accessToken, query, cancel);
     } on DriverApiException catch (error) {
       if (error.status == 401 || error.status == 403) {
         _end(
@@ -196,7 +219,16 @@ class DriverApiSession {
     _Session session,
     String path,
     String token,
-  ) => _request(session, path, accessToken: token, expectedStatus: 200);
+    Map<String, Object?>? query, [
+    CancelToken? cancel,
+  ]) => _request(
+    session,
+    path,
+    accessToken: token,
+    expectedStatus: 200,
+    query: query,
+    cancel: cancel,
+  );
 
   Future<void> _refreshOnce(_Session session) =>
       session.refreshInFlight ??= _refresh(session).whenComplete(() {
@@ -220,7 +252,9 @@ class DriverApiSession {
     String method = 'GET',
     required int expectedStatus,
     Map<String, Object?>? body,
+    Map<String, Object?>? query,
     String? accessToken,
+    CancelToken? cancel,
   }) async {
     final response = await _send(
       session,
@@ -228,7 +262,9 @@ class DriverApiSession {
       method: method,
       expectedStatus: expectedStatus,
       body: body,
+      query: query,
       accessToken: accessToken,
+      cancel: cancel,
     );
     return _decodeObject(response.data) ?? (throw _malformed);
   }
@@ -239,7 +275,9 @@ class DriverApiSession {
     required String method,
     required int expectedStatus,
     Map<String, Object?>? body,
+    Map<String, Object?>? query,
     String? accessToken,
+    CancelToken? cancel,
   }) async {
     _requireCurrent(session);
     late final Response<String> response;
@@ -247,7 +285,8 @@ class DriverApiSession {
       response = await _dio.request<String>(
         path,
         data: body,
-        cancelToken: session.cancel,
+        queryParameters: query,
+        cancelToken: cancel ?? session.cancel,
         options: Options(
           method: method,
           contentType: body == null ? null : Headers.jsonContentType,
@@ -274,6 +313,8 @@ class DriverApiSession {
           'unknown_vehicle_model' => 'unknown_vehicle_model',
           'plate_taken' => 'plate_taken',
           'vehicle_in_use' => 'vehicle_in_use',
+          'provider_unavailable' => 'provider_unavailable',
+          'station_location_unavailable' => 'station_location_unavailable',
           _ => null,
         },
       );
@@ -302,6 +343,9 @@ class DriverApiSession {
     session.accessToken = '';
     session.refreshToken = '';
     session.cancel.cancel();
+    for (final cancel in session.reads) {
+      cancel.cancel();
+    }
   }
 
   void dispose() {
@@ -313,6 +357,7 @@ class DriverApiSession {
 
 class _Session {
   final cancel = CancelToken();
+  final reads = <CancelToken>{};
   String accessToken = '';
   String refreshToken = '';
   Future<void>? refreshInFlight;

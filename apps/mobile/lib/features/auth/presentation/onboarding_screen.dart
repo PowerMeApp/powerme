@@ -140,11 +140,6 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
             Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Text(
-                  'Bước ${_step + 1} / $stepCount',
-                  style: text.labelMedium?.copyWith(color: PowerMeColors.gold),
-                ),
-                const SizedBox(height: 6),
                 Semantics(
                   header: true,
                   child: Text(
@@ -152,16 +147,28 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
                     style: text.headlineLarge,
                   ),
                 ),
-                const SizedBox(height: 6),
+                const SizedBox(height: 8),
                 Text(
                   [
                     'Đọc và xác nhận mục đích xử lý dữ liệu của PowerMe.',
                     'Nhập thông tin để tạo tài khoản PowerMe.',
                     'Lưu cấu hình xe để lọc trạm sạc tương thích.',
                   ][_step],
-                  style: text.bodyMedium?.copyWith(color: PowerMeColors.muted),
+                  style: text.bodyLarge?.copyWith(color: PowerMeColors.muted),
                 ),
-                const SizedBox(height: 20),
+                const SizedBox(height: 16),
+                Text(
+                  'Bước ${_step + 1} / $stepCount',
+                  style: text.labelLarge?.copyWith(color: PowerMeColors.gold),
+                ),
+                const SizedBox(height: 10),
+                ExcludeSemantics(
+                  child: LinearProgressIndicator(
+                    value: (_step + 1) / stepCount,
+                    minHeight: 3,
+                  ),
+                ),
+                const SizedBox(height: 16),
                 if (_step == 0)
                   _consentCard(needsVehicle: needsVehicle, busy: auth.busy)
                 else

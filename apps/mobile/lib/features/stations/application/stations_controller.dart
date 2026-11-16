@@ -30,9 +30,11 @@ class StationsState {
              (option) => switch (filter) {
                StationFilter.all => true,
                StationFilter.available =>
-                 option.status == StationStatus.available &&
-                     option.connector.quality == DataQuality.observed,
-               StationFilter.highPower => option.connector.powerW >= 120000,
+                 option.connector.availableNow ??
+                     (option.status == StationStatus.available &&
+                         option.connector.quality == DataQuality.observed),
+               StationFilter.highPower =>
+                 (option.connector.powerW ?? 0) >= 120000,
              },
            )
            .toList(growable: false) {
@@ -146,8 +148,16 @@ class StationListing {
   StationListing(this.station, this.options);
   final Station station;
   final List<StationOption> options;
-  DateTime get updatedAt =>
-      options.map((o) => o.updatedAt).reduce((a, b) => a.isBefore(b) ? a : b);
+  DateTime? get updatedAt {
+    DateTime? oldest;
+    for (final option in options) {
+      final time = option.updatedAt;
+      if (time == null) return null;
+      if (oldest == null || time.isBefore(oldest)) oldest = time;
+    }
+    return oldest;
+  }
+
   int get available => options
       .where(
         (o) =>
@@ -159,8 +169,8 @@ class StationListing {
       options.any((o) => o.connector.quality != DataQuality.observed);
   String get connectors =>
       options.map((o) => o.connector.type).toSet().join(' / ');
-  int get maxPowerW => options.fold(
-    0,
-    (power, o) => o.connector.powerW > power ? o.connector.powerW : power,
-  );
+  int get maxPowerW => options.fold(0, (power, o) {
+    final watts = o.connector.powerW;
+    return watts != null && watts > power ? watts : power;
+  });
 }

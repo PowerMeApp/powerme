@@ -5,6 +5,11 @@ class Vehicle {
     required this.model,
     required List<String> connectors,
     this.plateNumber,
+    this.batteryCapacityKwh,
+    this.ratedRangeKm,
+    this.maxDcKw,
+    this.imageUrl,
+    this.imageCredit,
     bool? isVinFast,
   }) : connectors = List.unmodifiable(connectors),
        isVinFast = isVinFast ?? brand.trim().toLowerCase() == 'vinfast';
@@ -13,6 +18,11 @@ class Vehicle {
   final String model;
   final List<String> connectors;
   final String? plateNumber;
+  final num? batteryCapacityKwh;
+  final int? ratedRangeKm;
+  final num? maxDcKw;
+  final String? imageUrl;
+  final String? imageCredit;
   final bool isVinFast;
   String get label => '$brand $model';
 }
@@ -26,6 +36,8 @@ class VehicleModel {
     this.batteryCapacityKwh,
     this.ratedRangeKm,
     this.maxDcKw,
+    this.imageUrl,
+    this.imageCredit,
   });
 
   final String id;
@@ -35,6 +47,8 @@ class VehicleModel {
   final num? batteryCapacityKwh;
   final int? ratedRangeKm;
   final num? maxDcKw;
+  final String? imageUrl;
+  final String? imageCredit;
 
   String get label => '$brand $model · $connector';
 }

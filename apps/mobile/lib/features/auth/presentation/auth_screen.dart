@@ -58,7 +58,7 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
     final auth = ref.watch(authControllerProvider);
     final registration = ref.watch(registrationOptionsProvider);
     final text = Theme.of(context).textTheme;
-    final mutedBody = text.bodyMedium?.copyWith(color: PowerMeColors.muted);
+    final mutedBody = text.bodyLarge?.copyWith(color: PowerMeColors.muted);
     return AnnotatedRegion<SystemUiOverlayStyle>(
       value: SystemUiOverlayStyle.light.copyWith(
         statusBarColor: Colors.transparent,
@@ -71,16 +71,20 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
             child: ConstrainedBox(
               constraints: const BoxConstraints(maxWidth: 480),
               child: SingleChildScrollView(
-                padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+                padding: const EdgeInsets.fromLTRB(20, 8, 20, 28),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
                     const _LoginBrand(),
+                    const SizedBox(height: 12),
                     Semantics(
                       header: true,
-                      child: Text('Chào mừng trở lại', style: text.titleLarge),
+                      child: Text(
+                        'Chào mừng trở lại',
+                        style: text.headlineLarge,
+                      ),
                     ),
-                    const SizedBox(height: 4),
+                    const SizedBox(height: 8),
                     Text(
                       'Đăng nhập để tiếp tục hành trình của bạn.',
                       style: mutedBody,
@@ -204,43 +208,9 @@ class _LoginBrand extends StatelessWidget {
   const _LoginBrand();
 
   @override
-  Widget build(BuildContext context) => ShaderMask(
-    // Screen blending lights the logo's black backing along with the surface.
-    blendMode: BlendMode.screen,
-    shaderCallback: (bounds) =>
-        RadialGradient(
-          colors: [
-            PowerMeColors.teal.withValues(alpha: .14),
-            Colors.transparent,
-          ],
-        ).createShader(
-          Rect.fromCircle(
-            center: bounds.center - const Offset(40, 7),
-            radius: 92,
-          ),
-        ),
-    child: ShaderMask(
-      blendMode: BlendMode.screen,
-      shaderCallback: (bounds) =>
-          RadialGradient(
-            colors: [
-              PowerMeColors.gold.withValues(alpha: .15),
-              Colors.transparent,
-            ],
-          ).createShader(
-            Rect.fromCircle(
-              center: bounds.center + const Offset(40, 8),
-              radius: 76,
-            ),
-          ),
-      child: const ColoredBox(
-        color: PowerMeColors.black,
-        child: SizedBox(
-          height: 204,
-          child: Center(child: BrandMark(hero: true)),
-        ),
-      ),
-    ),
+  Widget build(BuildContext context) => const Padding(
+    padding: EdgeInsets.symmetric(vertical: 12),
+    child: Center(child: BrandMark(hero: true)),
   );
 }
 
@@ -257,13 +227,7 @@ class _LoginField extends StatelessWidget {
       Padding(
         padding: const EdgeInsets.only(left: 4, bottom: 6),
         child: ExcludeSemantics(
-          child: Text(
-            label.toUpperCase(),
-            style: Theme.of(context).textTheme.labelMedium?.copyWith(
-              color: PowerMeColors.muted,
-              letterSpacing: .8,
-            ),
-          ),
+          child: Text(label, style: Theme.of(context).textTheme.labelLarge),
         ),
       ),
       Semantics(label: label, child: child),

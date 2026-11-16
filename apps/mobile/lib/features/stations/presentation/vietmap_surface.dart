@@ -1,17 +1,22 @@
 import 'dart:async';
-import 'dart:math' show Point;
-import 'package:flutter/services.dart';
-import '../domain/station.dart';
+import 'dart:math' show Point, min, max;
+import 'dart:ui' as ui;
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:vietmap_flutter_gl/vietmap_flutter_gl.dart';
+
 import '../../../app/composition/vietmap_config.dart';
 import '../../../core/l10n/app_copy.dart';
 import '../../../core/theme/powerme_theme.dart';
 import '../../profile/domain/driver_profile.dart';
 import '../application/map_location_controller.dart';
 import '../domain/map_location.dart';
+import '../domain/station.dart';
+import '../domain/station_discovery.dart';
+import 'route_status.dart';
 
 class VietmapSurface extends ConsumerStatefulWidget {
   const VietmapSurface({
@@ -21,6 +26,11 @@ class VietmapSurface extends ConsumerStatefulWidget {
     this.stations = const [],
     this.selectedId,
     this.onSelect,
+    this.fitResults = false,
+    this.origin,
+    this.routePoints = const [],
+    this.trafficSegments = const [],
+    this.maneuver,
     this.copy = const AppCopy(AppLanguage.vietnamese),
   });
   final VietmapConfig config;
@@ -28,7 +38,18 @@ class VietmapSurface extends ConsumerStatefulWidget {
   final List<Station> stations;
   final String? selectedId;
   final ValueChanged<String>? onSelect;
+  final bool fitResults;
+  final MapLocation? origin;
+  final List<MapLocation> routePoints;
+  final List<RouteTrafficSegment> trafficSegments;
+  final RouteManeuver? maneuver;
   final AppCopy copy;
+
+  static bool get isSupported =>
+      kIsWeb ||
+      defaultTargetPlatform == TargetPlatform.android ||
+      defaultTargetPlatform == TargetPlatform.iOS;
+
   @override
   ConsumerState<VietmapSurface> createState() => VietmapSurfaceState();
 }
@@ -41,13 +62,22 @@ class VietmapSurfaceState extends ConsumerState<VietmapSurface> {
   int _attempt = 0;
   int _styleEpoch = 0;
   Future<void> _pinQueue = Future.value();
+  bool _contentDirty = false;
+  final _maneuverImages = <IconData>{};
+  RouteManeuver? _renderedManeuver;
+  Symbol? _maneuverSymbol;
 
   @override
   void didUpdateWidget(covariant VietmapSurface oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.selectedId != widget.selectedId ||
-        !listEquals(oldWidget.stations, widget.stations)) {
-      _syncPins();
+    final contentChanged =
+        oldWidget.selectedId != widget.selectedId ||
+        oldWidget.origin != widget.origin ||
+        !listEquals(oldWidget.stations, widget.stations) ||
+        !listEquals(oldWidget.routePoints, widget.routePoints) ||
+        !listEquals(oldWidget.trafficSegments, widget.trafficSegments);
+    if (contentChanged || oldWidget.maneuver != widget.maneuver) {
+      _syncPins(contentChanged: contentChanged);
     }
   }
 
@@ -58,10 +88,11 @@ class VietmapSurfaceState extends ConsumerState<VietmapSurface> {
     }
   }
 
-  void _syncPins({bool loadImage = false}) {
+  void _syncPins({bool loadImage = false, bool contentChanged = true}) {
     final controller = _controller;
     final epoch = _styleEpoch;
     if (!_ready || controller == null) return;
+    _contentDirty |= contentChanged;
     bool current() =>
         mounted && controller == _controller && epoch == _styleEpoch;
     // Serialize native writes; stale style/filter work cannot restore old pins.
@@ -69,6 +100,9 @@ class VietmapSurfaceState extends ConsumerState<VietmapSurface> {
         .then((_) async {
           if (!current()) return;
           if (loadImage) {
+            _maneuverImages.clear();
+            _renderedManeuver = null;
+            _maneuverSymbol = null;
             final bytes = await rootBundle.load(
               'assets/brand/powerme-secondary-icon.png',
             );
@@ -82,32 +116,188 @@ class VietmapSurfaceState extends ConsumerState<VietmapSurface> {
             );
           }
           if (!current()) return;
-          await controller.clearSymbols();
-          for (final station in widget.stations) {
-            if (!current()) return;
-            final point = station.location;
-            if (point == null) continue;
-            await controller.addSymbol(
-              SymbolOptions(
-                geometry: LatLng(point.latitude, point.longitude),
-                iconImage: 'powerme-charger',
-                iconSize: station.id == widget.selectedId ? .28 : .23,
-                textField: station.name,
-                textSize: 12,
-                textOffset: const Offset(0, 2.5),
-                textColor: station.id == widget.selectedId
-                    ? PowerMeColors.teal
-                    : PowerMeColors.gold,
-                textHaloColor: PowerMeColors.black,
-                textHaloWidth: 2,
-              ),
-              {'stationId': station.id},
-            );
+          final redraw = _contentDirty;
+          if (redraw) {
+            _contentDirty = false;
+            await _syncStations(controller, current);
+            if (current() && widget.fitResults) {
+              await _syncGeography(controller, current);
+            }
+          }
+          if (current() && widget.fitResults) {
+            await _syncManeuver(controller, current, redraw: redraw);
           }
         })
         .catchError((Object _) {
           if (current()) setState(() => _failed = true);
         });
+  }
+
+  LatLng _latLng(MapLocation point) => LatLng(point.latitude, point.longitude);
+
+  Future<void> _syncStations(
+    VietmapController controller,
+    bool Function() current,
+  ) async {
+    final symbols = controller.symbols;
+    if (symbols.isNotEmpty) await controller.removeSymbols(symbols);
+    if (!current()) return;
+    _maneuverSymbol = null;
+    for (final station in widget.stations) {
+      if (!current()) return;
+      final point = station.location;
+      if (point == null) continue;
+      await controller.addSymbol(
+        SymbolOptions(
+          geometry: _latLng(point),
+          iconImage: 'powerme-charger',
+          iconSize: station.id == widget.selectedId ? .28 : .23,
+          textField: station.name,
+          textSize: 12,
+          textOffset: const Offset(0, 2.5),
+          textColor: station.id == widget.selectedId
+              ? PowerMeColors.teal
+              : PowerMeColors.gold,
+          textHaloColor: PowerMeColors.black,
+          textHaloWidth: 2,
+          zIndex: 0,
+        ),
+        {'stationId': station.id},
+      );
+    }
+  }
+
+  Future<void> _syncGeography(
+    VietmapController controller,
+    bool Function() current,
+  ) async {
+    final origin = widget.origin;
+    final route = widget.routePoints;
+    final circles = controller.circles;
+    if (circles.isNotEmpty) await controller.removeCircles(circles);
+    if (!current()) return;
+    if (origin != null) {
+      await controller.addCircle(
+        CircleOptions(
+          geometry: _latLng(origin),
+          circleRadius: 8,
+          circleColor: PowerMeColors.teal,
+          circleStrokeColor: PowerMeColors.graphite,
+          circleStrokeWidth: 3,
+        ),
+      );
+    }
+    if (!current()) return;
+    final lines = controller.lines;
+    if (lines.isNotEmpty) await controller.removePolylines(lines);
+    if (!current()) return;
+    if (route.length >= 2) {
+      final geometry = route.map(_latLng).toList(growable: false);
+      await controller.addPolylines([
+        PolylineOptions(
+          geometry: geometry,
+          polylineColor: PowerMeColors.black,
+          polylineWidth: 11,
+          polylineOpacity: 1,
+          polylineJoin: 'round',
+        ),
+        for (final section in roadTrafficSections(
+          route.length,
+          widget.trafficSegments,
+        ))
+          PolylineOptions(
+            geometry: geometry.sublist(section.start, section.end + 1),
+            polylineColor: roadTrafficColor(section.level),
+            polylineWidth: 7,
+            polylineOpacity: 1,
+            polylineJoin: 'round',
+          ),
+      ]);
+    }
+  }
+
+  Future<void> _syncManeuver(
+    VietmapController controller,
+    bool Function() current, {
+    required bool redraw,
+  }) async {
+    final maneuver = widget.maneuver;
+    final previous = _renderedManeuver;
+    if (!redraw && maneuver == previous) return;
+    final symbol = _maneuverSymbol;
+    if (symbol != null) await controller.removeSymbol(symbol);
+    if (!current()) return;
+    _maneuverSymbol = null;
+    if (maneuver == null) {
+      _renderedManeuver = null;
+      await _fitResults(controller);
+      return;
+    }
+
+    final icon = maneuver.icon;
+    final imageName = 'powerme-maneuver-${icon.codePoint}';
+    if (!_maneuverImages.contains(icon)) {
+      final bytes = await _drawManeuverIcon(icon);
+      if (!current()) return;
+      if (_maneuverImages.isEmpty) {
+        await controller.setSymbolIconAllowOverlap(true);
+        if (!current()) return;
+      }
+      await controller.addImage(imageName, bytes);
+      if (!current()) return;
+      _maneuverImages.add(icon);
+    }
+    final next = await controller.addSymbol(
+      SymbolOptions(
+        geometry: _latLng(maneuver.point),
+        iconImage: imageName,
+        iconSize: 0.5,
+        iconOpacity: 1,
+        zIndex: 1,
+      ),
+    );
+    if (!current()) return;
+    _maneuverSymbol = next;
+    _renderedManeuver = maneuver;
+    if (widget.maneuver == maneuver &&
+        (redraw || previous?.point != maneuver.point)) {
+      await controller.animateCamera(
+        CameraUpdate.newLatLngZoom(_latLng(maneuver.point), 16),
+      );
+    }
+  }
+
+  Future<void> _fitResults(VietmapController controller) async {
+    final points = [
+      ?widget.origin,
+      for (final station in widget.stations) ?station.location,
+      ...widget.routePoints,
+    ];
+    if (points.isEmpty) return;
+    var south = points.first.latitude;
+    var north = south;
+    var west = points.first.longitude;
+    var east = west;
+    for (final point in points.skip(1)) {
+      south = min(south, point.latitude);
+      north = max(north, point.latitude);
+      west = min(west, point.longitude);
+      east = max(east, point.longitude);
+    }
+    await controller.animateCamera(
+      south == north && west == east
+          ? CameraUpdate.newLatLngZoom(_latLng(points.first), 15)
+          : CameraUpdate.newLatLngBounds(
+              LatLngBounds(
+                southwest: LatLng(south, west),
+                northeast: LatLng(north, east),
+              ),
+              left: 32,
+              top: 32,
+              right: 32,
+              bottom: 32,
+            ),
+    );
   }
 
   @override
@@ -118,7 +308,7 @@ class VietmapSurfaceState extends ConsumerState<VietmapSurface> {
 
   void _armTimeout() {
     _timeout?.cancel();
-    if (!widget.config.configured) return;
+    if (!widget.config.configured || !VietmapSurface.isSupported) return;
     _timeout = Timer(const Duration(seconds: 20), () {
       if (mounted && !_ready) setState(() => _failed = true);
     });
@@ -171,16 +361,38 @@ class VietmapSurfaceState extends ConsumerState<VietmapSurface> {
   @override
   Widget build(BuildContext context) {
     final copy = widget.copy;
-    final location = ref.watch(mapLocationControllerProvider);
-    ref.listen(mapLocationControllerProvider, (previous, next) {
-      if (next.position != null && next.position != previous?.position) {
-        _showLocation(next.position!);
-      }
-    });
-    final supported =
-        kIsWeb ||
-        defaultTargetPlatform == TargetPlatform.android ||
-        defaultTargetPlatform == TargetPlatform.iOS;
+    if (!VietmapSurface.isSupported) {
+      return Card(
+        child: ListTile(
+          leading: const Icon(Icons.map_outlined),
+          title: Text(
+            copy.text(
+              'Bản đồ khả dụng trên Android và iOS.',
+              'The map is available on Android and iOS.',
+            ),
+            style: Theme.of(context).textTheme.bodyMedium,
+          ),
+        ),
+      );
+    }
+    final location = widget.fitResults
+        ? const MapLocationState()
+        : ref.watch(mapLocationControllerProvider);
+    if (!widget.fitResults) {
+      ref.listen(mapLocationControllerProvider, (previous, next) {
+        if (next.position != null && next.position != previous?.position) {
+          _showLocation(next.position!);
+        }
+      });
+    }
+    final center = widget.fitResults
+        ? widget.routePoints.firstOrNull ??
+              widget.origin ??
+              widget.stations
+                  .map((station) => station.location)
+                  .nonNulls
+                  .firstOrNull
+        : vietmapInitialCenter;
     final missing = !widget.config.configured;
     final issue = switch (location.issue) {
       LocationIssue.serviceOff => copy.text(
@@ -201,38 +413,39 @@ class VietmapSurfaceState extends ConsumerState<VietmapSurface> {
       ),
       null => null,
     };
+    final attempt = _attempt;
     return Stack(
       children: [
-        if (!missing && supported)
+        if (!missing)
           VietmapGL(
             key: ValueKey(_attempt),
             styleString: widget.config.styleUrl,
             initialCameraPosition: CameraPosition(
-              target: LatLng(
-                vietmapInitialCenter.latitude,
-                vietmapInitialCenter.longitude,
-              ),
-              zoom: 16,
+              target: _latLng(center ?? vietmapInitialCenter),
+              zoom: center == null ? 13 : 16,
             ),
             compassEnabled: false,
             logoViewMargins: Point(12, widget.padding.bottom),
             attributionButtonMargins: Point(12, widget.padding.bottom),
             onMapCreated: (controller) {
+              if (!mounted || attempt != _attempt) return;
               _controller?.onSymbolTapped.remove(_onPinTapped);
               _controller = controller;
               controller.onSymbolTapped.add(_onPinTapped);
             },
             onStyleLoadedCallback: () {
+              if (!mounted || attempt != _attempt) return;
               _timeout?.cancel();
-              if (!mounted) return;
               setState(() {
                 _ready = true;
                 _failed = false;
               });
               ++_styleEpoch;
               _syncPins(loadImage: true);
-              final point = ref.read(mapLocationControllerProvider).position;
-              if (point != null) _showLocation(point);
+              if (!widget.fitResults) {
+                final point = ref.read(mapLocationControllerProvider).position;
+                if (point != null) _showLocation(point);
+              }
             },
           )
         else
@@ -240,12 +453,7 @@ class VietmapSurfaceState extends ConsumerState<VietmapSurface> {
             color: PowerMeColors.black,
             child: SizedBox.expand(),
           ),
-        if (missing ||
-            !supported ||
-            _failed ||
-            !_ready ||
-            issue != null ||
-            location.busy)
+        if (missing || _failed || !_ready || issue != null || location.busy)
           Positioned(
             top: widget.padding.top + 12,
             left: 20,
@@ -261,18 +469,13 @@ class VietmapSurfaceState extends ConsumerState<VietmapSurface> {
                     mainAxisSize: MainAxisSize.min,
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      if (!missing && supported && !_ready && !_failed)
+                      if (!missing && !_ready && !_failed)
                         const LinearProgressIndicator(),
                       Text(
                         missing
                             ? copy.text(
                                 'Chưa thể mở bản đồ.',
                                 'Map could not be opened.',
-                              )
-                            : !supported
-                            ? copy.text(
-                                'Hãy mở bản đồ trên Android hoặc iOS.',
-                                'Open the map on Android or iOS.',
                               )
                             : _failed
                             ? copy.text(
@@ -307,5 +510,55 @@ class VietmapSurfaceState extends ConsumerState<VietmapSurface> {
           ),
       ],
     );
+  }
+}
+
+Future<Uint8List> _drawManeuverIcon(IconData icon) async {
+  const size = 72;
+  final recorder = ui.PictureRecorder();
+  final canvas = Canvas(recorder);
+  const center = Offset(size / 2, size / 2);
+  canvas.drawRRect(
+    RRect.fromRectAndRadius(
+      Rect.fromCenter(center: center, width: 68, height: 68),
+      const Radius.circular(18),
+    ),
+    Paint()..color = PowerMeColors.black,
+  );
+  canvas.drawRRect(
+    RRect.fromRectAndRadius(
+      Rect.fromCenter(center: center, width: 58, height: 58),
+      const Radius.circular(13),
+    ),
+    Paint()..color = PowerMeColors.teal,
+  );
+  final glyph = TextPainter(
+    text: TextSpan(
+      text: String.fromCharCode(icon.codePoint),
+      style: TextStyle(
+        fontFamily: icon.fontFamily,
+        package: icon.fontPackage,
+        fontSize: 44,
+        color: PowerMeColors.black,
+      ),
+    ),
+    textDirection: TextDirection.ltr,
+  )..layout();
+  glyph.paint(canvas, center - Offset(glyph.width / 2, glyph.height / 2));
+  glyph.dispose();
+  final picture = recorder.endRecording();
+  try {
+    final image = await picture.toImage(size, size);
+    try {
+      final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
+      return bytes!.buffer.asUint8List(
+        bytes.offsetInBytes,
+        bytes.lengthInBytes,
+      );
+    } finally {
+      image.dispose();
+    }
+  } finally {
+    picture.dispose();
   }
 }

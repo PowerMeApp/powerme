@@ -272,7 +272,7 @@ class _SuggestionsScreenState extends ConsumerState<SuggestionsScreen> {
                   DataQuality.observed => copy.text('đã ghi nhận', 'observed'),
                   DataQuality.stale => copy.text('cần cập nhật', 'needs refresh'),
                   DataQuality.unknown => copy.text('chưa xác định', 'unverified'),
-                }} · ${ict(o.updatedAt)}',
+                }} · ${o.updatedAt == null ? copy.text('Chưa rõ thời điểm cập nhật', 'Update time unknown') : ict(o.updatedAt!)}',
                 style: text.bodyMedium?.copyWith(color: PowerMeColors.muted),
               ),
               OutlinedButton(

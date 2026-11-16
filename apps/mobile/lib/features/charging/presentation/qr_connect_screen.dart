@@ -7,12 +7,19 @@ import '../../../core/l10n/app_copy.dart';
 import '../../../core/theme/powerme_theme.dart';
 import '../../../core/widgets/flow_page.dart';
 import '../../profile/application/profile_controller.dart';
+import '../../stations/application/connector_lookup_controller.dart';
+import '../../stations/application/station_discovery_controller.dart';
+import '../../stations/domain/station.dart';
+import '../../stations/presentation/station_copy.dart';
 import '../application/charging_controller.dart';
 import '../application/qr_connection_controller.dart';
 import 'charging_screens.dart';
 
 class QrConnectScreen extends ConsumerStatefulWidget {
-  const QrConnectScreen({super.key});
+  const QrConnectScreen({super.key, this.apiMode = false});
+
+  final bool apiMode;
+
   @override
   ConsumerState<QrConnectScreen> createState() => _QrConnectScreenState();
 }
@@ -62,7 +69,25 @@ class _QrConnectScreenState extends ConsumerState<QrConnectScreen>
     super.dispose();
   }
 
+  bool get _isScanCurrent {
+    final configuration = _router?.routerDelegate.currentConfiguration;
+    return configuration != null &&
+        configuration.isNotEmpty &&
+        configuration.last.matchedLocation == '/scan' &&
+        ModalRoute.isCurrentOf(context) == true;
+  }
+
   Future<void> _connect(String reference, {bool camera = false}) async {
+    if (camera && (!_foreground || !_isScanCurrent)) return;
+    if (widget.apiMode) {
+      final lookup = ref.read(connectorLookupProvider);
+      if (camera && (lookup.failure != null || lookup.connector != null)) {
+        return;
+      }
+      if (!camera) FocusScope.of(context).unfocus();
+      await ref.read(connectorLookupProvider.notifier).resolve(reference);
+      return;
+    }
     if (_opening || reference.trim().isEmpty) return;
     if (camera && _lastScan == reference) return;
     if (camera) _lastScan = reference;
@@ -71,10 +96,7 @@ class _QrConnectScreenState extends ConsumerState<QrConnectScreen>
         .read(qrConnectionProvider.notifier)
         .resolve(reference);
     if (!mounted) return;
-    if (connector != null &&
-        _router?.routerDelegate.currentConfiguration.last.matchedLocation ==
-            '/scan' &&
-        _foreground) {
+    if (connector != null && _isScanCurrent && _foreground) {
       await context.push(
         Uri(
           path: '/start',
@@ -85,21 +107,86 @@ class _QrConnectScreenState extends ConsumerState<QrConnectScreen>
     if (mounted) setState(() => _opening = false);
   }
 
+  void _retryCamera() {
+    if (widget.apiMode) ref.read(connectorLookupProvider.notifier).clear();
+    setState(() {
+      _lastScan = null;
+      _retry++;
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
-    final view = ref.watch(chargingControllerProvider);
-    final qr = ref.watch(qrConnectionProvider);
-    final copy = AppCopy(ref.watch(profileControllerProvider).profile.language);
-    final blocked = blocksQrConnection(view);
-    final visible =
-        _router?.routerDelegate.currentConfiguration.last.matchedLocation ==
-        '/scan';
+    final profile = ref.watch(profileControllerProvider).profile;
+    final copy = AppCopy(profile.language);
+    if (widget.apiMode && ref.watch(discoveryVehicleProvider).isEmpty) {
+      final hasVehicles = profile.vehicles.isNotEmpty;
+      return FlowPage(
+        title: copy.scanQr,
+        showBack: false,
+        children: [
+          InfoCard(
+            spacing: 14,
+            children: [
+              Text(
+                hasVehicles
+                    ? copy.text(
+                        'Chọn xe mặc định để kiểm tra cổng phù hợp.',
+                        'Choose a default vehicle to check compatible chargers.',
+                      )
+                    : copy.text(
+                        'Thêm xe để kiểm tra cổng sạc phù hợp.',
+                        'Add a vehicle to check compatible chargers.',
+                      ),
+              ),
+              FilledButton(
+                onPressed: () => hasVehicles
+                    ? context.go('/profile')
+                    : context.push('/vehicles/new'),
+                child: Text(
+                  hasVehicles
+                      ? copy.profile
+                      : copy.text('Thêm xe', 'Add vehicle'),
+                ),
+              ),
+            ],
+          ),
+        ],
+      );
+    }
+    final view = widget.apiMode ? null : ref.watch(chargingControllerProvider);
+    final qr = widget.apiMode ? null : ref.watch(qrConnectionProvider);
+    final lookup = widget.apiMode ? ref.watch(connectorLookupProvider) : null;
+    final connector = lookup?.connector;
+    final error = switch (lookup?.failure) {
+      ConnectorLookupFailure.invalidCode => copy.text(
+        'Mã cổng chưa đúng. Nhập mã trụ và số cổng, ví dụ PM-01/1.',
+        'Enter the charger code and connector number, for example PM-01/1.',
+      ),
+      ConnectorLookupFailure.notFound => copy.text(
+        'Không tìm thấy cổng phù hợp. Kiểm tra mã và xe đang chọn.',
+        'No compatible connector found. Check the code and selected vehicle.',
+      ),
+      ConnectorLookupFailure.unavailable => copy.text(
+        'Chưa kiểm tra được cổng sạc. Vui lòng thử lại.',
+        'Could not check the connector. Please try again.',
+      ),
+      null => qr?.error,
+    };
+    final blocked = view != null && blocksQrConnection(view);
+    final busy = lookup?.busy ?? _opening;
+    final cameraReady =
+        _foreground &&
+        _isScanCurrent &&
+        !busy &&
+        connector == null &&
+        lookup?.failure == null;
     return FlowPage(
       title: copy.scanQr,
       showBack: false,
       backTooltip: copy.back,
       children: [
-        if (view.session != null || view.command != null) ...[
+        if (view != null && (view.session != null || view.command != null)) ...[
           HeroCard(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -126,58 +213,87 @@ class _QrConnectScreenState extends ConsumerState<QrConnectScreen>
           const SizedBox(height: 20),
         ],
         Text(
-          copy.text('Kết nối với cổng sạc', 'Connect to a charger'),
+          widget.apiMode
+              ? copy.text('Tra cứu cổng sạc', 'Look up a connector')
+              : copy.text('Kết nối với cổng sạc', 'Connect to a charger'),
           style: Theme.of(context).textTheme.headlineSmall,
         ),
         const SizedBox(height: 8),
         Text(
-          copy.text(
-            'Đưa mã QR trên cổng sạc vào khung. Bạn sẽ kiểm tra thông tin trước khi bắt đầu.',
-            'Place the charger QR code inside the frame. Review the details before starting.',
-          ),
+          widget.apiMode
+              ? copy.text(
+                  'Quét mã trên trụ hoặc nhập mã cổng để xem trạng thái.',
+                  'Scan the charger QR code or enter its code to check the status.',
+                )
+              : copy.text(
+                  'Đưa mã QR trên cổng sạc vào khung. Bạn sẽ kiểm tra thông tin trước khi bắt đầu.',
+                  'Place the charger QR code inside the frame. Review the details before starting.',
+                ),
           style: Theme.of(
             context,
           ).textTheme.bodyMedium?.copyWith(color: PowerMeColors.muted),
         ),
         const SizedBox(height: 20),
-        ClipRRect(
-          borderRadius: BorderRadius.circular(20),
-          child: SizedBox(
-            height: 280,
-            child: blocked
-                ? Center(
-                    child: Text(
-                      copy.text(
-                        'Mở phiên hiện tại để tiếp tục.',
-                        'Open your current session to continue.',
+        if (connector == null)
+          ClipRRect(
+            borderRadius: BorderRadius.circular(20),
+            child: SizedBox(
+              height: 280,
+              child: blocked
+                  ? Center(
+                      child: Text(
+                        copy.text(
+                          'Mở phiên hiện tại để tiếp tục.',
+                          'Open your current session to continue.',
+                        ),
                       ),
+                    )
+                  : cameraReady
+                  ? _QrCamera(
+                      key: ValueKey(_retry),
+                      copy: copy,
+                      onCode: (code) => _connect(code, camera: true),
+                      onRetry: _retryCamera,
+                    )
+                  : Center(
+                      child: busy
+                          ? const CircularProgressIndicator()
+                          : const Icon(Icons.qr_code_scanner, size: 64),
                     ),
-                  )
-                : _foreground && visible && !_opening
-                ? _QrCamera(
-                    key: ValueKey(_retry),
-                    copy: copy,
-                    onCode: (code) => _connect(code, camera: true),
-                    onRetry: () => setState(() {
-                      _retry++;
-                      _lastScan = null;
-                    }),
-                  )
-                : Center(
-                    child: _opening
-                        ? const CircularProgressIndicator()
-                        : const Icon(Icons.qr_code_scanner, size: 64),
-                  ),
+            ),
           ),
-        ),
-        const SizedBox(height: 20),
-        FailureNotice(qr.error),
-        if (qr.error != null) ...[
+        if (connector != null)
+          Semantics(
+            liveRegion: true,
+            child: InfoCard(
+              spacing: 8,
+              children: [
+                Text(
+                  connector.stationName,
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
+                Text(
+                  copy.text(
+                    'Trụ ${connector.displayCode} · Cổng ${connector.number}',
+                    'Charger ${connector.displayCode} · Connector ${connector.number}',
+                  ),
+                ),
+                Text(
+                  connector.status == StationStatus.available
+                      ? copy.text('Trống', 'Available')
+                      : statusLabel(connector.status, copy),
+                ),
+                if (connector.reportedIssue)
+                  Text(copy.text('Cổng đã được báo lỗi', 'Reported issue')),
+              ],
+            ),
+          )
+        else
+          const SizedBox(height: 20),
+        FailureNotice(error),
+        if (error != null || connector != null) ...[
           TextButton(
-            onPressed: () => setState(() {
-              _lastScan = null;
-              _retry++;
-            }),
+            onPressed: _retryCamera,
             child: Text(copy.text('Quét lại', 'Scan again')),
           ),
           const SizedBox(height: 8),
@@ -192,20 +308,21 @@ class _QrConnectScreenState extends ConsumerState<QrConnectScreen>
             TextField(
               key: const Key('qr-manual-reference'),
               controller: _reference,
-              enabled: !blocked && !_opening,
+              enabled: !blocked && !busy,
               decoration: InputDecoration(
                 labelText: copy.text(
                   'Mã cổng hoặc nội dung QR',
                   'Charger code or QR content',
                 ),
+                hintText: widget.apiMode ? 'PM-01/1' : null,
                 fillColor: PowerMeColors.black,
                 prefixIcon: const Icon(Icons.ev_station_outlined),
               ),
-              onSubmitted: blocked || _opening ? null : _connect,
+              onSubmitted: blocked || busy ? null : _connect,
             ),
             FilledButton(
               key: const Key('qr-connect'),
-              onPressed: blocked || _opening
+              onPressed: blocked || busy
                   ? null
                   : () => _connect(_reference.text),
               child: Text(copy.text('Kiểm tra cổng sạc', 'Check charger')),
@@ -213,7 +330,7 @@ class _QrConnectScreenState extends ConsumerState<QrConnectScreen>
           ],
         ),
         TextButton(
-          onPressed: () => context.go('/'),
+          onPressed: () => context.go(widget.apiMode ? '/discover' : '/'),
           child: Text(
             copy.text('Chọn trạm trên bản đồ', 'Choose a station on the map'),
           ),

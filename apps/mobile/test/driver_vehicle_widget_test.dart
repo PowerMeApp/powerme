@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:dio/dio.dart';
 import 'package:driver_app/app/composition/api_app.dart';
@@ -7,6 +8,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'driver_api_fixture.dart';
 import 'driver_api_widget_test.dart' show api, enterAccount;
+import 'driver_discovery_fixture.dart' show page;
 
 const _add = 'add-vehicle';
 const _save = 'vehicle-save';
@@ -22,11 +24,13 @@ Future<void> _open(
   await tester.pumpWidget(ApiApp(config: api, httpAdapter: fixture));
   await tester.pumpAndSettle();
   await enterAccount(tester);
+  await _tap(tester, 'nav-account');
 }
 
 Future<void> _tap(WidgetTester tester, String key, {bool settle = true}) async {
   final target = find.byKey(Key(key));
   await tester.ensureVisible(target);
+  await tester.pump();
   await tester.tap(target);
   if (settle) await tester.pumpAndSettle();
 }
@@ -42,10 +46,101 @@ Future<void> _chooseModel(WidgetTester tester) async {
   await _tap(tester, 'vehicle-model-${leaf['vehicle_model_id']}');
 }
 
+Future<void> _back(WidgetTester tester) async {
+  await tester.tap(find.byTooltip('Quay lại'));
+  await tester.pumpAndSettle();
+}
+
+Future<void> _openVehicleActions(WidgetTester tester, String id) async {
+  await _tap(tester, 'vehicle-detail-$id');
+  await _tap(tester, 'manage-vehicle');
+}
+
+Future<void> _confirmDefault(WidgetTester tester, String id) async {
+  await _tap(tester, 'select-$id');
+  await _tap(tester, 'confirm-default-vehicle');
+}
+
 bool _canSave(WidgetTester tester) =>
     tester.widget<FilledButton>(find.byKey(const Key(_save))).onPressed != null;
 
 void main() {
+  testWidgets('Commons photo and credit stay separate from the signed API', (
+    tester,
+  ) async {
+    final imageClient = _FailingImageClient();
+    debugNetworkImageHttpClientProvider = () => imageClient;
+    try {
+      final fixture = DriverApiFixture((request) async {
+        if (request.path == 'auth/login') return reply(200, tokens(accessA));
+        expect(request.headers['Authorization'], 'Bearer $accessA');
+        return switch (request.path) {
+          'me' => reply(
+            200,
+            account(
+              vehicles: [
+                ownVehicle(model: picturedLeaf),
+                ownVehicle(
+                  id: '10',
+                  plate: '30A-123.45',
+                  model: picturedLeaf,
+                  isDefault: false,
+                ),
+              ],
+            ),
+          ),
+          'stations' => reply(200, page([])),
+          'vehicle-models' => reply(200, {
+            'items': [picturedLeaf, vf8],
+          }),
+          _ => throw StateError('Unexpected route'),
+        };
+      });
+      await _open(tester, fixture);
+      expect(find.text(leafPhotoCredit), findsOneWidget);
+      expect(find.text('Ảnh minh họa'), findsOneWidget);
+      expect(imageClient.urls, [Uri.parse(leafPhotoUrl)]);
+      expect(imageClient.request.headers.values, isEmpty);
+      await _tap(tester, 'open-vehicle-garage');
+      expect(find.text(leafPhotoCredit), findsOneWidget);
+      final secondary = find.byKey(const ValueKey('10'));
+      expect(
+        find.descendant(of: secondary, matching: _defaultPhoto()),
+        findsOneWidget,
+      );
+      await _tap(tester, 'vehicle-detail-10');
+      expect(find.text(leafPhotoCredit), findsOneWidget);
+      await _back(tester);
+      await _tap(tester, 'vehicle-detail-9');
+      expect(find.text(leafPhotoCredit), findsOneWidget);
+      await _tap(tester, 'manage-vehicle');
+      expect(find.text(leafPhotoCredit), findsOneWidget);
+      await _back(tester);
+      await _back(tester);
+      await _tap(tester, _add);
+      expect(find.text(leafPhotoCredit), findsOneWidget);
+      await _chooseModel(tester);
+      expect(find.text(leafPhotoCredit), findsOneWidget);
+      expect(find.text('Ảnh minh họa'), findsOneWidget);
+      await _tap(tester, 'vehicle-model-${vf8['vehicle_model_id']}');
+      expect(find.text(leafPhotoCredit), findsOneWidget);
+      expect(find.text('Ảnh minh họa'), findsOneWidget);
+      expect(
+        imageClient.urls.every((url) => url == Uri.parse(leafPhotoUrl)),
+        isTrue,
+      );
+      expect(imageClient.request.headers.values, isEmpty);
+      expect(fixture.requests.map((r) => r.path), [
+        'auth/login',
+        'me',
+        'stations',
+        'vehicle-models',
+      ]);
+    } finally {
+      debugNetworkImageHttpClientProvider = null;
+    }
+  });
+
   testWidgets('empty account adds, sets default and removes using /me', (
     tester,
   ) async {
@@ -106,21 +201,39 @@ void main() {
     await _tap(tester, _save, settle: false);
     await tester.tap(find.byKey(const Key(_save)));
     await tester.pumpAndSettle();
-    expect(find.text('51K-901.01 · CHAdeMO · Xe mặc định'), findsOneWidget);
+    expect(find.text('51K-901.01'), findsOneWidget);
+    expect(find.text('Xe mặc định'), findsOneWidget);
     expect(fixture.requests.where((r) => r.path == 'vehicles'), hasLength(1));
 
     await _tap(tester, _add);
     await _enterPlate(tester, '30A-123.45');
     await _chooseModel(tester);
     await _tap(tester, _save);
+    await _tap(tester, 'open-vehicle-garage');
     await _tap(tester, 'select-10');
-    expect(find.text('30A-123.45 · CHAdeMO · Xe mặc định'), findsOneWidget);
+    await _tap(tester, 'cancel-default-vehicle');
+    expect(fixture.requests.where((r) => r.method == 'PATCH'), isEmpty);
+    await _confirmDefault(tester, '10');
+    expect(find.text('30A-123.45'), findsOneWidget);
+    expect(find.text('Xe mặc định'), findsOneWidget);
     expect(find.text('51K-901.01 · CHAdeMO'), findsOneWidget);
+    expect(find.text('Đã đặt xe mặc định.'), findsOneWidget);
+    await tester.pump(const Duration(seconds: 5));
+    await tester.pumpAndSettle();
+    await _openVehicleActions(tester, '10');
     await _tap(tester, 'remove-10');
     expect(find.text('Nissan Leaf · 30A-123.45'), findsOneWidget);
+    await _tap(tester, 'cancel-remove-vehicle');
+    expect(fixture.requests.where((r) => r.method == 'DELETE'), isEmpty);
+    await _tap(tester, 'remove-10');
     await _tap(tester, 'confirm-remove-vehicle');
     expect(find.textContaining('30A-123.45'), findsNothing);
-    expect(find.text('51K-901.01 · CHAdeMO · Xe mặc định'), findsOneWidget);
+    expect(find.text('51K-901.01'), findsOneWidget);
+    expect(find.text('Xe mặc định'), findsOneWidget);
+    expect(find.text('Đã gỡ xe khỏi hồ sơ.'), findsOneWidget);
+    await tester.pump(const Duration(seconds: 5));
+    await tester.pumpAndSettle();
+    await _openVehicleActions(tester, '9');
     await _tap(tester, 'remove-9');
     await _tap(tester, 'confirm-remove-vehicle');
     expect(find.text('Chưa có xe trong hồ sơ.'), findsOneWidget);
@@ -178,6 +291,7 @@ void main() {
       return switch (request.path) {
         'auth/login' => reply(200, tokens(accessA)),
         'me' => reply(200, account()),
+        'stations' => reply(200, page([])),
         'vehicle-models' => reply(200, {
           'items': [leaf, vf8],
         }),
@@ -244,6 +358,7 @@ void main() {
     expect(fixture.requests.map((r) => r.path), [
       'auth/login',
       'me',
+      'stations',
       'vehicle-models',
       'vehicles',
       'me',
@@ -283,6 +398,7 @@ void main() {
       (request) async => switch (request.path) {
         'auth/login' => reply(200, tokens(accessA)),
         'me' => reply(200, account(withVehicle: !missing)),
+        'stations' => reply(200, page([])),
         'vehicle-models' => reply(200, {
           'items': [leaf],
         }),
@@ -301,6 +417,7 @@ void main() {
     expect(find.text('51A-00001'), findsOneWidget);
     await tester.tap(find.byTooltip('Quay lại'));
     await tester.pumpAndSettle();
+    await _openVehicleActions(tester, '9');
     await _tap(tester, 'remove-9');
     await _tap(tester, 'confirm-remove-vehicle');
     expect(
@@ -317,6 +434,8 @@ void main() {
       isNull,
     );
     await _tap(tester, _reload);
+    await tester.tap(find.text('Về nhà xe'));
+    await tester.pumpAndSettle();
     expect(find.text('Chưa có xe trong hồ sơ.'), findsOneWidget);
   });
 
@@ -361,8 +480,46 @@ void main() {
       expect(find.byKey(const Key(_save)), findsNothing);
       blocked = false;
       await _tap(tester, _reload);
-      expect(find.text('30A-123.45 · CHAdeMO · Xe mặc định'), findsOneWidget);
+      expect(find.text('30A-123.45'), findsOneWidget);
+      expect(find.text('Xe mặc định'), findsOneWidget);
       expect(fixture.requests.where((r) => r.path == 'vehicles'), hasLength(1));
     });
+  }
+}
+
+Finder _defaultPhoto() => find.byWidgetPredicate(
+  (widget) =>
+      widget is Image &&
+      widget.image is AssetImage &&
+      (widget.image as AssetImage).assetName ==
+          'assets/vehicles/ev-illustration.webp',
+);
+
+class _FailingImageClient extends Fake implements HttpClient {
+  final urls = <Uri>[];
+  final request = _FailingImageRequest();
+
+  @override
+  Future<HttpClientRequest> getUrl(Uri url) async {
+    urls.add(url);
+    return request;
+  }
+}
+
+class _FailingImageRequest extends Fake implements HttpClientRequest {
+  @override
+  final _ImageHeaders headers = _ImageHeaders();
+
+  @override
+  Future<HttpClientResponse> close() async =>
+      throw const SocketException('offline');
+}
+
+class _ImageHeaders extends Fake implements HttpHeaders {
+  final values = <String, Object>{};
+
+  @override
+  void add(String name, Object value, {bool preserveHeaderCase = false}) {
+    values[name] = value;
   }
 }
