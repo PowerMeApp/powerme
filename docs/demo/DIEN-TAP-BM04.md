@@ -14,8 +14,8 @@ Cách chạy từng kịch bản đã cam kết trong BM04 bằng công cụ có
 | **DS-06** phát lại `meterStop` cũ → `review` | Trí | `scripted-station.mjs ds-03a` | Staging 09/11: đạt; RQ1 13/11: 30/30 trên staging |
 | **DS-07** súng lỗi → xác nhận → reset từ xa → hết lỗi | Nghĩa | `scripted-station.mjs fault --reset accept` + console / dashboard | Local 14/11: đạt (`raised → acknowledged → resetting → resolved`). Chưa chạy trên staging |
 | **DS-08** reset bị từ chối → cảnh báo vẫn mở | Nghĩa | `scripted-station.mjs fault --reset reject` | Local 14/11: đạt (sự cố giữ `acknowledged`, lệnh `rejected`). Chưa chạy trên staging |
-| **DS-09** onboard `SIM-0005` | Ân | `onboard-sim.mjs` | Staging: đạt. `SIM-0005` đã `in_service`; cần serial mới hoặc `./seed.sh --reset` trước demo |
-| **DS-10** sai mật khẩu trụ → 401 | Ân | `scripted-station.mjs ds-10` | Staging: đạt |
+| **DS-09** onboard một serial đã đăng ký | Ân | `onboard-sim.mjs --serial <serial mới> --register` | Staging 16/11 (`review-20`): đạt với `SIM-0006` (Admin đăng ký → 201, onboard → 201 `awaiting_connection`, Boot → `in_service`, 2 súng Available). `SIM-0005` và `SIM-0006` đã `in_service`: mỗi lần tập lại dùng một serial mới, hoặc `./seed.sh --reset` |
+| **DS-10** sai mật khẩu trụ → 401; serial chưa đăng ký → 409 | Ân | cùng lệnh `onboard-sim.mjs` | Staging 16/11: đạt (`SIM-9999` → 409 `serial_not_registered`; `SIM-0006` sai mật khẩu → 401) |
 
 ## Chuẩn bị (local)
 
@@ -26,7 +26,7 @@ export DRIVER_API_JWT_SECRET_BASE64="$(openssl rand -base64 48)" \
        DRIVER_API_JWT_ISSUER=powerme-local DRIVER_API_JWT_AUDIENCE=powerme-driver-local
 npm run demo:reset -- --no-hmi          # Postgres nhúng + CSMS (:9000) + console (:3000)
 
-# Cửa sổ khác: nạp 3 tài xế mẫu, 9 trạm, đặt mật khẩu trụ và mật khẩu tài xế
+# Cửa sổ khác: nạp 3 tài xế mẫu, 11 trạm, đặt mật khẩu trụ và mật khẩu tài xế
 export DATABASE_URL=<dòng "Postgres" mà lệnh trên in ra>
 export DEMO_CHARGE_POINT_PASSWORD=<≥ 16 ký tự> DEMO_DRIVER_PASSWORD=<12–128 ký tự>
 node scripts/seed-demo.mjs
@@ -86,3 +86,17 @@ Chưa chạy trên staging vì ba việc làm đổi dữ liệu dùng chung: DS
 - Trụ kịch bản không phải firmware Ruihua và không thay SAP simulator; nó chỉ trả lời đúng giao thức cho `RemoteStartTransaction`, `RemoteStopTransaction`, `Reset`, `TriggerMessage`.
 - `rehearse-app.mjs` kiểm backend, không kiểm app Flutter. DS-01 và DS-02 chỉ được coi là sẵn cho demo khi app của Sơn chạy được cùng luồng.
 - DS-07 và DS-08 đã kiểm qua console (`/api/admin/faults`, chưa có xác thực); chưa kiểm qua dashboard của Nghĩa (`/api/operator/v1`).
+
+## DS-09 và DS-10 trên staging
+
+Onboard chỉ làm được một lần cho mỗi trụ, nên trên staging mỗi lần tập dùng một serial mới. `--register` thêm serial đó vào sổ đăng ký thiết bị qua `POST /api/admin/charge-points` (bước của Admin, UC-ADM-03) rồi chạy đủ các bước.
+
+```bash
+# Tunnel tới console của staging (cửa sổ riêng)
+ssh -N -L 3041:127.0.0.1:3000 deploy@<FQDN>
+
+node apps/csms/demo/onboard-sim.mjs --console http://127.0.0.1:3041 \
+  --url wss://<FQDN>/ocpp --site-id <id của HCM-DEMO-01> --serial SIM-0007 --register
+```
+
+Cần `CONSOLE_ACTOR_ADMIN_ID` và `CONSOLE_ACTOR_STAFF_ID` đã đặt trên VM (thiếu thì console trả 503). Trụ vừa onboard nằm ở trạm `HCM-DEMO-01` và mất kết nối khi script dừng. Bước sai mật khẩu ghi một lần 401 vào bộ đếm đăng nhập theo IP của máy chạy script (ngưỡng khoá: 20 lần / 60 s).

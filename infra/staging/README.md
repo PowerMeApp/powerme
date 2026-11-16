@@ -197,10 +197,24 @@ Trạm (operator mẫu `0312345678`, biểu giá theo khung giờ của `seed.sq
 | `HCM-APP-Q7-01` | Crescent Mall, Q7 | có | DC 150 (CCS2 150 + 75) |
 | `HCM-APP-TD-02` | Vinhomes Grand Park, Thủ Đức | có | DC 60 (CCS2 ×2), AC 11 (Type2 ×2) |
 | `HCM-APP-TB-01` | Cộng Hoà, Tân Bình | có | DC 60 (CCS2 ×2) |
+| `HCM-APP-TD-03` | Nhà Văn hoá Sinh viên, Làng Đại học | | DC 60 (CCS2 ×2) — luôn mất kết nối |
+| `HCM-APP-TD-04` | Ga metro Đại học Quốc gia ("Metro Làng Đại học") | | DC 120 (CCS2 120 + CCS2 60) — **trụ `PMAPP-TD-04A` được nối thường trực** (BE-41, xem dưới) |
 
-Tổng: 9 trạm, 12 trụ, 22 súng; 8 mẫu xe (VinFast VF 3 / VF 5 Plus / VF e34 / VF 8 Plus, Hyundai Ioniq 5, BYD Atto 3, Nissan Leaf, Wuling HongGuang MiniEV — thông số gần đúng); 3 tài xế, 5 xe.
+Tổng: 11 trạm, 14 trụ, 26 súng; 8 mẫu xe (VinFast VF 3 / VF 5 Plus / VF e34 / VF 8 Plus, Hyundai Ioniq 5, BYD Atto 3, Nissan Leaf, Wuling HongGuang MiniEV — thông số gần đúng); 3 tài xế, 5 xe.
 
 **Trạng thái súng:** trụ `PMAPP-*` ở `in_service` nhưng **không có credential và chưa từng kết nối OCPP**, nên app thấy `driver_status = offline` và không bắt đầu sạc được ở đó. Trạng thái súng chỉ đến từ OCPP (StatusNotification), seed không giả. Chỉ trụ demo `RH24D1-00001` (`HCM-DEMO-01`, Q1) có trạng thái sống khi simulator chạy. Trụ chưa từng kết nối không sinh cảnh báo Offline (OfflineAlertService bỏ qua `last_message_at` và `online_changed_at` cùng NULL).
+
+**Trụ luôn nối (BE-41).** Để app có một trạm online và bấm sạc thử được mà không cần ai chạy simulator, staging có dịch vụ `demo-station`: trụ kịch bản `app` (`apps/csms/demo/scripted-station.mjs`) nối bằng serial `PMAPP-TD-04A` (trạm `HCM-APP-TD-04`, mã in trên trụ `PM-DC120-HCM-1101`), trả lời `RemoteStartTransaction` / `RemoteStopTransaction` và gửi MeterValues mỗi 10 s (330 Wh mỗi nhịp, khoảng 120 kW). `./seed.sh` ghi credential cho trụ này bằng `DEMO_CHARGE_POINT_PASSWORD`.
+
+```bash
+cd ~/powerme/infra/staging
+./seed.sh                                                      # một lần sau khi deploy tag có BE-41
+docker compose --profile demo-station up -d demo-station       # bật; deploy.sh giữ nó chạy ở các lần sau
+docker compose --profile demo-station logs --tail 20 demo-station
+docker compose --profile demo-station stop demo-station        # tắt (trạm về mất kết nối sau OFFLINE_GRACE_S)
+```
+
+Giới hạn: đây không phải firmware thật và không thay simulator. Trụ rớt khi CSMS khởi động lại (deploy) rồi tự nối lại sau vài giây; phiên đang sạc lúc đó thành `orphaned` và được đối soát khi trụ nối lại. Sau `./seed.sh --reset` phải chạy lại hai lệnh đầu. Mọi trụ `PMAPP-*` khác, kể cả `PMAPP-TD-03A` ở Nhà Văn hoá Sinh viên, vẫn mất kết nối.
 
 ## Đăng nhập dashboard (T128, FE-01a)
 

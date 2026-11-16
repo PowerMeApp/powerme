@@ -3,7 +3,7 @@
 #
 #   ./seed.sh                nạp/áp lại dữ liệu mẫu, đặt lại credential trụ demo từ
 #                            DEMO_CHARGE_POINT_PASSWORD (đổi mật khẩu trong .env rồi chạy = xoay mật khẩu).
-#                            Kèm dữ liệu cho app tài xế (BE-27: 9 trạm TP.HCM, mẫu xe, tài xế
+#                            Kèm dữ liệu cho app tài xế (BE-27: 11 trạm TP.HCM, mẫu xe, tài xế
 #                            app.ds0x@powerme.test, mật khẩu = DEMO_DRIVER_PASSWORD) và mật khẩu dashboard
 #                            của admin.demo / staff.demo@powerme.test = DEMO_STAFF_PASSWORD (T128).
 #                            Idempotent; KHÔNG xoá phiên/meter/sổ cái đã phát sinh.

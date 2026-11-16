@@ -2,7 +2,7 @@
  * Test cho `loadConfig` — chỉ phần ALLOW_LEGACY_NO_CREDENTIAL (review PR #33, quyết định 2).
  * Mặc định phải là `false`: trụ không có credential bị từ chối, không phải "mở cho tiện".
  */
-import { loadConfig } from './config.js';
+import { loadConfig, OFFLINE_ALERT_MAX_DELAY_S } from './config.js';
 
 const base = { DATABASE_URL: 'postgresql://x:x@localhost:5432/x' };
 
@@ -86,10 +86,16 @@ describe('loadConfig — FAULT_RESET_TIMEOUT_S (WF-04, STM-6 t6)', () => {
 });
 
 describe('loadConfig — OFFLINE_ALERT_S / OFFLINE_ALERT_SWEEP_S (G10, NFR-OCPP-07)', () => {
-  it('mặc định 900 s và quét mỗi 60 s khi không khai báo hoặc rỗng', () => {
-    expect(loadConfig({ ...base }).offlineAlertS).toBe(900);
+  it('mặc định 840 s và quét mỗi 60 s khi không khai báo hoặc rỗng', () => {
+    expect(loadConfig({ ...base }).offlineAlertS).toBe(840);
     expect(loadConfig({ ...base }).offlineAlertSweepS).toBe(60);
-    expect(loadConfig({ ...base, OFFLINE_ALERT_S: '' }).offlineAlertS).toBe(900);
+    expect(loadConfig({ ...base, OFFLINE_ALERT_S: '' }).offlineAlertS).toBe(840);
+  });
+
+  it('T118: mặc định giữ trường hợp xấu nhất (ngưỡng + một nhịp quét) ≤ 900 s (NFR-OCPP-07)', () => {
+    const c = loadConfig({ ...base });
+    expect(c.offlineAlertS! + c.offlineAlertSweepS!).toBeLessThanOrEqual(OFFLINE_ALERT_MAX_DELAY_S);
+    expect(OFFLINE_ALERT_MAX_DELAY_S).toBe(900);
   });
 
   it('đọc số nguyên dương', () => {

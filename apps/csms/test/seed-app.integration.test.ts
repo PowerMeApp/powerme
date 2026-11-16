@@ -80,7 +80,7 @@ describeDb('demo/seed-app.sql — dữ liệu mẫu cho app tài xế (BE-27)', 
     await db?.$client.end();
   });
 
-  it('lần đầu: 9 trạm, 12 trụ, 22 súng, 8 mẫu xe, 3 tài xế, 5 xe; trụ in_service không credential', async () => {
+  it('lần đầu: 11 trạm, 14 trụ, 26 súng, 8 mẫu xe, 3 tài xế, 5 xe; trụ in_service không credential', async () => {
     await seedAll();
     const [row] = await q(
       `SELECT (SELECT count(*) FROM sites WHERE site_code LIKE 'HCM-APP-%')::int AS sites,
@@ -101,11 +101,11 @@ describeDb('demo/seed-app.sql — dữ liệu mẫu cho app tài xế (BE-27)', 
       [EMAILS],
     );
     expect(row).toEqual({
-      sites: 9,
+      sites: 11,
       vinfast_only: 3,
-      cps: 12,
-      cps_offline_no_cred: 12,
-      connectors: 22,
+      cps: 14,
+      cps_offline_no_cred: 14,
+      connectors: 26,
       kinds: ['ccs2', 'chademo', 'type2'],
       models: 8,
       drivers: 3,

@@ -19,6 +19,12 @@
 --     demo RH24D1-00001 (seed.sql, chạy simulator) có trạng thái sống và bắt đầu sạc được.
 --     OfflineAlertService bỏ qua trụ chưa từng kết nối (COALESCE(last_message_at, online_changed_at)
 --     NULL) nên không sinh sự cố "Offline" giả.
+--   * BE-41 (Sơn cần cho màn bản đồ): hai trạm ở Làng Đại học. `PMAPP-TD-03A` (Nhà Văn hoá Sinh
+--     viên) như các trụ trên: luôn mất kết nối. `PMAPP-TD-04A` (ga metro Đại học Quốc gia) là trụ
+--     ĐƯỢC NỐI THƯỜNG TRỰC trên staging: seed-demo.mjs ghi credential cho nó (cùng
+--     DEMO_CHARGE_POINT_PASSWORD) và dịch vụ `demo-station` của infra/staging chạy trụ kịch bản `app`
+--     với serial này, nên app thấy trụ online và bấm sạc thử được. Không có dịch vụ đó (local, test)
+--     thì nó cũng mất kết nối như các trụ khác.
 --   * VinFast-only là cờ của SITE (sites.vinfast_only, BR-P03), không phải của trụ.
 --   * Toạ độ là vị trí gần đúng của các địa danh có thật; tên trạm, địa chỉ, công suất là GIẢ.
 --     Thông số mẫu xe lấy gần đúng từ công bố của hãng — đủ cho smart search, không dùng làm số liệu.
@@ -39,7 +45,9 @@ CROSS JOIN (VALUES
   ('HCM-APP-TD-01',  'PowerMe Thao Dien',           false, 'Xuan Thuy, Phuong Thao Dien, TP Thu Duc, TP.HCM',   10.803400, 106.733600),
   ('HCM-APP-Q7-01',  'VinFast Crescent Mall',       true,  'Ton Dat Tien, Phuong Tan Phu, Quan 7, TP.HCM',      10.729300, 106.718900),
   ('HCM-APP-TD-02',  'VinFast Vinhomes Grand Park', true,  'Nguyen Xien, Phuong Long Binh, TP Thu Duc, TP.HCM', 10.842900, 106.838200),
-  ('HCM-APP-TB-01',  'VinFast Cong Hoa',            true,  'Cong Hoa, Phuong 4, Tan Binh, TP.HCM',              10.801200, 106.652700)
+  ('HCM-APP-TB-01',  'VinFast Cong Hoa',            true,  'Cong Hoa, Phuong 4, Tan Binh, TP.HCM',              10.801200, 106.652700),
+  ('HCM-APP-TD-03',  'PowerMe Nha Van hoa Sinh vien', false, 'Khu do thi DHQG-HCM, Phuong Dong Hoa, Di An, Binh Duong', 10.875200, 106.800900),
+  ('HCM-APP-TD-04',  'PowerMe Metro Lang Dai hoc',  false, 'Ga Dai hoc Quoc gia (metro so 1), Xa lo Ha Noi, TP Thu Duc, TP.HCM', 10.866000, 106.801000)
 ) AS v(code, name, vinfast_only, address, lat, lng)
 WHERE o.tax_code = '0312345678'
 ON CONFLICT ON CONSTRAINT sites_site_code_key DO NOTHING;
@@ -63,7 +71,9 @@ JOIN (VALUES
   ('PMAPP-Q7-01A',  'PM-DC150-HCM-0701', 'HCM-APP-Q7-01',  'DC-150', 150, true),
   ('PMAPP-TD-02A',  'PM-DC60-HCM-0801',  'HCM-APP-TD-02',  'DC-60',   60, true),
   ('PMAPP-TD-02B',  'PM-AC11-HCM-0802',  'HCM-APP-TD-02',  'AC-11',   11, false),
-  ('PMAPP-TB-01A',  'PM-DC60-HCM-0901',  'HCM-APP-TB-01',  'DC-60',   60, true)
+  ('PMAPP-TB-01A',  'PM-DC60-HCM-0901',  'HCM-APP-TB-01',  'DC-60',   60, true),
+  ('PMAPP-TD-03A',  'PM-DC60-HCM-1001',  'HCM-APP-TD-03',  'DC-60',   60, true),
+  ('PMAPP-TD-04A',  'PM-DC120-HCM-1101', 'HCM-APP-TD-04',  'DC-120', 120, true)
 ) AS v(serial, display_code, site_code, model, rated_kw, dc) ON v.site_code = s.site_code
 ON CONFLICT ON CONSTRAINT charge_points_serial_number_key DO NOTHING;
 
@@ -93,7 +103,11 @@ JOIN (VALUES
   ('PMAPP-TD-02B',  1, 'type2',    11),
   ('PMAPP-TD-02B',  2, 'type2',    11),
   ('PMAPP-TB-01A',  1, 'ccs2',     60),
-  ('PMAPP-TB-01A',  2, 'ccs2',     60)
+  ('PMAPP-TB-01A',  2, 'ccs2',     60),
+  ('PMAPP-TD-03A',  1, 'ccs2',     60),
+  ('PMAPP-TD-03A',  2, 'ccs2',     60),
+  ('PMAPP-TD-04A',  1, 'ccs2',    120),
+  ('PMAPP-TD-04A',  2, 'ccs2',     60)
 ) AS v(serial, no, kind, kw) ON v.serial = cp.serial_number
 ON CONFLICT ON CONSTRAINT connectors_charge_point_id_connector_no_key DO NOTHING;
 
