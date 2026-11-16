@@ -7,6 +7,12 @@
  * Run while `npm run demo` is up (it sets CONSOLE_ACTOR_ADMIN_ID / CONSOLE_ACTOR_STAFF_ID):
  *   node apps/csms/demo/onboard-sim.mjs [--console http://127.0.0.1:3000] [--url ws://localhost:9000/ocpp]
  *                                       [--site-id N] [--hold-s 60] [--show-password]
+ *                                       [--serial SIM-0006 --register]
+ *
+ * Onboarding works once per charge point, so a shared environment (staging) needs a fresh serial
+ * for every rehearsal: `--serial <new serial> --register` first adds it to the device registry
+ * through `POST /api/admin/charge-points` (the Admin step of UC-ADM-03, STM-3 #1) and then runs the
+ * same steps on it. Without `--register` the serial must already be `registered` (seed: SIM-0005).
  *
  * Steps:
  *   DS-10b  POST onboard for a serial that is NOT in the registry (SIM-9999) → expect 409
@@ -35,7 +41,8 @@ const CONSOLE = opt('console', 'http://127.0.0.1:3000').replace(/\/+$/, '');
 const OCPP_URL = opt('url', 'ws://localhost:9000/ocpp');
 const HOLD_S = opt('hold-s', '60');
 const SHOW = argv.includes('--show-password');
-const SERIAL = 'SIM-0005';
+const SERIAL = opt('serial', 'SIM-0005');
+const REGISTER = argv.includes('--register');
 const UNKNOWN_SERIAL = 'SIM-9999';
 
 const log = (m) => console.log(`[ds-09] ${m}`);
@@ -62,6 +69,16 @@ async function siteId() {
   } finally {
     await client.end();
   }
+}
+
+/** Admin registry step (UC-ADM-03): add the serial to the device registry → lifecycle `registered`. */
+async function register(serialNumber) {
+  const res = await fetch(`${CONSOLE}/api/admin/charge-points`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ serial_number: serialNumber, model: 'D1-120', rated_power_kw: 120 }),
+  });
+  return { status: res.status, body: await res.json() };
 }
 
 async function onboard(serialNumber, site) {
@@ -107,7 +124,15 @@ async function main() {
   if (unknown.status !== 409) fail(`expected 409 for ${UNKNOWN_SERIAL}, got ${unknown.status}`);
   log(`✓ DS-10 onboard ${UNKNOWN_SERIAL} (not in the registry) → 409 ${unknown.body.error}`);
 
-  // DS-09a: onboard SIM-0005 → 201 + credential (shown once)
+  if (REGISTER) {
+    const reg = await register(SERIAL);
+    if (reg.status === 503) fail(`console answered 503 ${reg.body.error}: ${reg.body.detail}`);
+    if (reg.status < 200 || reg.status > 201)
+      fail(`register ${SERIAL} → ${reg.status} ${JSON.stringify(reg.body)}`);
+    log(`✓ DS-09 Admin registered ${SERIAL} → ${reg.status} lifecycle ${reg.body.lifecycle}`);
+  }
+
+  // DS-09a: onboard the serial → 201 + credential (shown once)
   const ok = await onboard(SERIAL, site);
   if (ok.status === 409 && ok.body.error === 'already_onboarded') {
     fail(
@@ -124,7 +149,7 @@ async function main() {
   // DS-10a: wrong password → 401
   const wrong = await station('ds-10', { CP_PASSWORD: '' });
   if (wrong.code !== 0) fail('ds-10: the wrong password was not rejected with 401');
-  log('✓ DS-10 wrong password → 401 (see the "từ chối SIM-0005 … 401" line in the [csms] log)');
+  log(`✓ DS-10 wrong password → 401 (see the "từ chối ${SERIAL} … 401" line in the [csms] log)`);
 
   // DS-09b: right password → in_service, connectors Available
   const run = station('ds-09', { CP_PASSWORD: password }, ['--hold-s', HOLD_S]);
