@@ -32,6 +32,7 @@ export interface FakeResponse {
 export interface Seen {
   method: string;
   path: string;
+  search: string;
   authorization: string | null;
   body: unknown;
 }
@@ -47,6 +48,7 @@ export function fakeCsms(routes: Record<string, FakeResponse | 'network'>) {
       seen.push({
         method: input.method,
         path: url.pathname,
+        search: url.search,
         authorization: input.headers.get('Authorization'),
         body: text ? JSON.parse(text) : null,
       });
