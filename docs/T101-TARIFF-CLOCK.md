@@ -1,30 +1,56 @@
-# T101 — Quy tắc đồng hồ khung giá
+# T101 / T134 — Quy tắc đồng hồ khung giá
 
-Nguồn yêu cầu là [RP3 §5.1](requirements/report3-srs.md) BR-P02, BR-P45 và BR-P48. Nhánh `wp3/t101-quy-tac-dong-ho-khung-gia` dùng mã T101 được giao trực tiếp vì chưa tìm thấy mã MB tương ứng trong kế hoạch. Base local là `508fd0e`.
+Nguồn yêu cầu là [RP3 §5.1](requirements/report3-srs.md) BR-P02, BR-P45 và BR-P48. T101 (#120, base `508fd0e`) đưa vào việc kiểm đồng hồ trụ và phương án dùng giờ CSMS. **T134 (quyết định D-I ngày 14/11/2026) thay quy tắc xử lý khi đồng hồ trụ sai**: đo độ lệch trên các bản tin gửi live trong cùng connection epoch rồi cộng vào giờ trụ; chỉ khi không có độ lệch nào dùng được mới tính cả phiên theo khung giá lúc CSMS nhận StartTransaction. Phiên không còn bị giữ vì đồng hồ. Mã: `apps/csms/src/reconciliation/tariff-clock.ts`, `apps/csms/src/sessions/charge-settlement.service.ts`, migration 0020 và 0023.
+
+## Quy tắc (T134)
+
+Độ lệch của một bản tin = giờ CSMS nhận − giờ trụ ghi trong bản tin. Dương nghĩa là đồng hồ trụ chậm.
+
+1. **Đo theo từng epoch, chỉ trên bản tin live.** Ứng viên là StartTransaction, từng MeterValues.req (lấy mẫu mới nhất trong bản tin) và StopTransaction của phiên. Trong một epoch, bản tin có độ lệch nhỏ nhất là bản tin ít nằm chờ nhất; các bản tin cách nó không quá `REPLAY_SKEW_THRESHOLD_S` (5 giây) là nhóm live. Epoch chỉ cho số đo khi nhóm live có ít nhất hai bản tin cách nhau quá 5 giây trên đồng hồ trụ. Số đo là **trung vị** độ lệch của nhóm live.
+2. **Phiên trải nhiều epoch.** Lấy số đo của epoch đầu tiên đo được. Epoch đo được nào sau đó lệch với nó quá dung sai thì đồng hồ đã đổi giữa phiên, không có một độ lệch chung (`tariff_clock_offset_unstable`, về bước 4). Epoch không đo được không tham gia.
+3. **Đồng hồ sai** nghĩa là |số đo| > `TARIFF_CLOCK_TOLERANCE_S` (mặc định 300 giây). Khi đó cộng độ lệch, làm tròn tới giây, vào mọi mốc giờ trụ của phiên (bắt đầu, dừng, từng mẫu công tơ) rồi chia khung giá như thường; ghi `sessions.priced_clock = 'cp_offset'` và một bản ghi `tariff_clock_offset` có `offset_s=…`. Số đo trong dung sai, hoặc không đo được, thì dùng nguyên giờ trụ (`priced_clock = 'cp'`, không có bản ghi).
+4. **Kiểm lại các mốc đã chỉnh** (bảng dưới). Có mốc không qua thì không có độ lệch nào giải thích được phiên: tính **cả phiên theo một khung giá**, khung có hiệu lực tại `received_started_at`, ghi `priced_clock = 'csms'` và một bản ghi `tariff_clock_fallback` có `reason=…`. Job quyết toán đi tiếp ngay, không chờ và không thử lại.
+
+Use case: một trụ có đồng hồ chậm 10 phút, tài xế sạc 11:55–12:05. Giờ trụ ghi 11:45–11:55 nên trước T134 cả phiên bị tính giá Normal hoặc rơi về giờ CSMS và kẹt chờ số đo tại biên. Nay năm bản tin live đều lệch +600 giây, CSMS cộng 600 giây và chia đúng 5 phút Normal, 5 phút Peak (UC-CHG-03, BR-P02).
+
+### Vì sao nhận diện live không dùng cờ `replayed`
+
+OCPP 1.6 không có cờ live / phát bù. Cờ `replayed` của ReplayDetector so giờ trụ với giờ nhận, nên trụ chậm quá 5 giây thì mọi bản tin live đều mang cờ phát lại, và độ lệch dương không bao giờ đo được. Thời gian nằm trong hàng đợi offline chỉ làm độ lệch **lớn lên**, vì vậy độ lệch nhỏ nhất của epoch là mốc so không phụ thuộc đồng hồ trụ. Một loạt phát bù tới dồn (các bản tin tạo cách nhau một nhịp lấy mẫu, nhận cách nhau vài mili giây) có độ lệch khác nhau từng nhịp nên không tạo được hai bản tin cùng độ lệch.
+
+### Giới hạn đã biết
+
+- Một bản tin đơn lẻ không phân biệt được "đồng hồ chậm" với "nằm chờ trong hàng đợi". Phiên chỉ có StartTransaction live còn StopTransaction phát bù (hoặc ngược lại) không đo được và dùng nguyên giờ trụ.
+- Phiên diễn ra hoàn toàn offline không có bản tin live. Đồng hồ nhanh bị phát hiện vì mốc giờ nằm ở tương lai so với lúc nhận (về bước 4). Đồng hồ **chậm** thì không phân biệt được với phát bù muộn: phiên được tính theo giờ trụ như một phiên offline bình thường.
+- Nhịp lấy mẫu từ 5 giây trở xuống làm một loạt phát bù trông giống nhóm live. Cấu hình mặc định và staging dùng nhịp 10 giây (`METER_VALUE_SAMPLE_INTERVAL_S`).
 
 ## Dấu vết và điều kiện quyết toán
+
+Các kiểm tra áp trên mốc giờ trụ **đã cộng độ lệch**. Mốc gốc trong DB (`cp_started_at`, `cp_stopped_at`, `meter_values.cp_timestamp`) không bị sửa.
 
 | Bằng chứng | Cách kiểm tra |
 | --- | --- |
 | StartTransaction | Tìm CALL inbound hợp lệ theo trụ, `received_started_at`, `cp_started_at`, connector, idTag và meterStart. Kiểm lại chuỗi timestamp gốc và epoch của log. |
 | StopTransaction | Tìm CALL inbound hợp lệ theo trụ, `received_stopped_at`, `cp_stopped_at`, transaction id và meterStop. Kiểm lại chuỗi gốc, thứ tự start/stop trên đồng hồ trụ và thứ tự nhận/epoch phía CSMS. |
-| MeterValues và StopTransaction.transactionData | Kiểm từng timestamp của mẫu điện năng tích luỹ tổng. Mẫu phải thuộc khoảng start–stop, có bản tin gốc khớp thời điểm nhận, epoch và transaction. MeterValues còn khớp connector. Mẫu live lùi giữa các lần nhận hoặc được tạo trong cùng epoch nhưng đến trễ quá dung sai khiến quyết toán chuyển sang CSMS. Các mẫu trong cùng batch hoặc replay có thể đến khác thứ tự. |
-| Connection epoch | Ghép `charge_point_connections` theo trụ và epoch. Thời điểm nhận phải nằm trong khoảng mở–đóng. Dùng `TARIFF_CLOCK_TOLERANCE_S` (mặc định 300 giây) để xác minh đồng hồ tính giá. ReplayDetector tiếp tục dùng `REPLAY_SKEW_THRESHOLD_S` (mặc định 5 giây). |
+| MeterValues và StopTransaction.transactionData | Kiểm từng timestamp của mẫu điện năng tích luỹ tổng. Mẫu phải thuộc khoảng start–stop, có bản tin gốc khớp thời điểm nhận, epoch và transaction. MeterValues còn khớp connector. Mẫu live (đến trong dung sai) không được lùi giữa các lần nhận của cùng epoch. Mẫu đến trễ, kể cả trễ hơn dung sai trong cùng epoch, được chấp nhận: đó là mẫu phát bù. |
+| Connection epoch | Ghép `charge_point_connections` theo trụ và epoch. Thời điểm nhận phải nằm trong khoảng mở–đóng. Mốc giờ không được đi trước thời điểm nhận quá dung sai (`tariff_clock_future_timestamp`). Mốc đứng trước epoch nhận quá dung sai phải nằm trong lịch sử kể từ epoch 1 của trụ. |
 
-Độ trễ vượt dung sai được chấp nhận khi timestamp đứng trước epoch nhận quá dung sai và nằm trong lịch sử kể từ epoch 1 của trụ, có tính dung sai ở mốc đầu. Mẫu thuộc `transactionData` của StopTransaction khớp phiên cũng có thể được lấy sớm hơn trong cùng epoch. Mẫu MeterValues được tạo sau khi kết nối lại và nhận trễ quá dung sai sẽ dùng giờ CSMS khi quyết toán. Nhãn `replayed` của gateway dùng cho phân loại và theo dõi. Kiểm tra đồng hồ xác nhận tính nhất quán của log và epoch đã lưu.
+Lý do rơi về giờ CSMS (`reason` của bản ghi `tariff_clock_fallback`): `tariff_clock_invalid_timestamp`, `tariff_clock_conflicting_stop`, `tariff_clock_frame_unverified`, `tariff_clock_epoch_unverified`, `tariff_clock_future_timestamp`, `tariff_clock_reversed_session`, `tariff_clock_sample_outside_session`, `tariff_clock_sample_frame_unverified`, `tariff_clock_sample_out_of_order`, `tariff_clock_offset_unstable`. Lý do `tariff_clock_ambiguous_delay` của T101 đã bỏ; bản ghi cũ mang lý do này vẫn đọc được.
 
-Các truy vấn log dùng trụ và thời điểm nhận cụ thể, có thêm điều kiện epoch cho từng mẫu. Thời điểm nhận là khóa partition của `ocpp_message_log`. Trình phân tích kiểm ngày và offset trên chuỗi gốc trước khi dùng thời điểm đã chuẩn hoá. Phần lẻ có độ chính xác nhỏ hơn mili giây chỉ được chấp nhận nếu các chữ số dư đều bằng 0, để việc chuẩn hoá của JavaScript không biến mẫu gần biên thành mẫu đúng biên. Frame bị kiểm schema từ chối vẫn đi theo đường CALLERROR và log hiện có.
+Các truy vấn log dùng trụ và thời điểm nhận cụ thể, có thêm điều kiện epoch cho từng mẫu. Thời điểm nhận là khóa partition của `ocpp_message_log`. Frame bị kiểm schema từ chối vẫn đi theo đường CALLERROR và log hiện có.
 
-Giá Peak, Normal và Off-peak áp dụng theo lịch `Asia/Ho_Chi_Minh`. Phiên đủ điều kiện dùng giờ trụ đã xác minh cho cả live và replay. Nếu timestamp không đáng tin hoặc thiếu log xác minh, phiên dùng `received_started_at` và `received_stopped_at`. Tổng các phần tính bằng Wh và milli-VND, sau đó làm tròn half-up một lần theo BR-P45.
+**Timestamp của mẫu công tơ.** Timestamp dùng được cho khung giá phải có múi giờ và phần lẻ không quá mili giây (chữ số dư phải bằng 0, để việc chuẩn hoá không biến mẫu gần biên thành mẫu đúng biên). Từ T134, mẫu có timestamp thiếu múi giờ (coi là UTC) hoặc có phần lẻ dài hơn mili giây (cắt bớt) **vẫn được lưu** để không mất số đo điện năng; phiên bị đánh dấu `TARIFF_CLOCK_UNTRUSTED` và quyết toán theo giờ CSMS. Chỉ ngày giờ không tồn tại (30/02, giờ 24) mới không lưu được mẫu.
 
-Mỗi biên bên trong phiên vẫn cần số đo tích luỹ đúng thời điểm theo BR-P02. Với giờ trụ, dùng mẫu đã xác minh đúng biên hoặc bằng chứng biên do operator ghi nhận. Với giờ CSMS, thời điểm nhận frame chưa chứng minh được thời điểm lấy mẫu, nên cần bằng chứng do operator xác nhận trên trục CSMS. Thiếu bằng chứng giữ job ở `tariff_coverage_or_boundary_meter_required`. Service `ChargeSettlementService.recordTariffBoundary` kiểm quyền operator sở hữu trụ, kiểm biên và khoảng số đo, lưu trục giờ cùng ghi chú, rồi đặt lịch retry ngay. Luồng này hiện chỉ có ở service. Operator chưa có route hoặc UI để nhập bằng chứng biên.
+Giá Peak, Normal và Off-peak áp dụng theo lịch `Asia/Ho_Chi_Minh`. Tổng các phần tính bằng Wh và milli-VND, sau đó làm tròn half-up một lần theo BR-P45.
+
+Với `cp` và `cp_offset`, mỗi biên khung giá bên trong phiên vẫn cần số đo tích luỹ đúng thời điểm (không nội suy): mẫu đã xác minh có giờ trụ đúng bằng biên trừ độ lệch, hoặc bằng chứng biên do operator ghi nhận qua `ChargeSettlementService.recordTariffBoundary` trên cùng trục giờ (`pricing_clock` = `cp` hoặc `cp_offset`). Thiếu thì job ở `tariff_coverage_or_boundary_meter_required`; đây là thiếu số đo, không phải lỗi đồng hồ, và có từ T72. Luồng nhập bằng chứng hiện chỉ có ở service, operator chưa có route hoặc UI. Với `csms` không có biên nào cần số đo; `recordTariffBoundary` trả `boundary_not_applicable`.
 
 ## Audit và quyết toán
 
 - Quyết toán kiểm trạng thái `reconciled` và điều kiện meter trước khi đọc log gốc dưới khoá phiên. Phạm vi đủ điều kiện gồm app có intent và các ca được gán theo BE-24.
-- Khi post, debit, statement, các phần giá và `sessions.priced_clock` / `priced_ended_at` được ghi trong cùng giao dịch. CSMS ghi đúng một record `tariff_clock_fallback` có resolution `tariff_clock=csms_fallback reason=…`. Operator xem qua console, và RQ1 tiếp tục đếm xung đột công tơ bằng `record_type='conflict'`. Audit tính giá vẫn được ghi khi tắt engine đối soát để chạy ablation. Retry giữ đúng một debit và cho phép số dư âm theo BR-P20.
-- Bản tin lặp đúng timestamp và số đo tương đương giữ nguyên dữ liệu. Bản tin lặp có số đo mâu thuẫn giữ phiên chưa debit ở `review`. `OPERATOR_RESOLVED` cho phép quyết toán theo bằng chứng được xác nhận. Nếu đã có debit, bằng chứng muộn được ghi lại và statement đã phát hành được giữ nguyên.
-- Job cũ chưa post được thử lại theo quy tắc mới. Nếu phiên đang `review`, operator xử lý qua `OPERATOR_RESOLVED`. Cột pricing của statement đã post trước migration 0020 giữ `NULL`. Với K3/T108, dùng `(priced_ended_at AT TIME ZONE 'Asia/Ho_Chi_Minh')::date` để nhóm theo ngày đã tính giá.
+- Khi post, debit, statement, các phần giá và `sessions.priced_clock` / `priced_ended_at` được ghi trong cùng giao dịch, cùng với đúng một bản ghi `tariff_clock_offset` (resolution `tariff_clock=cp_offset offset_s=… epoch=… live_frames=…`) hoặc `tariff_clock_fallback` (`tariff_clock=csms_fallback reason=…`) nếu có chỉnh. Operator xem qua console. Audit tính giá vẫn được ghi khi tắt engine đối soát để chạy ablation. Retry giữ đúng một debit và cho phép số dư âm theo BR-P20.
+- Bản tin lặp đúng timestamp và số đo tương đương giữ nguyên dữ liệu. Bản tin lặp có số đo mâu thuẫn giữ phiên chưa debit ở `review` và ghi bản ghi `conflict` có tiền tố `meter_evidence_conflict`. Bản ghi này không phải xung đột điện năng của đối soát: console (`reconciliation_conflicts`, `has_conflict`) và harness RQ1 (`conflict_records`) không đếm nó; console hiển thị loại `meter_evidence_conflict`. `OPERATOR_RESOLVED` cho phép quyết toán theo bằng chứng được xác nhận. Nếu đã có debit, bằng chứng muộn được ghi lại và statement đã phát hành được giữ nguyên.
+- Cột pricing của statement đã post trước migration 0020 giữ `NULL`. Với K3/T108, dùng `(priced_ended_at AT TIME ZONE 'Asia/Ho_Chi_Minh')::date` để nhóm theo ngày đã tính giá; với `cp_offset` đó là giờ dừng của trụ đã cộng độ lệch.
+- Nhánh đọc sự kiện `TARIFF_CLOCK_HOLD` (dữ liệu thử nghiệm trước khi T101 merge, chưa từng được ghi trên `main`) đã bỏ.
 
 ## Đối chiếu mã nguồn
 
@@ -52,4 +78,4 @@ npm run build -w @powerme/csms
 
 Trong PowerShell, đặt `$env:DATABASE_URL` bằng URL trên trước khi chạy cùng lệnh `npm test`. Dừng PostgreSQL bằng Ctrl+C ở terminal đầu.
 
-WF-01 dùng gateway, log và epoch thật trong database test. Các ca T101 bao phủ biên giá, nửa đêm ICT, mẫu đến muộn sau kết nối lại, nhiều mẫu cùng frame, fallback, xung đột công tơ, số dư âm, chứng cứ biên và retry đồng thời.
+WF-01 dùng gateway, log và epoch thật trong database test. Các ca T101 bao phủ biên giá, nửa đêm ICT, mẫu đến muộn sau kết nối lại, nhiều mẫu cùng frame, fallback, xung đột công tơ, số dư âm, chứng cứ biên và retry đồng thời. Các ca T134: (a) đồng hồ lệch đúng 10 phút (chậm và nhanh) với phiên vắt qua biên giá; (b) phiên hoàn toàn offline với đồng hồ sai; (c) mẫu phát bù tới trễ hơn 300 giây; độ lệch đổi giữa hai epoch; mẫu có timestamp thiếu múi giờ. Phép đo độ lệch là hàm thuần, test ở `src/reconciliation/tariff-clock.spec.ts`.

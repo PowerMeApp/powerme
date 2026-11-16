@@ -3265,7 +3265,12 @@ components:
               items: { $ref: '#/components/schemas/ReconciliationRecord' }
     ReconciliationKind:
       type: string
-      enum: [conflict, gap_detected, replay, duplicate, orphan_stop, unknown_id_tag, meter_gap, late_sample, tariff_clock_fallback]
+      description: |
+        Loại hiển thị của bản ghi đối soát. `meter_evidence_conflict` (bản tin lặp mang số đo khác bản đã
+        lưu) có `record_type = conflict` nhưng không tính vào `reconciliation_conflicts` / `has_conflict`.
+        `tariff_clock_offset`: đã cộng độ lệch đồng hồ trụ (`offset_s=` trong `resolution`) trước khi chia
+        khung giá; `tariff_clock_fallback`: cả phiên tính theo khung giá lúc CSMS nhận StartTransaction (BR-P02).
+      enum: [conflict, meter_evidence_conflict, gap_detected, gap_closed, replay, duplicate, orphan_stop, unknown_id_tag, meter_gap, late_sample, tariff_clock_fallback, tariff_clock_offset]
     ReconciliationRecord:
       type: object
       required: [id, session_id, record_type, kind, reviewed, created_at]

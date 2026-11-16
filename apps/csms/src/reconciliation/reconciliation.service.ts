@@ -20,6 +20,9 @@
  *   - mẫu muộn LẤP KÍN một khe hở đã ghi → late_sample với tiền tố "gap_closed (late_sample): …"
  *     (T132). Bản ghi khe hở cũ không bị sửa hay xoá (append-only): khe hở "còn mở" = bản ghi
  *     gap_detected chưa có bản ghi gap_closed nào trỏ tới (`closes_record_no=`).
+ *   - bản tin lặp mang số đo khác bản đã lưu → conflict với tiền tố "meter_evidence_conflict"
+ *     (`recordMeterEvidenceConflict`). Đây KHÔNG phải xung đột điện năng của đối soát (meterStop so
+ *     với chuỗi đo): console và harness RQ1 không đếm nó vào số conflict (T134).
  *   - bản tin phát lại chạm phiên → replay; StartTransaction/MeterValues trùng → duplicate;
  *     StopTransaction cho phiên đã dừng → orphan_stop; idTag lạ → unknown_id_tag (ADR-0012).
  * Trước 0001 conflict và mẫu muộn được lưu là meter_gap + tiền tố resolution; bản ghi cũ còn nguyên
@@ -143,6 +146,9 @@ export function evaluateSeries(input: ReconciliationInput): ReconciliationVerdic
     sampleCount: samples.length,
   };
 }
+
+/** Tiền tố resolution của bản ghi "bản tin lặp mang số đo khác bản đã lưu" (record_type conflict). */
+export const METER_EVIDENCE_CONFLICT_PREFIX = 'meter_evidence_conflict';
 
 /** Tiền tố resolution của bản ghi "khe hở đã được mẫu muộn lấp kín" (T132). */
 export const GAP_CLOSED_PREFIX = 'gap_closed';
@@ -342,6 +348,10 @@ export class ReconciliationService {
     });
   }
 
+  /**
+   * Bản tin lặp (cùng timestamp, hoặc StopTransaction lần hai) mang số đo khác bản đã lưu. Enum chưa
+   * có loại riêng nên ghi `conflict` + tiền tố; mọi bộ đếm conflict phải loại tiền tố này.
+   */
   async recordMeterEvidenceConflict(
     ex: DbExecutor,
     sessionId: number,
@@ -353,7 +363,7 @@ export class ReconciliationService {
       gapStart: null,
       gapEnd: frame.receivedAt,
       energyDifferenceWh: null,
-      resolution: `meter_evidence_conflict reason=${reason} message_log_id=${frame.messageLogId}`,
+      resolution: `${METER_EVIDENCE_CONFLICT_PREFIX} reason=${reason} message_log_id=${frame.messageLogId}`,
     });
   }
 

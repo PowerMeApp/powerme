@@ -1118,15 +1118,39 @@ describeDb('WP3/T31 WF-01 service journey with real OCPP + Postgres', () => {
     await expectSettlementPending(sid, 'tariff_coverage_or_boundary_meter_required');
   });
 
-  it('T101 holds a legacy boundary meter whose inbound clock evidence is missing', async () => {
+  it('T134 prices a session whose boundary meter has no inbound frame at the receipt-start band, without holding it', async () => {
     await twoBands();
+    await q("UPDATE tariff_periods SET price_per_kwh_vnd=3000 WHERE band='peak'");
+    await q("UPDATE tariff_periods SET price_per_kwh_vnd=1000 WHERE band='normal'");
     const sid = await pricingFixture(utcTime(4, 59), utcTime(5, 1), 800);
     await q(
       `INSERT INTO meter_values(session_id,cp_timestamp,received_at,epoch,measurand,value,unit)
        VALUES($1,$2,$2,1,'Energy.Active.Import.Register',1400,'Wh')`,
       [sid, utcTime(5, 0)],
     );
-    await expectSettlementPending(sid, 'tariff_coverage_or_boundary_meter_required');
+    // Giờ CSMS không có biên nào cần số đo: operator không nhập được bằng chứng biên cho phiên này.
+    await q('UPDATE driver_charge_intents SET billing_review_required=true WHERE session_id=$1', [
+      sid,
+    ]);
+    await expect(
+      settlement.recordTariffBoundary(await operator(), sid, utcTime(5, 0), 1400, 'not needed'),
+    ).rejects.toThrow('boundary_not_applicable');
+    await q('UPDATE driver_charge_intents SET billing_review_required=false WHERE session_id=$1', [
+      sid,
+    ]);
+    expect(await settlement.settle(sid)).toBe('posted');
+    await expectFallback(sid, 'tariff_clock_sample_frame_unverified', utcTime(5, 1));
+    // Phiên vắt qua 12:00 ICT trên giờ CSMS nhưng chỉ có MỘT phần, theo khung lúc nhận start.
+    expect(await segments(sid)).toEqual([
+      {
+        band: 'normal',
+        segment_start: utcTime(4, 59),
+        segment_end: utcTime(5, 1),
+        energy_wh: '800',
+      },
+    ]);
+    expect((await service.statement(driver, sid)).amount_vnd).toBe('800');
+    expect(await settlement.retryPending()).toBe(0);
   });
 
   it('T101 validates the raw start clock even when JS normalizes an invalid date', async () => {
@@ -1148,6 +1172,43 @@ describeDb('WP3/T31 WF-01 service journey with real OCPP + Postgres', () => {
     ).toHaveLength(0);
   }
 
+  async function segments(sid: number) {
+    return q(
+      `SELECT t.band,s.segment_start,s.segment_end,s.energy_wh FROM session_tariff_segments s
+       JOIN tariff_periods t ON t.id=s.tariff_period_id WHERE s.session_id=$1 ORDER BY s.segment_start`,
+      [sid],
+    );
+  }
+
+  async function clockRecords(sid: number) {
+    return q(
+      `SELECT record_type,resolution FROM reconciliation_records
+       WHERE session_id=$1 AND record_type::text LIKE 'tariff_clock%' ORDER BY record_no`,
+      [sid],
+    );
+  }
+
+  async function expectOffset(sid: number, offsetS: number, end: Date, liveFrames: number) {
+    expect(await settlement.settle(sid)).toBe('already_posted');
+    expect(
+      await q('SELECT status,priced_clock,priced_ended_at FROM sessions WHERE id=$1', [sid]),
+    ).toEqual([{ status: 'reconciled', priced_clock: 'cp_offset', priced_ended_at: end }]);
+    expect(await clockRecords(sid)).toEqual([
+      {
+        record_type: 'tariff_clock_offset',
+        resolution: `tariff_clock=cp_offset offset_s=${offsetS} epoch=1 live_frames=${liveFrames}`,
+      },
+    ]);
+  }
+
+  async function expectChargePointClock(sid: number, end: Date) {
+    expect(await settlement.settle(sid)).toBe('already_posted');
+    expect(
+      await q('SELECT status,priced_clock,priced_ended_at FROM sessions WHERE id=$1', [sid]),
+    ).toEqual([{ status: 'reconciled', priced_clock: 'cp', priced_ended_at: end }]);
+    expect(await clockRecords(sid)).toEqual([]);
+  }
+
   async function expectFallback(sid: number, reason: string, end: Date) {
     expect(await settlement.settle(sid)).toBe('already_posted');
     expect(
@@ -1161,7 +1222,7 @@ describeDb('WP3/T31 WF-01 service journey with real OCPP + Postgres', () => {
     ).toEqual([{ resolution: 'tariff_clock=csms_fallback reason=' + reason }]);
   }
 
-  it('T101 uses the shifted receipt tariff and posts one debit even in shortfall', async () => {
+  it('T134 shifts a 10-minute-slow clock measured on live start and stop, and posts one debit even in shortfall', async () => {
     await twoBands();
     const receivedStart = utcTime(5, 2);
     const receivedStop = utcTime(5, 4);
@@ -1172,7 +1233,7 @@ describeDb('WP3/T31 WF-01 service journey with real OCPP + Postgres', () => {
     await q("UPDATE tariff_periods SET price_per_kwh_vnd=300000 WHERE band='peak'");
     await q('UPDATE charge_settlement_jobs SET next_attempt_at=now() WHERE session_id=$1', [sid]);
     await Promise.all([settlement.retryPending(), settlement.settle(sid)]);
-    await expectFallback(sid, 'tariff_clock_ambiguous_delay', receivedStop);
+    await expectOffset(sid, 600, receivedStop, 2);
     expect(await service.statement(driver, sid)).toMatchObject({ amount_vnd: '240000' });
     expect(
       await q(
@@ -1188,41 +1249,19 @@ describeDb('WP3/T31 WF-01 service journey with real OCPP + Postgres', () => {
     expect(await consoleQueries.reconciliation(20)).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          record_type: 'tariff_clock_fallback',
-          kind: 'tariff_clock_fallback',
-          resolution: 'tariff_clock=csms_fallback reason=tariff_clock_ambiguous_delay',
+          record_type: 'tariff_clock_offset',
+          kind: 'tariff_clock_offset',
+          resolution: 'tariff_clock=cp_offset offset_s=600 epoch=1 live_frames=2',
         }),
       ]),
     );
     expect(await consoleQueries.summary()).toMatchObject({
-      reconciliation_by_type: { tariff_clock_fallback: 1, conflict: 0 },
+      reconciliation_by_type: { tariff_clock_offset: 1, tariff_clock_fallback: 0, conflict: 0 },
       reconciliation_conflicts: 0,
     });
   });
 
-  it('T101 recovers a legacy clock-only settlement hold after OPERATOR_RESOLVED', async () => {
-    const end = utcTime(4, 2);
-    const sid = await pricingFixture(utcTime(4, 0), end, 800);
-    await q("UPDATE sessions SET status='review' WHERE id=$1", [sid]);
-    await q(
-      `INSERT INTO session_status_history(session_id,from_status,to_status,event,note)
-       VALUES($1,'active','active','TARIFF_CLOCK_HOLD','tariff_clock_invalid_timestamp message_log_id=1')`,
-      [sid],
-    );
-    await expectSettlementPending(sid, 'awaiting_reconciliation');
-    const review = new SessionReviewService(db, settlement);
-    expect(
-      await review.resolveReview(
-        sid,
-        await operator(),
-        'confirmed_meter',
-        'Verified original meter',
-      ),
-    ).toMatchObject({ settlement: 'posted' });
-    await expectFallback(sid, 'tariff_clock_invalid_timestamp', end);
-  });
-
-  it('T101 bills each receipt-clock band only after the operator supplies the boundary meter', async () => {
+  it('T134 bills each band of an offset-corrected session once the operator supplies the boundary meter on the corrected axis', async () => {
     await twoBands();
     const boundary = utcTime(5, 0);
     const receivedStop = utcTime(5, 1);
@@ -1250,7 +1289,14 @@ describeDb('WP3/T31 WF-01 service journey with real OCPP + Postgres', () => {
       'Verified receipt-clock boundary',
     );
     expect(await settlement.retryPending()).toBe(1);
-    await expectFallback(sid, 'tariff_clock_ambiguous_delay', receivedStop);
+    await expectOffset(sid, 600, receivedStop, 2);
+    expect(
+      await q('SELECT boundary_at,meter_wh,pricing_clock FROM charge_tariff_boundary_evidence'),
+    ).toEqual(
+      expect.arrayContaining([
+        { boundary_at: boundary, meter_wh: '1200', pricing_clock: 'cp_offset' },
+      ]),
+    );
     expect(await service.statement(driver, sid)).toMatchObject({ amount_vnd: '1400' });
     expect(
       await q(
@@ -1269,11 +1315,13 @@ describeDb('WP3/T31 WF-01 service journey with real OCPP + Postgres', () => {
     async (clock) => {
       const midnight = utcTime(17, 0);
       const nextDay = utcTime(17, 2);
-      const sid = await pricingFixture(utcTime(16, 48), utcTime(16, 50), 800, {
-        receivedStart: clock === 'csms' ? utcTime(17, 1) : undefined,
-        receivedStop: nextDay,
-        offline: clock === 'cp',
-      });
+      // csms: StopTransaction ghi 17:20 nhưng tới lúc 17:02 → giờ trụ ở tương lai, không đo được độ lệch.
+      const sid = await pricingFixture(
+        utcTime(16, 48),
+        clock === 'csms' ? utcTime(17, 20) : utcTime(16, 50),
+        800,
+        { receivedStop: nextDay, offline: clock === 'cp' },
+      );
       expect(await settlement.settle(sid)).toBe('posted');
       const group = await q(
         `SELECT priced_clock,(priced_ended_at AT TIME ZONE 'Asia/Ho_Chi_Minh')::date::text AS revenue_day,
@@ -1293,9 +1341,16 @@ describeDb('WP3/T31 WF-01 service journey with real OCPP + Postgres', () => {
     },
   );
 
+  it('T134 keeps the charge point clock for a stop delivered late in the same epoch', async () => {
+    const sid = await pricingFixture(utcTime(4, 0), utcTime(4, 1), 800, {
+      receivedStop: utcTime(4, 7),
+    });
+    expect(await settlement.settle(sid)).toBe('posted');
+    await expectChargePointClock(sid, utcTime(4, 1));
+  });
+
   it.each([
     [utcTime(4, 8), utcTime(4, 2), 'tariff_clock_future_timestamp'],
-    [utcTime(4, 1), utcTime(4, 7), 'tariff_clock_ambiguous_delay'],
     [new Date(utcTime(4, 0).getTime() - 1), utcTime(4, 0), 'tariff_clock_reversed_session'],
   ])(
     'T101 uses receipt time for an untrusted stop clock (%s, %s)',
@@ -1345,7 +1400,7 @@ describeDb('WP3/T31 WF-01 service journey with real OCPP + Postgres', () => {
   }
 
   it.each([20, 301])(
-    'T101 checks a queued sample generated after reconnect and delivered %ss late',
+    'T134 keeps the charge point clock for a queued sample generated after reconnect and delivered %ss late',
     async (delay) => {
       const sid = await observedStart();
       const first = registry.get('T31-CP')!;
@@ -1372,16 +1427,227 @@ describeDb('WP3/T31 WF-01 service journey with real OCPP + Postgres', () => {
       ).toEqual([
         { cp_timestamp: generated, received_at: receipt, epoch: conn.epoch, replayed: true },
       ]);
-      if (delay > 300) {
-        await expectFallback(sid, 'tariff_clock_ambiguous_delay', end);
-      } else {
-        expect(
-          await q('SELECT priced_clock,priced_ended_at FROM sessions WHERE id=$1', [sid]),
-        ).toEqual([{ priced_clock: 'cp', priced_ended_at: end }]);
-        expect((await service.statement(driver, sid)).energy_wh).toBe('800');
-      }
+      await expectChargePointClock(sid, end);
+      expect((await service.statement(driver, sid)).energy_wh).toBe('800');
     },
   );
+
+  /**
+   * Một phiên đi qua gateway thật, mỗi bản tin có giờ trụ (`cp`) và giờ CSMS nhận (`received`) riêng.
+   * `reconnect`: trụ nối lại ngay trước bản tin này (epoch cũ đóng, epoch mới mở).
+   */
+  async function clockSession(
+    frames: {
+      action: 'start' | 'meter' | 'stop';
+      cp: Date;
+      received: Date;
+      wh?: string;
+      reconnect?: boolean;
+    }[],
+  ) {
+    await service.start(driver, 'start', input);
+    let conn = registry.get('T31-CP')!;
+    const opened = new Date(
+      Math.min(...frames.flatMap((f) => [f.cp.getTime(), f.received.getTime()])) - 3600000,
+    );
+    await q(
+      'UPDATE charge_point_connections SET opened_at=$2 WHERE charge_point_id=$1 AND epoch=$3',
+      [conn.chargePointId, opened, conn.epoch],
+    );
+    conn = { ...conn, epochOpenedAt: opened };
+    for (const [i, frame] of frames.entries()) {
+      if (frame.reconnect) {
+        const reopened = new Date(frame.received.getTime() - 500);
+        await q(
+          'UPDATE charge_point_connections SET closed_at=$2 WHERE charge_point_id=$1 AND epoch=$3',
+          [conn.chargePointId, new Date(reopened.getTime() - 500), conn.epoch],
+        );
+        await q(
+          'INSERT INTO charge_point_connections(charge_point_id,epoch,opened_at) VALUES($1,$2,$3)',
+          [conn.chargePointId, conn.epoch + 1, reopened],
+        );
+        conn = { ...conn, epoch: conn.epoch + 1, epochOpenedAt: reopened };
+      }
+      const timestamp = frame.cp.toISOString();
+      const result = await server.processCall(
+        conn,
+        {
+          action: { start: 'StartTransaction', meter: 'MeterValues', stop: 'StopTransaction' }[
+            frame.action
+          ],
+          messageId: `clock-session-${i}`,
+          params:
+            frame.action === 'start'
+              ? { connectorId: 1, idTag: tag, meterStart: 1000, timestamp }
+              : frame.action === 'stop'
+                ? { transactionId: transaction, meterStop: 1800, timestamp }
+                : {
+                    connectorId: 1,
+                    transactionId: transaction,
+                    meterValue: [{ timestamp, sampledValue: [{ value: frame.wh, unit: 'Wh' }] }],
+                  },
+        },
+        frame.received,
+      );
+      if (frame.action === 'start') transaction = Number(result.transactionId);
+    }
+    return (await service.getStart(driver, 'start')).sessionId!;
+  }
+
+  it.each([
+    [600, 'slow'],
+    [-600, 'fast'],
+  ])(
+    'T134 (a) adds a constant %s s offset (%s clock) to start, stop and every sample, then splits at the band boundary',
+    async (offsetS) => {
+      await twoBands();
+      await q("UPDATE tariff_periods SET price_per_kwh_vnd=3 WHERE band='peak'");
+      // Giờ thật 11:55–12:05 ICT; trụ ghi lệch đúng 10 phút; CSMS nhận live (trễ mạng dưới 1 s).
+      const boundary = utcTime(5, 0);
+      const sent = (at: Date, wh?: string, lagMs = 0) => ({
+        cp: new Date(at.getTime() - offsetS * 1000),
+        received: new Date(at.getTime() + lagMs),
+        wh,
+      });
+      const sid = await clockSession([
+        { action: 'start', ...sent(utcTime(4, 55), undefined, 300) },
+        { action: 'meter', ...sent(utcTime(4, 57), '1200', 100) },
+        { action: 'meter', ...sent(boundary, '1400', 200) },
+        { action: 'meter', ...sent(utcTime(5, 2), '1500', 400) },
+        { action: 'stop', ...sent(utcTime(5, 5)) },
+      ]);
+      await expectOffset(sid, offsetS, utcTime(5, 5), 5);
+      // Không chỉnh thì cả phiên rơi vào một khung (11:45–11:55 hoặc 12:05–12:15 ICT).
+      expect(await segments(sid)).toEqual([
+        {
+          band: 'normal',
+          segment_start: utcTime(4, 55),
+          segment_end: boundary,
+          energy_wh: '400',
+        },
+        { band: 'peak', segment_start: boundary, segment_end: utcTime(5, 5), energy_wh: '400' },
+      ]);
+      expect((await service.statement(driver, sid)).amount_vnd).toBe('2');
+      // Giờ trụ gốc của phiên và của từng mẫu không bị sửa.
+      expect(
+        await q('SELECT cp_started_at,cp_stopped_at FROM sessions WHERE id=$1', [sid]),
+      ).toEqual([
+        { cp_started_at: sent(utcTime(4, 55)).cp, cp_stopped_at: sent(utcTime(5, 5)).cp },
+      ]);
+      expect(
+        await q(
+          "SELECT 1 FROM credit_transactions WHERE session_id=$1 AND transaction_type='session_debit'",
+          [sid],
+        ),
+      ).toHaveLength(1);
+    },
+  );
+
+  it('T134 (b) prices a session that ran entirely offline on a wrong clock at the band in force when the CSMS received the start', async () => {
+    await twoBands();
+    await q("UPDATE tariff_periods SET price_per_kwh_vnd=1000 WHERE band='normal'");
+    await q("UPDATE tariff_periods SET price_per_kwh_vnd=3000 WHERE band='peak'");
+    // Trụ sạc lúc mất mạng với đồng hồ nhanh 3 giờ, nối lại lúc 11:59:58 ICT và phát bù cả phiên;
+    // loạt phát bù vắt qua 12:00 ICT. Không có bản tin live nào để đo độ lệch.
+    const noon = utcTime(5, 0).getTime();
+    const receivedStart = new Date(noon - 2000);
+    const receivedStop = new Date(noon + 1000);
+    const sid = await clockSession([
+      { action: 'start', cp: utcTime(7, 0), received: receivedStart, reconnect: true },
+      { action: 'meter', cp: utcTime(7, 10), received: new Date(noon - 1000), wh: '1400' },
+      { action: 'stop', cp: utcTime(7, 30), received: receivedStop },
+    ]);
+    await expectFallback(sid, 'tariff_clock_future_timestamp', receivedStop);
+    expect(await segments(sid)).toEqual([
+      {
+        band: 'normal',
+        segment_start: receivedStart,
+        segment_end: receivedStop,
+        energy_wh: '800',
+      },
+    ]);
+    expect((await service.statement(driver, sid)).amount_vnd).toBe('800');
+    // Không còn job chờ thử lại mỗi 30 giây.
+    expect(
+      await q('SELECT state,reason FROM charge_settlement_jobs WHERE session_id=$1', [sid]),
+    ).toEqual([{ state: 'posted', reason: 'posted' }]);
+    expect(await settlement.retryPending()).toBe(0);
+  });
+
+  it('T134 (c) does not measure the clock on backfilled samples that arrive more than 300 s late', async () => {
+    await twoBands();
+    await q("UPDATE tariff_periods SET price_per_kwh_vnd=3 WHERE band='peak'");
+    const at = (hour: number, minute: number, second = 0) =>
+      new Date(utcTime(hour, minute).getTime() + second * 1000);
+    // Đồng hồ trụ đúng. Mất mạng 11:58–12:06 ICT; ba mẫu phát bù tới trễ 420 / 361 / 302 s, một mẫu
+    // tạo sau khi nối lại nằm chờ 330 s. Nếu tính các mẫu này thì "độ lệch" đo được sẽ vượt dung sai.
+    const sid = await clockSession([
+      { action: 'start', cp: at(4, 55), received: at(4, 55) },
+      { action: 'meter', cp: at(4, 56), received: at(4, 56), wh: '1100' },
+      { action: 'meter', cp: at(4, 57), received: at(4, 57), wh: '1200' },
+      { action: 'meter', cp: at(4, 59), received: at(5, 6), wh: '1300', reconnect: true },
+      { action: 'meter', cp: at(5, 0), received: at(5, 6, 1), wh: '1400' },
+      { action: 'meter', cp: at(5, 1), received: at(5, 6, 2), wh: '1500' },
+      { action: 'meter', cp: at(5, 6, 30), received: at(5, 12), wh: '1700' },
+      { action: 'stop', cp: at(5, 12, 30), received: at(5, 12, 30) },
+    ]);
+    expect(
+      await q(
+        `SELECT count(*)::int AS late FROM meter_values
+         WHERE session_id=$1 AND received_at-cp_timestamp > interval '300 seconds'`,
+        [sid],
+      ),
+    ).toEqual([{ late: 4 }]);
+    await expectChargePointClock(sid, at(5, 12, 30));
+    expect(await segments(sid)).toEqual([
+      { band: 'normal', segment_start: at(4, 55), segment_end: at(5, 0), energy_wh: '400' },
+      { band: 'peak', segment_start: at(5, 0), segment_end: at(5, 12, 30), energy_wh: '400' },
+    ]);
+    expect((await service.statement(driver, sid)).amount_vnd).toBe('2');
+  });
+
+  it('T134 falls back when the clock offset changes between two connection epochs of one session', async () => {
+    const at = (hour: number, minute: number) => utcTime(hour, minute);
+    const slow = (time: Date) => new Date(time.getTime() - 600000);
+    // Epoch 1: trụ chậm 10 phút. Sau khi nối lại đồng hồ đã được chỉnh đúng: không có một độ lệch chung.
+    const sid = await clockSession([
+      { action: 'start', cp: slow(at(4, 0)), received: at(4, 0) },
+      { action: 'meter', cp: slow(at(4, 1)), received: at(4, 1), wh: '1200' },
+      { action: 'meter', cp: at(4, 3), received: at(4, 3), wh: '1400', reconnect: true },
+      { action: 'stop', cp: at(4, 4), received: at(4, 4) },
+    ]);
+    await expectFallback(sid, 'tariff_clock_offset_unstable', at(4, 4));
+    expect(await segments(sid)).toHaveLength(1);
+  });
+
+  it('T134 keeps an energy sample whose timestamp has no zone or a sub-millisecond fraction and only distrusts the clock', async () => {
+    const sid = await observedStart();
+    const from = new Date(startTimestamp).getTime();
+    const at = (offset: number) => new Date(from + offset);
+    await clockMeter(at(1000).toISOString().replace('Z', ''), '1200', at(1000));
+    await clockMeter(at(2000).toISOString().replace('Z', '4567Z'), '1400', at(2000));
+    await stopAt(at(3000));
+    expect(
+      await q(
+        'SELECT cp_timestamp,value::int AS wh FROM meter_values WHERE session_id=$1 ORDER BY cp_timestamp',
+        [sid],
+      ),
+    ).toEqual([
+      { cp_timestamp: at(1000), wh: 1200 },
+      { cp_timestamp: at(2000), wh: 1400 },
+    ]);
+    expect(
+      await q(
+        "SELECT split_part(note,' ',1) AS reason FROM session_status_history WHERE session_id=$1 AND event='TARIFF_CLOCK_UNTRUSTED'",
+        [sid],
+      ),
+    ).toEqual([
+      { reason: 'tariff_clock_invalid_timestamp' },
+      { reason: 'tariff_clock_invalid_timestamp' },
+    ]);
+    await expectFallback(sid, 'tariff_clock_invalid_timestamp', at(3000));
+    expect((await service.statement(driver, sid)).energy_wh).toBe('800');
+  });
 
   it('T101 verifies all samples in one MeterValues frame regardless of array order', async () => {
     const sid = await observedStart();
@@ -1447,6 +1713,18 @@ describeDb('WP3/T31 WF-01 service journey with real OCPP + Postgres', () => {
     expect(await q('SELECT status FROM sessions WHERE id=$1', [sid])).toEqual([
       { status: 'review' },
     ]);
+    // T134: bản ghi meter_evidence_conflict có record_type = conflict nhưng không vào bộ đếm conflict.
+    const consoleQueries = new ConsoleQueries(db, config, registry);
+    expect(
+      await q("SELECT resolution FROM reconciliation_records WHERE record_type='conflict'"),
+    ).toEqual([{ resolution: expect.stringMatching(/^meter_evidence_conflict reason=/) }]);
+    expect(await consoleQueries.summary()).toMatchObject({ reconciliation_conflicts: 0 });
+    expect(await consoleQueries.sessions(5)).toEqual([
+      expect.objectContaining({ id: sid, has_conflict: false }),
+    ]);
+    expect(await consoleQueries.reconciliation(20)).toEqual(
+      expect.arrayContaining([expect.objectContaining({ kind: 'meter_evidence_conflict' })]),
+    );
     await expectSettlementPending(sid, 'awaiting_reconciliation');
     const review = new SessionReviewService(db, settlement);
     expect(

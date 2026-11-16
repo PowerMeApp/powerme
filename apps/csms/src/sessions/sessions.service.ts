@@ -53,7 +53,11 @@ import {
   FrameRef,
   ReconciliationService,
 } from '../reconciliation/reconciliation.service.js';
-import { parseChargePointTime, TARIFF_CLOCK_UNTRUSTED } from '../reconciliation/tariff-clock.js';
+import {
+  parseChargePointTime,
+  readChargePointTime,
+  TARIFF_CLOCK_UNTRUSTED,
+} from '../reconciliation/tariff-clock.js';
 import { isConnectorStatus, isExpectedTransition } from './connectors/valid-transitions.js';
 import { SessionEvent, SessionStateMachine, SessionStatus } from './session-state-machine.js';
 
@@ -470,11 +474,7 @@ export class SessionsService {
         .where(
           and(
             eq(sessionStatusHistory.sessionId, session.id),
-            or(
-              eq(sessionStatusHistory.event, METER_EVIDENCE_CONFLICT),
-              sql`${sessionStatusHistory.event}='TARIFF_CLOCK_HOLD'
-                AND split_part(${sessionStatusHistory.note},' ',1)='tariff_clock_conflicting_sample'`,
-            ),
+            eq(sessionStatusHistory.event, METER_EVIDENCE_CONFLICT),
           ),
         )
         .limit(1);
@@ -882,7 +882,10 @@ export class SessionsService {
   private flatten(values: MeterValue[]): FlatSample[] {
     const out: FlatSample[] = [];
     for (const mv of values) {
-      const cpTimestamp = parseChargePointTime(mv.timestamp);
+      // T134: timestamp thiếu múi giờ hoặc có phần lẻ dài hơn mili giây vẫn đọc được (coi là UTC, cắt
+      // tới mili giây) → GIỮ mẫu điện năng; đồng hồ đã bị ingestSamples đánh dấu không tin được.
+      // Chỉ ngày giờ không tồn tại mới không có mốc nào để lưu.
+      const cpTimestamp = readChargePointTime(mv.timestamp)?.at;
       if (!cpTimestamp) continue;
       for (const sv of mv.sampledValue) {
         if (!Number.isFinite(Number(sv.value))) {

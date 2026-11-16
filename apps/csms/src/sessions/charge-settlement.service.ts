@@ -1,10 +1,16 @@
 import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import type { PoolClient } from 'pg';
-import { CONFIG, CsmsConfig, DEFAULT_TARIFF_CLOCK_TOLERANCE_S } from '../config.js';
+import {
+  CONFIG,
+  CsmsConfig,
+  DEFAULT_REPLAY_SKEW_S,
+  DEFAULT_TARIFF_CLOCK_TOLERANCE_S,
+} from '../config.js';
 import { DB, Db } from '../db/db.module.js';
 import {
-  checkTariffTimeline,
+  resolveTariffClock,
   TARIFF_CLOCK_FALLBACK_PREFIX,
+  TARIFF_CLOCK_OFFSET_PREFIX,
   TARIFF_CLOCK_UNTRUSTED,
 } from '../reconciliation/tariff-clock.js';
 import { ChargePolicy, validateChargePolicy } from './charge-start-policy.js';
@@ -34,9 +40,21 @@ interface BillableSession {
 
 type StoppedSession = BillableSession & { received_stopped_at: Date; meter_stop_wh: string };
 
+// T134 (BR-P02): `cp` = giờ trụ dùng nguyên; `cp_offset` = giờ trụ + độ lệch đo được (start / end đã
+// cộng); `csms` = không có độ lệch nào dùng được, cả phiên một khung giá lúc CSMS nhận start.
 type PricingTimeline = { start: Date; end: Date } & (
-  { clock: 'cp' } | { clock: 'csms'; reason: string }
+  | { clock: 'cp' }
+  | { clock: 'cp_offset'; offsetMs: number; epoch: number | null; liveFrames: number }
+  | { clock: 'csms'; reason: string }
 );
+
+interface PricedSegment {
+  tariffId: string;
+  start: Date;
+  end: Date;
+  energy: bigint;
+  numerator: bigint;
+}
 
 @Injectable()
 export class ChargeSettlementService {
@@ -142,6 +160,8 @@ export class ChargeSettlementService {
         received_stopped_at: row.received_stopped_at,
         meter_stop_wh: row.meter_stop_wh,
       });
+      // Giờ CSMS tính cả phiên một khung giá (T134): không có biên nào cần số đo.
+      if (timeline.clock === 'csms') throw new Error('boundary_not_applicable');
       if (boundaryAt <= timeline.start || boundaryAt >= timeline.end)
         throw new Error('boundary_outside_session');
       const old = (
@@ -331,12 +351,19 @@ export class ChargeSettlementService {
          WHERE id=$1`,
         [sessionId, amount.toString(), timeline.clock, timeline.end],
       );
-      if (timeline.clock === 'csms') {
+      // Mỗi lần chỉnh đồng hồ để lại đúng một bản ghi cho operator (BR-P02), kể cả khi tắt đối soát.
+      if (timeline.clock !== 'cp') {
         await c.query(
           `INSERT INTO reconciliation_records(session_id,record_no,record_type,resolution)
-           SELECT $1,coalesce(max(record_no),0)+1,'tariff_clock_fallback',$2
+           SELECT $1,coalesce(max(record_no),0)+1,$2,$3
            FROM reconciliation_records WHERE session_id=$1`,
-          [sessionId, TARIFF_CLOCK_FALLBACK_PREFIX + timeline.reason],
+          timeline.clock === 'csms'
+            ? [sessionId, 'tariff_clock_fallback', TARIFF_CLOCK_FALLBACK_PREFIX + timeline.reason]
+            : [
+                sessionId,
+                'tariff_clock_offset',
+                `${TARIFF_CLOCK_OFFSET_PREFIX}${timeline.offsetMs / 1000} epoch=${timeline.epoch} live_frames=${timeline.liveFrames}`,
+              ],
         );
       }
       await c.query(
@@ -361,28 +388,70 @@ export class ChargeSettlementService {
   }
 
   private async pricingTimeline(c: PoolClient, session: StoppedSession): Promise<PricingTimeline> {
-    const { rows } = await c.query<{ reason: string }>(
-      `SELECT split_part(note,' ',1) AS reason FROM session_status_history
-       WHERE session_id=$1 AND (
-         event=$2 OR (event='TARIFF_CLOCK_HOLD' AND split_part(note,' ',1) IN (
-           'tariff_clock_invalid_timestamp','tariff_clock_conflicting_stop'
-         ))
-       ) ORDER BY id LIMIT 1`,
-      [session.id, TARIFF_CLOCK_UNTRUSTED],
-    );
-    const tolerance = this.config?.tariffClockToleranceS ?? DEFAULT_TARIFF_CLOCK_TOLERANCE_S;
-    const reason = rows[0]?.reason ?? (await checkTariffTimeline(c, session, tolerance * 1000));
-    if (!reason && session.cp_stopped_at)
-      return { clock: 'cp', start: session.cp_started_at, end: session.cp_stopped_at };
-    return {
+    const csms = (reason: string): PricingTimeline => ({
       clock: 'csms',
       start: session.received_started_at,
       end: session.received_stopped_at,
-      reason: reason ?? 'tariff_clock_invalid_timestamp',
-    };
+      reason,
+    });
+    // Bản tin mang timestamp không dùng được hoặc StopTransaction lặp đổi giờ: không tin đồng hồ trụ.
+    const { rows } = await c.query<{ reason: string }>(
+      `SELECT split_part(note,' ',1) AS reason FROM session_status_history
+       WHERE session_id=$1 AND event=$2 ORDER BY id LIMIT 1`,
+      [session.id, TARIFF_CLOCK_UNTRUSTED],
+    );
+    if (rows[0]) return csms(rows[0].reason);
+    const clock = await resolveTariffClock(
+      c,
+      session,
+      (this.config?.tariffClockToleranceS ?? DEFAULT_TARIFF_CLOCK_TOLERANCE_S) * 1000,
+      (this.config?.replaySkewThresholdS ?? DEFAULT_REPLAY_SKEW_S) * 1000,
+    );
+    if ('issue' in clock || !session.cp_stopped_at)
+      return csms('issue' in clock ? clock.issue : 'tariff_clock_invalid_timestamp');
+    const start = new Date(session.cp_started_at.getTime() + clock.offsetMs);
+    const end = new Date(session.cp_stopped_at.getTime() + clock.offsetMs);
+    return clock.offsetMs
+      ? { clock: 'cp_offset', start, end, ...clock }
+      : { clock: 'cp', start, end };
   }
 
-  private async pricedSegments(c: PoolClient, session: BillableSession, timeline: PricingTimeline) {
+  /** Giờ CSMS (T134): cả phiên theo MỘT khung giá, khung có hiệu lực lúc CSMS nhận StartTransaction. */
+  private async receiptSegment(
+    c: PoolClient,
+    session: BillableSession,
+    timeline: PricingTimeline,
+  ): Promise<PricedSegment[] | undefined> {
+    const { rows } = await c.query<{ id: string; price: string }>(
+      `SELECT t.id,t.price_per_kwh_vnd AS price
+       FROM tariff_periods t
+       CROSS JOIN (SELECT ($2::timestamptz AT TIME ZONE 'Asia/Ho_Chi_Minh')::date AS day) d
+       WHERE t.operator_id=$1 AND t.effective_from<=d.day
+         AND (t.effective_to IS NULL OR t.effective_to>=d.day)
+         AND ((d.day+t.time_start) AT TIME ZONE 'Asia/Ho_Chi_Minh') <= $2
+         AND ((d.day+t.time_end) AT TIME ZONE 'Asia/Ho_Chi_Minh') > $2
+       LIMIT 2`,
+      [session.operator_id, timeline.start],
+    );
+    // Không có hoặc có hai khung giá cùng lúc là lỗi cấu hình giá, không phải lỗi đồng hồ.
+    if (rows.length !== 1) return undefined;
+    const energy = BigInt(session.energy_wh!);
+    return [
+      {
+        tariffId: rows[0]!.id,
+        start: timeline.start,
+        end: timeline.end,
+        energy,
+        numerator: energy * BigInt(rows[0]!.price),
+      },
+    ];
+  }
+
+  private async pricedSegments(
+    c: PoolClient,
+    session: BillableSession,
+    timeline: PricingTimeline,
+  ): Promise<PricedSegment[] | undefined> {
     const { start, end, clock } = timeline;
     if (
       !Number.isFinite(start.getTime()) ||
@@ -391,6 +460,9 @@ export class ChargeSettlementService {
       end.getTime() - start.getTime() > 366 * 86400000
     )
       return undefined;
+    if (timeline.clock === 'csms') return this.receiptSegment(c, session, timeline);
+    // Mẫu công tơ lưu theo giờ trụ gốc: biên khung giá (trục đã chỉnh) trừ lại độ lệch.
+    const offsetMs = timeline.clock === 'cp_offset' ? timeline.offsetMs : 0;
     const { rows } = await c.query<{ id: string; price: string; starts: Date; ends: Date }>(
       `
       SELECT t.id,t.price_per_kwh_vnd AS price,
@@ -408,13 +480,7 @@ export class ChargeSettlementService {
     );
     let cursor = start.getTime();
     let previous = BigInt(session.meter_start_wh);
-    const result: {
-      tariffId: string;
-      start: Date;
-      end: Date;
-      energy: bigint;
-      numerator: bigint;
-    }[] = [];
+    const result: PricedSegment[] = [];
     for (const tariff of rows) {
       const left = Math.max(start.getTime(), tariff.starts.getTime());
       const right = Math.min(end.getTime(), tariff.ends.getTime());
@@ -423,18 +489,14 @@ export class ChargeSettlementService {
       let meter: bigint;
       if (right === end.getTime()) meter = BigInt(session.meter_stop_wh!);
       else {
-        // Receipt time does not date the meter reading inside a delayed or batched frame.
-        const sample =
-          clock === 'cp'
-            ? (
-                await c.query<{ wh: string }>(
-                  `SELECT CASE WHEN unit='kWh' THEN value*1000 ELSE value END AS wh
-                   FROM meter_values WHERE session_id=$1 AND cp_timestamp=$2 AND measurand='Energy.Active.Import.Register'
-                   AND phase IS NULL AND (unit IN ('Wh','kWh') OR unit IS NULL)`,
-                  [session.id, new Date(right)],
-                )
-              ).rows
-            : [];
+        const sample = (
+          await c.query<{ wh: string }>(
+            `SELECT CASE WHEN unit='kWh' THEN value*1000 ELSE value END AS wh
+             FROM meter_values WHERE session_id=$1 AND cp_timestamp=$2 AND measurand='Energy.Active.Import.Register'
+             AND phase IS NULL AND (unit IN ('Wh','kWh') OR unit IS NULL)`,
+            [session.id, new Date(right - offsetMs)],
+          )
+        ).rows;
         const evidence = (
           await c.query<{ meter_wh: string }>(
             `SELECT meter_wh FROM charge_tariff_boundary_evidence

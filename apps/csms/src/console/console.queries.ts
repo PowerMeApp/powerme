@@ -25,6 +25,7 @@ import {
   sessions,
 } from '../db/schema/index.js';
 import { ConnectionRegistry } from '../ocpp-gateway/connection-registry.js';
+import { METER_EVIDENCE_CONFLICT_PREFIX } from '../reconciliation/reconciliation.service.js';
 import { ReplayDetector } from '../reconciliation/replay-detector.js';
 import { ENERGY_MEASURAND } from '../sessions/sessions.service.js';
 import { ConsoleError } from './console.http.js';
@@ -60,12 +61,16 @@ const SESSION_COLUMNS = {
 
 /**
  * Điều kiện SQL của "bản ghi conflict" (khớp `reconciliationKind() === 'conflict'`):
- *  - record_type = conflict (từ migration 0001);
+ *  - record_type = conflict (từ migration 0001), TRỪ bản ghi `meter_evidence_conflict` (bản tin lặp
+ *    mang số đo khác bản đã lưu: không phải xung đột điện năng của đối soát, T134);
  *  - record_type = late_sample mà kết luận (tiền tố resolution) là conflict;
  *  - DỮ LIỆU CŨ trước 0001: meter_gap có resolution bắt đầu bằng "conflict".
  */
 const IS_CONFLICT = or(
-  eq(reconciliationRecords.recordType, 'conflict'),
+  and(
+    eq(reconciliationRecords.recordType, 'conflict'),
+    sql`coalesce(${reconciliationRecords.resolution}, '') NOT LIKE ${`${METER_EVIDENCE_CONFLICT_PREFIX}%`}`,
+  ),
   and(
     inArray(reconciliationRecords.recordType, ['late_sample', 'meter_gap']),
     like(reconciliationRecords.resolution, 'conflict%'),

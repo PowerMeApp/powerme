@@ -316,10 +316,13 @@ header button:hover:not(:disabled) { background: var(--accent); color: var(--pan
     switch (r.kind) {
       case 'tariff_clock_fallback':
         var reason = /reason=(\S+)/.exec(r.resolution || '');
-        return 'Đã tính giá theo giờ nhận của CSMS vì không xác minh được đồng hồ trụ (' + (reason ? reason[1] : '?') + ')';
+        return 'Không đo được độ lệch đồng hồ trụ: cả phiên tính theo khung giá lúc CSMS nhận StartTransaction (' + (reason ? reason[1] : '?') + ')';
+      case 'tariff_clock_offset':
+        var offset = /offset_s=(-?\d+)/.exec(r.resolution || '');
+        return 'Đồng hồ trụ lệch ' + (offset ? (offset[1] < 0 ? 'nhanh ' : 'chậm ') + Math.abs(offset[1]) + ' s' : '?') + ': đã cộng độ lệch vào mọi mốc giờ của phiên trước khi chia khung giá';
+      case 'meter_evidence_conflict':
+        return 'Bản tin lặp có số đo khác bản đã lưu (' + r.resolution + ')';
       case 'conflict':
-        if ((r.resolution || '').indexOf('meter_evidence_conflict ') === 0)
-          return 'Bản tin lặp có số đo khác bản đã lưu (' + r.resolution + ')';
         return 'meterStop ' + wh(r.meter_stop_minus_start_wh) + ' mâu thuẫn chuỗi đo ' + wh(r.series_last_wh) + ' — lệch ' + wh(r.energy_difference_wh) + late;
       case 'gap_detected':
         return 'Chuỗi đo bị đứt ' + hms(r.gap_start) + ' → ' + hms(r.gap_end) + ', chênh ' + wh(r.energy_difference_wh) + late;
@@ -345,7 +348,7 @@ header button:hover:not(:disabled) { background: var(--accent); color: var(--pan
     if (!list.length) { $('recon').innerHTML = '<div class="empty">Chưa có bản ghi đối soát.</div>'; return; }
     var h = '';
     list.forEach(function (r) {
-      var cls = r.kind === 'conflict' ? 'b-failed' : (r.kind === 'gap_detected' ? 'b-paused' : 'b-info');
+      var cls = (r.kind === 'conflict' || r.kind === 'meter_evidence_conflict') ? 'b-failed' : (r.kind === 'gap_detected' ? 'b-paused' : 'b-info');
       h += '<div class="rec k-' + esc(r.kind) + '"><div class="t"><span class="badge ' + cls + '">' + esc(r.kind) + '</span><span>phiên #' + dash(r.transaction_no) + ' · bản ghi ' + r.record_no + '</span><span>' + hms(r.created_at) + '</span>' + (r.reviewed ? '<span class="badge b-active">đã xử lý</span>' : '') + '</div><div class="s">' + esc(sentence(r)) + '</div></div>';
     });
     $('recon').innerHTML = h;
@@ -443,7 +446,7 @@ header button:hover:not(:disabled) { background: var(--accent); color: var(--pan
     h += '<h3 style="margin:12px 0 4px">Bản ghi đối soát (' + d.reconciliation_records.length + ')</h3>';
     if (!d.reconciliation_records.length) h += '<div class="empty" style="padding:4px 0">Không có.</div>';
     d.reconciliation_records.forEach(function (r) {
-      h += '<div class="rec k-' + esc(r.kind) + '"><div class="t"><span class="badge ' + (r.kind === 'conflict' ? 'b-failed' : 'b-info') + '">' + esc(r.kind) + '</span><span>#' + r.record_no + ' · ' + hms(r.created_at) + '</span></div><div class="s">' + esc(sentence(r)) + '</div></div>';
+      h += '<div class="rec k-' + esc(r.kind) + '"><div class="t"><span class="badge ' + ((r.kind === 'conflict' || r.kind === 'meter_evidence_conflict') ? 'b-failed' : 'b-info') + '">' + esc(r.kind) + '</span><span>#' + r.record_no + ' · ' + hms(r.created_at) + '</span></div><div class="s">' + esc(sentence(r)) + '</div></div>';
     });
     if (d.pauses.length) h += '<h3 style="margin:12px 0 4px">Tạm dừng (' + d.pauses.length + ')</h3>' + d.pauses.map(function (p) { return '<div>' + hms(p.paused_at) + ' → ' + hms(p.resumed_at) + ' (' + esc(p.pause_cause) + ')</div>'; }).join('');
     $('drawer').innerHTML = h + '</div>';

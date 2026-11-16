@@ -101,7 +101,7 @@ Các trường bắt buộc theo NFR-02 mục 5: `run_id`, `scenario`, `config`,
 | `class_subtype` | `lost` / `duplicate` / `station_error` |
 | `station_data_wrong` | `abs(E_stop − E_true) > 1` |
 | `gap_true`, `max_delivered_gap_s` | Khe hở thật: khoảng trống lớn nhất trong chuỗi mẫu trụ **đã giao** (tính cả mốc bắt đầu và mốc dừng) có vượt ngưỡng `RECONCILE_GAP_FACTOR × nhịp` không |
-| `meter_gap_records`, `conflict_records`, `late_sample_records`, `replay_records`, `duplicate_records`, `orphan_stop_records` | Số dòng `reconciliation_records` theo loại |
+| `meter_gap_records`, `conflict_records`, `late_sample_records`, `replay_records`, `duplicate_records`, `orphan_stop_records` | Số dòng `reconciliation_records` theo loại. Từ T134 `conflict_records` không gồm bản ghi `meter_evidence_conflict` (bản tin lặp mang số đo khác bản đã lưu); các file kết quả đã commit được đếm theo cách cũ và không bị sửa |
 | `status_path` | Chuỗi chuyển trạng thái từ `session_status_history` |
 | `payment_mode`, `debit_vnd` | `debit_vnd` trống = chưa có dòng `session_debit` (xem G5 bên dưới) |
 | `meter_start_wh`, `meter_stop_sent_wh`, `meter_stop_true_wh`, `db_meter_stop_wh` | Số chỉ bộ đếm: trụ gửi, sự thật, và CSMS lưu |
