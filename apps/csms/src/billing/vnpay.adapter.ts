@@ -214,8 +214,10 @@ export function clientIp(remoteAddress: string | undefined): string {
 //   - chuỗi ký request / response: các giá trị nối bằng `|` theo THỨ TỰ CỐ ĐỊNH của tài liệu, không
 //     sắp xếp, không encode (tài liệu không ghi encode); HMAC-SHA512 như PAY 2.1.0;
 //   - trường tuỳ chọn của response (`vnp_PayDate`, `vnp_PromotionCode`, `vnp_PromotionAmount`) thiếu
-//     thì đưa chuỗi rỗng vào chuỗi ký (chờ thử sandbox);
-//   - `vnp_Amount` của response coi là VND × 100 như IPN (tài liệu querydr không ghi; chờ sandbox).
+//     thì đưa chuỗi rỗng vào chuỗi ký (thử sandbox 16/11: RC `00` và `91` đều khớp);
+//   - `vnp_Amount` của response là VND × 100 như IPN (thử sandbox 16/11).
+// T32 Phần 8b: `paid` mang số VNPay thực trừ (`amount`, VND); việc so với `amount_paid_vnd` làm ở
+// `TopUpService.applyLockedResult` (dưới khoá), không ở đây.
 // ---------------------------------------------------------------------------------------------
 
 /** Thứ tự chuỗi ký request querydr (tài liệu VNPay). */
@@ -275,7 +277,6 @@ export interface QueryTopUp {
   gatewayReference: string;
   /** `top_ups.created_at` — `vnp_TransactionDate` = `vnp_CreateDate` của lệnh pay. */
   createdAt: Date;
-  amountPaidVnd: number;
 }
 
 /** Body JSON đã ký của một querydr. Hàm thuần: `now`, `requestId` do bên gọi đưa vào. */
@@ -314,14 +315,30 @@ export type QueryUnresolvedReason =
   | 'response_code'
   | 'transaction_type'
   | 'transaction_status'
-  | 'amount_mismatch'
   | 'network'
   | 'timeout'
   | 'http_status';
 
+/**
+ * Mã / câu thô của một response querydr CHƯA xác thực (sai / thiếu chữ ký, `vnp_TmnCode` hay
+ * `vnp_TxnRef` khác). Chỉ để log (vd. phân biệt RC `94` với `99`, thử sandbox 16/11), không dùng để
+ * quyết định gì.
+ */
+export interface UnverifiedResponseInfo {
+  responseCode?: string;
+  message?: string;
+  hasSecureHash: boolean;
+}
+
 /** Kết quả querydr đã phân loại (bảng 3.1, Ân 12/11). */
 export type QueryResult =
-  | { kind: 'paid'; transactionNo: string; amount: number; payDate: Date | null }
+  | {
+      kind: 'paid';
+      transactionNo: string;
+      /** Số VNPay thực trừ, **VND** (`vnp_Amount / 100`, luôn nguyên). */
+      amount: number;
+      payDate: Date | null;
+    }
   | { kind: 'failed'; responseCode: string; transactionStatus: string }
   | { kind: 'not_found' }
   | {
@@ -329,17 +346,53 @@ export type QueryResult =
       reason: QueryUnresolvedReason;
       responseCode?: string;
       transactionStatus?: string;
+      /** Chỉ có khi `queryTransaction` gắn vào, cho lý do `signature` / `tmn_code` / `txn_ref`. */
+      unverified?: UnverifiedResponseInfo;
     };
+
+/** Độ dài tối đa của mã / câu thô chưa xác thực đưa vào log. */
+export const UNVERIFIED_FIELD_MAX = 200;
+
+/**
+ * Lấy `vnp_ResponseCode` / `vnp_Message` thô (chuỗi hoặc số hữu hạn, cắt ≤ 200 ký tự) và có trường
+ * `vnp_SecureHash` hay không. Không đọc giá trị chữ ký. Hàm thuần.
+ */
+export function unverifiedResponseInfo(body: unknown): UnverifiedResponseInfo {
+  if (body === null || typeof body !== 'object' || Array.isArray(body))
+    return { hasSecureHash: false };
+  const b = body as Record<string, unknown>;
+  const raw = (k: string): string | undefined => {
+    const v = b[k];
+    if (typeof v === 'string') return v.slice(0, UNVERIFIED_FIELD_MAX);
+    if (typeof v === 'number' && Number.isFinite(v))
+      return String(v).slice(0, UNVERIFIED_FIELD_MAX);
+    return undefined;
+  };
+  const responseCode = raw('vnp_ResponseCode');
+  const message = raw('vnp_Message');
+  return {
+    ...(responseCode !== undefined && { responseCode }),
+    ...(message !== undefined && { message }),
+    hasSecureHash: b['vnp_SecureHash'] !== undefined && b['vnp_SecureHash'] !== null,
+  };
+}
+
+const UNVERIFIED_REASONS: ReadonlySet<QueryUnresolvedReason> = new Set([
+  'signature',
+  'tmn_code',
+  'txn_ref',
+]);
 
 /**
  * Kiểm + phân loại response querydr (hàm thuần, không log). Thứ tự: dạng body (chuẩn hoá giá trị
  * về chuỗi) → chữ ký (thời gian hằng) → `vnp_TmnCode` → `vnp_TxnRef` → RC `91` (`not_found`) →
- * RC ≠ `00` → `vnp_TransactionType` ≠ `01` → TS `00` (kiểm `vnp_TransactionNo`, số tiền) / `02` /
- * khác. Mọi ca không tin được → `unresolved` (giữ `pending`, hẹn lại).
+ * RC ≠ `00` → `vnp_TransactionType` ≠ `01` → TS `00` (kiểm dạng `vnp_TransactionNo`, `vnp_Amount`
+ * chia hết cho 100) / `02` / khác. Mọi ca không tin được → `unresolved` (giữ `pending`, hẹn lại).
+ * Không so số tiền: `paid` mang số thực trừ, `TopUpService` so dưới khoá (T32 Phần 8b).
  */
 export function classifyQuerydrResponse(
   body: unknown,
-  expect: { tmnCode: string; txnRef: string; amountPaidVnd: number },
+  expect: { tmnCode: string; txnRef: string },
   hashSecret: string,
 ): QueryResult {
   if (body === null || typeof body !== 'object' || Array.isArray(body))
@@ -373,14 +426,17 @@ export function classifyQuerydrResponse(
   if (transactionStatus === '00') {
     const transactionNo = str('vnp_TransactionNo');
     const amountRaw = str('vnp_Amount');
-    if (!/^\d{1,15}$/.test(transactionNo) || !/^\d{1,15}$/.test(amountRaw))
+    // VND không có đơn vị lẻ: vnp_Amount phải chia hết cho 100 (Khang 16/11), nếu không là sai dạng.
+    if (
+      !/^\d{1,15}$/.test(transactionNo) ||
+      !/^\d{1,15}$/.test(amountRaw) ||
+      BigInt(amountRaw) % 100n !== 0n
+    )
       return { kind: 'unresolved', reason: 'malformed', ...codes };
-    if (BigInt(amountRaw) !== BigInt(expect.amountPaidVnd) * 100n)
-      return { kind: 'unresolved', reason: 'amount_mismatch', ...codes };
     return {
       kind: 'paid',
       transactionNo,
-      amount: Number(amountRaw) / 100,
+      amount: Number(BigInt(amountRaw) / 100n),
       payDate: parseVnpDate(str('vnp_PayDate') || undefined),
     };
   }
@@ -465,14 +521,14 @@ export class VnpayAdapter {
     } catch {
       return { kind: 'unresolved', reason: 'malformed' };
     }
-    return classifyQuerydrResponse(
+    const result = classifyQuerydrResponse(
       json,
-      {
-        tmnCode: this.config.tmnCode,
-        txnRef: topUp.gatewayReference,
-        amountPaidVnd: topUp.amountPaidVnd,
-      },
+      { tmnCode: this.config.tmnCode, txnRef: topUp.gatewayReference },
       this.config.hashSecret,
     );
+    // Response không tin được: kèm mã / câu thô để log (T32 Phần 8b, mục 5.1); phân loại giữ nguyên.
+    if (result.kind === 'unresolved' && UNVERIFIED_REASONS.has(result.reason))
+      return { ...result, unverified: unverifiedResponseInfo(json) };
+    return result;
   }
 }

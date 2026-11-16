@@ -6,7 +6,9 @@
  * có thể là: IPN giả (sai chữ ký / sai mã merchant) cộng được tiền, IPN lặp cộng hai lần, hai IPN
  * song song cùng cộng, lần trả thứ hai bị nuốt (không ghi khoản trễ để Admin hoàn), mã 07 / 01 / 04
  * (đã trừ tiền nhưng chưa ngã ngũ) bị coi là thất bại, sổ điểm hỏng chặn cộng tiền, hoặc lỗi khác ở
- * bước điểm để lại tiền đã cộng mà không trừ điểm.
+ * bước điểm để lại tiền đã cộng mà không trừ điểm. Phần 8b: VNPay đã trừ tiền mà không cộng được
+ * (sai số tiền / tài khoản `closed`) phải thành `failed` + khoản trễ (số thực trừ) và trả 00 để
+ * VNPay ngừng gửi lại, thay vì 04 / 99 không ghi gì.
  *
  * Tham số IPN ký bằng đúng `vnpSignData` / `vnpSecureHash` của adapter với cấu hình test (secret giả).
  * Mã TC theo Report 5 bản nộp 09/11 (TC-STM4-01…08); ca khác đặt tên theo nội dung.
@@ -561,14 +563,49 @@ describeDb('billing: IPN VNPay — TopUpService.applyPaymentResult (T32 Phần 6
       expect(await snapshot(t)).toEqual(before);
     });
 
-    it('sai số tiền → 04, log warn', async () => {
+    it('IPN thành công sai số tiền trên pending → failed + khoản trễ (số thực trừ), 00, log error payment_not_creditable (Phần 8b, trước đây 04)', async () => {
+      const t = await pendingTopUp(200_000);
+      const p = ipn(t, { vnp_Amount: String(199_000 * 100) });
+      expect(await service.applyPaymentResult(p)).toEqual({
+        RspCode: '00',
+        Message: 'Confirm Success',
+      });
+      expect(await topUpRow(t.topUpId)).toMatchObject({
+        status: 'failed',
+        late_gateway_ref: p['vnp_TransactionNo'],
+        late_amount_vnd: '199000',
+        gateway_transaction_no: null,
+        next_attempt_at: null,
+      });
+      expect(logged(errorSpy, 'payment_not_creditable')).toHaveLength(1);
+      expect(logged(warnSpy, 'ipn_amount_mismatch')).toHaveLength(0);
+    });
+
+    it('IPN thất bại sai số tiền → 04, không ghi gì, log warn', async () => {
       const t = await pendingTopUp(200_000);
       const before = await snapshot(t);
       expect(
-        await service.applyPaymentResult(ipn(t, { vnp_Amount: String(199_000 * 100) })),
+        await service.applyPaymentResult(
+          ipn(t, {
+            vnp_Amount: String(199_000 * 100),
+            vnp_ResponseCode: '24',
+            vnp_TransactionStatus: '02',
+          }),
+        ),
       ).toEqual({ RspCode: '04', Message: 'invalid amount' });
       expect(await snapshot(t)).toEqual(before);
       expect(logged(warnSpy, 'ipn_amount_mismatch')).toHaveLength(1);
+    });
+
+    it('IPN thành công mà vnp_Amount không chia hết cho 100 → 99, không ghi gì, log error ipn_malformed', async () => {
+      const t = await pendingTopUp(200_000);
+      const before = await snapshot(t);
+      expect(
+        (await service.applyPaymentResult(ipn(t, { vnp_Amount: String(200_000 * 100 + 50) })))
+          .RspCode,
+      ).toBe('99');
+      expect(await snapshot(t)).toEqual(before);
+      expect(logged(errorSpy, 'ipn_malformed')).toHaveLength(1);
     });
 
     it('thiếu cấu hình VNPay → 99, log error', async () => {
@@ -618,6 +655,261 @@ describeDb('billing: IPN VNPay — TopUpService.applyPaymentResult (T32 Phần 6
       const signed = sign(params);
       expect((await service.applyPaymentResult(signed)).RspCode).toBe('00');
       expect((await topUpRow(t.topUpId))['status']).toBe('credited');
+    });
+  });
+
+  // ---------------------------------------------------------------------------------------------
+  describe('Phần 8b: đã trả nhưng không cộng được (STM-4 #8) và mục 3.4', () => {
+    const closeAccount = (driverId: number) =>
+      q("UPDATE credit_accounts SET status='closed', closed_at=now() WHERE driver_id=$1", [
+        driverId,
+      ]);
+    const lateOf = (id: number) =>
+      one(
+        `SELECT status, late_gateway_ref, late_amount_vnd, next_attempt_at, completed_at IS NOT NULL AS completed
+         FROM top_ups WHERE id=$1`,
+        [id],
+      );
+
+    it('tài khoản closed + IPN thành công → failed + khoản trễ (= amount_paid_vnd), số dư / sổ cái / điểm không đổi, 00; gửi lại → 02, khoản trễ giữ nguyên', async () => {
+      const d = await newDriver();
+      await earn(d, 1000, '6 months');
+      const t = await pendingTopUp(100_000, 600, d);
+      await closeAccount(d);
+      const points = await one('SELECT points_balance FROM loyalty_accounts WHERE driver_id=$1', [
+        d,
+      ]);
+      const p = ipn(t);
+      expect(await service.applyPaymentResult(p)).toEqual({
+        RspCode: '00',
+        Message: 'Confirm Success',
+      });
+      expect(await lateOf(t.topUpId)).toEqual({
+        status: 'failed',
+        late_gateway_ref: p['vnp_TransactionNo'],
+        late_amount_vnd: String(t.amountPaidVnd),
+        next_attempt_at: null,
+        completed: true,
+      });
+      expect(await balance(d)).toBe(0);
+      expect(await creditRows(t.topUpId)).toBe(0);
+      expect(await loyaltyRows(t.topUpId)).toEqual([]);
+      expect(
+        await one('SELECT points_balance FROM loyalty_accounts WHERE driver_id=$1', [d]),
+      ).toEqual(points);
+      expect(logged(errorSpy, 'payment_not_creditable')).toEqual([
+        {
+          event: 'payment_not_creditable',
+          top_up_id: t.topUpId,
+          gateway_reference: t.ref,
+          reason: 'account_closed',
+          vnp_TransactionNo: p['vnp_TransactionNo'],
+          amount_paid_vnd: t.amountPaidVnd,
+          late_amount_vnd: t.amountPaidVnd,
+          source: 'ipn',
+        },
+      ]);
+      expect(logged(logSpy, 'ipn_applied')).toEqual([
+        {
+          event: 'ipn_applied',
+          top_up_id: t.topUpId,
+          gateway_reference: t.ref,
+          outcome: 'not_creditable',
+          vnp_TransactionNo: p['vnp_TransactionNo'],
+          reason: 'account_closed',
+          amount_paid_vnd: t.amountPaidVnd,
+          late_amount_vnd: t.amountPaidVnd,
+        },
+      ]);
+
+      const before = await snapshot(t);
+      expect((await service.applyPaymentResult(p)).RspCode).toBe('02');
+      expect(await snapshot(t)).toEqual(before);
+      // already_applied không log ipn_applied.
+      expect(logged(logSpy, 'ipn_applied')).toHaveLength(1);
+    });
+
+    it('sai số tiền + IPN thành công → failed, late_amount_vnd = vnp_Amount / 100; gửi lại → 02; IPN thành công thứ hai (txn khác) → 02 conflicting_result, không đổi gì', async () => {
+      const t = await pendingTopUp(200_000);
+      const p = ipn(t, { vnp_Amount: String(250_000 * 100) });
+      expect((await service.applyPaymentResult(p)).RspCode).toBe('00');
+      expect(await lateOf(t.topUpId)).toMatchObject({
+        status: 'failed',
+        late_gateway_ref: p['vnp_TransactionNo'],
+        late_amount_vnd: '250000',
+      });
+      expect(logged(errorSpy, 'payment_not_creditable')).toEqual([
+        expect.objectContaining({ reason: 'amount_mismatch', late_amount_vnd: 250_000 }),
+      ]);
+      const before = await snapshot(t);
+      expect((await service.applyPaymentResult(p)).RspCode).toBe('02');
+      expect(await snapshot(t)).toEqual(before);
+      expect((await service.applyPaymentResult(ipn(t))).RspCode).toBe('02');
+      expect(await snapshot(t)).toEqual(before);
+      expect(logged(errorSpy, 'ipn_conflicting_result')).toHaveLength(1);
+    });
+
+    it('sai số tiền và tài khoản đóng cùng lúc → lý do amount_mismatch', async () => {
+      const t = await pendingTopUp(200_000);
+      await closeAccount(t.driverId);
+      expect(
+        (await service.applyPaymentResult(ipn(t, { vnp_Amount: String(1_000 * 100) }))).RspCode,
+      ).toBe('00');
+      expect(logged(errorSpy, 'payment_not_creditable')).toEqual([
+        expect.objectContaining({ reason: 'amount_mismatch', late_amount_vnd: 1_000 }),
+      ]);
+    });
+
+    it.each(['expired', 'failed'] as const)(
+      '3.4: %s + IPN thành công sai số tiền → khoản trễ với số thực trừ, giữ trạng thái, 00',
+      async (status) => {
+        const t = await pendingTopUp(120_000);
+        await setStatus(t.topUpId, status);
+        const p = ipn(t, { vnp_Amount: String(90_000 * 100) });
+        expect((await service.applyPaymentResult(p)).RspCode).toBe('00');
+        expect(await lateOf(t.topUpId)).toMatchObject({
+          status,
+          late_gateway_ref: p['vnp_TransactionNo'],
+          late_amount_vnd: '90000',
+        });
+        expect(logged(logSpy, 'ipn_applied')).toEqual([
+          expect.objectContaining({ outcome: 'late_payment', late_amount_vnd: 90_000 }),
+        ]);
+      },
+    );
+
+    it('3.4: credited + IPN thành công txn khác, sai số tiền → khoản trễ (lần trả thứ hai) với số thực trừ', async () => {
+      const t = await pendingTopUp(100_000);
+      expect((await service.applyPaymentResult(ipn(t))).RspCode).toBe('00');
+      const p = ipn(t, { vnp_Amount: String(70_000 * 100) });
+      expect((await service.applyPaymentResult(p)).RspCode).toBe('00');
+      expect(await lateOf(t.topUpId)).toMatchObject({
+        status: 'credited',
+        late_gateway_ref: p['vnp_TransactionNo'],
+        late_amount_vnd: '70000',
+      });
+      expect(await balance(t.driverId)).toBe(100_000);
+    });
+
+    it('3.4: credited, cùng vnp_TransactionNo đã cộng nhưng khác số tiền → 02, không ghi gì, log error ipn_conflicting_result kèm hai số tiền', async () => {
+      const t = await pendingTopUp(100_000);
+      const first = ipn(t);
+      expect((await service.applyPaymentResult(first)).RspCode).toBe('00');
+      const before = await snapshot(t);
+      const same = ipn(t, {
+        vnp_TransactionNo: first['vnp_TransactionNo'],
+        vnp_Amount: String(80_000 * 100),
+      });
+      expect((await service.applyPaymentResult(same)).RspCode).toBe('02');
+      expect(await snapshot(t)).toEqual(before);
+      expect(logged(errorSpy, 'ipn_conflicting_result')).toEqual([
+        expect.objectContaining({
+          top_up_id: t.topUpId,
+          vnp_TransactionNo: first['vnp_TransactionNo'],
+          gateway_transaction_no: first['vnp_TransactionNo'],
+          amount_paid_vnd: 100_000,
+          paid_amount_vnd: 80_000,
+        }),
+      ]);
+    });
+
+    it('3.4: đã có khoản trễ, cùng vnp_TransactionNo nhưng khác số tiền → 02, không ghi đè, log error', async () => {
+      const t = await pendingTopUp(100_000);
+      await setStatus(t.topUpId, 'expired');
+      const late = ipn(t);
+      expect((await service.applyPaymentResult(late)).RspCode).toBe('00');
+      const before = await snapshot(t);
+      const other = ipn(t, {
+        vnp_TransactionNo: late['vnp_TransactionNo'],
+        vnp_Amount: String(60_000 * 100),
+      });
+      expect((await service.applyPaymentResult(other)).RspCode).toBe('02');
+      expect(await snapshot(t)).toEqual(before);
+      expect(logged(errorSpy, 'ipn_conflicting_result')).toEqual([
+        expect.objectContaining({
+          late_gateway_ref: late['vnp_TransactionNo'],
+          late_amount_vnd: 100_000,
+          paid_amount_vnd: 60_000,
+        }),
+      ]);
+    });
+
+    it('3.4: credited đã có khoản trễ (lần trả thứ hai), cùng vnp_TransactionNo của khoản trễ nhưng khác số tiền → 02, không ghi đè, log error', async () => {
+      const t = await pendingTopUp(100_000);
+      expect((await service.applyPaymentResult(ipn(t))).RspCode).toBe('00');
+      const second = ipn(t);
+      expect((await service.applyPaymentResult(second)).RspCode).toBe('00');
+      const before = await snapshot(t);
+      const other = ipn(t, {
+        vnp_TransactionNo: second['vnp_TransactionNo'],
+        vnp_Amount: String(40_000 * 100),
+      });
+      expect((await service.applyPaymentResult(other)).RspCode).toBe('02');
+      expect(await snapshot(t)).toEqual(before);
+      expect(logged(errorSpy, 'ipn_conflicting_result')).toEqual([
+        expect.objectContaining({
+          status: 'credited',
+          late_gateway_ref: second['vnp_TransactionNo'],
+          late_amount_vnd: 100_000,
+          paid_amount_vnd: 40_000,
+        }),
+      ]);
+    });
+
+    it('3.4: IPN thất bại sai số tiền trên expired → 04, không ghi gì', async () => {
+      const t = await pendingTopUp(100_000);
+      await setStatus(t.topUpId, 'expired');
+      const before = await snapshot(t);
+      expect(
+        (
+          await service.applyPaymentResult(
+            ipn(t, {
+              vnp_Amount: String(1_000 * 100),
+              vnp_ResponseCode: '24',
+              vnp_TransactionStatus: '02',
+            }),
+          )
+        ).RspCode,
+      ).toBe('04');
+      expect(await snapshot(t)).toEqual(before);
+    });
+
+    it('log ipn_applied sau commit cho credited / failed / late_payment, đủ trường', async () => {
+      const a = await pendingTopUp(100_000);
+      const pa = ipn(a);
+      await service.applyPaymentResult(pa);
+      const b = await pendingTopUp(100_000);
+      await service.applyPaymentResult(
+        ipn(b, { vnp_ResponseCode: '24', vnp_TransactionStatus: '02' }),
+      );
+      const late = ipn(a);
+      await service.applyPaymentResult(late);
+      expect(logged(logSpy, 'ipn_applied')).toEqual([
+        {
+          event: 'ipn_applied',
+          top_up_id: a.topUpId,
+          gateway_reference: a.ref,
+          outcome: 'credited',
+          vnp_TransactionNo: pa['vnp_TransactionNo'],
+          amount_paid_vnd: 100_000,
+        },
+        expect.objectContaining({ top_up_id: b.topUpId, outcome: 'failed' }),
+        expect.objectContaining({
+          top_up_id: a.topUpId,
+          outcome: 'late_payment',
+          vnp_TransactionNo: late['vnp_TransactionNo'],
+          late_amount_vnd: 100_000,
+        }),
+      ]);
+    });
+
+    it('lỗi làm rollback (lỗi khác ở bước điểm) → không log ipn_applied', async () => {
+      const d = await newDriver();
+      await earn(d, 1000, '6 months');
+      const t = await pendingTopUp(100_000, 600, d);
+      jest.spyOn(loyalty, 'redeemForTopUp').mockRejectedValueOnce(new Error('boom'));
+      expect((await service.applyPaymentResult(ipn(t))).RspCode).toBe('99');
+      expect(logged(logSpy, 'ipn_applied')).toHaveLength(0);
     });
   });
 

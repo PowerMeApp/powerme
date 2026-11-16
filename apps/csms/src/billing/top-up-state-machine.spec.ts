@@ -6,10 +6,13 @@
  * (thành công sau `failed`, khoản trễ đã ghi, lần trả thứ hai cho top-up đã cộng — T116), rồi quét
  * TOÀN BỘ 5 trạng thái × 4 event = 20 cặp:
  * 16 cặp được nhận, 4 cặp ném InvalidTransition (ADMIN_REFUND khi không ở credited).
+ * T32 Phần 8b: #8 (pending → failed khi đã trả mà không cộng được) và các ca cùng giao dịch khác số
+ * tiền → `conflicting_result`. Bảng 20 cặp giữ nguyên (guard mặc định = cộng được).
  */
 import { topUpStatusEnum } from '../db/schema/enums.js';
 import { InvalidTransition, MissingGuard } from './invalid-transition.js';
 import {
+  NOT_CREDITABLE_TRANSITION,
   TOP_UP_EVENTS,
   TOP_UP_STATUSES,
   TOP_UP_TRANSITIONS,
@@ -193,6 +196,107 @@ describe('TopUpStateMachine — T116: thành công tới khi đã credited / ref
     });
     expect(step).toEqual({ to: from, outcome: 'already_applied', no: null });
   });
+});
+
+describe('TopUpStateMachine — #8 (Phần 8b): đã trả nhưng không cộng được', () => {
+  it('bảng #8: pending --PAYMENT_SUCCEEDED--> failed', () => {
+    expect(NOT_CREDITABLE_TRANSITION).toEqual({
+      no: '#8',
+      from: 'pending',
+      event: 'PAYMENT_SUCCEEDED',
+      to: 'failed',
+    });
+  });
+
+  it.each([
+    ['amount_mismatch', { amountMismatch: true }],
+    ['account_closed', { accountClosed: true }],
+  ] as const)('pending + %s → not_creditable, sang failed (#8)', (reason, guards) => {
+    expect(sm.apply('pending', 'PAYMENT_SUCCEEDED', { transactionNo: 'VNP-1', ...guards })).toEqual(
+      { to: 'failed', outcome: 'not_creditable', no: '#8', reason },
+    );
+  });
+
+  it('sai số tiền và tài khoản đóng cùng lúc → lý do là sai số tiền (kiểm trước)', () => {
+    const step = sm.apply('pending', 'PAYMENT_SUCCEEDED', {
+      amountMismatch: true,
+      accountClosed: true,
+    });
+    expect(step.reason).toBe('amount_mismatch');
+  });
+
+  it('không guard / guard false → credited (#2) như cũ', () => {
+    expect(sm.apply('pending', 'PAYMENT_SUCCEEDED').outcome).toBe('transition');
+    expect(
+      sm.apply('pending', 'PAYMENT_SUCCEEDED', { amountMismatch: false, accountClosed: false }),
+    ).toEqual({ to: 'credited', outcome: 'transition', no: '#2' });
+  });
+
+  it.each(['credited', 'refunded'] as const)(
+    '%s: tài khoản đóng không đổi gì (chỉ xét ở pending) → already_applied',
+    (from) => {
+      expect(sm.apply(from, 'PAYMENT_SUCCEEDED', { ...OK, accountClosed: true }).outcome).toBe(
+        'already_applied',
+      );
+    },
+  );
+});
+
+describe('TopUpStateMachine — Phần 8b mục 3.4: cùng giao dịch nhưng khác số tiền là mâu thuẫn', () => {
+  it.each(['credited', 'refunded'] as const)(
+    '%s: cùng transactionNo đã cộng, khác số tiền → conflicting_result (kể cả khi đã có khoản trễ)',
+    (from) => {
+      const g = { transactionNo: 'VNP-1', appliedTransactionNo: 'VNP-1', amountMismatch: true };
+      expect(sm.apply(from, 'PAYMENT_SUCCEEDED', { ...g, recordedLateRef: null }).outcome).toBe(
+        'conflicting_result',
+      );
+      expect(sm.apply(from, 'PAYMENT_SUCCEEDED', { ...g, recordedLateRef: 'VNP-2' }).outcome).toBe(
+        'conflicting_result',
+      );
+    },
+  );
+
+  it.each(['credited', 'refunded'] as const)(
+    '%s: transactionNo khác giao dịch đã cộng, sai số tiền, chưa có khoản trễ → late_payment',
+    (from) => {
+      expect(
+        sm.apply(from, 'PAYMENT_SUCCEEDED', {
+          transactionNo: 'VNP-2',
+          appliedTransactionNo: 'VNP-1',
+          recordedLateRef: null,
+          amountMismatch: true,
+        }).outcome,
+      ).toBe('late_payment');
+    },
+  );
+
+  it.each(['credited', 'refunded', 'failed', 'expired'] as const)(
+    '%s: đã có khoản trễ cùng transactionNo nhưng khác số tiền → conflicting_result; cùng số → already_applied',
+    (from) => {
+      const g = { transactionNo: 'VNP-2', appliedTransactionNo: 'VNP-1', recordedLateRef: 'VNP-2' };
+      expect(sm.apply(from, 'PAYMENT_SUCCEEDED', { ...g, lateAmountMismatch: true })).toEqual({
+        to: from,
+        outcome: 'conflicting_result',
+        no: null,
+      });
+      expect(sm.apply(from, 'PAYMENT_SUCCEEDED', { ...g, lateAmountMismatch: false }).outcome).toBe(
+        'already_applied',
+      );
+    },
+  );
+
+  it.each(['failed', 'expired'] as const)(
+    '%s: chưa có khoản trễ, sai số tiền → late_payment (ghi số thực trừ ở service)',
+    (from) => {
+      expect(
+        sm.apply(from, 'PAYMENT_SUCCEEDED', {
+          transactionNo: 'VNP-2',
+          recordedLateRef: null,
+          amountMismatch: true,
+        }).outcome,
+      ).toBe('late_payment');
+    },
+  );
 });
 
 describe('TopUpStateMachine — TIMEOUT_NOT_PAID đến muộn (đua với IPN qua Scheduler) → stale', () => {

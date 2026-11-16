@@ -13,6 +13,8 @@
  *   #4 pending → expired
  *   #6 thành công sau khi đã expired → khoản trễ, vẫn expired (ghi chú ở `expired` của STM-4)
  *   #7 credited → refunded (Admin hoàn, UC-ADM-08)
+ *   #8 pending → failed: VNPay báo đã trả nhưng không cộng được (T32 Phần 8b, Ân chốt 16/11),
+ *      ghi khoản trễ = số VNPay thực trừ. Chưa có trong diagram (Ân sửa STM-4).
  *
  * Guard do service tính rồi truyền vào (`TopUpGuards`); máy không đọc DB hay đồng hồ, giống guard
  * #19 của SessionStateMachine. Thiếu guard cần cho nhánh đang xét → `MissingGuard`.
@@ -28,6 +30,10 @@
  *       lỗi sau khi đã cộng.
  *   - `stale`: timeout đến khi đã rời `pending` (đua với IPN qua Scheduler); bỏ qua.
  *   - `rejected`: guard số dư của #7 sai (TC-STM4-12/13); service đổi thành RefundNotAllowed → 422.
+ *   - `not_creditable` (#8): thành công tới khi còn `pending` nhưng không cộng được — số VNPay trừ
+ *       khác `amount_paid_vnd` (`amountMismatch`, kiểm TRƯỚC) hoặc tài khoản `closed`
+ *       (`accountClosed`). Chuyển sang `failed` và ghi khoản trễ; không cộng, không trừ điểm, không
+ *       hoá đơn. Chọn `failed` vì đã có kết quả thanh toán (không phải hết hạn chờ).
  * Chỉ ADMIN_REFUND khi không ở `credited` mới ném `InvalidTransition` (vd. hoàn hai lần, TC-STM4-14).
  *
  * Bổ sung ⊕ chưa có trong diagram (decisions D4, chốt 04/11; T116 12/11):
@@ -39,9 +45,13 @@
  *   - Đã có khoản trễ (`recordedLateRef`) trên `failed` / `expired`: cùng transactionNo →
  *     `already_applied`, khác → `conflicting_result`. Kiểm khoản trễ đã ghi TRƯỚC, để IPN lặp trả 02
  *     thay vì ghi khoản trễ lần hai.
+ *   - Cùng giao dịch nhưng khác số tiền là MÂU THUẪN (T32 Phần 8b, Khang 16/11, chờ Ân xác nhận):
+ *     cùng transactionNo với giao dịch đã cộng mà `amountMismatch`, hoặc cùng transactionNo với
+ *     khoản trễ đã ghi mà `lateAmountMismatch` → `conflicting_result` thay vì `already_applied`.
  *   CHECK `top_ups_late_payment_status_check` cho khoản trễ trên mọi trạng thái trừ `pending` (0021).
  *
- * Bộ 5 × 4 = 20 cặp (trạng thái, event): 16 được nhận · 4 ném InvalidTransition.
+ * Bộ 5 × 4 = 20 cặp (trạng thái, event): 16 được nhận · 4 ném InvalidTransition. Cặp (`pending`,
+ * `PAYMENT_SUCCEEDED`) có hai nhánh guard: #2 hoặc #8.
  */
 import { InvalidTransition, MissingGuard } from './invalid-transition.js';
 
@@ -74,20 +84,41 @@ export interface TopUpGuards {
    * `null` = chưa có khoản trễ.
    */
   recordedLateRef?: string | null;
+  /**
+   * PAYMENT_SUCCEEDED: số VNPay thực trừ ≠ `amount_paid_vnd`. Bỏ trống = khớp. Ở `pending` → #8;
+   * ở `credited` / `refunded` cùng giao dịch đã cộng → `conflicting_result`.
+   */
+  amountMismatch?: boolean;
+  /** PAYMENT_SUCCEEDED trên `pending`: `credit_accounts.status = 'closed'` (#8). Bỏ trống = không. */
+  accountClosed?: boolean;
+  /**
+   * PAYMENT_SUCCEEDED khi đã có khoản trễ cùng transactionNo: số VNPay trừ ≠ `late_amount_vnd`
+   * → `conflicting_result`. Bỏ trống = khớp.
+   */
+  lateAmountMismatch?: boolean;
   /** ADMIN_REFUND (#7): số dư ≥ số tiền top-up (không hoàn một phần). */
   balanceCoversAmount?: boolean;
 }
 
 export type TopUpOutcome =
-  'transition' | 'already_applied' | 'late_payment' | 'conflicting_result' | 'stale' | 'rejected';
+  | 'transition'
+  | 'already_applied'
+  | 'late_payment'
+  | 'conflicting_result'
+  | 'stale'
+  | 'rejected'
+  | 'not_creditable';
+
+/** Lý do không cộng được của #8, theo thứ tự kiểm. */
+export type NotCreditableReason = 'amount_mismatch' | 'account_closed';
 
 export interface TopUpStep {
   to: TopUpStatus;
   outcome: TopUpOutcome;
   /** Số chuyển STM-4; null khi kết quả không ứng với mũi tên nào của diagram. */
   no: string | null;
-  /** Chỉ có khi `outcome = 'rejected'`. */
-  reason?: 'insufficient_balance';
+  /** `rejected` → `insufficient_balance`; `not_creditable` → lý do không cộng được. */
+  reason?: 'insufficient_balance' | NotCreditableReason;
 }
 
 export interface TopUpTransition {
@@ -104,6 +135,17 @@ export const TOP_UP_TRANSITIONS: readonly TopUpTransition[] = [
   { no: '#4', from: 'pending', event: 'TIMEOUT_NOT_PAID', to: 'expired' },
   { no: '#7', from: 'credited', event: 'ADMIN_REFUND', to: 'refunded' },
 ];
+
+/**
+ * #8 (T32 Phần 8b): đã trả nhưng không cộng được. Để riêng, không vào `TOP_UP_TRANSITIONS`, vì cặp
+ * (`pending`, `PAYMENT_SUCCEEDED`) đã là #2; nhánh nào do guard quyết định.
+ */
+export const NOT_CREDITABLE_TRANSITION: TopUpTransition = {
+  no: '#8',
+  from: 'pending',
+  event: 'PAYMENT_SUCCEEDED',
+  to: 'failed',
+};
 
 /** Kết quả thanh toán và timeout được nhận ở mọi trạng thái; chỉ lệnh của Admin mới bị chặn. */
 const ALWAYS_ACCEPTED: ReadonlySet<TopUpEvent> = new Set([
@@ -153,16 +195,31 @@ export class TopUpStateMachine {
   private paymentSucceeded(from: TopUpStatus, g: TopUpGuards): TopUpStep {
     const event = 'PAYMENT_SUCCEEDED';
     switch (from) {
-      case 'pending':
+      case 'pending': {
+        // Thứ tự kiểm: sai số tiền trước, rồi tài khoản đóng (Ân 16/11).
+        const reason: NotCreditableReason | null = g.amountMismatch
+          ? 'amount_mismatch'
+          : g.accountClosed
+            ? 'account_closed'
+            : null;
+        if (reason)
+          return {
+            to: NOT_CREDITABLE_TRANSITION.to,
+            outcome: 'not_creditable',
+            no: NOT_CREDITABLE_TRANSITION.no,
+            reason,
+          };
         return this.step(from, event);
+      }
       case 'credited':
       case 'refunded': {
         const applied = need(g, 'appliedTransactionNo', from, event);
         const txn = need(g, 'transactionNo', from, event);
         const late = need(g, 'recordedLateRef', from, event);
-        if (applied === txn) return stay(from, 'already_applied');
-        if (late !== null)
-          return stay(from, late === txn ? 'already_applied' : 'conflicting_result');
+        // Cùng giao dịch đã cộng mà khác số tiền: mâu thuẫn (không hoàn hai lần cho một giao dịch).
+        if (applied === txn)
+          return stay(from, g.amountMismatch ? 'conflicting_result' : 'already_applied');
+        if (late !== null) return stay(from, lateOutcome(late, txn, g));
         // Lần trả thứ hai cho top-up đã cộng (T116): ghi khoản trễ, không cộng lần hai.
         return stay(from, 'late_payment');
       }
@@ -170,8 +227,7 @@ export class TopUpStateMachine {
       case 'expired': {
         const late = need(g, 'recordedLateRef', from, event);
         const txn = need(g, 'transactionNo', from, event);
-        if (late !== null)
-          return stay(from, late === txn ? 'already_applied' : 'conflicting_result');
+        if (late !== null) return stay(from, lateOutcome(late, txn, g));
         if (from === 'failed') return stay(from, 'late_payment');
         return { to: 'expired', outcome: 'late_payment', no: '#6' };
       }
@@ -183,6 +239,11 @@ export class TopUpStateMachine {
     if (!t) throw new InvalidTransition('STM-4', from, event);
     return { to: t.to, outcome: 'transition', no: t.no };
   }
+}
+
+/** Đã có khoản trễ: cùng giao dịch, cùng số tiền → lặp; khác giao dịch hoặc khác số tiền → mâu thuẫn. */
+function lateOutcome(late: string, txn: string, g: TopUpGuards): TopUpOutcome {
+  return late === txn && !g.lateAmountMismatch ? 'already_applied' : 'conflicting_result';
 }
 
 function stay(from: TopUpStatus, outcome: TopUpOutcome): TopUpStep {
