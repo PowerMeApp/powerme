@@ -45,6 +45,9 @@ COPY --from=build --chown=node:node /app/apps/csms/dist ./dist
 COPY --chown=node:node apps/csms/drizzle ./drizzle
 COPY --chown=node:node apps/csms/scripts/migrate.mjs apps/csms/scripts/seed-demo.mjs ./scripts/
 COPY --chown=node:node apps/csms/demo/seed.sql apps/csms/demo/seed-app.sql ./demo/
+# BE-41: trụ kịch bản cho dịch vụ `demo-station` của staging (một trụ luôn nối để app thử sạc).
+# Chỉ dùng ocpp-rpc, đã là dependency của CSMS.
+COPY --chown=node:node apps/csms/demo/scripted-station.mjs ./demo/
 USER node
 # OCPP-J (wss kết thúc TLS ở Caddy). Console: xem CONSOLE_HOST bên dưới.
 EXPOSE 9000 3000

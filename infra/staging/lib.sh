@@ -155,6 +155,11 @@ sim_running() {
   [ -n "$(docker compose --profile sim ps --status running -q simulator 2>/dev/null)" ]
 }
 
+# Trụ luôn nối (BE-41, profile demo-station) đang chạy?
+demo_station_running() {
+  [ -n "$(docker compose --profile demo-station ps --status running -q demo-station 2>/dev/null)" ]
+}
+
 # Kiểm sức khoẻ TRONG container: console bind loopback/0.0.0.0 trong container, không nối ra ngoài.
 health_internal() {
   docker compose exec -T csms node -e \

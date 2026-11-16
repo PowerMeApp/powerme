@@ -141,6 +141,39 @@ services:
     logging: *default-logging
 
   # Trụ D1 giả lập có HMI, cho demo. Bật: docker compose --profile sim up -d simulator
+  # BE-41: MỘT trụ luôn nối, để app tài xế thấy trạm "PowerMe Metro Lang Dai hoc" online và bấm sạc
+  # thử được (trụ kịch bản `app`: trả lời RemoteStart / RemoteStop, gửi MeterValues mỗi 10 s).
+  # Không phải firmware thật. Nối thẳng CSMS trong mạng compose (không qua Caddy). Bật:
+  #   docker compose --profile demo-station up -d demo-station   (deploy.sh giữ nó chạy nếu đang chạy)
+  # Trụ thoát khi CSMS khởi động lại hoặc hết --hold-s; `restart` nối lại. Cần ./seed.sh đã chạy
+  # (credential của PMAPP-TD-04A = DEMO_CHARGE_POINT_PASSWORD), nếu không CSMS trả 401.
+  demo-station:
+    profiles: ['demo-station']
+    image: ${REGISTRY}/powerme-csms:${TAG}
+    restart: unless-stopped
+    command:
+      - node
+      - demo/scripted-station.mjs
+      - app
+      - --id
+      - PMAPP-TD-04A
+      - --url
+      - ws://csms:9000/ocpp
+      - --interval-s
+      - '10'
+      - --tick-wh
+      - '330'
+      - --hold-s
+      - '86400'
+    environment:
+      CP_PASSWORD: ${DEMO_CHARGE_POINT_PASSWORD:-${DEMO_PILLAR_PASSWORD:-}}
+    healthcheck:
+      disable: true
+    depends_on:
+      csms:
+        condition: service_healthy
+    logging: *default-logging
+
   simulator:
     profiles: ['sim']
     image: ${REGISTRY}/powerme-simulator:${TAG}

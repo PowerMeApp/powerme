@@ -4,7 +4,7 @@
  *
  * Vì sao tồn tại: chứng minh OfflineAlertService + FaultService ghi đúng `fault_events` theo STM-6
  * (t1 raised, SIGNAL no-op, CONNECTOR_AVAILABLE → resolved) và đúng ngưỡng thời gian, chạy trên
- * đồng hồ giả để không chờ 900 s thật. "Trụ nói lại" được mô phỏng bằng đúng các cột mà
+ * đồng hồ giả để không chờ 840 s thật. "Trụ nói lại" được mô phỏng bằng đúng các cột mà
  * ocpp-gateway ghi khi trụ kết nối/gửi frame (`is_online`, `last_message_at`, `online_changed_at`)
  * — service chỉ đọc các cột đó, không phụ thuộc gateway (ADR-0016 D-F).
  *
@@ -15,7 +15,12 @@
 import { Logger } from '@nestjs/common';
 import { asc, eq } from 'drizzle-orm';
 import type { ScheduledTask, Scheduler } from '../src/common/scheduler.js';
-import type { CsmsConfig } from '../src/config.js';
+import {
+  DEFAULT_OFFLINE_ALERT_S,
+  DEFAULT_OFFLINE_ALERT_SWEEP_S,
+  OFFLINE_ALERT_MAX_DELAY_S,
+  type CsmsConfig,
+} from '../src/config.js';
 import { createDb, Db } from '../src/db/db.module.js';
 import { chargePoints, connectors, faultEvents } from '../src/db/schema/index.js';
 import { OFFLINE_ERROR_CODE } from '../src/stations/faults/error-code-guide.js';
@@ -26,8 +31,9 @@ import { resetAndMigrate } from './helpers/apply-migrations.js';
 const DATABASE_URL = process.env['DATABASE_URL'];
 const describeDb = DATABASE_URL ? describe : describe.skip;
 
-const OFFLINE_ALERT_S = 900;
-const SWEEP_S = 60;
+/** Production defaults (T118: 840 + 60 = 900 s), so the NFR-06 case checks what ships. */
+const OFFLINE_ALERT_S = DEFAULT_OFFLINE_ALERT_S;
+const SWEEP_S = DEFAULT_OFFLINE_ALERT_SWEEP_S;
 
 const CONFIG: CsmsConfig = {
   databaseUrl: DATABASE_URL ?? '',
@@ -131,16 +137,16 @@ describeDb('G10 — cảnh báo trụ im lặng quá OFFLINE_ALERT_S (NFR-OCPP-0
     await db?.$client.end();
   });
 
-  it('TC-F10-04: im lặng 899 s → chưa có sự cố', async () => {
+  it('TC-F10-04: im lặng OFFLINE_ALERT_S − 1 → chưa có sự cố', async () => {
     await socketClosed(at(1));
-    const r = await alerts.sweep(at(899));
+    const r = await alerts.sweep(at(OFFLINE_ALERT_S - 1));
     expect(r).toEqual({ raised: 0, attached: 0, resolved: 0 });
     expect(await offlineFaults()).toHaveLength(0);
   });
 
-  it('TC-F10-05: im lặng quá 900 s → đúng một sự cố Offline cả trụ (t1 raised)', async () => {
+  it('TC-F10-05: im lặng quá OFFLINE_ALERT_S → đúng một sự cố Offline cả trụ (t1 raised)', async () => {
     await socketClosed(at(1));
-    const r = await alerts.sweep(at(901));
+    const r = await alerts.sweep(at(OFFLINE_ALERT_S + 1));
     expect(r.raised).toBe(1);
     const [f] = await offlineFaults();
     expect(f).toMatchObject({
@@ -149,18 +155,18 @@ describeDb('G10 — cảnh báo trụ im lặng quá OFFLINE_ALERT_S (NFR-OCPP-0
       errorCode: OFFLINE_ERROR_CODE,
       status: 'raised',
     });
-    expect(f!.raisedAt.toISOString()).toBe(at(901).toISOString());
+    expect(f!.raisedAt.toISOString()).toBe(at(OFFLINE_ALERT_S + 1).toISOString());
   });
 
   it('TC-F10-06: quét lại khi vẫn im lặng → không tạo trùng (SIGNAL no-op)', async () => {
-    await alerts.sweep(at(901));
-    const r = await alerts.sweep(at(961));
+    await alerts.sweep(at(OFFLINE_ALERT_S + 1));
+    const r = await alerts.sweep(at(OFFLINE_ALERT_S + 1 + SWEEP_S));
     expect(r).toEqual({ raised: 0, attached: 1, resolved: 0 });
     expect(await offlineFaults()).toHaveLength(1);
   });
 
   it('TC-F10-07: trụ nói lại → sự cố Offline tự đóng (CONNECTOR_AVAILABLE → resolved)', async () => {
-    await alerts.sweep(at(901));
+    await alerts.sweep(at(OFFLINE_ALERT_S + 1));
     await heard(at(1200));
     const r = await alerts.sweep(at(1210));
     expect(r.resolved).toBe(1);
@@ -170,7 +176,7 @@ describeDb('G10 — cảnh báo trụ im lặng quá OFFLINE_ALERT_S (NFR-OCPP-0
   });
 
   it('operator đã xác nhận rồi trụ mới nói lại → vẫn đóng được (t7)', async () => {
-    await alerts.sweep(at(901));
+    await alerts.sweep(at(OFFLINE_ALERT_S + 1));
     const [f] = await offlineFaults();
     await faults.acknowledge(f!.id, null, at(950));
     await heard(at(1000));
@@ -178,13 +184,13 @@ describeDb('G10 — cảnh báo trụ im lặng quá OFFLINE_ALERT_S (NFR-OCPP-0
     expect((await offlineFaults())[0]!.status).toBe('resolved');
   });
 
-  it('socket còn mở nhưng không frame nào quá 900 s (trụ treo) → vẫn cảnh báo', async () => {
+  it('socket còn mở nhưng không frame nào quá OFFLINE_ALERT_S (trụ treo) → vẫn cảnh báo', async () => {
     // is_online = true từ beforeEach; last_message_at đứng yên ở t=0.
-    expect((await alerts.sweep(at(901))).raised).toBe(1);
+    expect((await alerts.sweep(at(OFFLINE_ALERT_S + 1))).raised).toBe(1);
   });
 
   it('trụ không ở in_service (awaiting_connection) → bỏ qua dù im lặng rất lâu', async () => {
-    await alerts.sweep(at(901));
+    await alerts.sweep(at(OFFLINE_ALERT_S + 1));
     expect(await offlineFaults(idleCpId)).toHaveLength(0);
   });
 
@@ -197,7 +203,7 @@ describeDb('G10 — cảnh báo trụ im lặng quá OFFLINE_ALERT_S (NFR-OCPP-0
       status: 'raised',
       raisedAt: at(0),
     });
-    const r = await alerts.sweep(at(901));
+    const r = await alerts.sweep(at(OFFLINE_ALERT_S + 1));
     expect(r).toEqual({ raised: 0, attached: 1, resolved: 0 });
     const rows = await offlineFaults();
     expect(rows).toHaveLength(1);
@@ -208,7 +214,7 @@ describeDb('G10 — cảnh báo trụ im lặng quá OFFLINE_ALERT_S (NFR-OCPP-0
     expect((await offlineFaults())[0]!.status).toBe('raised');
   });
 
-  it('NFR-06: từ frame cuối tới cảnh báo ≤ OFFLINE_ALERT_S + một nhịp quét', async () => {
+  it('NFR-06: từ frame cuối tới cảnh báo ≤ OFFLINE_ALERT_S + một nhịp quét ≤ 900 s', async () => {
     const lastMessage = at(0);
     await socketClosed(at(1));
     // Quét đều theo nhịp SWEEP_S, như vòng hẹn giờ thật.
@@ -224,10 +230,12 @@ describeDb('G10 — cảnh báo trụ im lặng quá OFFLINE_ALERT_S (NFR-OCPP-0
     const delayS = (alertAt!.getTime() - lastMessage.getTime()) / 1000;
     expect(delayS).toBeGreaterThan(OFFLINE_ALERT_S - 1);
     expect(delayS).toBeLessThanOrEqual(OFFLINE_ALERT_S + SWEEP_S);
+    // Frame cuối trùng một lượt quét = trường hợp xấu nhất; vẫn trong cam kết NFR-OCPP-07.
+    expect(delayS).toBeLessThanOrEqual(OFFLINE_ALERT_MAX_DELAY_S);
   });
 
   it('khởi động lại CSMS giữa chừng → service mới vẫn thấy và đóng sự cố cũ (không giữ RAM)', async () => {
-    await alerts.sweep(at(901));
+    await alerts.sweep(at(OFFLINE_ALERT_S + 1));
     const fresh = new OfflineAlertService(db, CONFIG, faults, new ManualScheduler());
     await heard(at(1100));
     expect((await fresh.sweep(at(1110))).resolved).toBe(1);

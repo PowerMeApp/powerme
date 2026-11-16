@@ -32,7 +32,9 @@ apps/csms/docs
 simulator/d1-hmi/docs
 simulator/d1-hmi/smoke.mjs
 
-# Demo chỉ cần seed.sql và seed-app.sql (scripts/seed-demo.mjs đọc chúng)
+# Demo chỉ cần seed.sql và seed-app.sql (scripts/seed-demo.mjs đọc chúng) và trụ kịch bản cho
+# dịch vụ demo-station của staging (BE-41)
 apps/csms/demo/*
 !apps/csms/demo/seed.sql
 !apps/csms/demo/seed-app.sql
+!apps/csms/demo/scripted-station.mjs
