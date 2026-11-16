@@ -37,6 +37,7 @@
  *           --interval-s 10 (nhịp MeterValues)  --offline-s 60 (độ dài đứt mạng)  --fast (3 s / 15 s)
  *           --tag <idTag>  --hold-s 60 (ds-09 / app / fault: seconds to stay connected)
  *           --tick-wh 170 (app: Wh cộng mỗi nhịp; 2500 để chạm giới hạn 10 kWh sau 4 nhịp)
+ *           --heartbeat-s N (ép nhịp Heartbeat; mặc định theo interval CSMS trả ở Boot, 300 s)
  *           --reject-start (app)  --error-code InternalError  --reset accept|reject  --reboot-s 5 (fault)
  * Biến môi trường: CP_PASSWORD (mật khẩu Basic Auth của trụ; cần khi nối vào staging)
  */
@@ -70,6 +71,21 @@ const connectorStatus = new Map([
   [2, 'Available'],
 ]);
 let client = null;
+// Heartbeat theo `interval` CSMS trả ở BootNotification.conf (mặc định sản phẩm 300 s). Thiếu nó, trụ
+// đứng chờ lâu (kịch bản app / fault / ds-09, dịch vụ demo-station) không gửi bản tin nào, nên sau
+// OFFLINE_ALERT_S CSMS mở sự cố Offline và ẩn súng dù socket vẫn nối (BE-41).
+// --heartbeat-s N ép nhịp (để thử nhanh); không có thì theo CSMS.
+const HEARTBEAT_OVERRIDE_S = Number(opt('heartbeat-s', 0));
+let heartbeatS = HEARTBEAT_OVERRIDE_S > 0 ? HEARTBEAT_OVERRIDE_S : 300;
+let heartbeatTimer = null;
+function startHeartbeat() {
+  clearInterval(heartbeatTimer);
+  const mine = client;
+  heartbeatTimer = setInterval(() => {
+    if (client !== mine) return;
+    mine.call('Heartbeat', {}).catch((e) => log('✗ Heartbeat:', e.message));
+  }, heartbeatS * 1000);
+}
 /** Lệnh CSMS → trụ mà kịch bản đang chạy muốn xử lý (app, fault); null = trả NotImplemented. */
 const hooks = { remoteStart: null, remoteStop: null, reset: null };
 
@@ -136,8 +152,11 @@ async function connect({ boot, password = process.env.CP_PASSWORD }) {
       firmwareVersion: '4.0.4.22',
     });
     log(`  BootNotification → ${res.status}`);
+    if (!(HEARTBEAT_OVERRIDE_S > 0) && Number.isInteger(res.interval) && res.interval > 0)
+      heartbeatS = res.interval;
     for (const [id, st] of connectorStatus) await notify(id, st);
   }
+  startHeartbeat();
 }
 
 async function notify(connectorId, status, errorCode = 'NoError') {
@@ -154,6 +173,7 @@ async function notify(connectorId, status, errorCode = 'NoError') {
 /** Ngắt đột ngột (không close frame) — CSMS thấy mã 1006, giống rút cáp mạng. */
 async function dropLink() {
   log('✂ NGẮT KẾT NỐI (force)');
+  clearInterval(heartbeatTimer);
   await client.close({ force: true });
 }
 
