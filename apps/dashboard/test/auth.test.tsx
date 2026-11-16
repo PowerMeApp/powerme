@@ -6,7 +6,14 @@ import { ADMIN, currentPath, fakeCsms, renderApp, session, STAFF } from './rende
 
 const ok = (user: typeof STAFF): { status: number; body: LoginResponse } => ({
   status: 200,
-  body: { access_token: `token-${user.user_id}`, token_type: 'Bearer', expires_in: 28800, user },
+  body: {
+    access_token: `token-${user.user_id}`,
+    token_type: 'Bearer',
+    expires_in: 900,
+    refresh_token: `refresh-${user.user_id}`,
+    refresh_expires_in: 43200,
+    user,
+  },
 });
 const fail = (status: number, error: string, headers?: Record<string, string>) => ({
   status,

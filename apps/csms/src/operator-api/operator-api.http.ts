@@ -1,6 +1,7 @@
 /**
  * IOperatorAPI (Report 4 component 02 `operator-api`, ADR-0018) on the console port:
  *   POST /api/auth/v1/login   public, staff and admins (screens 16, 26)
+ *   POST /api/auth/v1/refresh public, refresh token → new 900 s access token (T125)
  *   GET  /api/operator/v1/me  operator_staff
  *   GET  /api/operator/v1/faults, POST …/faults/{id}/acknowledge|reset|close  (FE-04a, operator-faults.ts)
  *   GET  /api/admin/v1/me     admin
@@ -60,15 +61,21 @@ export function createOperatorApiListener(
     }
     const url = new URL(req.url ?? '', 'http://operator-api.local');
     const [, surface, rest] = /^\/api\/(auth|operator|admin)\/v1(\/.*)?$/.exec(url.pathname) ?? [];
-    // Only the fault list takes a query (status, limit); everywhere else a query is 400.
+    // Only the fault list takes a query (status, page, page_size); everywhere else a query is 400.
     if (url.search && !/^\/api\/operator\/v1\/faults$/.test(url.pathname))
       throw new AuthError(400, 'invalid_input');
 
     if (surface === 'auth') {
-      if (rest !== '/login') throw new AuthError(404, 'not_found');
+      if (rest !== '/login' && rest !== '/refresh') throw new AuthError(404, 'not_found');
       allow(req, res, 'POST');
       const body = await readJsonObject(req, res);
-      send(res, 200, await accounts.login(body, req.socket.remoteAddress ?? 'unknown'));
+      send(
+        res,
+        200,
+        rest === '/login'
+          ? await accounts.login(body, req.socket.remoteAddress ?? 'unknown')
+          : await accounts.refresh(body),
+      );
       return;
     }
     if (surface !== 'operator' && surface !== 'admin') throw new AuthError(404, 'not_found');

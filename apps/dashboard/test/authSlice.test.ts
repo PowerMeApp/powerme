@@ -14,11 +14,18 @@ describe('authSlice (D17)', () => {
     const before = Date.now();
     const state = authReducer(
       undefined,
-      loggedIn({ access_token: 't', token_type: 'Bearer', expires_in: 28800, user: STAFF }),
+      loggedIn({
+        access_token: 't',
+        token_type: 'Bearer',
+        expires_in: 900,
+        refresh_token: 'r',
+        refresh_expires_in: 43200,
+        user: STAFF,
+      }),
     );
     expect(state.token).toBe('t');
     expect(state.user).toEqual(STAFF);
-    expect(state.expiresAt! - before).toBeGreaterThanOrEqual(28_800_000);
+    expect(state.expiresAt! - before).toBeGreaterThanOrEqual(900_000);
     expect(authReducer(state, loggedOut())).toEqual({ token: null, user: null, expiresAt: null });
   });
 

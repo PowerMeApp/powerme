@@ -55,7 +55,7 @@ Hợp đồng giữ đúng như vậy — **không endpoint nghiệp vụ nào c
 refresh là chung). Admin xem dữ liệu vận hành qua các route chỉ đọc của chính mình (`/admin/v1/sessions`,
 `/reconciliation-records`, `/ocpp-messages`).
 
-### 2.2 Xác thực (đã chạy — FE-01a #118, ADR-0018; thời hạn token đổi theo T125 — §2.2b)
+### 2.2 Xác thực (đã chạy — FE-01a #118, ADR-0018; access 900 s + refresh từ T125 — §2.2b)
 
 Code: `apps/csms/src/users/auth.ts` (IAuth, `StaffAccounts.login`), `users/roles-guard.ts`
 (RolesGuard), `operator-api/operator-api.http.ts` (route); type phía dashboard
@@ -70,12 +70,9 @@ vai trò còn lại và không lưu token (FE-01b #119).
   `Content-Type: application/json` (không thì 415 `unsupported_media_type`), body ≤ 16 KiB (413
   `payload_too_large`), chỉ `POST` (405 + `Allow`). Email được `trim()` + chữ thường, không kiểm
   định dạng; email > 254 ký tự hoặc mật khẩu > 128 ký tự → 401, không phải 400.
-- 200 → `{access_token, token_type: "Bearer", expires_in, refresh_token, refresh_expires_in, user}`;
-  `user` cùng hình dạng với `/me` (cuối mục này). `Cache-Control: no-store`.
-  - **Đích (T125):** `expires_in: 900`, có `refresh_token` + `refresh_expires_in` (§2.2b).
-  - **Hiện tại (#118):** `expires_in: 28800`, **không có** hai trường refresh. Dashboard đọc
-    `expires_in` chứ không gán cứng, và thiếu `refresh_token` thì hết hạn là đăng nhập lại — chạy
-    được với cả hai cho tới khi T125 merge.
+- 200 → `{access_token, token_type: "Bearer", expires_in: 900, refresh_token, refresh_expires_in, user}`;
+  `user` cùng hình dạng với `/me` (cuối mục này). `Cache-Control: no-store`. `refresh_expires_in` =
+  `DASHBOARD_JWT_REFRESH_TTL_S` (mặc định 43 200). Làm mới access token: §2.2b (T125).
 
 | Tình huống đăng nhập | Kết quả |
 |---|---|
@@ -91,9 +88,8 @@ xem §2.7 về proxy.
 
 **Token.** JWT HS256 `typ: JWT`, claim `sub` (users.id), `role` (`operator_staff` | `admin`, đúng
 enum `user_role` — "Operator" chỉ là nhãn UI), `iss`, `aud`, `iat`, `exp`, `jti`; nhân viên có thêm
-`operator_id`, `staff_role`. Thời hạn: **đích** `exp` = `iat` + **900 s**, làm mới bằng refresh token
-(§2.2b); **hiện tại** `exp` = `iat` + 8 giờ, không có refresh (ADR-0018 #3 — mục này của ADR cần sửa
-theo quyết định 12/11). Đăng xuất = xoá token ở trình duyệt; không thu hồi được từng token, bù bằng
+`operator_id`, `staff_role`. Thời hạn: `exp` = `iat` + **900 s**, làm mới bằng refresh token
+(§2.2b; ADR-0018 #3 đã sửa theo quyết định 12/11). Đăng xuất = xoá token ở trình duyệt; không thu hồi được từng token, bù bằng
 việc kiểm DB ở mỗi request (và ở mỗi lần refresh).
 
 **Khoá ký riêng.** `DASHBOARD_JWT_SECRET_BASE64` (base64 chuẩn của ≥ 32 byte ngẫu nhiên),
@@ -126,13 +122,13 @@ Với Admin ba khoá cuối không có trong JSON (không phải `null`) — TS 
 (`operator_id?: string`…). Response đăng nhập dùng đúng type này (`LoginResponse.user`). Ở `/me`,
 `operator_id` lấy từ lần đọc DB của guard ở chính request đó, không từ token.
 
-### 2.2b Quyết định 12/11 — access token 900 s + refresh (T125, chưa có code)
+### 2.2b Quyết định 12/11 — access token 900 s + refresh (T125, đã có code)
 
-**Ân (PM) chốt 12/11**, khác ADR-0018 #3: giữ **một** `POST /api/auth/v1/login` cho nhân viên và
-Admin (ADR-0018 #1 không đổi), nhưng access token sống **900 s** và có **refresh token**. Việc code là
-T125 — owner **chờ phân công**, đề xuất Nghĩa vì #118 là của Nghĩa. Hợp đồng **không sửa ADR**;
-ADR-0018 mục 3 (và dòng "Access 15 phút + refresh token" trong bảng phương án bị loại) cần được sửa
-hoặc thay bằng ADR mới theo quyết định này — câu hỏi N15.
+**Ân (PM) chốt 12/11**: giữ **một** `POST /api/auth/v1/login` cho nhân viên và Admin (ADR-0018 #1
+không đổi), nhưng access token sống **900 s** và có **refresh token**. Code: T125 (Nghĩa) —
+`StaffAccounts.refresh` trong `apps/csms/src/users/auth.ts`, test
+`apps/csms/test/fe01-dashboard-auth.integration.test.ts` ("T125 refresh token"). ADR-0018 mục 3 đã
+sửa tại chỗ (ADR còn "Đề xuất" nên được sửa; nay "Chấp nhận") — N13, N15 đóng.
 
 Tình huống: nhân viên kỹ thuật mở Operator Dashboard đầu ca 7:00, dashboard poll trụ 5 s cả buổi. Với
 access 900 s, mỗi 15 phút dashboard đổi refresh token lấy access mới mà không hỏi lại mật khẩu. 10:30
@@ -152,16 +148,17 @@ thời hạn:
 | Không dùng thay nhau | RolesGuard đòi `typ: JWT` + `role` → refresh token gọi `/operator/v1`, `/admin/v1` nhận 401; route refresh đòi `typ: refresh+jwt` + `token_use: refresh` → access token gửi vào nhận 401 `invalid_refresh_token`; refresh token tài xế (khoá khác) → 401 |
 | Kiểm DB mỗi lần | user không còn → 401 `invalid_refresh_token`; `users.role` không phải `operator_staff`/`admin` hoặc thiếu dòng `operator_staff`/`admins` → 403 `forbidden`; role DB khác role lúc đăng nhập (token có `operator_id` ⇔ lúc đăng nhập là nhân viên) hoặc `operator_id` DB khác claim → 401 `invalid_refresh_token` (đăng nhập lại — giống guard xử lý nhân viên bị chuyển Operator); `account_status ≠ active` → 403 `account_locked`; Operator ≠ `active` → 403 `operator_inactive`. Access mới lấy `role`, `operator_id`, `staff_role` từ lần đọc DB này |
 | Xoay vòng | **không** — một refresh token dùng nhiều lần tới khi hết hạn; thời hạn tính từ lúc đăng nhập, hết thì đăng nhập lại (không có bảng refresh token nên không để phiên kéo dài vô hạn, như BE-21) |
-| Thời hạn | `DASHBOARD_JWT_REFRESH_TTL_S`. **Đề xuất cho Nghĩa chốt:** mặc định 43 200 s (**12 giờ** — một ca làm việc kể cả giao ca), giới hạn 3 600 … 86 400, ngoài khoảng → CSMS không khởi động (như `DRIVER_API_REFRESH_TTL_S`, 30 ngày cho app tài xế — dashboard ngắn hơn vì máy dùng chung ở trạm) |
+| Thời hạn | `DASHBOARD_JWT_REFRESH_TTL_S`. **Nghĩa chốt 16/11 (N14):** mặc định 43 200 s (**12 giờ** — một ca làm việc kể cả giao ca), giới hạn 3 600 … 86 400, ngoài khoảng → CSMS không khởi động (như `DRIVER_API_REFRESH_TTL_S`, 30 ngày cho app tài xế — dashboard ngắn hơn vì máy dùng chung ở trạm) |
 | Thử sai | không có bộ đếm (Driver API cũng không) — refresh token có chữ ký, không đoán được |
 | Lỗi khác | `DASHBOARD_JWT_*` trống cả ba → 503 `auth_unavailable`; `Origin` lạ → 403 `forbidden_origin` |
 | Đăng xuất | vẫn là dashboard xoá cả hai token; không có `/logout` phía server |
 
-Phần đổi theo khi làm T125 (việc của code, ghi để không sót): `DASHBOARD_TOKEN_TTL_S` (8 giờ, `users/auth.ts`)
-→ 900; guard kiểm tuổi từ `iat` ≤ 900 s; type `LoginResponse` trong `packages/shared/src/api/auth.ts`
-thêm hai trường refresh; dashboard (FE-01b) gọi refresh khi nhận 401 / trước khi hết `expires_in`;
-`infra/staging` thêm `DASHBOARD_JWT_REFRESH_TTL_S` (tuỳ chọn, có mặc định); test TC-F13 thêm ca refresh
-token bị dùng làm access và ngược lại, ca khoá tài khoản giữa hai lần refresh.
+Đã đổi trong T125: `DASHBOARD_TOKEN_TTL_S` = 900 (`users/auth.ts`), guard kiểm tuổi từ `iat` ≤ 900 s;
+`LoginResponse` / `RefreshRequest` / `RefreshResponse` trong `packages/shared/src/api/auth.ts`;
+`infra/staging` có `DASHBOARD_JWT_REFRESH_TTL_S` (tuỳ chọn, trống = mặc định); test thêm ca refresh
+token dùng làm access và ngược lại, token tài xế, khoá tài khoản / Operator giữa hai lần refresh,
+nhân viên bị chuyển Operator. Dashboard (FE-01b) gọi refresh khi nhận 401 làm ở PR dashboard riêng
+của T125; trước khi PR đó merge, dashboard đọc `expires_in` nên chỉ phải đăng nhập lại sau 15 phút.
 
 ### 2.2a RolesGuard, CORS, query string (hành vi hiện tại)
 
@@ -170,8 +167,8 @@ cả đường dẫn chưa có route: không có token hợp lệ → 401, có t
 Thứ tự:
 
 1. Đúng **một** header `Authorization: Bearer <jwt>` (≤ 8 192 ký tự). Thiếu, hai header, sai dạng,
-   sai chữ ký / iss / aud, hết hạn (kiểm `exp` và tuổi từ `iat` ≤ 8 giờ — đích T125: ≤ 900 s —
-   không dung sai đồng hồ), refresh token (`typ: refresh+jwt`) dùng làm access
+   sai chữ ký / iss / aud, hết hạn (kiểm `exp` và tuổi từ `iat` ≤ 900 s, không dung sai đồng
+   hồ), refresh token (`typ: refresh+jwt`) dùng làm access
    → **401 `unauthorized`** — trừ token tài xế hợp lệ → **403 `forbidden`** (ở trên).
 2. `role` trong token khác bề mặt (token admin gọi `/operator/v1`, token nhân viên gọi
    `/admin/v1`) → **403 `forbidden`**.
@@ -307,8 +304,8 @@ tiền tố `/api`.
 
 | Endpoint | Role | UC / FR / BR | Trạng thái · người làm | Ghi chú |
 |---|---|---|---|---|
-| `POST /auth/v1/login` | công khai | F-13, UC-ACC-04/05, BR-P16, ADR-0018, T125 | **implemented (8 h, không refresh) — đích 900 s + refresh theo T125** · Nghĩa (#118); T125 chờ phân công | một endpoint cho nhân viên và Admin; mã lỗi ở §2.2; đích thêm `refresh_token`, `refresh_expires_in` (§2.2b) |
-| `POST /auth/v1/refresh` | công khai | F-13, UC-ACC-04/05, BR-P16, T125 (theo BE-21) | **planned · T125** (owner: chờ phân công; đề xuất Nghĩa vì #118 là của Nghĩa) | đổi refresh token lấy access 900 s; không xoay vòng; kiểm lại DB mỗi lần; hiện nhận 404 (§2.2b) |
+| `POST /auth/v1/login` | công khai | F-13, UC-ACC-04/05, BR-P16, ADR-0018, T125 | **implemented** (900 s + refresh, T125) · Nghĩa (#118, T125) | một endpoint cho nhân viên và Admin; mã lỗi ở §2.2; trả kèm `refresh_token`, `refresh_expires_in` (§2.2b) |
+| `POST /auth/v1/refresh` | công khai | F-13, UC-ACC-04/05, BR-P16, T125 (theo BE-21) | **implemented** · Nghĩa (T125) | đổi refresh token lấy access 900 s; không xoay vòng; kiểm lại DB mỗi lần (§2.2b) |
 | `GET /operator/v1/me` | operator_staff | BR-P16, Table 5 #17 | **đã chạy** (FE-01a #118) · Nghĩa | `DashboardUser` phẳng có `operator_id`, `operator_name`, `staff_role` |
 | `GET /admin/v1/me` | admin | Table 5 #27 | **đã chạy** (FE-01a #118) · Nghĩa | `DashboardUser` không có ba trường Operator |
 
@@ -612,7 +609,7 @@ trụ; hợp đồng trả id **chuỗi** và `charge_point_id` + `serial_number
 |---|---|---|---|
 | 1 | Doanh thu: UC-OPS-09 trong SRS 24/10 là "Revenue Analytics" (Should); bản vẽ lại sau Review 2 (T91) đổi thành "View Revenue Share" và thêm UC-ADM-09 "Configure Platform Fee Rate", UC-ADM-10 "View Platform Revenue", màn hình ghi "charged · platform fee · own share". BR-P46 lại nói không tính phí/chia | Theo BR-P46: không có phí, không chia; UC-ADM-09 không có endpoint | K1 **đóng** (D6 09/11: không phí, không chia); bản vẽ Revenue Share / Platform Fee cần sửa theo (A5) |
 | 2 | UC-ADM-10 và BR-P46 chưa có trong `report3-srs.md` (bản 24/10) | Từ #124 (T126) đã có: UC-ADM-10 "View Transactions & Revenue" (Table 4), màn 35 (Table 5), BR-P46 (Table 13) — hợp đồng dẫn theo bản đó | đóng; "transaction list" của UC-ADM-10 thành `/admin/v1/transactions` (§4.1) |
-| 2a | Thời hạn token dashboard: ADR-0018 #3 ghi 8 giờ, không refresh; Ân chốt 12/11 access 900 s + refresh | Theo quyết định 12/11: đích 900 s + `/api/auth/v1/refresh`; code #118 là hiện trạng (T125) | PM chốt; ADR-0018 #3 cần sửa (N15) — hợp đồng không tự sửa ADR |
+| 2a | Thời hạn token dashboard: ADR-0018 #3 ghi 8 giờ, không refresh; Ân chốt 12/11 access 900 s + refresh | Theo quyết định 12/11: 900 s + `/api/auth/v1/refresh` | **đóng** (T125, 16/11): code và ADR-0018 #3 đã theo quyết định 12/11 |
 | 3 | Biểu giá: SRS UC-OPS-06 ghi 4 khung Sharp / Peak / Shoulder / Off-peak "for their sites"; DB `tariff_band` có 3 giá trị (`off_peak`, `normal`, `peak`) và `tariff_periods` theo **operator**, không theo site | Theo DB: 3 band, biểu giá theo operator | đổi enum là migration — câu hỏi K2/N4; mock dashboard đang dùng 4 tên SRS |
 | 4 | UC-ADM-04 còn ghi loại thẻ thứ hai và Table 5 #30 cũng vậy | Chỉ `online`, `free_vend` | theo T110 |
 | 5 | Role: tác vụ nói "operator", DB là `operator_staff` + `staff_role` (`manager`, `technician`); SRS không phân quyền theo `staff_role` | JWT `role = operator_staff`; hai `staff_role` cùng quyền trong v0.1 | không bịa phân quyền SRS không có (N5) |
@@ -642,10 +639,10 @@ trụ; hợp đồng trả id **chuỗi** và `charge_point_id` + `serial_number
 | N10 | Khi có route danh sách: bỏ luật "có query → 400" và kiểm tham số **sau** guard (để request không token luôn 401)? | Có |
 | N11 | `detail` của lỗi xác thực hiện bằng mã lỗi; dashboard tự dịch mã hay CSMS trả câu tiếng Việt như các bề mặt khác? | CSMS trả câu tiếng Việt, mã giữ nguyên |
 | N12 | Ai thêm `DASHBOARD_JWT_*` vào `infra/staging/docker-compose.yml`, `init-env.sh` và `lib.sh check_env` trước FE-01d (§2.7 #4)? | FE-01d, theo mẫu `DRIVER_API_JWT_*` |
-| N13 | ADR-0018 còn trạng thái "Đề xuất" dù code đã merge — chuyển "Chấp nhận"? | Có, nhưng cùng lúc sửa mục 3 theo N15 |
-| N14 | Thời hạn refresh token dashboard (`DASHBOARD_JWT_REFRESH_TTL_S`): mặc định bao nhiêu, giới hạn nào? (§2.2b) | 43 200 s (12 giờ, một ca kể cả giao ca), giới hạn 3 600 … 86 400 |
-| N15 | ADR-0018 #3 ("8 giờ, không refresh") và dòng loại "Access 15 phút + refresh token" trái quyết định 12/11 của Ân — sửa ADR-0018 hay viết ADR mới thay mục 3? Ai làm? | ADR mới (vd ADR-0019) "thay thế ADR-0018 #3", người làm T125 viết cùng PR code |
-| N16 | Ai làm T125 (đổi 8 h → 900 s, thêm refresh, sửa FE-01b gọi refresh)? | Nghĩa — #118/#119 là của Nghĩa |
+| N13 | ADR-0018 còn trạng thái "Đề xuất" dù code đã merge — chuyển "Chấp nhận"? | **Đóng 16/11 (T125):** đã chuyển "Chấp nhận" cùng lúc sửa mục 3 |
+| N14 | Thời hạn refresh token dashboard (`DASHBOARD_JWT_REFRESH_TTL_S`): mặc định bao nhiêu, giới hạn nào? (§2.2b) | **Đóng 16/11 (Nghĩa):** 43 200 s (12 giờ, một ca kể cả giao ca), giới hạn 3 600 … 86 400 |
+| N15 | ADR-0018 #3 ("8 giờ, không refresh") và dòng loại "Access 15 phút + refresh token" trái quyết định 12/11 của Ân — sửa ADR-0018 hay viết ADR mới thay mục 3? Ai làm? | **Đóng 16/11 (T125):** sửa tại chỗ — ADR-0018 còn "Đề xuất" nên quy tắc "không sửa ADR đã Chấp nhận" chưa áp dụng (như ADR-0011 sửa 25/10); có ghi chú ngày sửa ở mục 3. Số 0019 đã dùng cho ADR báo lỗi của tài xế |
+| N16 | Ai làm T125 (đổi 8 h → 900 s, thêm refresh, sửa FE-01b gọi refresh)? | **Đóng:** Nghĩa |
 | N17 | Refresh trả về có kèm `user` không? Hợp đồng chọn **không** (như Driver API) — dashboard đã có `user` từ lúc đăng nhập | Không; cần thì gọi `/me` |
 | N18 | Role DB đổi giữa hai lần refresh (nhân viên → Admin, hoặc bị chuyển Operator): hợp đồng trả 401 `invalid_refresh_token` (đăng nhập lại), không lặng lẽ phát access với role mới | Giữ 401 — khu vực dashboard đang mở gắn với role lúc đăng nhập |
 | N19 | Dashboard giữ refresh token ở đâu? ADR-0018 #8 để access trong `sessionStorage`; refresh token sống lâu hơn nên lộ qua XSS thì thiệt hơn | `sessionStorage` như access (đóng tab là mất); cookie httpOnly để sau vì cần CSRF + đổi CORS |
@@ -700,7 +697,8 @@ payment_mode / loại thẻ mà T110 bỏ; từ 12/11 kiểm thêm `x-status` th
 hai route công khai — có 401 và 403, và đếm 76 operation (2 auth / 39 operator / 35 admin);
 `RefreshRequest`, `InvalidRefreshToken` có lại cho T125 (đặt tên như Driver API), cùng
 `DashboardAccessToken`, `RefreshForbidden`, `TransactionPage`, `TransactionRow`, `TransactionKind`,
-`TransactionsBadRequest`. Hai operation đăng nhập / refresh có thêm khoá `x-target` ghi đích T125.
+`TransactionsBadRequest`. Hai operation đăng nhập / refresh từng có khoá `x-target` ghi đích T125;
+bỏ khi T125 có code (16/11), cả hai nay `x-status: implemented`.
 Ma trận ở §9 sinh từ `x-roles` bằng chính script đó. `prettier --check` qua vì `.prettierignore` bỏ
 qua `docs/` và `**/*.md` (bảng viết tay), không phải vì file đã được định dạng. **Chưa chạy
 Redocly** vì chưa có trong dependency (không tự tải công cụ chưa được duyệt — như Driver API §10).
@@ -725,8 +723,8 @@ trạng thái (2xx/4xx nghiệp vụ khác với 401/403). Ba điều kiện c�
 
 | # | Endpoint | Không token | driver | operator_staff | admin | Trạng thái |
 |---|---|---|---|---|---|---|
-| 1 | `POST /api/auth/v1/login` | công khai | — | — | — | implemented (8 h, không refresh) — đích 900 s + refresh theo T125 |
-| 2 | `POST /api/auth/v1/refresh` | công khai | — | — | — | planned · T125 |
+| 1 | `POST /api/auth/v1/login` | công khai | — | — | — | implemented (900 s + refresh, T125) |
+| 2 | `POST /api/auth/v1/refresh` | công khai | — | — | — | implemented (T125) |
 | 3 | `GET /api/operator/v1/me` | 401 | 403 | ✓ | 403 | implemented |
 | 4 | `GET /api/admin/v1/me` | 401 | 403 | 403 | ✓ | implemented |
 | 5 | `GET /api/operator/v1/sites` | 401 | 403 | ✓ | 403 | planned |
