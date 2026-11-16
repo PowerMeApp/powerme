@@ -329,11 +329,7 @@ class _AppShell extends ConsumerWidget {
       '/profile' => 2,
       _ => 0,
     };
-    final paths = [
-      apiMode ? '/discover' : '/',
-      '/scan',
-      '/profile',
-    ];
+    final paths = [apiMode ? '/discover' : '/', '/scan', '/profile'];
     final destinations = [
       (
         key: 'nav-discovery',
