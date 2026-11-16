@@ -115,13 +115,24 @@ export const DEFAULT_OFFLINE_GRACE_S = 120;
 export const DEFAULT_FAULT_RESET_TIMEOUT_S = 120;
 
 /**
- * Mặc định của OFFLINE_ALERT_S: 900 s = ngưỡng của NFR-OCPP-07 (SRS §3.1.4 dòng 13, Commitment
- * NFR-06), tức 3 nhịp Heartbeat 300 s. Khác OFFLINE_GRACE_S (120 s, chỉ quyết định phiên orphan).
+ * NFR-OCPP-07 / Commitment NFR-06 (SRS §3.1.4 dòng 13): cảnh báo trong ≤ 900 s kể từ bản tin cuối.
+ * Đây là trần của CẢ chuỗi phát hiện, không phải ngưỡng: cảnh báo chậm nhất =
+ * OFFLINE_ALERT_S + OFFLINE_ALERT_SWEEP_S (frame cuối tới ngay sau một lượt quét).
  */
-export const DEFAULT_OFFLINE_ALERT_S = 900;
+export const OFFLINE_ALERT_MAX_DELAY_S = 900;
 
-/** Mặc định của OFFLINE_ALERT_SWEEP_S: 60 s → cảnh báo chậm nhất 900 + 60 s sau frame cuối. */
+/**
+ * Mặc định của OFFLINE_ALERT_SWEEP_S: 60 s. Nhịp quét cũng là phần trễ tối đa cộng thêm vào
+ * OFFLINE_ALERT_S.
+ */
 export const DEFAULT_OFFLINE_ALERT_SWEEP_S = 60;
+
+/**
+ * Mặc định của OFFLINE_ALERT_S: 840 s = 900 − 60 (T118), để trường hợp xấu nhất 840 + 60 = 900 s
+ * vẫn đạt NFR-OCPP-07. Trước đây là 900 s → chậm nhất 960 s, vượt cam kết. Khác OFFLINE_GRACE_S
+ * (120 s, chỉ quyết định phiên orphan).
+ */
+export const DEFAULT_OFFLINE_ALERT_S = OFFLINE_ALERT_MAX_DELAY_S - DEFAULT_OFFLINE_ALERT_SWEEP_S;
 
 /** Token DI cho CsmsConfig (dùng `@Inject(CONFIG)`). */
 export const CONFIG = Symbol('CSMS_CONFIG');

@@ -82,14 +82,14 @@ describe('OfflineAlertService — vòng quét (G10)', () => {
     expect(scheduler.live).toHaveLength(0);
   });
 
-  it('ngưỡng mặc định 900 s / 60 s khi config không khai báo', () => {
+  it('ngưỡng mặc định 840 s / 60 s khi config không khai báo', () => {
     const service = new OfflineAlertService(
       {} as Db,
       {} as CsmsConfig,
       {} as FaultService,
       new ManualScheduler(),
     );
-    expect(service.offlineAlertS).toBe(900);
+    expect(service.offlineAlertS).toBe(840);
     expect(service.sweepS).toBe(60);
   });
 });
