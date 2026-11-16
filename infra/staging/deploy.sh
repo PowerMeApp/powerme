@@ -79,6 +79,11 @@ on_err() {
 }
 trap 'on_err $LINENO' ERR
 
+# BE-41: trụ luôn nối (profile demo-station) đang chạy thì giữ nó chạy bằng ảnh mới. Xét TRƯỚC khi
+# khởi động lại CSMS, vì lúc CSMS khởi động lại trụ rớt và container ở trạng thái "restarting".
+STATION_ON=false
+if demo_station_running; then STATION_ON=true; fi
+
 SIM_ON=false
 if [ "$SIM" = true ] || sim_running; then SIM_ON=true; fi
 if [ "$SIM_ON" = true ]; then
@@ -137,6 +142,10 @@ if [ "$SIM_ON" = true ]; then log "Khởi động CSMS + Caddy + simulator"; els
 APP_TOUCHED=true
 docker compose up -d csms caddy
 if [ "$SIM_ON" = true ]; then docker compose up -d simulator; fi
+if [ "$STATION_ON" = true ]; then
+  log "Cập nhật trụ luôn nối (demo-station)"
+  docker compose --profile demo-station up -d demo-station
+fi
 
 STEP="kiểm sức khoẻ"
 log "Kiểm sức khoẻ: trong container (GET /health) + công khai (https://$(env_get DOMAIN)/ocpp/HEALTHCHECK)"

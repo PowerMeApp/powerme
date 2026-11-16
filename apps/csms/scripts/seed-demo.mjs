@@ -11,7 +11,7 @@
  * rồi seed lại là xoay được mật khẩu. Lifecycle giữ như seed.sql đặt (`awaiting_connection`, STM-3
  * #3 sang `in_service` khi kết nối đầu tiên được nhận) và KHÔNG bị đụng khi seed lại.
  *
- * BE-27: sau đó nạp demo/seed-app.sql (9 trạm quanh TP.HCM, mẫu xe, ba tài xế mẫu app.ds0x@powerme.test
+ * BE-27: sau đó nạp demo/seed-app.sql (11 trạm quanh TP.HCM, mẫu xe, ba tài xế mẫu app.ds0x@powerme.test
  * theo BM04 DS-01..DS-03) và đặt mật khẩu đăng nhập cho ba tài xế đó từ DEMO_DRIVER_PASSWORD — băm
  * bằng đúng hàm mà BE-21 dùng cho mật khẩu tài xế (driver-account.ts dùng lại
  * hashChargePointPassword). Mật khẩu không bao giờ nằm trong repo (repo public). Thiếu biến thì bỏ
@@ -39,6 +39,11 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 export const SEED_SQL = path.resolve(here, '..', 'demo', 'seed.sql');
 export const SEED_APP_SQL = path.resolve(here, '..', 'demo', 'seed-app.sql');
 export const DEMO_SERIAL = 'RH24D1-00001';
+/**
+ * BE-41: trụ của seed-app.sql được nối thường trực trên staging (dịch vụ `demo-station` chạy trụ
+ * kịch bản `app`). Cần credential để qua Basic Auth; dùng chung DEMO_CHARGE_POINT_PASSWORD.
+ */
+export const ONLINE_APP_SERIAL = 'PMAPP-TD-04A';
 export const MIN_PASSWORD_LENGTH = 16;
 /** Tài xế mẫu của seed-app.sql (BE-27) — dùng chung một mật khẩu DEMO_DRIVER_PASSWORD. */
 export const APP_DRIVER_EMAILS = [
@@ -215,6 +220,28 @@ export async function seedStaff(client, staffPassword, log = () => {}, hash = un
   return upd.rowCount;
 }
 
+/**
+ * BE-41: ghi credential cho trụ được nối thường trực (`ONLINE_APP_SERIAL`). Gọi sau `seedApp`. Mỗi
+ * trụ một salt riêng (không dùng lại hash của trụ demo). Trả số dòng đã ghi (0 nếu seed-app chưa
+ * tạo trụ).
+ */
+export async function seedOnlineStation(client, password, log = () => {}, hash = undefined) {
+  const bad = checkPassword(password);
+  if (bad) throw new Error(bad);
+  const hasher = hash ?? (await loadHasher());
+  const upd = await client.query(
+    `UPDATE charge_points SET basic_auth_password_hash = $1, updated_at = now()
+      WHERE serial_number = $2`,
+    [await hasher(password), ONLINE_APP_SERIAL],
+  );
+  log(
+    upd.rowCount === 1
+      ? `trụ ${ONLINE_APP_SERIAL} đã có credential (để dịch vụ demo-station nối thường trực)`
+      : `CẢNH BÁO: không thấy trụ ${ONLINE_APP_SERIAL} — seed-app.sql chưa chạy?`,
+  );
+  return upd.rowCount;
+}
+
 // ---- Chạy riêng ----
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const url = process.env.DATABASE_URL;
@@ -252,7 +279,10 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     const log = (m) => console.log(`[seed-demo] ${m}`);
     await seedDemo(client, demoPassword(), log);
     await seedStaff(client, staffPassword, log);
-    if (withApp) await seedApp(client, driverPassword, log);
+    if (withApp) {
+      await seedApp(client, driverPassword, log);
+      await seedOnlineStation(client, demoPassword(), log);
+    }
   } catch (err) {
     console.error(`[seed-demo] LỖI: ${err instanceof Error ? err.message : String(err)}`);
     process.exitCode = 1;

@@ -26,7 +26,7 @@ export DRIVER_API_JWT_SECRET_BASE64="$(openssl rand -base64 48)" \
        DRIVER_API_JWT_ISSUER=powerme-local DRIVER_API_JWT_AUDIENCE=powerme-driver-local
 npm run demo:reset -- --no-hmi          # Postgres nhúng + CSMS (:9000) + console (:3000)
 
-# Cửa sổ khác: nạp 3 tài xế mẫu, 9 trạm, đặt mật khẩu trụ và mật khẩu tài xế
+# Cửa sổ khác: nạp 3 tài xế mẫu, 11 trạm, đặt mật khẩu trụ và mật khẩu tài xế
 export DATABASE_URL=<dòng "Postgres" mà lệnh trên in ra>
 export DEMO_CHARGE_POINT_PASSWORD=<≥ 16 ký tự> DEMO_DRIVER_PASSWORD=<12–128 ký tự>
 node scripts/seed-demo.mjs
