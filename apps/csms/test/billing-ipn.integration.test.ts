@@ -8,7 +8,9 @@
  * (đã trừ tiền nhưng chưa ngã ngũ) bị coi là thất bại, sổ điểm hỏng chặn cộng tiền, hoặc lỗi khác ở
  * bước điểm để lại tiền đã cộng mà không trừ điểm. Phần 8b: VNPay đã trừ tiền mà không cộng được
  * (sai số tiền / tài khoản `closed`) phải thành `failed` + khoản trễ (số thực trừ) và trả 00 để
- * VNPay ngừng gửi lại, thay vì 04 / 99 không ghi gì.
+ * VNPay ngừng gửi lại, thay vì 04 / 99 không ghi gì. Phần 8b bổ sung (0024): lần trả thành công
+ * mâu thuẫn phải thành một dòng `top_up_payment_conflicts` (Admin thấy), không đè `late_*` /
+ * `exception_kind`, VNPay gửi lại không thêm dòng.
  *
  * Tham số IPN ký bằng đúng `vnpSignData` / `vnpSecureHash` của adapter với cấu hình test (secret giả).
  * Mã TC theo Report 5 bản nộp 09/11 (TC-STM4-01…08); ca khác đặt tên theo nội dung.
@@ -1002,6 +1004,175 @@ describeDb('billing: IPN VNPay — TopUpService.applyPaymentResult (T32 Phần 6
   });
 
   // ---------------------------------------------------------------------------------------------
+  describe('Phần 8b bổ sung: lần trả mâu thuẫn ghi top_up_payment_conflicts (0024)', () => {
+    const conflicts = (topUpId: number) =>
+      q(
+        `SELECT gateway_transaction_no, amount_vnd, source, reason, reviewed_at,
+                paid_at = '2026-11-13T03:30:00Z'::timestamptz AS paid_ok
+         FROM top_up_payment_conflicts WHERE top_up_id=$1 ORDER BY id`,
+        [topUpId],
+      );
+    const lateCols = (id: number) =>
+      one(
+        `SELECT status, late_gateway_ref, late_paid_at, late_amount_vnd, exception_kind,
+                exception_reviewed_at, updated_at FROM top_ups WHERE id=$1`,
+        [id],
+      );
+    /** Top-up credited đã có khoản trễ (lần trả thứ hai). */
+    async function creditedWithLate() {
+      const t = await pendingTopUp(100_000);
+      const first = ipn(t);
+      expect((await service.applyPaymentResult(first)).RspCode).toBe('00');
+      const second = ipn(t);
+      expect((await service.applyPaymentResult(second)).RspCode).toBe('00');
+      return { t, first, second };
+    }
+
+    it('hai lần trả mâu thuẫn (hai txn khác nhau sau khi đã có khoản trễ) → 2 dòng extra_payment, late_* không đổi, 02', async () => {
+      const { t } = await creditedWithLate();
+      const before = await lateCols(t.topUpId);
+      const third = ipn(t);
+      const fourth = ipn(t, { vnp_Amount: String(30_000 * 100) });
+      expect(await service.applyPaymentResult(third)).toEqual({
+        RspCode: '02',
+        Message: 'Order already confirmed',
+      });
+      expect((await service.applyPaymentResult(fourth)).RspCode).toBe('02');
+      expect(await conflicts(t.topUpId)).toEqual([
+        {
+          gateway_transaction_no: third['vnp_TransactionNo'],
+          amount_vnd: '100000',
+          source: 'ipn',
+          reason: 'extra_payment',
+          reviewed_at: null,
+          paid_ok: true,
+        },
+        {
+          gateway_transaction_no: fourth['vnp_TransactionNo'],
+          amount_vnd: '30000',
+          source: 'ipn',
+          reason: 'extra_payment',
+          reviewed_at: null,
+          paid_ok: true,
+        },
+      ]);
+      expect(await lateCols(t.topUpId)).toEqual(before);
+      expect(await balance(t.driverId)).toBe(100_000);
+      const errs = logged(errorSpy, 'ipn_conflicting_result');
+      expect(errs).toHaveLength(2);
+      expect(errs[0]).toMatchObject({ inserted: true, reason: 'extra_payment' });
+      expect(typeof errs[0]!['conflict_id']).toBe('number');
+    });
+
+    it('gửi lại cùng giao dịch mâu thuẫn → không thêm dòng, 02, log mức log (inserted: false)', async () => {
+      const { t } = await creditedWithLate();
+      const third = ipn(t);
+      expect((await service.applyPaymentResult(third)).RspCode).toBe('02');
+      const firstLog = logged(errorSpy, 'ipn_conflicting_result')[0]!;
+      expect((await service.applyPaymentResult(third)).RspCode).toBe('02');
+      expect((await service.applyPaymentResult(third)).RspCode).toBe('02');
+      expect(await conflicts(t.topUpId)).toHaveLength(1);
+      expect(logged(errorSpy, 'ipn_conflicting_result')).toHaveLength(1);
+      expect(logged(logSpy, 'ipn_conflicting_result')).toEqual([
+        expect.objectContaining({
+          conflict_id: firstLog['conflict_id'],
+          inserted: false,
+          existing_amount_vnd: 100_000,
+        }),
+        expect.objectContaining({ conflict_id: firstLog['conflict_id'], inserted: false }),
+      ]);
+    });
+
+    it('gửi lại cùng giao dịch mâu thuẫn nhưng khác số tiền → không thêm / không ghi đè dòng, 02, log error kèm hai số tiền', async () => {
+      const { t } = await creditedWithLate();
+      const third = ipn(t);
+      expect((await service.applyPaymentResult(third)).RspCode).toBe('02');
+      const other = ipn(t, {
+        vnp_TransactionNo: third['vnp_TransactionNo'],
+        vnp_Amount: String(55_000 * 100),
+      });
+      expect((await service.applyPaymentResult(other)).RspCode).toBe('02');
+      expect(await conflicts(t.topUpId)).toEqual([
+        expect.objectContaining({ amount_vnd: '100000', reason: 'extra_payment' }),
+      ]);
+      const errs = logged(errorSpy, 'ipn_conflicting_result');
+      expect(errs).toHaveLength(2);
+      expect(errs[1]).toMatchObject({
+        inserted: false,
+        existing_amount_vnd: 100_000,
+        paid_amount_vnd: 55_000,
+      });
+    });
+
+    it('cùng txn đã cộng, khác số tiền → 1 dòng amount_differs (số thực trừ), gửi lại không thêm', async () => {
+      const t = await pendingTopUp(100_000);
+      const first = ipn(t);
+      expect((await service.applyPaymentResult(first)).RspCode).toBe('00');
+      const same = ipn(t, {
+        vnp_TransactionNo: first['vnp_TransactionNo'],
+        vnp_Amount: String(80_000 * 100),
+      });
+      expect((await service.applyPaymentResult(same)).RspCode).toBe('02');
+      expect((await service.applyPaymentResult(same)).RspCode).toBe('02');
+      expect(await conflicts(t.topUpId)).toEqual([
+        expect.objectContaining({
+          gateway_transaction_no: first['vnp_TransactionNo'],
+          amount_vnd: '80000',
+          reason: 'amount_differs',
+          source: 'ipn',
+        }),
+      ]);
+      expect(await topUpRow(t.topUpId)).toMatchObject({
+        status: 'credited',
+        gateway_transaction_no: first['vnp_TransactionNo'],
+        late_gateway_ref: null,
+      });
+    });
+
+    it('credited có exception_kind = loyalty_error dính mâu thuẫn → có dòng, exception_kind / exception_reviewed_at giữ nguyên', async () => {
+      const t = await pendingTopUp(100_000);
+      const first = ipn(t);
+      expect((await service.applyPaymentResult(first)).RspCode).toBe('00');
+      await q("UPDATE top_ups SET exception_kind='loyalty_error' WHERE id=$1", [t.topUpId]);
+      const before = await lateCols(t.topUpId);
+      const same = ipn(t, {
+        vnp_TransactionNo: first['vnp_TransactionNo'],
+        vnp_Amount: String(1_000 * 100),
+      });
+      expect((await service.applyPaymentResult(same)).RspCode).toBe('02');
+      expect(await conflicts(t.topUpId)).toHaveLength(1);
+      expect(await lateCols(t.topUpId)).toEqual(before);
+      expect(before).toMatchObject({
+        exception_kind: 'loyalty_error',
+        exception_reviewed_at: null,
+      });
+    });
+
+    it('IPN sai chữ ký mang vnp_TransactionNo mới → 97, không ghi dòng', async () => {
+      const { t } = await creditedWithLate();
+      const forged = sign(ipn(t), 'OTHERSECRETNOTREAL');
+      expect((await service.applyPaymentResult(forged)).RspCode).toBe('97');
+      expect(await conflicts(t.topUpId)).toEqual([]);
+    });
+
+    it('PAYMENT_FAILED trên top-up đã credited → 02, không ghi dòng, vẫn log error', async () => {
+      const t = await pendingTopUp(100_000);
+      expect((await service.applyPaymentResult(ipn(t))).RspCode).toBe('00');
+      expect(
+        (
+          await service.applyPaymentResult(
+            ipn(t, { vnp_ResponseCode: '24', vnp_TransactionStatus: '02' }),
+          )
+        ).RspCode,
+      ).toBe('02');
+      expect(await conflicts(t.topUpId)).toEqual([]);
+      const errs = logged(errorSpy, 'ipn_conflicting_result');
+      expect(errs).toHaveLength(1);
+      expect(errs[0]).not.toHaveProperty('conflict_id');
+    });
+  });
+
+  // ---------------------------------------------------------------------------------------------
   describe('race: hai IPN song song cùng vnp_TransactionNo (hai connection thật)', () => {
     async function waitForTopUpLockWaiters(n: number): Promise<void> {
       const deadline = Date.now() + LOCK_WAIT_TIMEOUT_MS;
@@ -1041,6 +1212,38 @@ describeDb('billing: IPN VNPay — TopUpService.applyPaymentResult (T32 Phần 6
       expect(codes.sort()).toEqual(['00', '02']);
       expect(await balance(t.driverId)).toBe(100_000);
       expect(await creditRows(t.topUpId)).toBe(1);
+    });
+
+    it('hai IPN mâu thuẫn cùng giao dịch tới đồng thời → đúng 1 dòng top_up_payment_conflicts, cả hai 02', async () => {
+      const t = await pendingTopUp(100_000);
+      expect((await service.applyPaymentResult(ipn(t))).RspCode).toBe('00');
+      expect((await service.applyPaymentResult(ipn(t))).RspCode).toBe('00'); // khoản trễ
+      const p = ipn(t);
+      const holder = await db.$client.connect();
+      let results: PromiseSettledResult<{ RspCode: string }>[];
+      try {
+        await holder.query('BEGIN');
+        await holder.query('SELECT 1 FROM top_ups WHERE id=$1 FOR UPDATE', [t.topUpId]);
+        const pending = Promise.allSettled([
+          service.applyPaymentResult(p),
+          service.applyPaymentResult(p),
+        ]);
+        try {
+          await waitForTopUpLockWaiters(2);
+        } finally {
+          await holder.query('COMMIT');
+        }
+        results = await pending;
+      } finally {
+        holder.release();
+      }
+      const codes = results.map((r) => (r.status === 'fulfilled' ? r.value.RspCode : 'rejected'));
+      expect(codes).toEqual(['02', '02']);
+      expect(
+        await one('SELECT count(*)::int AS n FROM top_up_payment_conflicts WHERE top_up_id=$1', [
+          t.topUpId,
+        ]),
+      ).toEqual({ n: 1 });
     });
   });
 });

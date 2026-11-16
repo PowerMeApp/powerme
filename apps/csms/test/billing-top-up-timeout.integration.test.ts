@@ -632,6 +632,26 @@ describeDb('billing: quét top-up quá hạn + querydr (T32 Phần 8, SD-2d)', (
       expect(await balance(t.driverId)).toBe(100_000);
     });
 
+    it('Phần 8b bổ sung: nguồn querydr không sinh dòng top_up_payment_conflicts — querydr trả paid txn khác sau khi IPN đã cộng → mất lease, bỏ kết quả, 0 dòng', async () => {
+      // Vòng quét chỉ giữ chỗ pending; lockLeased khớp token ⇒ còn pending (mọi đường rời pending
+      // đặt next_attempt_at = NULL); nhánh pending của STM-4 không trả conflicting_result. Ca duy
+      // nhất querydr gặp top-up đã cộng là đua với IPN, và khi đó kết quả querydr bị bỏ.
+      const t = await dueTopUp(3);
+      const g = gated(PAID);
+      script.set(t.ref, g.handler);
+      const sweep = run();
+      await g.inside;
+      expect((await service.applyPaymentResult(ipn(t))).RspCode).toBe('00');
+      g.open();
+      await sweep;
+      expect(
+        await one('SELECT count(*)::int AS n FROM top_up_payment_conflicts WHERE top_up_id=$1', [
+          t.topUpId,
+        ]),
+      ).toEqual({ n: 0 });
+      expect(logged(errorSpy, 'querydr_conflicting_result')).toEqual([]);
+    });
+
     it('querydr cộng trước, IPN cùng vnp_TransactionNo tới sau → 02, không ghi gì', async () => {
       const t = await dueTopUp(3);
       script.set(t.ref, PAID);
@@ -908,6 +928,36 @@ describeDb('billing: quét top-up quá hạn + querydr (T32 Phần 8, SD-2d)', (
           late_amount_vnd: 30_000,
           source: 'recheck',
         }),
+      ]);
+    });
+
+    it('Phần 8b bổ sung: expired + unresolved_04, recheck paid mâu thuẫn → dòng source = recheck, exception_kind giữ, exception_reviewed_at vẫn NULL', async () => {
+      const t = await unresolved('04');
+      expect((await service.applyPaymentResult(ipn(t))).RspCode).toBe('00'); // khoản trễ
+      const before = await topUpRow(t.topUpId);
+      script.set(t.ref, reply({ vnp_Amount: String(40_000 * 100) }));
+      expect(await service.recheckTopUp(t.topUpId)).toEqual({ result: 'conflicting_result' });
+      expect(await topUpRow(t.topUpId)).toEqual(before);
+      expect(before).toMatchObject({
+        exception_kind: 'unresolved_04',
+        exception_reviewed_at: null,
+      });
+      expect(
+        await q(
+          `SELECT gateway_transaction_no, amount_vnd, source, reason
+           FROM top_up_payment_conflicts WHERE top_up_id=$1`,
+          [t.topUpId],
+        ),
+      ).toEqual([
+        {
+          gateway_transaction_no: String(txn),
+          amount_vnd: '40000',
+          source: 'recheck',
+          reason: 'extra_payment',
+        },
+      ]);
+      expect(logged(errorSpy, 'recheck_conflicting_result')).toEqual([
+        expect.objectContaining({ inserted: true, reason: 'extra_payment' }),
       ]);
     });
 

@@ -25,9 +25,11 @@
  *   - `late_payment`: đã trả nhưng không cộng; giữ trạng thái, ghi `late_*` để Admin hoàn. Có trên
  *       MỌI trạng thái trừ `pending` (T116, Ân 12/11): `expired` (#6), `failed`, và lần trả thứ hai
  *       (transactionNo khác giao dịch đã cộng) cho top-up `credited` / `refunded`.
- *   - `conflicting_result`: kết quả mâu thuẫn với kết quả đã ghi; không ghi gì, service log error để
- *       Admin xử lý ngoài hệ thống: khoản thứ ba (đã có khoản trễ với transactionNo khác), hoặc báo
- *       lỗi sau khi đã cộng.
+ *   - `conflicting_result`: kết quả mâu thuẫn với kết quả đã ghi; không đổi trạng thái, Admin xử lý
+ *       ngoài hệ thống: khoản thứ ba (đã có khoản trễ với transactionNo khác, `reason =
+ *       extra_payment`), cùng giao dịch khác số tiền (`reason = amount_differs`), hoặc báo lỗi sau
+ *       khi đã cộng (không `reason`). Có `reason` → service ghi dòng `top_up_payment_conflicts`
+ *       (0024); không `reason` → chỉ log error.
  *   - `stale`: timeout đến khi đã rời `pending` (đua với IPN qua Scheduler); bỏ qua.
  *   - `rejected`: guard số dư của #7 sai (TC-STM4-12/13); service đổi thành RefundNotAllowed → 422.
  *   - `not_creditable` (#8): thành công tới khi còn `pending` nhưng không cộng được — số VNPay trừ
@@ -112,13 +114,23 @@ export type TopUpOutcome =
 /** Lý do không cộng được của #8, theo thứ tự kiểm. */
 export type NotCreditableReason = 'amount_mismatch' | 'account_closed';
 
+/**
+ * Loại mâu thuẫn của `conflicting_result` từ PAYMENT_SUCCEEDED (T32 Phần 8b bổ sung, migration
+ * 0024): service ghi một dòng `top_up_payment_conflicts`. PAYMENT_FAILED trên top-up đã cộng là
+ * `conflicting_result` không có `reason` (chỉ log).
+ */
+export type ConflictReason = 'extra_payment' | 'amount_differs';
+
 export interface TopUpStep {
   to: TopUpStatus;
   outcome: TopUpOutcome;
   /** Số chuyển STM-4; null khi kết quả không ứng với mũi tên nào của diagram. */
   no: string | null;
-  /** `rejected` → `insufficient_balance`; `not_creditable` → lý do không cộng được. */
-  reason?: 'insufficient_balance' | NotCreditableReason;
+  /**
+   * `rejected` → `insufficient_balance`; `not_creditable` → lý do không cộng được;
+   * `conflicting_result` từ PAYMENT_SUCCEEDED → loại mâu thuẫn.
+   */
+  reason?: 'insufficient_balance' | NotCreditableReason | ConflictReason;
 }
 
 export interface TopUpTransition {
@@ -218,8 +230,10 @@ export class TopUpStateMachine {
         const late = need(g, 'recordedLateRef', from, event);
         // Cùng giao dịch đã cộng mà khác số tiền: mâu thuẫn (không hoàn hai lần cho một giao dịch).
         if (applied === txn)
-          return stay(from, g.amountMismatch ? 'conflicting_result' : 'already_applied');
-        if (late !== null) return stay(from, lateOutcome(late, txn, g));
+          return g.amountMismatch
+            ? conflict(from, 'amount_differs')
+            : stay(from, 'already_applied');
+        if (late !== null) return lateOutcome(from, late, txn, g);
         // Lần trả thứ hai cho top-up đã cộng (T116): ghi khoản trễ, không cộng lần hai.
         return stay(from, 'late_payment');
       }
@@ -227,7 +241,7 @@ export class TopUpStateMachine {
       case 'expired': {
         const late = need(g, 'recordedLateRef', from, event);
         const txn = need(g, 'transactionNo', from, event);
-        if (late !== null) return stay(from, lateOutcome(late, txn, g));
+        if (late !== null) return lateOutcome(from, late, txn, g);
         if (from === 'failed') return stay(from, 'late_payment');
         return { to: 'expired', outcome: 'late_payment', no: '#6' };
       }
@@ -242,8 +256,13 @@ export class TopUpStateMachine {
 }
 
 /** Đã có khoản trễ: cùng giao dịch, cùng số tiền → lặp; khác giao dịch hoặc khác số tiền → mâu thuẫn. */
-function lateOutcome(late: string, txn: string, g: TopUpGuards): TopUpOutcome {
-  return late === txn && !g.lateAmountMismatch ? 'already_applied' : 'conflicting_result';
+function lateOutcome(from: TopUpStatus, late: string, txn: string, g: TopUpGuards): TopUpStep {
+  if (late !== txn) return conflict(from, 'extra_payment');
+  return g.lateAmountMismatch ? conflict(from, 'amount_differs') : stay(from, 'already_applied');
+}
+
+function conflict(from: TopUpStatus, reason: ConflictReason): TopUpStep {
+  return { to: from, outcome: 'conflicting_result', no: null, reason };
 }
 
 function stay(from: TopUpStatus, outcome: TopUpOutcome): TopUpStep {

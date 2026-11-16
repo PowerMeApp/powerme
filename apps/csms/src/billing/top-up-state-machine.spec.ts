@@ -129,7 +129,13 @@ describe('TopUpStateMachine — ⊕ D4: khoản trễ đã ghi rồi', () => {
       recordedLateRef: 'VNP-1',
       transactionNo: 'VNP-2',
     });
-    expect(step).toEqual({ to: from, outcome: 'conflicting_result', no: null });
+    // Phần 8b bổ sung (0024): reason để service ghi dòng top_up_payment_conflicts.
+    expect(step).toEqual({
+      to: from,
+      outcome: 'conflicting_result',
+      no: null,
+      reason: 'extra_payment',
+    });
   });
 });
 
@@ -185,7 +191,12 @@ describe('TopUpStateMachine — T116: thành công tới khi đã credited / ref
       appliedTransactionNo: 'VNP-1',
       recordedLateRef: 'VNP-2',
     });
-    expect(step).toEqual({ to: from, outcome: 'conflicting_result', no: null });
+    expect(step).toEqual({
+      to: from,
+      outcome: 'conflicting_result',
+      no: null,
+      reason: 'extra_payment',
+    });
   });
 
   it.each(cases)('%s: IPN lặp của giao dịch đã cộng thắng dù đã có khoản trễ', (from) => {
@@ -278,6 +289,7 @@ describe('TopUpStateMachine — Phần 8b mục 3.4: cùng giao dịch nhưng kh
         to: from,
         outcome: 'conflicting_result',
         no: null,
+        reason: 'amount_differs',
       });
       expect(sm.apply(from, 'PAYMENT_SUCCEEDED', { ...g, lateAmountMismatch: false }).outcome).toBe(
         'already_applied',
@@ -295,6 +307,37 @@ describe('TopUpStateMachine — Phần 8b mục 3.4: cùng giao dịch nhưng kh
           amountMismatch: true,
         }).outcome,
       ).toBe('late_payment');
+    },
+  );
+});
+
+describe('TopUpStateMachine — Phần 8b bổ sung: reason của conflicting_result (bảng 0024)', () => {
+  it.each(['credited', 'refunded'] as const)(
+    '%s: cùng transactionNo đã cộng, khác số tiền → amount_differs',
+    (from) => {
+      expect(sm.apply(from, 'PAYMENT_SUCCEEDED', { ...OK, amountMismatch: true }).reason).toBe(
+        'amount_differs',
+      );
+    },
+  );
+
+  it.each(['credited', 'refunded', 'failed', 'expired'] as const)(
+    '%s: đã có khoản trễ, thêm lần trả khác giao dịch → extra_payment',
+    (from) => {
+      expect(
+        sm.apply(from, 'PAYMENT_SUCCEEDED', {
+          transactionNo: 'VNP-3',
+          appliedTransactionNo: 'VNP-1',
+          recordedLateRef: 'VNP-2',
+        }).reason,
+      ).toBe('extra_payment');
+    },
+  );
+
+  it.each(['credited', 'refunded'] as const)(
+    '%s: PAYMENT_FAILED sau khi đã cộng → conflicting_result không có reason (chỉ log)',
+    (from) => {
+      expect(sm.apply(from, 'PAYMENT_FAILED').reason).toBeUndefined();
     },
   );
 });
