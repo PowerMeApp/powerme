@@ -13,7 +13,7 @@ Dùng Flutter `ThemeData`/`ColorScheme`/`TextTheme`, token spacing/radius/size v
 
 ## Logo và font
 
-Shared `BrandMark` dùng [crops gốc](../assets/brand/README.md): lockup 533×310 ở đăng nhập; ribbon 200×194 và wordmark 520×77 ở header compact onboarding/discovery. `ChargingMark` dùng secondary icon 198×203 gốc ở Start, empty/pending charging và avatar station/connector. Giữ tỷ lệ bằng `BoxFit.contain` và byte hash; không dựng lại wordmark bằng font hoặc thay ribbon bằng tia sét. Theme dùng đúng bốn token gốc. Launcher/splash platform vẫn là scaffold, chưa phải nhận diện hoàn chỉnh.
+Shared `BrandMark` dùng [crops gốc](../assets/brand/README.md): lockup 533×310 ở đăng nhập; ribbon 200×194 và wordmark 520×77 ở header compact onboarding/discovery. `ChargingMark` dùng secondary icon 210×208 gốc ở Start, empty/pending charging và avatar station/connector. Giữ tỷ lệ bằng `BoxFit.contain` và byte hash; không dựng lại wordmark bằng font hoặc thay ribbon bằng tia sét. Theme dùng đúng bốn token gốc. Icon màn hình chính trên Android và iOS dùng ảnh raster dẫn xuất từ `powerme-secondary-icon.png`. Splash vẫn dùng scaffold Flutter.
 
 Không bọc logo bằng khung #000000. Runtime dùng `Image.color = backgroundColor` + `colorBlendMode: BlendMode.screen`: screen kết hợp pixel ảnh với đúng màu nền solid (#0A0A0A hoặc #141414), nên pixel đen trở thành màu surface và nét vàng/teal được giữ. Đây là color filter lên ảnh, không blend tự động với phía sau; caller phải truyền đúng màu surface. Không tint trắng, không dùng trên gradient không đồng nhất hoặc coi crop là ảnh alpha; file gốc giữ nguyên. Pixel render tests kiểm cả hai nền và màu artwork, không chỉ kiểm thuộc tính widget.
 

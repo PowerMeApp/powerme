@@ -1,7 +1,14 @@
 import 'map_location.dart';
 import 'station_route.dart';
 
-enum StationStatus { available, inUse, freeingSoon, unavailable, offline }
+enum StationStatus {
+  available,
+  inUse,
+  freeingSoon,
+  unavailable,
+  offline,
+  unknown,
+}
 
 enum DataQuality { observed, stale, unknown }
 
@@ -15,12 +22,20 @@ class StationConnector {
     required this.status,
     required this.updatedAt,
     required this.quality,
+    this.id,
+    this.chargePointId,
+    this.displayCode,
+    this.availableNow,
   });
-  final DateTime updatedAt;
+  final String? id;
+  final String? chargePointId;
+  final String? displayCode;
+  final bool? availableNow;
+  final DateTime? updatedAt;
   final DataQuality quality;
   final int number;
   final String type;
-  final int powerW;
+  final int? powerW;
   final StationStatus status;
 }
 
@@ -44,10 +59,10 @@ class Station {
   });
   final String id;
   final String name;
-  final String address;
+  final String? address;
   final StationStatus status;
   final DataQuality quality;
-  final DateTime updatedAt;
+  final DateTime? updatedAt;
   final int availableCount;
   final List<StationConnector> connectors;
   final bool vinfastOnly;
@@ -77,12 +92,12 @@ class StationOption {
     this.roadRoute,
   });
   StationConnector get connector => station.connectors.firstWhere(
-    (c) => connectorId == "${station.id}/${c.number}",
+    (c) => connectorId == (c.id ?? '${station.id}/${c.number}'),
   );
   final Station station;
   final String connectorId;
   final StationStatus status;
-  final DateTime updatedAt;
+  final DateTime? updatedAt;
   final int? rank;
   final int? estimatedTariffVndPerKwh;
   final int? etaSeconds;

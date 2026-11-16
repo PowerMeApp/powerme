@@ -34,6 +34,11 @@ class ApiProfileRepository
           model: vehicle.model,
           connectors: [vehicle.connector],
           plateNumber: vehicle.plate,
+          batteryCapacityKwh: vehicle.batteryCapacityKwh,
+          ratedRangeKm: vehicle.ratedRangeKm,
+          maxDcKw: vehicle.maxDcKw,
+          imageUrl: vehicle.imageUrl,
+          imageCredit: vehicle.imageCredit,
           isVinFast: vehicle.isVinFast,
         ),
       ),
@@ -69,6 +74,8 @@ class ApiProfileRepository
         batteryCapacityKwh: model.batteryCapacityKwh,
         ratedRangeKm: model.ratedRangeKm,
         maxDcKw: model.maxDcKw,
+        imageUrl: model.imageUrl,
+        imageCredit: model.imageCredit,
       ),
   ];
 

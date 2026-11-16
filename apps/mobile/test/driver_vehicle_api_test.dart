@@ -22,7 +22,7 @@ void main() {
     final second = ownVehicle(
       id: '9007199254741001',
       plate: '30A-123.45',
-      model: leaf,
+      model: picturedLeaf,
       isDefault: false,
     );
     var vehicles = <Map<String, Object?>>[];
@@ -37,7 +37,7 @@ void main() {
           return reply(200, account(vehicles: vehicles));
         case ('GET', 'vehicle-models'):
           return reply(200, {
-            'items': [leaf, vf8],
+            'items': [picturedLeaf, vf8],
           });
         case ('POST', 'vehicles'):
           expect(request.contentType, Headers.jsonContentType);
@@ -73,6 +73,10 @@ void main() {
       'Nissan Leaf · CHAdeMO',
       'VinFast VF 8 · GB/T',
     ]);
+    expect(models.map((m) => (m.imageUrl, m.imageCredit)), [
+      (leafPhotoUrl, leafPhotoCredit),
+      (null, null),
+    ]);
     expect(
       models.map((m) => (m.batteryCapacityKwh, m.ratedRangeKm, m.maxDcKw)),
       [(39.5, 270, 50), (null, null, null)],
@@ -82,8 +86,10 @@ void main() {
       '51K-901.01',
     );
     expect(repo.read().vehicles, hasLength(2));
+    expect(repo.read().vehicles.last.imageUrl, leafPhotoUrl);
     final selected = await repo.selectVehicle('9007199254741001', 0);
     expect(selected.selectedVehicle?.isVinFast, isFalse);
+    expect(selected.selectedVehicle?.imageCredit, leafPhotoCredit);
     expect(selected.vehicleId, '9007199254741001');
     expect((await repo.removeVehicle(selected.vehicleId, 0)).vehicleId, '9');
     expect(repo.read().vehicles, hasLength(1));
@@ -99,6 +105,58 @@ void main() {
       'me',
     ]);
   });
+
+  test(
+    'vehicle photo metadata accepts Wikimedia HTTPS and legacy nulls',
+    () async {
+      var model = <String, Object?>{};
+      final fixture = DriverApiFixture(
+        (request) async => switch (request.path) {
+          'auth/login' => reply(200, tokens(accessA)),
+          'me' => reply(200, account()),
+          'vehicle-models' => reply(200, {
+            'items': [
+              {...leaf, ...model},
+            ],
+          }),
+          _ => throw StateError('Unexpected route'),
+        },
+      );
+      final session = sessionWith(fixture);
+      final repo = ApiProfileRepository(session);
+      await session.signIn('test@example.invalid', 'fixture password');
+      expect(repo.read().selectedVehicle?.imageUrl, isNull);
+      expect(repo.read().selectedVehicle?.imageCredit, isNull);
+      for (final url in [
+        leafPhotoUrl,
+        'https://thumb.wikimedia.org/a.jpg',
+        'https://upload.wikimedia.org/a.jpg',
+      ]) {
+        model = {'image_url': url, 'image_credit': leafPhotoCredit};
+        expect((await repo.listModels()).single.imageUrl, url);
+      }
+      for (final rejected in [
+        null,
+        'http://commons.wikimedia.org/a.jpg',
+        'https://commons.wikimedia.org.example.invalid/a.jpg',
+        'https://user@commons.wikimedia.org/a.jpg',
+        'https://commons.wikimedia.org:8443/a.jpg',
+        'https://commons.wikimedia.org/an image.jpg',
+      ]) {
+        model = {'image_url': rejected, 'image_credit': null};
+        final parsed = (await repo.listModels()).single;
+        expect(parsed.imageUrl, isNull);
+        expect(parsed.imageCredit, isNull);
+      }
+      for (final field in ['image_url', 'image_credit']) {
+        model = {field: 123};
+        await expectLater(
+          repo.listModels(),
+          throwsA(problem(DriverApiProblem.malformed)),
+        );
+      }
+    },
+  );
 
   test('catalog 401 refreshes once and rejects malformed items', () async {
     final fixture = DriverApiFixture(

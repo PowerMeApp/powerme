@@ -1,7 +1,11 @@
 import type { Db } from '../db/db.module.js';
+import type { RoadEstimate, SearchStation } from '../sessions/station-search.js';
 import { DriverApiError } from './driver-auth.js';
 import { ProviderCache } from './provider-cache.js';
-import { Coordinate, VietmapAdapter } from './vietmap.js';
+import { Coordinate, ProviderUnavailable, VietmapAdapter } from './vietmap.js';
+
+const RANKING_DEADLINE_MS = 4000;
+const RANKING_CONCURRENCY = 2;
 
 export class RoadDiscovery {
   constructor(
@@ -29,6 +33,62 @@ export class RoadDiscovery {
     await this.ownedVehicle(driver, vehicle);
     return this.cache.run(driver, JSON.stringify(['place', ref]), () => this.provider.place(ref));
   }
+
+  // Call only after the authenticated station query has released its transaction.
+  async estimateStationRoads(
+    driver: string,
+    from: Coordinate,
+    candidates: readonly SearchStation[],
+    caller: AbortSignal,
+  ): Promise<RoadEstimate[] | undefined> {
+    const controller = new AbortController();
+    const signal = AbortSignal.any([
+      caller,
+      controller.signal,
+      AbortSignal.timeout(RANKING_DEADLINE_MS),
+    ]);
+    const roads: RoadEstimate[] = [];
+    let next = 0;
+    const worker = async () => {
+      while (!signal.aborted && next < candidates.length) {
+        const index = next++;
+        const station = candidates[index]!;
+        const destination = {
+          latitude: Number(station.latitude),
+          longitude: Number(station.longitude),
+        };
+        if (
+          station.latitude === null ||
+          station.longitude === null ||
+          !Number.isFinite(destination.latitude) ||
+          !Number.isFinite(destination.longitude) ||
+          Math.abs(destination.latitude) > 90 ||
+          Math.abs(destination.longitude) > 180
+        )
+          throw new ProviderUnavailable('no_route');
+        const { value, computed_at } = await this.cache.run(
+          driver,
+          JSON.stringify(['ranking-road', station.site_id, from, destination]),
+          () => this.provider.route(from, destination),
+          signal,
+        );
+        roads[index] = { ...value, computed_at };
+      }
+    };
+    try {
+      await Promise.all(Array.from({ length: RANKING_CONCURRENCY }, () => worker()));
+      return signal.aborted ? undefined : roads;
+    } catch (error) {
+      controller.abort();
+      if (
+        error instanceof ProviderUnavailable ||
+        (error instanceof DriverApiError && error.status === 429)
+      )
+        return undefined;
+      throw error;
+    }
+  }
+
   async route(
     driver: string,
     vehicle: string,

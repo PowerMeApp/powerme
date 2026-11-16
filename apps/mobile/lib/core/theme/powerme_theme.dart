@@ -31,15 +31,12 @@ ThemeData powerMeTheme() {
       surfaceTintColor: Colors.transparent,
       elevation: 0,
       height: 68,
-      indicatorColor: PowerMeColors.teal,
-      indicatorShape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(14),
-      ),
+      indicatorColor: Colors.transparent,
       iconTheme: WidgetStateProperty.resolveWith(
         (states) => IconThemeData(
           size: 22,
           color: states.contains(WidgetState.selected)
-              ? PowerMeColors.black
+              ? PowerMeColors.teal
               : PowerMeColors.muted,
         ),
       ),
@@ -48,7 +45,6 @@ ThemeData powerMeTheme() {
           fontWeight: states.contains(WidgetState.selected)
               ? FontWeight.w700
               : FontWeight.w500,
-          letterSpacing: .2,
           color: states.contains(WidgetState.selected)
               ? PowerMeColors.teal
               : PowerMeColors.muted,

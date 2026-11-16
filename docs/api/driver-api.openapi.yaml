@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: PowerMe CSMS — Driver API
-  version: 0.11.0
+  version: 0.13.0
   summary: Hợp đồng REST cho app tài xế (T77, phiếu v1.3 §3.2g)
   description: |
     Hợp đồng giữa CSMS (WP2) và app tài xế Flutter (WP3) cho trạng thái súng sạc, thời gian còn lại,
@@ -489,12 +489,16 @@ paths:
         xe không phải VinFast, trừ khi `include_vinfast_only=true` (BR-P03).
         `driver_status` theo BR-P38; `status_quality` theo BR-P39 (quá 2 chu kỳ heartbeat là
         `stale`, mặc định 600 s; quá ngưỡng offline 900 s là `offline`).
-        Brief 07/11 được người dùng ưu tiên cho MVP, thay thuật toán SRS §3.7/AD-5 cũ.
+        Brief 07/11 là thuật toán dự phòng. Khi truyền sort=smart và location_consent=true,
+        CSMS dùng Vietmap Route v4 cho tối đa 6 ứng viên có ước tính sạc/chờ và trạng thái súng fresh.
+        Sau lọc bán kính, chọn theo tổng phút chờ + sạc, rồi site_id. Khi đủ tuyến trong 4 giây,
+        xếp nhóm này theo reach → tổng phút → mét đường bộ → site_id; giữ phần còn lại theo brief.
+        Nếu thiếu một tuyến, mỗi kết quả giữ cùng cách xếp theo brief và không có road_estimate.
         Có SoC và vị trí thì mặc định smart: reach ok → tight → risky, tổng phút, khoảng cách,
         site_id. Chọn súng tương thích có tổng phút thấp nhất, tính toàn bộ ứng viên trong bán kính
         trước khi cắt trang. Không có SoC/vị trí/thông số xe thì estimate=null và nêu lý do fallback.
-        distance_m là haversine; đường ước tính = distance_m × road_factor, không gọi Vietmap để
-        xếp hạng. Route Vietmap thật nằm ở /stations/{site_id}/route, traffic vẫn unknown.
+        distance_m là haversine để lọc bán kính và tương thích client cũ. Ứng dụng dùng road_estimate
+        để hiển thị quãng đường bộ và thời gian di chuyển. Hình học nằm ở /stations/{site_id}/route.
         Bán kính rõ ràng giữ nguyên; smart không truyền bán kính dùng est_range_km × radius_factor.
         Nếu bán kính ngầm không có trạm, lấy tối đa fallback_limit trạm gần nhất (ưu tiên có thể
         tính thời gian); không mở rộng bán kính người dùng đã nhập. Smart không bảo đảm top ba
@@ -532,6 +536,10 @@ paths:
           in: query
           description: Mặc định smart khi có SoC và toạ độ; nếu không thì distance khi có toạ độ, name khi không
           schema: { type: string, enum: [name, distance, smart] }
+        - name: location_consent
+          in: query
+          description: Cho phép gửi điểm đi tới Vietmap cho yêu cầu có sort=smart tường minh, SoC và toạ độ hợp lệ.
+          schema: { type: boolean, default: false }
         - name: soc_percent
           in: query
           description: Pin do tài xế nhập; hữu hạn, 0 ≤ soc < target. Không tự đọc SoC phiên cũ.
@@ -1344,10 +1352,45 @@ components:
         distance_m: { type: number, minimum: 0 }
         duration_s: { type: integer, minimum: 0 }
         geometry: { $ref: '#/components/schemas/RoadGeometry' }
-        traffic_quality: { type: string, const: unknown }
+        traffic_quality: { type: string, const: unknown, description: 'Trường tương thích app cũ. Xem traffic_segments nếu có.' }
+        instructions:
+          type: array
+          minItems: 1
+          description: 'Các bước xem trước theo thứ tự tuyến. Chỉ số tính từ 0, gồm cả hai đầu. Một bước có thể bắt đầu và kết thúc tại cùng một điểm.'
+          items: { $ref: '#/components/schemas/RoadInstruction' }
+        traffic_segments:
+          type: array
+          minItems: 1
+          description: 'Đoạn có chỉ số theo geometry, gồm cả hai đầu. Các đoạn có thể tiếp giáp nhưng không chồng cạnh. Khoảng trống nghĩa là thiếu thông tin.'
+          items: { $ref: '#/components/schemas/RoadTrafficSegment' }
+        congested_distance_m: { $ref: '#/components/schemas/CongestedDistance' }
         computed_at: { $ref: '#/components/schemas/Timestamp' }
         cached: { type: boolean }
         quality: { type: string, const: provider_estimate }
+    RoadInstruction:
+      type: object
+      additionalProperties: false
+      required: [start_index, end_index, sign, text, street_name, distance_m, duration_s]
+      properties:
+        start_index: { type: integer, minimum: 0 }
+        end_index: { type: integer, minimum: 0 }
+        sign: { type: integer, description: 'Mã rẽ có dấu của Vietmap, ví dụ -2 rẽ trái, 2 rẽ phải, 4 đến nơi.' }
+        text: { type: string, description: 'Mô tả Vietmap. Dùng tên đường khi trống, có thể rỗng khi cả hai thiếu.' }
+        street_name: { type: [string, 'null'] }
+        distance_m: { type: number, minimum: 0 }
+        duration_s: { type: integer, minimum: 0 }
+    RoadTrafficSegment:
+      type: object
+      additionalProperties: false
+      required: [start_index, end_index, level]
+      properties:
+        start_index: { type: integer, minimum: 0 }
+        end_index: { type: integer, minimum: 1, description: 'Lớn hơn start_index và thuộc geometry.' }
+        level: { type: string, enum: [low, moderate, heavy, severe, unknown] }
+    CongestedDistance:
+      type: number
+      minimum: 0
+      description: 'Tổng mét heavy/severe từ Vietmap khi dữ liệu phủ toàn tuyến và các đoạn ùn tắc có mét khớp chỉ số. Thiếu dữ liệu thì bỏ trường. 0 là dữ liệu xác nhận không có đoạn heavy/severe.'
     Id:
       type: string
       pattern: '^[1-9][0-9]{0,18}$'
@@ -1584,10 +1627,19 @@ components:
         vinfast_only: { type: boolean }
         latitude: { type: [number, 'null'] }
         longitude: { type: [number, 'null'] }
-        distance_m: { type: [integer, 'null'], description: 'Đường chim bay làm tròn mét, chỉ khi có toạ độ' }
+        distance_m: { type: [integer, 'null'], description: 'Haversine làm tròn mét cho bộ lọc và client cũ. App không dùng làm quãng đường bộ.' }
+        road_estimate:
+          type: object
+          additionalProperties: false
+          required: [distance_m, duration_s, computed_at]
+          properties:
+            distance_m: { type: number, minimum: 0 }
+            duration_s: { type: integer, minimum: 0 }
+            computed_at: { $ref: '#/components/schemas/Timestamp' }
+            congested_distance_m: { $ref: '#/components/schemas/CongestedDistance' }
         reach: { type: [string, 'null'], enum: [ok, tight, risky, null] }
         best_connector_id: { oneOf: [{ $ref: '#/components/schemas/Id' }, { type: 'null' }] }
-        est_drive_min: { type: [number, 'null'], minimum: 0 }
+        est_drive_min: { type: [number, 'null'], minimum: 0, description: 'Số phút Vietmap khi có road_estimate. Nếu thiếu thì là giả định brief phục vụ xếp hạng.' }
         est_wait_min: { type: [number, 'null'], minimum: 0 }
         est_charge_min: { type: [number, 'null'], minimum: 0 }
         est_total_min: { type: [number, 'null'], minimum: 0 }
@@ -1630,6 +1682,10 @@ components:
       properties:
         estimate: { oneOf: [{ $ref: '#/components/schemas/SmartSearchEstimate' }, { type: 'null' }] }
         smart_unavailable_reason: { type: string, enum: [no_soc, no_location, missing_vehicle_specs] }
+        ranking_source:
+          type: string
+          enum: [vietmap_route, brief]
+          description: 'Chỉ có ở sort smart (gồm mặc định). vietmap_route xác nhận nhóm có road_estimate đã được xếp theo Vietmap trước phần còn lại. brief áp dụng cho toàn bộ lượt.'
         items:
           type: array
           items: { $ref: '#/components/schemas/Station' }

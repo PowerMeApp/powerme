@@ -39,7 +39,7 @@ class MockStationRepository
     final normalized = _fold(query.trim());
     final matches = _store.stations.map(observed).where((station) {
       final matches = _fold(
-        '${station.name} ${station.address}',
+        '${station.name} ${station.address ?? ''}',
       ).contains(normalized);
       return matches &&
           (!station.vinfastOnly || vehicle.isVinFast || showRestricted) &&
@@ -108,10 +108,11 @@ class MockStationRepository
           ? (capacityWh * (target - batteryPercent) / 100).ceil()
           : null;
       final vehiclePowerW = vehicle.model == 'Leaf' ? 50000 : 150000;
-      final powerW = o.connector.powerW < vehiclePowerW
-          ? o.connector.powerW
+      final connectorPower = o.connector.powerW;
+      final powerW = connectorPower == null || connectorPower < vehiclePowerW
+          ? connectorPower
           : vehiclePowerW;
-      final seconds = energyWh == null
+      final seconds = energyWh == null || powerW == null || powerW <= 0
           ? null
           : (energyWh * 3600 / powerW).ceil();
       final tariff = o.station.tariffVndPerKwh;

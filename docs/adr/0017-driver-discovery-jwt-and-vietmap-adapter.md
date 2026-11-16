@@ -2,6 +2,45 @@
 
 Date: 2026-11-06; updated 2026-11-09. Status: MB03 implementation decision; local verification snapshot 2026-11-09. GitHub status is tracked by branch/commit.
 
+## T96 addendum — use Vietmap Route for smart ranking
+
+With explicit smart sort and location consent, rank a bounded shortlist using actual road distance
+and estimated travel duration. Preserve the brief for fallback and for stations outside the
+shortlist. Keep the radius filter, vehicle ownership, compatible connectors and existing route
+endpoint. [API contract and exact ordering](../api/DRIVER-API-HOP-DONG.md#16-t96--xếp-hạng-gợi-ý-theo-đường-bộ-vietmap).
+
+Use the in-repo `VietmapAdapter.route` summary and `RoadDiscovery` cache. Route v4 returns both
+distance and time, in metres and milliseconds respectively. Reuse the adapter conversion to
+integer seconds, its server TLS validation and response bounds. The cache is scoped to the
+principal, with a two-minute TTL and existing request/concurrency limits. Release the DB
+connection before provider work. Bound each search to six candidates, two concurrent lookups
+and a four-second caller deadline. An abandoned caller stops scheduling requests. An in-flight
+shared request can finish under the adapter's own five-second timeout.
+
+Brief-only avoids provider latency but misses road detours. Routing every candidate improves
+coverage at the cost of unbounded work as inventory grows. Matrix was considered but the current
+adapter only exposes duration and the app needs distance too. The chosen shortlist trades
+full-inventory coverage for a fixed call budget. No external implementation or dependency is
+added. [Vietmap Route v4](https://maps.vietmap.vn/docs/vi/map-api/route-version/route-v4/).
+
+### T96 — route preview and congestion
+
+Request indexed congestion alongside existing Route v4 results. Normalize maneuver and traffic
+intervals on the backend. Keep preview coordinates unencoded and shortlist payloads encoded.
+Measure shortlist coverage against decoded vertex count since an arrival step may end before the
+last coordinate. Missing annotations leave distance, duration and ranking by ETA available.
+
+Count only provider metres paired with heavy/severe intervals. To preserve comparable ordering,
+enable the traffic tie-break for the entire shortlist only when every route has a verified total.
+Use the provider's duration once, without a second traffic time charge. The existing server-side
+credential, timeout, cache and consent boundaries apply.
+
+The [Vietmap Playground bundle](https://tools.vietmap.vn/playground/assets/index-DQkfeQKM.js)
+and [public route example](https://tools.vietmap.vn/playground/en/route?point=10.7769,106.7009&point=10.7828,106.6959&version=v4&vehicle=car&annotations=congestion%2Ccongestion_distance)
+confirm explicit geometry indices. The existing adapter is sufficient for preview. The
+[Vietmap Flutter Navigation example](https://github.com/vietmap-company/flutter-navigation-example)
+uses a separate SDK for GPS-guided navigation. This backend change adds no SDK or source reuse.
+
 ## Context and decision
 
 FR-03/UC-CHG-01 needs real authenticated station discovery. Existing `DriverChargingService`
@@ -101,13 +140,13 @@ The prior advanced `/stations/suggestions` experiment and its schemas were retir
 alongside a second policy. Existing GitHub source/license research above remains applicable;
 no external ranking code was copied. Full source brief and narrow SRS differences are linked above.
 
-Smart search is a disclosed haversine-based estimate independent of provider availability.
+The original MB03 smart search uses a haversine-based estimate, now the T96 fallback.
 No hard range exclusion: an empty implicit radius gets a bounded nearest-risky fallback,
 prioritizing usable candidates. An explicitly requested radius is never expanded. Sort name/
 distance keeps its legacy order; missing inputs return null and a reason. Target >80 is invalid
 under B5/B6. No live traffic, true wait, reliability score or final billing is claimed.
 
-Vietmap remains for addresses and the selected station's actual road geometry; provider failure
+The separate Vietmap address and selected-station geometry routes remain available; provider failure
 returns unavailable without fabricated geometry. Cache is principal-scoped and bounded, ownership
 and compatibility are rechecked on hits, and one caller's cancellation cannot poison shared work.
 Single authorized unencoded Route check 2026-11-07 succeeded: LineString, 4 vertices, 137.4 m / 50 s;

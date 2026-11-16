@@ -49,6 +49,15 @@ const leaf = {
   'max_dc_kw': 50,
 };
 
+const leafPhotoUrl =
+    'https://commons.wikimedia.org/wiki/Special:FilePath/Nissan_Leaf_(ZE1)_DSC_7096.jpg?width=640';
+const leafPhotoCredit = 'Alexander Migl / Wikimedia Commons, CC BY-SA 4.0';
+const picturedLeaf = {
+  ...leaf,
+  'image_url': leafPhotoUrl,
+  'image_credit': leafPhotoCredit,
+};
+
 Map<String, Object?> ownVehicle({
   String id = '9',
   String plate = '51A-00001',

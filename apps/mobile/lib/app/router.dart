@@ -2,15 +2,20 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../core/l10n/app_copy.dart';
+import '../core/theme/powerme_theme.dart';
 import '../features/profile/application/profile_controller.dart';
 import '../features/profile/presentation/profile_screen.dart';
 import '../features/profile/presentation/profile_edit_screen.dart';
 import '../features/profile/presentation/vehicle_edit_screen.dart';
 import '../features/profile/presentation/vehicle_add_screen.dart';
+import '../features/profile/presentation/api_vehicle_screens.dart';
 import '../features/auth/application/auth_controller.dart';
 import '../features/auth/presentation/auth_screen.dart';
 import '../features/auth/presentation/onboarding_screen.dart';
 import '../features/stations/presentation/discovery_screen.dart';
+import '../features/stations/presentation/api_discovery_screen.dart';
+import '../features/stations/presentation/api_station_detail_screen.dart';
+import '../features/stations/presentation/api_suggestions_screen.dart';
 import '../features/stations/domain/station_actions.dart';
 import '../features/stations/presentation/station_detail_screen.dart';
 import '../features/stations/presentation/station_actions_screens.dart';
@@ -21,10 +26,12 @@ import '../features/payments/presentation/payment_screens.dart';
 import '../features/history/presentation/history_screens.dart';
 import '../features/loyalty/presentation/loyalty_screen.dart';
 
-final accountOnlyRouterProvider = Provider<bool>((ref) => false);
+final apiRouterProvider = Provider<bool>((ref) => false);
+
+final _apiVehiclePath = RegExp(r'^/vehicles/[1-9][0-9]{0,18}(/manage)?$');
 
 final routerProvider = Provider<GoRouter>((ref) {
-  final accountOnly = ref.watch(accountOnlyRouterProvider);
+  final apiMode = ref.watch(apiRouterProvider);
   final registrationEnabled = ref.watch(registrationOptionsProvider).enabled;
   final refresh = _RouterRefresh();
   ref.listen(authControllerProvider, (_, _) => refresh.changed());
@@ -34,7 +41,7 @@ final routerProvider = Provider<GoRouter>((ref) {
     redirect: (context, state) {
       final auth = ref.read(authControllerProvider);
       final path = state.uri.path;
-      if (accountOnly) {
+      if (apiMode) {
         if (auth.restoring) return path == '/loading' ? null : '/loading';
         if (auth.scope == null) {
           return path == '/login' ||
@@ -42,9 +49,16 @@ final routerProvider = Provider<GoRouter>((ref) {
               ? null
               : '/login';
         }
-        return path == '/profile' || path == '/vehicles/new'
+        return path == '/profile' ||
+                path == '/vehicles' ||
+                path == '/vehicles/new' ||
+                _apiVehiclePath.hasMatch(path) ||
+                path == '/discover' ||
+                path == '/scan' ||
+                path == '/suggestions' ||
+                RegExp(r'^/station/[1-9][0-9]{0,18}$').hasMatch(path)
             ? null
-            : '/profile';
+            : '/discover';
       }
       if (auth.scope == null &&
           RegExp(r'^/station/[a-zA-Z0-9_-]{1,100}$').hasMatch(path)) {
@@ -77,20 +91,66 @@ final routerProvider = Provider<GoRouter>((ref) {
         path: '/register',
         builder: (context, state) => const OnboardingScreen(),
       ),
-      if (accountOnly) ...[
-        GoRoute(
-          path: '/profile',
-          builder: (context, state) => const _PrivatePage(
-            child: Scaffold(body: ProfileScreen(apiMode: true)),
+      if (apiMode) ...[
+        ShellRoute(
+          builder: (context, state, child) => _PrivatePage(
+            child: _AppShell(path: state.uri.path, apiMode: true, child: child),
           ),
+          routes: [
+            GoRoute(
+              path: '/profile',
+              builder: (context, state) =>
+                  const Scaffold(body: ProfileScreen(apiMode: true)),
+            ),
+            GoRoute(
+              path: '/discover',
+              builder: (context, state) => const ApiDiscoveryScreen(),
+            ),
+            GoRoute(
+              path: '/scan',
+              builder: (context, state) => const QrConnectScreen(apiMode: true),
+            ),
+            GoRoute(
+              path: '/suggestions',
+              builder: (context, state) => const ApiSuggestionsScreen(),
+            ),
+          ],
         ),
         GoRoute(
           path: '/vehicles/new',
           builder: (context, state) =>
               const _PrivatePage(child: VehicleAddScreen()),
         ),
+        GoRoute(
+          path: '/vehicles',
+          builder: (context, state) =>
+              const _PrivatePage(child: VehicleGarageScreen()),
+        ),
+        GoRoute(
+          path: '/vehicles/:id',
+          builder: (context, state) => _PrivatePage(
+            child: ApiVehicleDetailScreen(id: state.pathParameters['id']!),
+          ),
+          routes: [
+            GoRoute(
+              path: 'manage',
+              builder: (context, state) => _PrivatePage(
+                child: ApiVehicleDetailScreen(
+                  id: state.pathParameters['id']!,
+                  manage: true,
+                ),
+              ),
+            ),
+          ],
+        ),
+        GoRoute(
+          path: '/station/:id',
+          builder: (context, state) => _PrivatePage(
+            child: ApiStationDetailScreen(id: state.pathParameters['id']!),
+          ),
+        ),
       ],
-      if (!accountOnly) ...[
+      if (!apiMode) ...[
         GoRoute(
           path: '/credit',
           builder: (context, state) =>
@@ -253,9 +313,14 @@ class _PrivatePage extends ConsumerWidget {
 }
 
 class _AppShell extends ConsumerWidget {
-  const _AppShell({required this.path, required this.child});
+  const _AppShell({
+    required this.path,
+    required this.child,
+    this.apiMode = false,
+  });
   final String path;
   final Widget child;
+  final bool apiMode;
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final copy = AppCopy(ref.watch(profileControllerProvider).profile.language);
@@ -264,6 +329,34 @@ class _AppShell extends ConsumerWidget {
       '/profile' => 2,
       _ => 0,
     };
+    final paths = [apiMode ? '/discover' : '/', '/scan', '/profile'];
+    final destinations = [
+      (
+        key: 'nav-discovery',
+        icon: Icons.explore_outlined,
+        selected: Icons.explore,
+        label: copy.home,
+      ),
+      (
+        key: 'nav-charging',
+        icon: Icons.qr_code_scanner_rounded,
+        selected: Icons.qr_code_rounded,
+        label: copy.scanQr,
+      ),
+      (
+        key: 'nav-account',
+        icon: Icons.person_outline_rounded,
+        selected: Icons.person_rounded,
+        label: copy.profile,
+      ),
+    ];
+    void select(int index) {
+      if (path != paths[index]) context.go(paths[index]);
+    }
+
+    final scaler = MediaQuery.textScalerOf(context);
+    final labelSize = scaler.scale(12.5);
+    final largeText = labelSize > 16;
     return Scaffold(
       body: child,
       bottomNavigationBar: DecoratedBox(
@@ -280,30 +373,50 @@ class _AppShell extends ConsumerWidget {
           padding: const EdgeInsets.only(top: 1),
           child: NavigationBar(
             selectedIndex: selected,
-            onDestinationSelected: (index) {
-              if (index != selected) {
-                context.go(['/', '/scan', '/profile'][index]);
-              }
-            },
+            height: largeText ? 36 + labelSize * 3.7 : null,
+            onDestinationSelected: select,
             destinations: [
-              NavigationDestination(
-                key: const Key('nav-discovery'),
-                icon: const Icon(Icons.explore_outlined),
-                selectedIcon: const Icon(Icons.explore),
-                label: copy.home,
-              ),
-              NavigationDestination(
-                key: const Key('nav-charging'),
-                icon: const Icon(Icons.qr_code_scanner_rounded),
-                selectedIcon: const Icon(Icons.qr_code_rounded),
-                label: copy.scanQr,
-              ),
-              NavigationDestination(
-                key: const Key('nav-account'),
-                icon: const Icon(Icons.person_outline_rounded),
-                selectedIcon: const Icon(Icons.person_rounded),
-                label: copy.profile,
-              ),
+              for (final (index, item) in destinations.indexed)
+                if (largeText)
+                  Semantics(
+                    key: Key(item.key),
+                    button: true,
+                    selected: selected == index,
+                    child: InkWell(
+                      onTap: () => select(index),
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(
+                            selected == index ? item.selected : item.icon,
+                            color: selected == index
+                                ? PowerMeColors.teal
+                                : PowerMeColors.muted,
+                          ),
+                          const SizedBox(height: 4),
+                          Flexible(
+                            child: Text(
+                              item.label,
+                              textAlign: TextAlign.center,
+                              style: Theme.of(context).textTheme.labelMedium
+                                  ?.copyWith(
+                                    color: selected == index
+                                        ? PowerMeColors.teal
+                                        : PowerMeColors.muted,
+                                  ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  )
+                else
+                  NavigationDestination(
+                    key: Key(item.key),
+                    icon: Icon(item.icon),
+                    selectedIcon: Icon(item.selected),
+                    label: item.label,
+                  ),
             ],
           ),
         ),

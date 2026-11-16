@@ -30,7 +30,9 @@ class DriverVehicleModelResponse {
       isVinFast = _boolean(json, 'is_vinfast'),
       batteryCapacityKwh = _nullableNumber<num>(json, 'battery_capacity_kwh'),
       ratedRangeKm = _nullableNumber<int>(json, 'rated_range_km'),
-      maxDcKw = _nullableNumber<num>(json, 'max_dc_kw');
+      maxDcKw = _nullableNumber<num>(json, 'max_dc_kw'),
+      imageUrl = _commonsImageUrl(_optionalText(json, 'image_url')),
+      imageCredit = _optionalText(json, 'image_credit');
 
   final String modelId;
   final String brand;
@@ -40,6 +42,8 @@ class DriverVehicleModelResponse {
   final num? batteryCapacityKwh;
   final int? ratedRangeKm;
   final num? maxDcKw;
+  final String? imageUrl;
+  final String? imageCredit;
 
   static List<DriverVehicleModelResponse> catalog(Map<String, dynamic> json) =>
       _uniqueList(
@@ -85,6 +89,31 @@ String _text(Map<String, dynamic> json, String key) {
   final value = json[key];
   if (value is! String) throw _malformed;
   return value;
+}
+
+String? _optionalText(Map<String, dynamic> json, String key) {
+  final value = json[key];
+  if (value == null) return null;
+  if (value is! String) throw _malformed;
+  return value;
+}
+
+String? _commonsImageUrl(String? value) {
+  if (value == null || RegExp(r'\s').hasMatch(value)) return null;
+  final uri = Uri.tryParse(value);
+  const imageHosts = {
+    'commons.wikimedia.org',
+    'upload.wikimedia.org',
+    'thumb.wikimedia.org',
+  };
+  if (uri == null ||
+      uri.scheme != 'https' ||
+      !imageHosts.contains(uri.host) ||
+      uri.authority.contains('@') ||
+      uri.port != 443) {
+    return null;
+  }
+  return uri.toString();
 }
 
 String _id(Map<String, dynamic> json, String key) {

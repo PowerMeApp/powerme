@@ -294,10 +294,14 @@ void main() {
         expect(theme.backgroundColor, PowerMeColors.graphite);
         expect(
           theme.iconTheme!.resolve({WidgetState.selected})!.color,
-          PowerMeColors.black,
+          PowerMeColors.teal,
         );
         expect(theme.iconTheme!.resolve({})!.color, PowerMeColors.muted);
         expect(find.byIcon(icon), findsOneWidget);
+        expect(
+          tester.widget<Icon>(find.byIcon(icon)).color,
+          PowerMeColors.teal,
+        );
         expect(tester.takeException(), isNull);
       }
     },

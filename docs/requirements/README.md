@@ -5,6 +5,9 @@ Search/suggestion MVP override (09/11/2026): the user prioritizes the
 SRS §3.7/AD-5 algorithm. Other requirements still use the repo baseline. The original source is
 preserved with its SHA-256; implemented/deferred scope and test evidence are linked there.
 
+The T96 decision adds Route-based ranking with explicit location consent. The 07/11 brief remains
+the fallback. See [the current Driver API contract](../api/DRIVER-API-HOP-DONG.md#16-t96--xếp-hạng-gợi-ý-theo-đường-bộ-vietmap).
+
 Markdown copies of the requirement documents, so code reviews, the BM02 self-review and the Review 2 council can check the code against what was promised. The Word files on the team Google Drive (Main Doc) stay the masters; these copies are refreshed when a master changes.
 
 | File | Source | Date |

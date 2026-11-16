@@ -11,7 +11,12 @@ import { chargeTransaction } from './charge-sql.js';
 import { SessionStateMachine, SessionStatus } from './session-state-machine.js';
 
 import { ChargingError } from './charging-error.js';
-import { searchStations, StationSearchInput } from './station-search.js';
+import {
+  type EstimateStationRoads,
+  rankStationResults,
+  searchStations,
+  type StationSearchInput,
+} from './station-search.js';
 export { ChargingError } from './charging-error.js';
 
 export interface EnergyStartInput {
@@ -1233,10 +1238,11 @@ export class DriverChargingService {
     driverId: number | string,
     vehicleId: number | string,
     input: StationSearchInput = {},
+    estimateRoads?: EstimateStationRoads,
   ) {
     this.validateDiscoveryIds(driverId, vehicleId);
     const policy = this.requirePolicy();
-    return chargeTransaction(this.db, async (c) => {
+    const result = await chargeTransaction(this.db, async (c) => {
       await this.driver(c, driverId);
       return searchStations(
         c,
@@ -1246,8 +1252,10 @@ export class DriverChargingService {
         policy.stationStaleAfterMs,
         policy.stationOfflineAfterMs ?? 900000,
         this.config?.smartSearch,
+        Boolean(estimateRoads),
       );
     });
+    return estimateRoads ? rankStationResults(result, estimateRoads) : result;
   }
 
   // WP3/T72: QR resolves an exact canonical connector independently of search pagination.

@@ -58,7 +58,7 @@ class StationDetailScreen extends ConsumerWidget {
                   ],
                 ),
                 Text(
-                  station.address,
+                  stationAddress(station, copy),
                   style: text.bodyLarge?.copyWith(color: PowerMeColors.muted),
                 ),
                 ValueLine(
@@ -163,7 +163,7 @@ class StationDetailScreen extends ConsumerWidget {
                         crossAxisAlignment: WrapCrossAlignment.center,
                         children: [
                           Text(
-                            '${connector.powerW ~/ 1000} kW',
+                            connectorPower(connector, copy),
                             style: text.titleLarge?.copyWith(
                               color: PowerMeColors.gold,
                               fontWeight: FontWeight.w800,
