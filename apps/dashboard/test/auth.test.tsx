@@ -157,9 +157,11 @@ describe('Đăng nhập (màn 16 / 26) và phân quyền', () => {
         }
         if (r.headers.get('Authorization') !== 'Bearer token-new')
           return json(401, { error: 'unauthorized', detail: 'unauthorized' });
-        return path === '/api/operator/v1/me'
-          ? json(200, STAFF)
-          : json(200, { items: [], total: 0, page: 1, page_size: 20 });
+        if (path === '/api/operator/v1/me') return json(200, STAFF);
+        // Màn tổng quan (FE-03) cũng gọi /summary; test này không quan tâm số liệu của nó.
+        if (path === '/api/operator/v1/summary')
+          return json(404, { error: 'not_found', detail: 'not_found' });
+        return json(200, { items: [], total: 0, page: 1, page_size: 20 });
       }) as typeof fetch;
       const { store } = renderApp('/operator', withRefresh());
       void store.dispatch(api.endpoints.operatorFaults.initiate({ status: 'open', page: 1 }));
