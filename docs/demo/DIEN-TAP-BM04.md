@@ -8,8 +8,8 @@ Cách chạy từng kịch bản đã cam kết trong BM04 bằng công cụ có
 |---|---|---|---|
 | **DS-01** sạc từ app tới hạn mức 10 kWh | Sơn | `scripted-station.mjs app` + `rehearse-app.mjs ds-01` | Local 14/11: 11/11 kiểm tra đạt. **Chưa chạy trên staging**; app Flutter chưa nối màn sạc |
 | **DS-02** số dư 30.000 → từ chối, gợi ý nạp | Sơn | `rehearse-app.mjs ds-02` | Local 14/11: 4/4 đạt. Chưa chạy trên staging |
-| **DS-03** nạp 200.000, đổi 500 điểm, trả VNPay | Khang | — | **Chưa diễn tập được**: staging chưa có khoá VNPay (chờ T32 Phần 8) |
-| **DS-04** huỷ ở VNPay, gửi lại IPN | Khang | — | Như DS-03 |
+| **DS-03** nạp 200.000, đổi 500 điểm, trả VNPay | Khang | `rehearse-topup.mjs ds-03` | Local 17/11 với VNPay giả (`--simulate-vnpay`): 9/9 kiểm tra đạt (giảm 5.000 ₫, trả 195.000 ₫, số dư 100.000 → 300.000, điểm 600 → 100). **Chưa chạy với sandbox thật trên staging** (chưa đặt mã VNPay); hoá đơn điện tử (Phần 7) chưa có nên chưa kiểm |
+| **DS-04** huỷ ở VNPay, gửi lại IPN | Khang | `rehearse-topup.mjs ds-04` | Local 17/11 với VNPay giả: 8/8 đạt (`failed`, IPN lặp → RspCode 02, số dư không đổi, tạo được top-up mới). Chưa chạy với sandbox thật |
 | **DS-05** đứt 2 phút, nối lại, phát bù | Trí | `scripted-station.mjs ds-03d --offline-s 150` | Staging 09/11: đạt |
 | **DS-06** phát lại `meterStop` cũ → `review` | Trí | `scripted-station.mjs ds-03a` | Staging 09/11: đạt; RQ1 13/11: 30/30 trên staging |
 | **DS-07** súng lỗi → xác nhận → reset từ xa → hết lỗi | Nghĩa | `scripted-station.mjs fault --reset accept` + console / dashboard | Local 14/11: đạt (`raised → acknowledged → resetting → resolved`). Chưa chạy trên staging |
@@ -171,3 +171,25 @@ node apps/csms/demo/onboard-sim.mjs --console http://127.0.0.1:3041 \
 ```
 
 Cần `CONSOLE_ACTOR_ADMIN_ID` và `CONSOLE_ACTOR_STAFF_ID` đã đặt trên VM (thiếu thì console trả 503). Trụ vừa onboard nằm ở trạm `HCM-DEMO-01` và mất kết nối khi script dừng. Bước sai mật khẩu ghi một lần 401 vào bộ đếm đăng nhập theo IP của máy chạy script (ngưỡng khoá: 20 lần / 60 s).
+
+## DS-03 và DS-04 (không cần màn nạp tiền của app)
+
+`rehearse-topup.mjs` đóng vai app: đăng nhập `app.ds03@powerme.test` (600 điểm), xin báo giá đổi điểm, tạo top-up, rồi chờ kết quả và kiểm số dư, điểm, số dòng sổ cái.
+
+**Local, VNPay giả.** CSMS chạy với một mã merchant và secret GIẢ; script tự ký và gửi IPN như VNPay.
+
+```bash
+cd apps/csms
+export VNPAY_TMN_CODE=LOCALTST VNPAY_HASH_SECRET=<chuỗi giả bất kỳ, chỉ dùng ở máy này>
+# + ba biến DRIVER_API_JWT_* như mục "Chuẩn bị (local)", rồi npm run demo:reset -- --no-hmi và seed-demo.mjs
+node demo/rehearse-topup.mjs ds-03 --simulate-vnpay     # nạp 200.000, đổi 500 điểm, VNPay báo thành công
+node demo/rehearse-topup.mjs ds-04 --simulate-vnpay     # huỷ ở VNPay, gửi lại đúng IPN đó, rồi một IPN thành công tới muộn
+```
+
+`ds-04` kiểm thêm một ca ngoài đề: IPN thành công tới sau khi top-up đã `failed` không cộng tiền (ghi thành khoản trễ).
+
+**Staging, sandbox thật** (sau khi mã VNPay đã đặt trên VM và hai đường `/billing/vnpay/*` đã mở): bỏ `--simulate-vnpay`. Script in `payment_url`; người trình bày mở trong trình duyệt, trả tiền bằng thẻ thử của sandbox (DS-03) hoặc bấm huỷ (DS-04); script chờ tới khi VNPay báo về (tối đa `--timeout-s`, mặc định 900 s). Bước "gửi lại IPN" của DS-04 không làm được ở chế độ này vì không có secret để ký; phải trình bày bằng bản local hoặc bằng test tự động (`test/billing-ipn.integration.test.ts`).
+
+`--simulate-vnpay` từ chối chạy khi `--api` không phải `http://127.0.0.1`. Không bao giờ đưa secret sandbox thật vào biến môi trường của máy dev để "giả" IPN trên staging: làm vậy là tự tạo thanh toán giả trong dữ liệu dùng chung.
+
+`ds-03` cộng tiền và trừ điểm thật trong DB đang trỏ tới; tài xế mẫu chỉ có 600 điểm nên chạy lại lần hai cần `seed --reset`.
