@@ -26,6 +26,7 @@ import { createVnpayListener, isVnpayPath } from '../billing/vnpay-ipn.http.js';
 import { createDriverListener } from '../driver/driver.http.js';
 import { createOperatorApiListener, OPERATOR_API_PATH } from '../operator-api/operator-api.http.js';
 import { DB, Db } from '../db/db.module.js';
+import { loadChargePolicy } from '../sessions/charge-policy.config.js';
 import { DriverChargingService } from '../sessions/driver-charging.service.js';
 import { ChargePointOnboardingService } from '../stations/charge-point-onboarding.service.js';
 import { FaultService } from '../stations/faults/fault.service.js';
@@ -143,6 +144,7 @@ export class ConsoleServer implements OnModuleInit, OnModuleDestroy {
         : null;
     // FE-01a: /api/{auth,operator,admin}/v1 → operator-api (JWT, ADR-0018). Matched before the
     // console so `/api/admin/v1/*` never reaches the unauthenticated `/api/admin/*` routes.
+    const chargePolicy = loadChargePolicy(process.env);
     const operatorApi = this.db
       ? createOperatorApiListener(
           this.db,
@@ -150,6 +152,13 @@ export class ConsoleServer implements OnModuleInit, OnModuleDestroy {
           this.config.driverApi ?? { devAuth: false },
           undefined,
           this.commands.faultActions,
+          {
+            thresholds: {
+              staleAfterMs: chargePolicy.stationStaleAfterMs,
+              offlineAfterMs: chargePolicy.stationOfflineAfterMs ?? 900_000,
+            },
+            registry: this.queries.registry,
+          },
         )
       : null;
     // T32 Phần 6: /billing/vnpay/{ipn,return} công khai (chỉ dựa chữ ký VNPay). Mọi URL /billing…

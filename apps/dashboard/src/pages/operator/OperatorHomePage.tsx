@@ -1,27 +1,134 @@
 /**
- * Screen 17 — Operator Dashboard (hub). Charge point counts and open alerts arrive with FE-03 / FE-04;
- * until then no numbers are shown (D36). Loading /me also checks a restored session on reload.
+ * Screen 17 — Operator Dashboard (hub, UC-OPS-02/03). Greeting from /me, then the Operator's counts
+ * from GET /api/operator/v1/summary (FE-03): charge points online / offline, connectors grouped as
+ * the driver app sees them (BR-P38), open faults by severity, and the work queues. A tile only
+ * shows when it has something to say — never a placeholder 0 (D36). Polled every 5 s (D5).
  */
-import { errorMessage, useOperatorMeQuery } from '../../core/api/api';
+import { Link } from 'react-router';
+import type { OperatorSummary } from '@powerme/shared';
+import { errorMessage, useOperatorMeQuery, useOperatorSummaryQuery } from '../../core/api/api';
+
+export const SUMMARY_POLL_MS = 5000;
+
+const CONNECTOR_GROUPS: [keyof OperatorSummary['connectors'], string, string][] = [
+  ['available', 'Sẵn sàng', ''],
+  ['in_use', 'Đang sạc', ''],
+  ['freeing_soon', 'Sắp trống', ''],
+  ['unavailable', 'Không dùng được', 'major'],
+  ['offline', 'Offline', 'muted'],
+];
+const SEVERITIES: [keyof OperatorSummary['open_faults'], string, string][] = [
+  ['critical', 'Nghiêm trọng', 'critical'],
+  ['major', 'Nặng', 'major'],
+  ['minor', 'Nhẹ', ''],
+  ['none', 'Khác', 'muted'],
+];
+
+function Tile({ title, children, to }: { title: string; children: React.ReactNode; to?: string }) {
+  return (
+    <section className="card tile" aria-label={title}>
+      <h2>{title}</h2>
+      {children}
+      {to && (
+        <Link className="tile-link" to={to}>
+          Xem chi tiết →
+        </Link>
+      )}
+    </section>
+  );
+}
 
 export function OperatorHomePage() {
-  const { data, error, isLoading } = useOperatorMeQuery();
+  const me = useOperatorMeQuery();
+  const summary = useOperatorSummaryQuery(undefined, {
+    pollingInterval: SUMMARY_POLL_MS,
+    skipPollingIfUnfocused: true,
+  });
+  const s = summary.data;
+  const queues = s
+    ? (
+        [
+          [s.sessions_to_review, 'phiên cần xem lại (đối soát)'],
+          [s.unattributed_sessions, 'phiên chưa gắn tài xế'],
+          [s.uncertain_starts, 'lệnh bắt đầu chưa rõ kết quả'],
+        ] as const
+      ).filter(([n]) => n > 0)
+    : [];
+
   return (
     <>
       <div className="page-head">
         <h1>Tổng quan vận hành</h1>
-        {data && <p>{data.operator_name}</p>}
+        {me.data && <p>{me.data.operator_name}</p>}
       </div>
       <div className="card">
-        {isLoading && <p className="muted">Đang tải…</p>}
-        {error && <p role="alert">{errorMessage(error)}</p>}
-        {data && (
+        {me.isLoading && <p className="muted">Đang tải…</p>}
+        {me.error && <p role="alert">{errorMessage(me.error)}</p>}
+        {me.data && (
           <p>
-            Xin chào {data.full_name}. Bạn đang xem dữ liệu của Operator <b>{data.operator_name}</b>
-            .
+            Xin chào {me.data.full_name}. Bạn đang xem dữ liệu của Operator{' '}
+            <b>{me.data.operator_name}</b>.
           </p>
         )}
       </div>
+      {summary.error && !s && <p role="alert">{errorMessage(summary.error)}</p>}
+      {s && (
+        <div className="tiles">
+          {s.charge_points.total > 0 ? (
+            <Tile title="Charge Point" to="/operator/charge-points">
+              <p className="tile-number">
+                {s.charge_points.online}
+                <span className="muted"> / {s.charge_points.total} online</span>
+              </p>
+              {s.charge_points.offline > 0 && (
+                <span className="pill muted">{s.charge_points.offline} offline</span>
+              )}
+            </Tile>
+          ) : (
+            <Tile title="Charge Point">
+              <p className="muted">Operator chưa có Charge Point nào.</p>
+            </Tile>
+          )}
+          {s.charge_points.total > 0 && (
+            <Tile title="Connector" to="/operator/charge-points">
+              <ul className="tile-list">
+                {CONNECTOR_GROUPS.filter(([k]) => s.connectors[k] > 0).map(([k, label, tone]) => (
+                  <li key={k}>
+                    <span className={`pill ${tone}`}>{label}</span> <b>{s.connectors[k]}</b>
+                  </li>
+                ))}
+              </ul>
+            </Tile>
+          )}
+          <Tile title="Cảnh báo sự cố" to="/operator/faults">
+            {s.open_faults.total > 0 ? (
+              <>
+                <p className="tile-number">{s.open_faults.total} đang mở</p>
+                <ul className="tile-list">
+                  {SEVERITIES.filter(([k]) => s.open_faults[k] > 0).map(([k, label, tone]) => (
+                    <li key={k}>
+                      <span className={`pill ${tone}`}>{label}</span> <b>{s.open_faults[k]}</b>
+                    </li>
+                  ))}
+                </ul>
+              </>
+            ) : (
+              <p className="muted">Không có sự cố đang mở.</p>
+            )}
+          </Tile>
+          {queues.length > 0 && (
+            <Tile title="Việc cần xử lý">
+              <ul className="tile-list">
+                {queues.map(([n, label]) => (
+                  <li key={label}>
+                    <b>{n}</b> {label}
+                  </li>
+                ))}
+              </ul>
+            </Tile>
+          )}
+        </div>
+      )}
     </>
   );
 }

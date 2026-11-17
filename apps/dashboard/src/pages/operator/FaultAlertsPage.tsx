@@ -84,7 +84,7 @@ export function FaultAlertsPage() {
       ) : (
         <div className="card table-card">
           <div className="table-wrap">
-            <table className="faults">
+            <table className="data-table">
               <thead>
                 <tr>
                   <th scope="col">#</th>

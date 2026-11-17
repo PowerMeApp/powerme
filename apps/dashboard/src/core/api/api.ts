@@ -13,6 +13,9 @@ import {
 } from '@reduxjs/toolkit/query/react';
 import type {
   ApiErrorBody,
+  ChargePointLifecycle,
+  ChargePointPage,
+  OperatorSummary,
   DashboardMe,
   FaultActionResponse,
   FaultListStatus,
@@ -29,6 +32,15 @@ import { env } from '../config/env';
 
 /** Rows per page on screen 21. */
 export const FAULT_PAGE_SIZE = 20;
+/** Rows per page on screen 18. */
+export const CHARGE_POINT_PAGE_SIZE = 20;
+
+/** Screen 18 filters; omitted = all (decommissioned hidden by the server, D24). */
+export interface ChargePointFilter {
+  lifecycle?: ChargePointLifecycle;
+  online?: boolean;
+  page: number;
+}
 
 export interface ApiError {
   /** HTTP status, or 'network' when the CSMS could not be reached. */
@@ -112,7 +124,7 @@ const baseQuery: BaseQueryFn<string | FetchArgs, unknown, ApiError> = async (arg
 export const api = createApi({
   reducerPath: 'api',
   baseQuery,
-  tagTypes: ['Fault'],
+  tagTypes: ['Fault', 'Summary', 'ChargePoint'],
   endpoints: (b) => ({
     login: b.mutation<LoginResponse, LoginRequest>({
       query: (body) => ({ url: 'auth/v1/login', method: 'POST', body }),
@@ -126,17 +138,34 @@ export const api = createApi({
         `operator/v1/faults?status=${status}&page=${page}&page_size=${FAULT_PAGE_SIZE}`,
       providesTags: ['Fault'],
     }),
+    // Fault actions also change the open-fault tiles of screen 17.
     acknowledgeFault: b.mutation<FaultActionResponse, string>({
       query: (id) => ({ url: `operator/v1/faults/${id}/acknowledge`, method: 'POST' }),
-      invalidatesTags: ['Fault'],
+      invalidatesTags: ['Fault', 'Summary'],
     }),
     resetFault: b.mutation<ResetResponse, { id: string } & ResetRequest>({
       query: ({ id, ...body }) => ({ url: `operator/v1/faults/${id}/reset`, method: 'POST', body }),
-      invalidatesTags: ['Fault'],
+      invalidatesTags: ['Fault', 'Summary'],
     }),
     closeFault: b.mutation<FaultActionResponse, string>({
       query: (id) => ({ url: `operator/v1/faults/${id}/close`, method: 'POST' }),
-      invalidatesTags: ['Fault'],
+      invalidatesTags: ['Fault', 'Summary'],
+    }),
+    // Screens 17 / 18 (FE-03, UC-OPS-02): the Operator's charge points and their live status.
+    operatorSummary: b.query<OperatorSummary, void>({
+      query: () => 'operator/v1/summary',
+      providesTags: ['Summary'],
+    }),
+    operatorChargePoints: b.query<ChargePointPage, ChargePointFilter>({
+      query: ({ lifecycle, online, page }) => {
+        const q = new URLSearchParams();
+        if (lifecycle) q.set('lifecycle', lifecycle);
+        if (online !== undefined) q.set('online', String(online));
+        q.set('page', String(page));
+        q.set('page_size', String(CHARGE_POINT_PAGE_SIZE));
+        return `operator/v1/charge-points?${q}`;
+      },
+      providesTags: ['ChargePoint'],
     }),
   }),
 });
@@ -149,6 +178,8 @@ export const {
   useAcknowledgeFaultMutation,
   useResetFaultMutation,
   useCloseFaultMutation,
+  useOperatorSummaryQuery,
+  useOperatorChargePointsQuery,
 } = api;
 
 /** Vietnamese text for any error of this API. */

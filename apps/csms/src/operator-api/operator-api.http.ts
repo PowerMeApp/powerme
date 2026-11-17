@@ -4,6 +4,7 @@
  *   POST /api/auth/v1/refresh public, refresh token → new 900 s access token (T125)
  *   GET  /api/operator/v1/me  operator_staff
  *   GET  /api/operator/v1/faults, POST …/faults/{id}/acknowledge|reset|close  (FE-04a, operator-faults.ts)
+ *   GET  /api/operator/v1/charge-points, GET /api/operator/v1/summary  (FE-03, operator-monitoring.ts)
  *   GET  /api/admin/v1/me     admin
  * RolesGuard runs before route matching, so an unknown path without a valid token is 401, not 404.
  * CORS: localhost origins only (Vite dev server). JSON: snake_case, string ids, `{ error, detail }`.
@@ -14,7 +15,26 @@ import type { DriverApiConfig } from '../driver/driver-auth.js';
 import { FaultActionError, type FaultActions } from '../console/fault-actions.js';
 import { AuthError, StaffAccounts, type DashboardAuthConfig } from '../users/auth.js';
 import { rolesGuard, type Principal } from '../users/roles-guard.js';
+import type { ConnectionRegistry } from '../ocpp-gateway/connection-registry.js';
 import { matchFaultRoute, runFaultRoute } from './operator-faults.js';
+import {
+  matchMonitoringRoute,
+  runMonitoringRoute,
+  type MonitoringThresholds,
+} from './operator-monitoring.js';
+
+/** FE-03: what the monitoring routes need besides the DB. */
+export interface MonitoringDeps {
+  thresholds: MonitoringThresholds;
+  /** `connected` is true only when this process holds the socket. */
+  registry?: ConnectionRegistry;
+}
+
+/** Same thresholds as the Driver API (`loadChargePolicy`): 2 × heartbeat, 900 s. */
+const DEFAULT_THRESHOLDS: MonitoringThresholds = {
+  staleAfterMs: 600_000,
+  offlineAfterMs: 900_000,
+};
 
 /** Paths `ConsoleServer` hands to this listener, before its own `/api/admin/*` routes. */
 export const OPERATOR_API_PATH = /^\/api\/(auth|operator|admin)\/v1(?:\/|\?|$)/;
@@ -29,6 +49,7 @@ export function createOperatorApiListener(
   accounts = new StaffAccounts(db, config),
   /** FE-04a. Missing → fault routes answer 503 `faults_unavailable`. */
   faults?: FaultActions,
+  monitoring: MonitoringDeps = { thresholds: DEFAULT_THRESHOLDS },
 ): RequestListener {
   return (req, res) => {
     void handle(req, res).catch((error: unknown) => {
@@ -61,8 +82,8 @@ export function createOperatorApiListener(
     }
     const url = new URL(req.url ?? '', 'http://operator-api.local');
     const [, surface, rest] = /^\/api\/(auth|operator|admin)\/v1(\/.*)?$/.exec(url.pathname) ?? [];
-    // Only the fault list takes a query (status, page, page_size); everywhere else a query is 400.
-    if (url.search && !/^\/api\/operator\/v1\/faults$/.test(url.pathname))
+    // Only the fault and charge point lists take a query; everywhere else a query is 400.
+    if (url.search && !/^\/api\/operator\/v1\/(faults|charge-points)$/.test(url.pathname))
       throw new AuthError(400, 'invalid_input');
 
     if (surface === 'auth') {
@@ -92,6 +113,23 @@ export function createOperatorApiListener(
           ? await readJsonObject(req, res)
           : undefined;
       send(res, 200, await runFaultRoute(faultRoute, principal, faults, body));
+      return;
+    }
+    const monitoringRoute =
+      surface === 'operator' ? matchMonitoringRoute(rest ?? '', url.searchParams) : null;
+    if (monitoringRoute) {
+      allow(req, res, 'GET');
+      send(
+        res,
+        200,
+        await runMonitoringRoute(
+          monitoringRoute,
+          principal,
+          db,
+          monitoring.thresholds,
+          monitoring.registry,
+        ),
+      );
       return;
     }
     if (rest !== '/me') throw new AuthError(404, 'not_found');
