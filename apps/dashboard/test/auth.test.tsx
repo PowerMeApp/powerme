@@ -1,12 +1,20 @@
 /** Screens 16 / 26 and the role guard (SRS Table 6, D31) against a fake CSMS. */
 import { screen, waitFor } from '@testing-library/react';
 import type { LoginResponse } from '@powerme/shared';
+import { api } from '../src/core/api/api';
 import { SESSION_KEY } from '../src/core/auth/authSlice';
 import { ADMIN, currentPath, fakeCsms, renderApp, session, STAFF } from './render';
 
 const ok = (user: typeof STAFF): { status: number; body: LoginResponse } => ({
   status: 200,
-  body: { access_token: `token-${user.user_id}`, token_type: 'Bearer', expires_in: 28800, user },
+  body: {
+    access_token: `token-${user.user_id}`,
+    token_type: 'Bearer',
+    expires_in: 900,
+    refresh_token: `refresh-${user.user_id}`,
+    refresh_expires_in: 43200,
+    user,
+  },
 });
 const fail = (status: number, error: string, headers?: Record<string, string>) => ({
   status,
@@ -123,5 +131,74 @@ describe('Đăng nhập (màn 16 / 26) và phân quyền', () => {
     renderApp('/operator', session(STAFF, 150));
     await screen.findByRole('heading', { name: 'Tổng quan vận hành' });
     await waitFor(() => expect(currentPath()).toBe('/operator/login'), { timeout: 2000 });
+  });
+
+  describe('T125: access token 900 s được làm mới bằng refresh token', () => {
+    const withRefresh = () => ({
+      ...session(STAFF),
+      refreshToken: 'refresh-10',
+      refreshExpiresAt: Date.now() + 3_600_000,
+    });
+    const json = (status: number, body: unknown) =>
+      new Response(JSON.stringify(body), {
+        status,
+        headers: { 'Content-Type': 'application/json' },
+      });
+
+    it('401 → một lần refresh dùng chung cho các request song song → gửi lại bằng token mới', async () => {
+      const seen = fakeCsms({});
+      const record = globalThis.fetch as unknown as (r: Request) => Promise<Response>;
+      globalThis.fetch = (async (r: Request) => {
+        await record(r.clone());
+        const path = new URL(r.url).pathname;
+        if (path === '/api/auth/v1/refresh') {
+          await new Promise((resolve) => setTimeout(resolve, 20));
+          return json(200, { access_token: 'token-new', token_type: 'Bearer', expires_in: 900 });
+        }
+        if (r.headers.get('Authorization') !== 'Bearer token-new')
+          return json(401, { error: 'unauthorized', detail: 'unauthorized' });
+        return path === '/api/operator/v1/me'
+          ? json(200, STAFF)
+          : json(200, { items: [], total: 0, page: 1, page_size: 20 });
+      }) as typeof fetch;
+      const { store } = renderApp('/operator', withRefresh());
+      void store.dispatch(api.endpoints.operatorFaults.initiate({ status: 'open', page: 1 }));
+      expect(await screen.findByText(/Xin chào Trần Trọng Nghĩa/)).toBeInTheDocument();
+      await waitFor(() =>
+        expect(
+          seen.filter((r) => r.path === '/api/operator/v1/faults').map((r) => r.authorization),
+        ).toContain('Bearer token-new'),
+      );
+      const refreshes = seen.filter((r) => r.path === '/api/auth/v1/refresh');
+      expect(refreshes).toHaveLength(1);
+      expect(refreshes[0]).toMatchObject({ body: { refresh_token: 'refresh-10' } });
+      expect(store.getState().auth).toMatchObject({
+        token: 'token-new',
+        refreshToken: 'refresh-10',
+      });
+      expect(currentPath()).toBe('/operator');
+    });
+
+    it.each([[fail(403, 'account_locked')], [fail(401, 'invalid_refresh_token')]])(
+      'refresh bị từ chối (%#) → đăng xuất về màn đăng nhập',
+      async (response) => {
+        fakeCsms({
+          'GET /api/operator/v1/me': fail(401, 'unauthorized'),
+          'POST /api/auth/v1/refresh': response,
+        });
+        renderApp('/operator', withRefresh());
+        await waitFor(() => expect(currentPath()).toBe('/operator/login'));
+      },
+    );
+
+    it('mất mạng khi refresh → giữ phiên, báo lỗi kết nối', async () => {
+      fakeCsms({
+        'GET /api/operator/v1/me': fail(401, 'unauthorized'),
+        'POST /api/auth/v1/refresh': 'network',
+      });
+      renderApp('/operator', withRefresh());
+      expect(await screen.findByText('Không kết nối được máy chủ')).toBeInTheDocument();
+      expect(currentPath()).toBe('/operator');
+    });
   });
 });

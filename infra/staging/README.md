@@ -218,7 +218,7 @@ Giới hạn: đây không phải firmware thật và không thay simulator. Tr�
 
 ## Đăng nhập dashboard (T128, FE-01a)
 
-Màn 16 (staff Operator) và 26 (Admin) gọi `POST /api/auth/v1/login`, rồi `GET /api/operator/v1/me` hoặc `GET /api/admin/v1/me` với `Authorization: Bearer <token>` (8 giờ, không refresh; hợp đồng: [`docs/api/OPERATOR-ADMIN-API-HOP-DONG.md`](../../docs/api/OPERATOR-ADMIN-API-HOP-DONG.md)). Các route này nằm trên **cùng listener cổng 3000 với console chưa xác thực**, nên chỉ vào bằng SSH tunnel như console và Driver API. **Không thêm `/api/*` vào Caddyfile**: proxy `/api` ra internet là mở luôn `/api/admin/*` của console (ngắt kết nối trụ, RemoteStop, onboarding) cho mọi người — chờ tới khi console có xác thực hoặc tách listener.
+Màn 16 (staff Operator) và 26 (Admin) gọi `POST /api/auth/v1/login`, rồi `GET /api/operator/v1/me` hoặc `GET /api/admin/v1/me` với `Authorization: Bearer <token>` (access 900 s, làm mới bằng `POST /api/auth/v1/refresh` tới 12 giờ sau đăng nhập — T125; hợp đồng: [`docs/api/OPERATOR-ADMIN-API-HOP-DONG.md`](../../docs/api/OPERATOR-ADMIN-API-HOP-DONG.md)). Các route này nằm trên **cùng listener cổng 3000 với console chưa xác thực**, nên chỉ vào bằng SSH tunnel như console và Driver API. **Không thêm `/api/*` vào Caddyfile**: proxy `/api` ra internet là mở luôn `/api/admin/*` của console (ngắt kết nối trụ, RemoteStop, onboarding) cho mọi người — chờ tới khi console có xác thực hoặc tách listener.
 
 **Bật trên VM có `.env` cũ** (người có quyền `deploy`):
 

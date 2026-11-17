@@ -92,6 +92,7 @@ services:
       DASHBOARD_JWT_SECRET_BASE64: ${DASHBOARD_JWT_SECRET_BASE64:-}
       DASHBOARD_JWT_ISSUER: ${DASHBOARD_JWT_ISSUER:-}
       DASHBOARD_JWT_AUDIENCE: ${DASHBOARD_JWT_AUDIENCE:-}
+      DASHBOARD_JWT_REFRESH_TTL_S: ${DASHBOARD_JWT_REFRESH_TTL_S:-}
       # WF-05 (T119, #111): người thao tác các route onboarding của console (đăng ký trụ, onboard).
       # Là id user lấy từ log seed ("WF-05 console actors: ..."), KHÔNG lấy từ body. Trống → 503.
       CONSOLE_ACTOR_ADMIN_ID: ${CONSOLE_ACTOR_ADMIN_ID:-}

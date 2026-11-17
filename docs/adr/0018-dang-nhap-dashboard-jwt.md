@@ -2,8 +2,8 @@
 
 | | |
 |---|---|
-| Trạng thái | Đề xuất |
-| Ngày | 11/11/2026 |
+| Trạng thái | Chấp nhận |
+| Ngày | 11/11/2026 · sửa mục 3 và chấp nhận 16/11/2026 (T125) |
 | Người quyết định | WP4 (Trần Trọng Nghĩa) |
 | Liên quan | FE-01a, UC-ACC-04/05, F-13, NFR-SEC-01, BR-P16, ADR-0011, ADR-0017; Report 4 thành phần 02 `operator-api`, 03 `users` |
 
@@ -21,7 +21,8 @@ Chúng ta sẽ:
 
 1. Thêm **một** `POST /api/auth/v1/login` (email + mật khẩu) cho cả nhân viên vận hành và Admin, cùng listener với console và Driver API (cổng 3000). Token trả về mang `role`; màn đăng nhập của mỗi khu vực từ chối vai trò còn lại.
 2. Băm mật khẩu bằng **scrypt**, dùng lại `stations/charge-point-credential.ts` (định dạng `scrypt$N$r$p$salt$hash`, ADR-0011).
-3. Trả **JWT HS256** (`jose` 6.2.15, `typ: JWT`): `sub` = user id, `role` (`operator_staff` | `admin`), `iss`, `aud`, `iat`, `exp` = 8 giờ (một ca), `jti`; nhân viên có thêm `operator_id`, `staff_role`. Không có refresh token.
+3. Trả **access token** JWT HS256 (`jose` 6.2.15, `typ: JWT`): `sub` = user id, `role` (`operator_staff` | `admin`), `iss`, `aud`, `iat`, `exp` = **900 s**, `jti`; nhân viên có thêm `operator_id`, `staff_role`. Kèm **refresh token** cùng khoá nhưng `typ: refresh+jwt`, claim `token_use: refresh`, **không có `role`** (nhân viên có `operator_id`), sống `DASHBOARD_JWT_REFRESH_TTL_S` (mặc định 12 giờ, 1–24 giờ) tính từ lúc đăng nhập. `POST /api/auth/v1/refresh` đổi refresh token lấy access token mới, đọc lại DB như RolesGuard, **không xoay vòng** (hết hạn thì đăng nhập lại). Hai loại token không dùng thay nhau được: guard đòi `typ: JWT` + `role`, route refresh đòi `typ: refresh+jwt` + `token_use`. Thiết kế theo Driver API `/auth/refresh` (BE-21).
+   - *Sửa 16/11/2026 (Ân chốt 12/11, T125; hợp đồng `OPERATOR-ADMIN-API-HOP-DONG.md` §2.2b):* bản đầu ghi `exp` = 8 giờ, không refresh. Đổi vì token lộ (máy dùng chung ở trạm) dùng được cả ca; với 900 s chỉ còn tối đa 15 phút. Refresh 12 giờ = một ca kể cả giao ca (Nghĩa chốt, câu hỏi N14).
 4. Khoá ký **riêng**: `DASHBOARD_JWT_SECRET_BASE64` (≥ 32 byte ngẫu nhiên), `DASHBOARD_JWT_ISSUER`, `DASHBOARD_JWT_AUDIENCE`. Thiếu cả ba → mọi route trả 503 `auth_unavailable`.
 5. **RolesGuard** chạy trước khi khớp route trên mọi `/api/operator/v1/*` và `/api/admin/v1/*`:
    - thiếu, sai hoặc hết hạn token → **401**;
@@ -46,7 +47,8 @@ Mã: `apps/csms/src/users/auth.ts` (IAuth), `users/roles-guard.ts` (RolesGuard),
 **Mất:**
 
 - Mỗi request thêm một truy vấn DB.
-- Không thu hồi được từng token; đăng xuất chỉ là xoá token ở trình duyệt (bù bằng mục 5).
+- Không thu hồi được từng token; đăng xuất chỉ là xoá cả hai token ở trình duyệt (bù bằng mục 5 và việc đọc lại DB ở mỗi lần refresh).
+- Dashboard phải tự làm mới: gặp 401 thì gọi `/api/auth/v1/refresh` một lần rồi gửi lại request.
 - Bộ đếm thử sai nằm trong bộ nhớ một tiến trình (như ADR-0002); chuyển Redis khi chạy nhiều instance.
 - Guard phải biết khoá Driver API để trả 403 thay vì 401 cho token tài xế.
 
@@ -56,7 +58,8 @@ Mã: `apps/csms/src/users/auth.ts` (IAuth), `users/roles-guard.ts` (RolesGuard),
 |---|---|
 | Header dev `X-Operator-Id` | Giới hạn theo Operator không chứng minh được |
 | Dùng chung khoá, issuer, audience với Driver API | Lộ một khoá là mở được cả hai bề mặt; khoá riêng vẫn trả được 403 cho token tài xế |
-| Access 15 phút + refresh token | Thêm luồng làm mới cho dashboard; kiểm `active` mỗi request đã bù việc không thu hồi |
+| Access 8 giờ, không refresh (bản đầu của mục 3) | Token lộ dùng được cả ca; thay ngày 16/11 bằng access 900 s + refresh (T125) |
+| Refresh token xoay vòng, lưu bảng | Cần migration và bảng thu hồi; kiểm DB mỗi lần refresh đã chặn tài khoản bị khoá |
 | Lấy `operatorId` chỉ từ token | Nhân viên chuyển Operator vẫn thấy dữ liệu cũ tới 8 giờ; so với DB không tốn thêm truy vấn |
 | argon2 (`@node-rs/argon2`) | Phụ thuộc native; CSMS đã chọn scrypt (ADR-0011) |
 | Session id lưu bảng | Cần migration; không cần khi đã kiểm DB mỗi request |

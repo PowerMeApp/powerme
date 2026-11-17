@@ -1,7 +1,8 @@
 /**
  * FE-01a — dashboard login and RolesGuard over real HTTP (ConsoleServer) and Postgres, ADR-0018.
  * Report 5 (F-13): TC-F13-01 wrong role → 403 on every surface; TC-F13-02 a locked account
- * cannot log in; TC-F13-03 locking stops a live token. Needs DATABASE_URL; resets its schema.
+ * cannot log in; TC-F13-03 locking stops a live token. T125 (contract §2.2b): access 900 s +
+ * refresh token. Needs DATABASE_URL; resets its schema.
  */
 import { randomBytes } from 'node:crypto';
 import { createServer } from 'node:http';
@@ -47,6 +48,36 @@ describeDb('FE-01a dashboard login and RolesGuard (F-13, ADR-0018)', () => {
     });
     return { status: r.status, body: (await r.json()) as any };
   }
+  async function refresh(body: unknown) {
+    const r = await fetch(`${base}/api/auth/v1/refresh`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    return { status: r.status, body: (await r.json()) as any, headers: r.headers };
+  }
+  /** Any token shape, for the cases the server must refuse. `iat`/`exp` are offsets from now. */
+  const raw = (
+    typ: string,
+    claims: Record<string, unknown>,
+    iat: number,
+    exp: number,
+    key: typeof DASH = DASH,
+  ) => {
+    const now = Math.floor(Date.now() / 1000);
+    return new SignJWT(claims)
+      .setProtectedHeader({ alg: 'HS256', typ })
+      .setSubject(String(claims['sub']))
+      .setIssuer(key.issuer)
+      .setAudience(key.audience)
+      .setIssuedAt(now + iat)
+      .setExpirationTime(now + exp)
+      .sign(key.secret);
+  };
+  const claimsOf = (jwt: string) =>
+    JSON.parse(Buffer.from(jwt.split('.')[1]!, 'base64url').toString());
+  const headerOf = (jwt: string) =>
+    JSON.parse(Buffer.from(jwt.split('.')[0]!, 'base64url').toString());
   const sign = (claims: Record<string, unknown>, key: typeof DASH, ttl = 3600) => {
     const now = Math.floor(Date.now() / 1000);
     return new SignJWT(claims)
@@ -122,10 +153,14 @@ describeDb('FE-01a dashboard login and RolesGuard (F-13, ADR-0018)', () => {
     Logger.overrideLogger(['log', 'error', 'warn', 'debug', 'verbose']);
   });
 
-  it('logs staff and admin in with an 8 h token carrying role and Operator; no hash leaks', async () => {
+  it('logs staff and admin in with a 900 s token carrying role and Operator; no hash leaks', async () => {
     const staff = await login('STAFF@fe01.test');
     expect(staff.status).toBe(200);
-    expect(staff.body).toMatchObject({ token_type: 'Bearer', expires_in: 28800 });
+    expect(staff.body).toMatchObject({
+      token_type: 'Bearer',
+      expires_in: 900,
+      refresh_expires_in: 43200,
+    });
     expect(staff.body.user).toEqual({
       user_id: ids['staff'],
       email: 'staff@fe01.test',
@@ -139,9 +174,16 @@ describeDb('FE-01a dashboard login and RolesGuard (F-13, ADR-0018)', () => {
       Buffer.from(staff.body.access_token.split('.')[1], 'base64url').toString(),
     );
     expect(claims).toMatchObject({ sub: ids['staff'], role: 'operator_staff' });
-    expect(claims.exp - claims.iat).toBe(28800);
+    expect(claims.exp - claims.iat).toBe(900);
+    // Refresh token: own typ, token_use, no role; staff keep their Operator (T125).
+    expect(headerOf(staff.body.refresh_token)).toMatchObject({ typ: 'refresh+jwt' });
+    const rc = claimsOf(staff.body.refresh_token);
+    expect(rc).toMatchObject({ sub: ids['staff'], token_use: 'refresh', operator_id: ids['opA'] });
+    expect(rc.role).toBeUndefined();
+    expect(rc.exp - rc.iat).toBe(43200);
     expect(JSON.stringify(staff.body)).not.toContain('scrypt$');
     const admin = await login('admin@fe01.test');
+    expect(claimsOf(admin.body.refresh_token).operator_id).toBeUndefined();
     expect(admin.body.user).toEqual({
       user_id: ids['admin'],
       email: 'admin@fe01.test',
@@ -264,5 +306,128 @@ describeDb('FE-01a dashboard login and RolesGuard (F-13, ADR-0018)', () => {
       ids['opA'],
     ]);
     expect((await me()).status).toBe(401);
+  });
+
+  describe('T125 refresh token (contract §2.2b)', () => {
+    it('trades a refresh token for a fresh 900 s access token, many times, without rotating', async () => {
+      for (const [email, path] of [
+        ['tech@fe01.test', '/api/operator/v1/me'],
+        ['admin@fe01.test', '/api/admin/v1/me'],
+      ] as const) {
+        const { refresh_token } = (await login(email)).body;
+        for (let i = 0; i < 2; i++) {
+          const r = await refresh({ refresh_token });
+          expect(r.status).toBe(200);
+          expect(Object.keys(r.body).sort()).toEqual(['access_token', 'expires_in', 'token_type']);
+          expect(r.body).toMatchObject({ token_type: 'Bearer', expires_in: 900 });
+          expect(r.headers.get('cache-control')).toBe('no-store');
+          const c = claimsOf(r.body.access_token);
+          expect(c.exp - c.iat).toBe(900);
+          expect((await get(path, r.body.access_token)).status).toBe(200);
+        }
+      }
+      const c = claimsOf(
+        (await refresh({ refresh_token: (await login('tech@fe01.test')).body.refresh_token })).body
+          .access_token,
+      );
+      expect(c).toMatchObject({
+        role: 'operator_staff',
+        operator_id: ids['opA'],
+        staff_role: 'technician',
+      });
+    });
+
+    it('never lets one token stand in for the other, nor a driver refresh token', async () => {
+      const staff = (await login('tech@fe01.test')).body;
+      expect((await get('/api/operator/v1/me', staff.refresh_token)).status).toBe(401);
+      const asRefresh = await refresh({ refresh_token: staff.access_token });
+      expect([asRefresh.status, asRefresh.body.error]).toEqual([401, 'invalid_refresh_token']);
+      const driverRefresh = await raw(
+        'refresh+jwt',
+        { sub: ids['driver'], token_use: 'refresh' },
+        0,
+        3600,
+        DRIVER,
+      );
+      expect((await refresh({ refresh_token: driverRefresh })).status).toBe(401);
+      // Right key and typ, but a role claim, a wrong token_use, or past its age.
+      for (const bad of [
+        await raw('refresh+jwt', { sub: ids['tech'], token_use: 'refresh', role: 'admin' }, 0, 60),
+        await raw('refresh+jwt', { sub: ids['tech'], token_use: 'access' }, 0, 60),
+        await raw('refresh+jwt', { sub: ids['tech'], token_use: 'refresh' }, -43201, 60),
+        await raw('refresh+jwt', { sub: ids['tech'], token_use: 'refresh' }, -100, -1),
+        'not-a-jwt',
+      ])
+        expect((await refresh({ refresh_token: bad })).body.error).toBe('invalid_refresh_token');
+      // An access token older than 900 s is refused even if exp is still ahead.
+      const old = await raw(
+        'JWT',
+        { sub: ids['tech'], role: 'operator_staff', operator_id: ids['opA'] },
+        -901,
+        60,
+      );
+      expect((await get('/api/operator/v1/me', old)).status).toBe(401);
+    });
+
+    it('accepts only POST JSON with exactly refresh_token', async () => {
+      const url = `${base}/api/auth/v1/refresh`;
+      expect((await fetch(url)).status).toBe(405);
+      expect((await fetch(url, { method: 'POST', body: 'x' })).status).toBe(415);
+      const { refresh_token } = (await login('tech@fe01.test')).body;
+      expect((await refresh({ refresh_token, extra: 1 })).status).toBe(400);
+      expect((await refresh({})).body.error).toBe('invalid_refresh_token');
+      expect((await refresh({ refresh_token: 42 })).body.error).toBe('invalid_refresh_token');
+      const evil = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Origin: 'https://evil.example' },
+        body: JSON.stringify({ refresh_token }),
+      });
+      expect(evil.status).toBe(403);
+    });
+
+    it('re-reads the DB: locked account or Operator, moved staff, or a deleted user stop the refresh', async () => {
+      // TC-F13-03 above leaves staffb moved to Operator A; start from Operator B again.
+      await q('UPDATE operator_staff SET operator_id=$2 WHERE user_id=$1', [
+        ids['staffb'],
+        ids['opB'],
+      ]);
+      const { refresh_token } = (await login('staffb@fe01.test')).body;
+      const again = () => refresh({ refresh_token });
+      expect((await again()).status).toBe(200);
+      await q("UPDATE users SET account_status='suspended' WHERE id=$1", [ids['staffb']]);
+      expect((await again()).body).toMatchObject({ error: 'account_locked' });
+      await q("UPDATE users SET account_status='active' WHERE id=$1", [ids['staffb']]);
+      await q("UPDATE operators SET status='suspended' WHERE id=$1", [ids['opB']]);
+      expect((await again()).body).toMatchObject({ error: 'operator_inactive' });
+      await q("UPDATE operators SET status='active' WHERE id=$1", [ids['opB']]);
+      expect((await again()).status).toBe(200);
+      await q('UPDATE operator_staff SET operator_id=$2 WHERE user_id=$1', [
+        ids['staffb'],
+        ids['opA'],
+      ]);
+      expect((await again()).body).toMatchObject({ error: 'invalid_refresh_token' });
+      await q('UPDATE operator_staff SET operator_id=$2 WHERE user_id=$1', [
+        ids['staffb'],
+        ids['opB'],
+      ]);
+      // A staff refresh token whose user is now a driver; an admin token naming an Operator.
+      expect(
+        (await refresh({ refresh_token: (await login('admin@fe01.test')).body.refresh_token }))
+          .status,
+      ).toBe(200);
+      const adminWithOperator = await raw(
+        'refresh+jwt',
+        { sub: ids['admin'], token_use: 'refresh', operator_id: ids['opA'] },
+        0,
+        60,
+      );
+      expect((await refresh({ refresh_token: adminWithOperator })).body.error).toBe(
+        'invalid_refresh_token',
+      );
+      const driver = await raw('refresh+jwt', { sub: ids['driver'], token_use: 'refresh' }, 0, 60);
+      expect((await refresh({ refresh_token: driver })).body).toMatchObject({ error: 'forbidden' });
+      const ghost = await raw('refresh+jwt', { sub: '999999', token_use: 'refresh' }, 0, 60);
+      expect((await refresh({ refresh_token: ghost })).body.error).toBe('invalid_refresh_token');
+    });
   });
 });
