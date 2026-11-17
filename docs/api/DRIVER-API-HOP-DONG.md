@@ -375,8 +375,8 @@ Luật (WF-04-PLAN Q75–Q81, 11/11/2026):
 
 - Súng (hoặc cả trụ) đang có sự cố mở → báo cáo gắn vào sự cố đó.
 - **2 tài xế khác nhau trong 2 giờ**, hoặc **1 tài xế khi súng `Faulted` / `Unavailable` hoặc trụ Offline** → CSMS tạo sự cố `driver_report`, báo Operator, **ẩn súng** khỏi `/stations` (cả `sort=smart`) và gắn mọi báo cáo chờ trong 2 giờ.
-- Cùng một tài xế báo nhiều lần chỉ tính một.
-- Nhãn hiện ở `GET /connectors/by-code/{code}/{no}` (`reported_issue`). Nhãn xoá khi sự cố đóng: súng báo `Available`, Operator đóng, hoặc **một phiên trên súng hoàn tất bình thường** (bắt đầu sau khi có sự cố, > 0 Wh, không dừng vì EmergencyStop / PowerLoss / Other) — ADR-0019.
+- Cùng một tài xế báo nhiều lần chỉ tính một. Ở đường một tài xế, trong 2 giờ một tài xế chỉ tự mở được **một** sự cố trên một trụ; báo cáo ở súng khác vẫn `201`, `reported_issue: false`, chờ tài xế thứ hai (T131).
+- Nhãn hiện ở `GET /connectors/by-code/{code}/{no}` (`reported_issue`). Nhãn xoá khi Operator đóng sự cố, hoặc **một phiên trên súng hoàn tất bình thường** (bắt đầu sau khi có sự cố theo giờ trụ đã đối soát, > 0 Wh, không dừng vì EmergencyStop / PowerLoss / Other). Súng đổi trạng thái (kể cả `Available`) **không** xoá nhãn (BR-P42, D-G 14/11) — ADR-0019.
 
 ## 16. T96 — xếp hạng gợi ý theo đường bộ Vietmap
 

@@ -4,7 +4,9 @@
  *
  * Report 5: TC-F05-01 report visible to the owning Operator; TC-F05-02 repeated reports from
  * different drivers label the connector and hide it; TC-F05-03 one report while the connector is
- * abnormal is enough, and a report joins an open fault.
+ * abnormal is enough, and a report joins an open fault. T131 (review #139, D-G 14/11): no status
+ * change closes a driver report, a hardware code is recorded on it, one driver opens at most one
+ * fault per charge point by themselves; the OCPP path is in wf04-driver-report-ocpp.
  *
  * Needs DATABASE_URL (skipped without it); resets the schema of that database.
  */
@@ -60,12 +62,20 @@ describeDb('FE-17 driver fault report (UC-CHG-05, BR-P42, STM-6 t8)', () => {
     (
       await http('GET', `/stations?vehicle_id=${vehicles[0]}${extra}`, undefined, drivers[0])
     ).body.items.flatMap((s: any) => s.connectors.map((c: any) => c.connector_no));
-  async function session(no: 1 | 2, startedAt: Date, energyWh: number, reason: string | null) {
+  /** `late`: the charge point delivered it after reconnecting, its own start time `cpStartedAt`. */
+  async function session(
+    no: 1 | 2,
+    startedAt: Date,
+    energyWh: number,
+    reason: string | null,
+    late?: { cpStartedAt: Date },
+  ) {
     txNo += 1;
     await q(
       `INSERT INTO sessions(transaction_no,charge_point_id,connector_id,connector_no,id_tag,origin,payment_mode,
-        status,meter_start_wh,meter_stop_wh,cp_started_at,received_started_at,cp_stopped_at,received_stopped_at,stop_reason)
-       VALUES($1,$2,$3,$4,$9,'rfid','unattributed','closed',1000,$5,$6,$6,$7,$7,$8)`,
+        status,meter_start_wh,meter_stop_wh,cp_started_at,received_started_at,cp_stopped_at,received_stopped_at,
+        stop_reason,delivered_offline)
+       VALUES($1,$2,$3,$4,$9,'rfid','unattributed','closed',1000,$5,$10,$6,$7,$7,$8,$11)`,
       [
         txNo,
         cp,
@@ -76,6 +86,8 @@ describeDb('FE-17 driver fault report (UC-CHG-05, BR-P42, STM-6 t8)', () => {
         new Date(startedAt.getTime() + 60_000),
         reason,
         `FE17-${txNo}`,
+        late?.cpStartedAt ?? startedAt,
+        late !== undefined,
       ],
     );
     return faults.onSessionCompleted(txNo);
@@ -280,6 +292,11 @@ describeDb('FE-17 driver fault report (UC-CHG-05, BR-P42, STM-6 t8)', () => {
     expect(await session(1, after, 5000, 'EmergencyStop')).toBe('none');
     expect(await session(2, after, 5000, null)).toBe('none'); // other connector
     expect(await session(1, new Date(Date.now() - HOUR), 5000, 'Local')).toBe('none'); // started before
+    // T131: received after the report, but sent late by the charge point and its clock is not
+    // verified → start time unknown, no t8 (the Operator closes it).
+    expect(
+      await session(1, after, 5000, 'Local', { cpStartedAt: new Date(Date.now() - HOUR) }),
+    ).toBe('none');
     expect(await openEvents()).toHaveLength(1);
     expect(await session(1, after, 5000, 'Local')).toBe('resolved');
     expect(await openEvents()).toEqual([]);
@@ -290,23 +307,42 @@ describeDb('FE-17 driver fault report (UC-CHG-05, BR-P42, STM-6 t8)', () => {
     expect(await listedConnectors()).toEqual([1, 2]);
   });
 
-  it('Q76: Preparing does not resolve a driver-report fault, Available does; operator close clears the label too', async () => {
-    const status = (st: string) =>
+  it('T131 / D-G: no status change resolves a driver report, a hardware code is recorded, operator close clears the label', async () => {
+    const status = (st: string, errorCode = 'NoError') =>
       faults.onConnectorStatus({
         chargePointId: cp,
         connectorNo: 1,
         status: st,
-        errorCode: 'NoError',
+        errorCode,
         receivedAt: new Date(Date.now() + 1000),
       });
     await report(drivers[0]!);
     await report(drivers[1]!);
-    expect((await status('Preparing')).kind).toBe('none');
-    expect((await status('Available')).kind).toBe('resolved');
-
-    await report(drivers[0]!, 2);
-    await report(drivers[1]!, 2);
+    // Reboot (Unavailable → Available), plug-in, and plain Available: the label stays.
+    for (const st of ['Unavailable', 'Available', 'Preparing', 'Available'])
+      expect((await status(st)).kind).toBe('none');
     const [event] = await openEvents();
+    expect(event).toMatchObject({ source: 'driver_report', status: 'raised' });
+
+    // A real hardware fault during the report: recorded once (first code kept), still one fault.
+    expect(await status('Faulted', 'GroundFailure')).toEqual({
+      kind: 'attached',
+      faultId: Number(event.id),
+      errorCode: 'GroundFailure',
+    });
+    expect(await status('Faulted', 'HighTemperature')).toEqual({
+      kind: 'attached',
+      faultId: Number(event.id),
+    });
+    expect(await openEvents()).toHaveLength(1);
+    const listed = (await faults.list('open', 20)).find((f) => f.id === Number(event.id));
+    expect(listed).toMatchObject({
+      source: 'driver_report',
+      errorCode: 'GroundFailure',
+      severity: 'critical',
+    });
+    expect((await status('Available')).kind).toBe('none');
+
     await faults.acknowledge(Number(event.id), null);
     await faults.close(Number(event.id), null);
     const [r] = await q(
@@ -314,6 +350,27 @@ describeDb('FE-17 driver fault report (UC-CHG-05, BR-P42, STM-6 t8)', () => {
       [event.id],
     );
     expect(r.open).toBe(0);
+    expect(await openEvents()).toEqual([]);
+  });
+
+  it('T131: one driver alone opens at most one fault per charge point in 2 h; a second driver still labels', async () => {
+    await q("UPDATE charge_points SET last_message_at=now()-interval '1 hour' WHERE id=$1", [cp]);
+    expect((await report(drivers[0]!, 1)).reportedIssue).toBe(true);
+    const second = await report(drivers[0]!, 2);
+    expect(second).toMatchObject({ faultEventId: null, reportedIssue: false });
+    expect(await openEvents()).toHaveLength(1);
+    // The waiting report still counts for BR-P42's two different drivers.
+    expect((await report(drivers[1]!, 2)).reportedIssue).toBe(true);
+    const events = await openEvents();
+    expect(events.map((e: any) => Number(e.connector_id)).sort()).toEqual(
+      [conn[1], conn[2]].sort(),
+    );
+    // A fault another driver took part in does not count against this driver.
+    await q('DELETE FROM fault_reports');
+    await q('DELETE FROM fault_events');
+    await report(drivers[0]!, 1, new Date(Date.now() - 10 * 60_000));
+    await report(drivers[1]!, 1, new Date(Date.now() - 9 * 60_000));
+    expect((await report(drivers[0]!, 2)).reportedIssue).toBe(true);
   });
 
   it('POST /connectors/{id}/fault-reports: 201, validation, 401, 404, 409, 405', async () => {
