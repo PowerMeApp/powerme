@@ -3,6 +3,9 @@
  * D19–D25, D36) behind RolesGuard `operator_staff`:
  *   GET /api/operator/v1/charge-points?site_id=&lifecycle=&online=&page=&page_size=
  *       → { items: ChargePoint[], total, page, page_size }            (contract §2.4, §3.3)
+ *   GET /api/operator/v1/charge-points/{id} → ChargePointDetail (FE-05, screen 20): the row above
+ *       plus firmware / rated power / capabilities, open faults (same DTO as screen 21) and the
+ *       20 latest remote commands; another Operator's or an unknown id → 404
  *   GET /api/operator/v1/summary → OperatorSummary
  * Everything is scoped to the token's Operator as RolesGuard read it from the DB (BR-P16).
  *
@@ -15,11 +18,13 @@
  *   - The list shows the 9 raw OCPP statuses (D21); the summary groups connectors like the driver
  *     app (BR-P38).
  */
+import { FaultActionError, type FaultActions, type FaultActor } from '../console/fault-actions.js';
 import type { Db } from '../db/db.module.js';
 import type { ConnectionRegistry } from '../ocpp-gateway/connection-registry.js';
 import { guideFor } from '../stations/faults/error-code-guide.js';
 import { AuthError } from '../users/auth.js';
 import type { Principal } from '../users/roles-guard.js';
+import { toDto } from './operator-faults.js';
 
 export interface MonitoringThresholds {
   /** BR-P39: 2 × heartbeat interval. */
@@ -49,6 +54,7 @@ export type MonitoringRoute =
       page: number;
       pageSize: number;
     }
+  | { kind: 'detail'; id: string }
   | { kind: 'summary' };
 
 /** Matches `rest` (path after /api/operator/v1); null if it is not a monitoring route. */
@@ -57,6 +63,12 @@ export function matchMonitoringRoute(rest: string, query: URLSearchParams): Moni
   if (rest === '/summary') {
     if (keys.length) throw new AuthError(400, 'invalid_input');
     return { kind: 'summary' };
+  }
+  const detail = /^\/charge-points\/([^/]+)$/.exec(rest);
+  if (detail) {
+    if (!/^[1-9][0-9]{0,18}$/.test(detail[1]!)) throw new AuthError(404, 'not_found');
+    if (keys.length) throw new AuthError(400, 'invalid_input');
+    return { kind: 'detail', id: detail[1]! };
   }
   if (rest !== '/charge-points') return null;
   const allowed = ['site_id', 'lifecycle', 'online', 'page', 'page_size'];
@@ -96,14 +108,17 @@ const OFFLINE_SQL = `(NOT cp.is_online OR cp.last_message_at IS NULL
 
 /**
  * The Operator's charge points after the list filters ($1 operator, $2 offline ms, $3 lifecycle,
- * $4 site, $5 online). `decommissioned` only when asked for (D24).
+ * $4 site, $5 online, $6 one charge point id). `decommissioned` only when asked for (D24) or when
+ * one charge point is asked for by id (screen 20).
  */
 const FILTERED_CTE = `WITH cps AS (
   SELECT cp.*,st.site_code,st.site_name,${OFFLINE_SQL} AS offline
   FROM charge_points cp JOIN sites st ON st.id=cp.site_id
   WHERE st.operator_id=$1
-    AND (($3::text IS NULL AND cp.lifecycle<>'decommissioned') OR cp.lifecycle::text=$3)
+    AND (($3::text IS NULL AND ($6::bigint IS NOT NULL OR cp.lifecycle<>'decommissioned'))
+      OR cp.lifecycle::text=$3)
     AND ($4::bigint IS NULL OR st.id=$4)
+    AND ($6::bigint IS NULL OR cp.id=$6)
 ), filtered AS (
   SELECT * FROM cps WHERE $5::boolean IS NULL OR offline = NOT $5
 )`;
@@ -114,11 +129,81 @@ export async function runMonitoringRoute(
   db: Db,
   thresholds: MonitoringThresholds,
   registry?: ConnectionRegistry,
+  faults?: FaultActions,
 ): Promise<unknown> {
   const operatorId = principal.operatorId!;
-  return route.kind === 'summary'
-    ? summary(db, operatorId, thresholds)
-    : chargePoints(db, operatorId, route, thresholds, registry);
+  if (route.kind === 'summary') return summary(db, operatorId, thresholds);
+  if (route.kind === 'charge-points') {
+    const page = await chargePoints(db, operatorId, route, thresholds, registry);
+    return { ...page, items: page.items.map(({ extra: _extra, ...cp }) => cp) };
+  }
+  return detail(db, principal, route.id, thresholds, registry, faults);
+}
+
+const DETAIL_PAGE = {
+  siteId: null,
+  lifecycle: null,
+  online: null,
+  page: 1,
+  pageSize: 1,
+} as const;
+
+/** Screen 20 (FE-05): one charge point of the Operator, its open faults and latest commands. */
+async function detail(
+  db: Db,
+  principal: Principal,
+  id: string,
+  thresholds: MonitoringThresholds,
+  registry?: ConnectionRegistry,
+  faults?: FaultActions,
+) {
+  const operatorId = principal.operatorId!;
+  const page = await chargePoints(
+    db,
+    operatorId,
+    { kind: 'charge-points', ...DETAIL_PAGE },
+    thresholds,
+    registry,
+    id,
+  );
+  const cp = page.items[0];
+  if (!cp) throw new AuthError(404, 'not_found');
+  if (!faults) throw new FaultActionError(503, 'faults_unavailable', 'FaultService chưa được nạp');
+  const actor: FaultActor = { userId: Number(principal.userId), operatorId: Number(operatorId) };
+  const [open, commands] = await Promise.all([
+    faults.list('open', 50, actor, 0, Number(id)),
+    db.$client.query<{
+      id: string;
+      action: string;
+      connector_no: number | null;
+      status: string;
+      requested_at: Date;
+      sent_at: Date | null;
+      responded_at: Date | null;
+      error: string | null;
+    }>(
+      `SELECT id::text,action,connector_no,status,requested_at,sent_at,responded_at,error
+       FROM remote_commands WHERE charge_point_id=$1 ORDER BY requested_at DESC,id DESC LIMIT 20`,
+      [id],
+    ),
+  ]);
+  const { extra, ...base } = cp;
+  return {
+    ...base,
+    ...extra,
+    open_faults: open.map((f) => toDto(f, faults)),
+    recent_commands: commands.rows.map((c) => ({
+      id: c.id,
+      charge_point_id: id,
+      action: c.action,
+      connector_no: c.connector_no,
+      status: c.status,
+      requested_at: c.requested_at.toISOString(),
+      sent_at: c.sent_at?.toISOString() ?? null,
+      responded_at: c.responded_at?.toISOString() ?? null,
+      error: c.error,
+    })),
+  };
 }
 
 async function chargePoints(
@@ -127,8 +212,16 @@ async function chargePoints(
   route: Extract<MonitoringRoute, { kind: 'charge-points' }>,
   { staleAfterMs, offlineAfterMs }: MonitoringThresholds,
   registry?: ConnectionRegistry,
+  chargePointId: string | null = null,
 ) {
-  const filters = [operatorId, offlineAfterMs, route.lifecycle, route.siteId, route.online];
+  const filters = [
+    operatorId,
+    offlineAfterMs,
+    route.lifecycle,
+    route.siteId,
+    route.online,
+    chargePointId,
+  ];
   const { rows } = await db.$client.query<{
     total: number;
     id: string;
@@ -142,16 +235,21 @@ async function chargePoints(
     site_code: string;
     site_name: string;
     connectors: Record<string, unknown>[];
+    firmware_version: string | null;
+    rated_power_kw: number | null;
+    reports_soc: boolean;
+    supports_reservation: boolean;
   }>(
     `${FILTERED_CTE}
      SELECT count(*) OVER()::int AS total,f.id::text,f.serial_number,f.display_code,f.model,
        f.lifecycle,f.is_online,f.last_message_at,f.site_id::text,f.site_code,f.site_name,
+       f.firmware_version,f.rated_power_kw::float8,f.reports_soc,f.supports_reservation,
        coalesce((SELECT jsonb_agg(jsonb_build_object(
          'connector_id',c.id::text,'connector_no',c.connector_no,'connector_type',c.connector_type,
          'max_power_kw',c.max_power_kw::float8,'status',c.status,'status_updated_at',c.status_changed_at,
          'status_quality',CASE WHEN f.offline THEN 'offline'
            WHEN c.status_changed_at IS NULL OR f.last_message_at>now() OR c.status_changed_at>now()
-             OR f.last_message_at < now()-($6::bigint*interval '1 millisecond')
+             OR f.last_message_at < now()-($7::bigint*interval '1 millisecond')
              OR c.status_changed_at < f.online_changed_at THEN 'stale' ELSE 'fresh' END,
          'error_code',CASE WHEN c.status='Faulted' THEN (SELECT e.error_code FROM connector_status_events e
            WHERE e.connector_id=c.id ORDER BY e.id DESC LIMIT 1) END,
@@ -159,7 +257,7 @@ async function chargePoints(
            AND s.received_stopped_at IS NULL AND s.status IN ('pending','active','paused','stopping')
            ORDER BY s.id DESC LIMIT 1)
        ) ORDER BY c.connector_no) FROM connectors c WHERE c.charge_point_id=f.id),'[]'::jsonb) AS connectors
-     FROM filtered f ORDER BY f.site_code,f.serial_number LIMIT $7 OFFSET $8`,
+     FROM filtered f ORDER BY f.site_code,f.serial_number LIMIT $8 OFFSET $9`,
     [...filters, staleAfterMs, route.pageSize, (route.page - 1) * route.pageSize],
   );
   // A page past the end has no rows to carry count(*) OVER(), so count separately only then.
@@ -190,6 +288,13 @@ async function chargePoints(
           ? new Date(c['status_updated_at'] as string).toISOString()
           : null,
       })),
+      /** Detail-only fields (screen 20); the list leaves them out (contract `ChargePoint`). */
+      extra: {
+        firmware_version: r.firmware_version,
+        rated_power_kw: r.rated_power_kw,
+        reports_soc: r.reports_soc,
+        supports_reservation: r.supports_reservation,
+      },
     })),
     total,
     page: route.page,

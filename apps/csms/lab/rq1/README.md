@@ -6,6 +6,7 @@ Dụng cụ đo, không phải sản phẩm. Không sửa mã CSMS, không chỉ
 
 | Trạng thái (12/11/2026) | |
 |---|---|
+| **Cả ba cấu hình trên VM staging (T132 + T133, 14–17/11/2026)** | **Đã chạy — đây là bộ số dùng để xét NFR-02.** PowerMe (sau bản sửa T132) 90/90 đúng; tắt đối soát và SteVe 3.14.1 chạy trên chính VM đó, mỗi cấu hình 60/90 với 30 phiên tính tiền sai im lặng ở S2 — xem `results/2026-11-17-vm-staging/` và mục "Kết quả 14–17/11/2026" |
 | **Thời gian thật (T130, 13/11/2026)** | **Đã chạy**: PowerMe trên staging `review-15`, tắt đối soát và SteVe trên máy dev, 90 lần mỗi cấu hình, MeterValues 10 s / ân hạn 120 s. PowerMe 90/90 đúng — xem `results/2026-11-13-thoi-gian-that/` và mục "Kết quả lần chạy 13/11/2026" |
 | PowerMe, PowerMe tắt đối soát | **Đã chạy thật** 30 × 3 mỗi cấu hình trên máy dev — xem `results/2026-11-12/` |
 | SteVe | **Đã chạy 12/11/2026** trên máy dev (Docker Desktop, SteVe 3.14.1 + MariaDB 10.11.16): 90 lần, `--concurrency 1` (xem mối đe doạ 8). Kết quả trong `results/2026-11-12/steve/`. Cách dựng: [`infra/lab/steve/README.md`](../../../../infra/lab/steve/README.md) |
@@ -111,6 +112,49 @@ Các trường bắt buộc theo NFR-02 mục 5: `run_id`, `scenario`, `config`,
 Nhóm (`class`): `billed_correct`, `held_correct`, `held_unnecessary`, `billed_wrong_silent`, `lost_or_duplicate` là 5 nhóm của NFR-02 mục 3; `unresolved` và `harness_error` là hai nhóm thêm (xem "Chỗ phải đoán").
 
 `E_bill` lấy từ đâu: PowerMe (bật và tắt đối soát) đọc `sessions.energy_wh` khi phiên `reconciled`; phiên `review` không có `E_bill`. SteVe: `stop_value − start_value` của view `transaction`.
+
+## Kết quả 14–17/11/2026 — ba cấu hình trên cùng VM staging (T132, T133)
+
+Đây là bộ số dùng để xét NFR-02. Lần 13/11 bên dưới (đối chứng chạy trên máy dev) và lần 12/11 (thời gian rút ngắn) giữ làm bản thử. Báo cáo gộp: [`results/2026-11-17-vm-staging/summary.md`](results/2026-11-17-vm-staging/summary.md). 3 kịch bản × 30 lần × 3 cấu hình = **270 lần chạy**, seed 20261112, không lần nào lỗi harness, không lần nào mất kết nối DB.
+
+Tham số theo sản phẩm như lần 13/11: MeterValues 10 s, `OFFLINE_GRACE_S` 120 s, ngưỡng khe hở 30 s, đứt 121–181 s, dung sai 1 Wh. Trụ giả chạy từ máy dev ở Việt Nam trong cả ba lượt.
+
+| Cấu hình | Ngày | Chạy thế nào trên VM (Azure 2 vCPU / 4 GB, Japan East) | Thời gian | Dữ liệu |
+|---|---|---|---|---|
+| PowerMe (đối soát bật) | 14/11 | CSMS staging `review-17` (có bản sửa T132, #145), Postgres 16.4, qua Caddy + TLS (`wss://`) | 1898,4 s | [`results/2026-11-14-sau-t132/powerme/`](results/2026-11-14-sau-t132/powerme/summary.md) |
+| PowerMe tắt đối soát | 17/11 | Container riêng, **cùng ảnh `powerme-csms:review-17`**, chỉ khác `RECONCILIATION_ENABLED=false`, Postgres 16.4 riêng ([`infra/lab/rq1-staging/`](../../../../infra/lab/rq1-staging/README.md)); trụ nối qua SSH tunnel | 1907,8 s | `results/2026-11-17-vm-staging/powerme-off/` |
+| SteVe 3.14.1 | 17/11 | SteVe + MariaDB 10.11.16 trong Docker trên VM; trụ nối qua SSH tunnel; `--stagger-s 5`; đọc MariaDB qua `ssh … docker compose exec` (`--steve-ssh`) | 1979,4 s | `results/2026-11-17-vm-staging/steve/` |
+
+Ba lượt chạy lần lượt, 10 trụ song song. Trong hai lượt đối chứng, CSMS staging vẫn chạy nhưng không có trụ nào nối (trụ luôn nối `demo-station` được tạm dừng), và lượt này đã xong, đã gỡ container trước khi lượt kia bắt đầu.
+
+| Cấu hình | Kịch bản | n | Tính tiền đúng | Giữ lại đúng | Giữ lại thừa | Sai im lặng | Mất/trùng | Tỉ lệ đúng | CI Wilson 95% |
+|---|---|---|---|---|---|---|---|---|---|
+| PowerMe | S1 | 30 | 30 | 0 | 0 | 0 | 0 | 100% | 88,6 – 100% |
+| PowerMe | S2 | 30 | 0 | 30 | 0 | 0 | 0 | 100% | 88,6 – 100% |
+| PowerMe | S3 | 30 | 30 | 0 | 0 | 0 | 0 | 100% | 88,6 – 100% |
+| PowerMe | **gộp** | 90 | 60 | 30 | 0 | **0** | 0 | 100% | **95,9** – 100% |
+| Tắt đối soát | S2 | 30 | 0 | 0 | 0 | **30** | 0 | 0% | 0 – 11,4% |
+| Tắt đối soát | **gộp** | 90 | 60 | 0 | 0 | **30** | 0 | 66,7% | 56,4 – 75,5% |
+| SteVe | S2 | 30 | 0 | 0 | 0 | **30** | 0 | 0% | 0 – 11,4% |
+| SteVe | **gộp** | 90 | 60 | 0 | 0 | **30** | 0 | 66,7% | 56,4 – 75,5% |
+
+(S1 và S3 của hai cấu hình đối chứng: 30/30 tính tiền đúng.)
+
+**Xét theo luật đạt NFR-02** (cận dưới Wilson 95% trên 90 lần gộp ≥ 95% và W1 = 0): PowerMe **đạt** (90/90, cận dưới 95,9%, W1 = 0) và tốt hơn cả hai cấu hình đối chứng; khác biệt nằm hoàn toàn ở S2.
+
+- **Giữ phiên lại** (PowerMe): precision 30/30, recall 30/30.
+- **Sai số Wh** trên phiên đã tính tiền: PowerMe 0 Wh (60 phiên). Tắt đối soát và SteVe ở S2: thiếu trung bình **586,4 Wh** mỗi phiên (CI 95%: 456,7 – 716,1), tức 46,4% năng lượng thật. Hai cấu hình đối chứng cho `E_true`, `E_bill` và nhóm giống hệt nhau ở cả 90 lần (đã so từng dòng): cùng kế hoạch theo seed, cùng lấy `meterStop − meterStart`.
+- **Mất / trùng**: 0 ở cả ba cấu hình.
+- **Khe hở** (chỉ PowerMe ghi), sau bản sửa T132: 11 khe hở thật ở S1, bắt 11/11. Ở S2 vẫn có 12 phiên nhận bản ghi `meter_gap` lúc dừng, nhưng cả 12 đều có bản ghi đóng (`gap_closed`) sau khi mẫu phát bù tới, nên **không còn khe hở báo nhầm nào đang mở**: precision trên khe hở còn mở 11/11 (trước T132: 11/23).
+- So với lần 13/11 (đối chứng trên máy dev): số của hai cấu hình đối chứng không đổi một dòng nào. Tài nguyên máy chạy không ảnh hưởng kết quả đúng / sai của các kịch bản này.
+
+### Điều bộ số này chưa nói được
+
+- **Vẫn không hoàn toàn cùng điều kiện:** PowerMe đi qua Caddy + TLS, hai cấu hình đối chứng đi qua SSH tunnel tới cổng loopback của VM (không mở thêm cổng ra internet). Cùng VM, cùng đường mạng Việt Nam → Nhật, khác lớp mã hoá và proxy.
+- **Ba lượt không cùng ngày** (14/11 và 17/11) và mỗi cấu hình chỉ chạy một lần.
+- Trong lượt PowerMe 14/11, một tiến trình test khác chạy trên máy dev (máy sinh tải); trong hai lượt 17/11 cũng vậy. Chỉ số là đúng / sai của từng phiên, không phải thời gian, và không lần chạy nào lỗi.
+- Phiên S2 của PowerMe vẫn đi qua `reconciled` trước khi vào `review` (30/30); biến thể S2 mất hẳn hàng đợi MeterValues không chạy lại. Các mối đe doạ 2, 3, 4, 7 ở cuối file vẫn nguyên.
+- Dữ liệu của lượt PowerMe ở lại staging (operator `LOADTEST01`, trạm `RQ1-LAB-01`, trụ `RQ1-R3-P-*` đã `disabled`); dữ liệu của hai lượt đối chứng đã xoá cùng container.
 
 ## Kết quả lần chạy 13/11/2026 — thời gian thật (T130)
 

@@ -419,6 +419,24 @@ describeDb('FE-04a operator fault API (D37–D42, BR-P16)', () => {
     }
   });
 
+  it('FE-05: charge_point_id narrows the list to one charge point, still within the Operator', async () => {
+    const t = tokens['staffA'];
+    const all = (await call('GET', '/faults?status=all&page_size=100', t)).body;
+    const mine = (await call('GET', `/faults?status=all&charge_point_id=${ids['cpA']}`, t)).body;
+    expect(mine.total).toBe(all.items.filter((f: any) => f.charge_point_id === ids['cpA']).length);
+    expect(mine.total).toBeGreaterThan(0);
+    expect(mine.items.every((f: any) => f.charge_point_id === ids['cpA'])).toBe(true);
+    // Operator B's charge point id from Operator A's token: nothing, not a leak.
+    expect(
+      (await call('GET', `/faults?status=all&charge_point_id=${ids['cpB']}`, t)).body,
+    ).toMatchObject({
+      items: [],
+      total: 0,
+    });
+    for (const bad of ['abc', '0', '-1'])
+      expect((await call('GET', `/faults?charge_point_id=${bad}`, t)).status).toBe(400);
+  });
+
   it('rejects bad queries and methods', async () => {
     const t = tokens['staffA'];
     expect((await call('GET', '/faults?status=bogus', t)).status).toBe(400);

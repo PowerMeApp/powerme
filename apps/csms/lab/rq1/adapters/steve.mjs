@@ -133,30 +133,55 @@ export function parseBatchOutput(text) {
  * Mật khẩu lấy từ biến môi trường sẵn có của container (MYSQL_USER / MYSQL_PASSWORD /
  * MYSQL_DATABASE do image mariadb đặt), nên không đi qua dòng lệnh hay repo.
  */
-export function dockerMariadbQuery({ composeFile, service = 'mariadb', docker = 'docker' }) {
-  const args = [
-    'compose',
-    '-f',
-    composeFile,
-    'exec',
-    '-T',
-    service,
-    'sh',
-    '-c',
-    'exec mariadb --batch --raw -u"$MYSQL_USER" -p"$MYSQL_PASSWORD" "$MYSQL_DATABASE"',
-  ];
-  return (sql) =>
+export function dockerMariadbQuery({
+  composeFile,
+  service = 'mariadb',
+  docker = 'docker',
+  ssh = null,
+}) {
+  const inner = 'exec mariadb --batch --raw -u"$MYSQL_USER" -p"$MYSQL_PASSWORD" "$MYSQL_DATABASE"';
+  let bin = docker;
+  let args = ['compose', '-f', composeFile, 'exec', '-T', service, 'sh', '-c', inner];
+  if (ssh) {
+    // SteVe chạy trên máy khác (VM staging, T133): chạy `docker compose exec` ở đó qua ssh.
+    // `composeFile` là đường dẫn TRÊN MÁY ĐÓ. Lệnh từ xa đi qua shell của máy đó nên phần `sh -c`
+    // được bọc nháy đơn (để $MYSQL_* chỉ được mở trong container).
+    if (!/^[A-Za-z0-9_./~-]+$/.test(composeFile) || !/^[A-Za-z0-9_-]+$/.test(service)) {
+      throw new Error('đường dẫn compose / tên service từ xa chỉ được có chữ, số và . _ - / ~');
+    }
+    bin = 'ssh';
+    args = [...ssh, `docker compose -f ${composeFile} exec -T ${service} sh -c '${inner}'`];
+  }
+  const run = (sql) =>
     new Promise((resolve, reject) => {
-      const child = spawn(docker, args, { stdio: ['pipe', 'pipe', 'pipe'] });
+      const child = spawn(bin, args, { stdio: ['pipe', 'pipe', 'pipe'] });
       let out = '';
       let err = '';
       child.stdout.setEncoding('utf8').on('data', (c) => (out += c));
       child.stderr.setEncoding('utf8').on('data', (c) => (err += c));
-      child.on('error', (e) => reject(new Error(`không chạy được ${docker}: ${e.message}`)));
+      child.on('error', (e) => reject(new Error(`không chạy được ${bin}: ${e.message}`)));
       child.on('close', (code) => {
         if (code !== 0) reject(new Error(`mariadb thoát mã ${code}: ${err.trim().slice(0, 500)}`));
         else resolve(parseBatchOutput(out));
       });
       child.stdin.end(`${sql};\n`);
     });
+  if (!ssh) return run;
+  // Qua ssh: mỗi câu lệnh là một phiên ssh mới. Chạy LẦN LƯỢT để 10 trụ song song không mở cùng lúc
+  // hàng chục phiên (sshd từ chối khi vượt MaxStartups), và thử lại khi phiên rớt.
+  let chain = Promise.resolve();
+  return (sql) => {
+    const next = chain.then(async () => {
+      for (let attempt = 1; ; attempt++) {
+        try {
+          return await run(sql);
+        } catch (err) {
+          if (attempt >= 4) throw err;
+          await new Promise((r) => setTimeout(r, 1500 * attempt));
+        }
+      }
+    });
+    chain = next.catch(() => {});
+    return next;
+  };
 }

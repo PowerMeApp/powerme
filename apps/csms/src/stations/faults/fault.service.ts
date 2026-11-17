@@ -182,6 +182,7 @@ export type FaultListFilter = 'open' | 'all' | FaultStatus;
 export interface FaultListItem {
   id: number;
   eventNo: number;
+  chargePointId: number;
   serial: string;
   connectorNo: number | null;
   source: string;
@@ -848,11 +849,14 @@ export class FaultService implements OnApplicationBootstrap, OnApplicationShutdo
     /** Only this Operator's charge points (BR-P16); omitted = all (dev console). */
     operatorId?: number,
     offset = 0,
+    /** FE-05: only this charge point (screen 20 fault history). */
+    chargePointId?: number,
   ): Promise<FaultListItem[]> {
     const rows = await this.db
       .select({
         id: faultEvents.id,
         eventNo: faultEvents.eventNo,
+        chargePointId: faultEvents.chargePointId,
         serial: chargePoints.serialNumber,
         connectorNo: connectors.connectorNo,
         source: faultEvents.source,
@@ -873,7 +877,7 @@ export class FaultService implements OnApplicationBootstrap, OnApplicationShutdo
       .leftJoin(sites, eq(sites.id, chargePoints.siteId))
       .leftJoin(connectors, eq(connectors.id, faultEvents.connectorId))
       .leftJoin(remoteCommands, eq(remoteCommands.id, faultEvents.resetCommandId))
-      .where(this.listWhere(filter, operatorId))
+      .where(this.listWhere(filter, operatorId, chargePointId))
       .orderBy(
         sql`(${faultEvents.status} = 'resolved')`,
         severityRankSql(faultEvents.errorCode),
@@ -894,17 +898,21 @@ export class FaultService implements OnApplicationBootstrap, OnApplicationShutdo
   }
 
   /** Rows `list` would page through (same filter and Operator scope), for the pager's total. */
-  async count(filter: FaultListFilter, operatorId?: number): Promise<number> {
+  async count(
+    filter: FaultListFilter,
+    operatorId?: number,
+    chargePointId?: number,
+  ): Promise<number> {
     const [row] = await this.db
       .select({ n: sql<number>`count(*)::int` })
       .from(faultEvents)
       .innerJoin(chargePoints, eq(chargePoints.id, faultEvents.chargePointId))
       .leftJoin(sites, eq(sites.id, chargePoints.siteId))
-      .where(this.listWhere(filter, operatorId));
+      .where(this.listWhere(filter, operatorId, chargePointId));
     return row?.n ?? 0;
   }
 
-  private listWhere(filter: FaultListFilter, operatorId?: number) {
+  private listWhere(filter: FaultListFilter, operatorId?: number, chargePointId?: number) {
     return and(
       filter === 'open'
         ? ne(faultEvents.status, 'resolved')
@@ -912,6 +920,7 @@ export class FaultService implements OnApplicationBootstrap, OnApplicationShutdo
           ? undefined
           : eq(faultEvents.status, filter),
       operatorId === undefined ? undefined : eq(sites.operatorId, operatorId),
+      chargePointId === undefined ? undefined : eq(faultEvents.chargePointId, chargePointId),
     );
   }
 

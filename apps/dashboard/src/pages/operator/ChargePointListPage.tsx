@@ -5,23 +5,18 @@
  * online / offline and lifecycle; decommissioned is hidden unless chosen (D24). The site filter
  * waits for GET /operator/v1/sites (Ân). Polled every 5 s (D5); the map is FE-03c (D23).
  */
-import { useEffect, useState } from 'react';
-import type { ChargePointLifecycle, ConnectorLive, OperatorChargePoint } from '@powerme/shared';
+import { useState } from 'react';
+import { Link } from 'react-router';
+import type { ChargePointLifecycle, OperatorChargePoint } from '@powerme/shared';
 import {
   CHARGE_POINT_PAGE_SIZE,
   errorMessage,
   useOperatorChargePointsQuery,
 } from '../../core/api/api';
+import { ago, connectorTone, LIFECYCLE, useNow } from '../../features/chargePoints/format';
 
 export const LIST_POLL_MS = 5000;
 
-const LIFECYCLE: Record<ChargePointLifecycle, string> = {
-  registered: 'Đã đăng ký',
-  awaiting_connection: 'Chờ kết nối',
-  in_service: 'Đang hoạt động',
-  disabled: 'Tạm ngừng',
-  decommissioned: 'Đã gỡ',
-};
 const ONLINE_FILTERS = [
   ['all', 'Tất cả'],
   ['online', 'Online'],
@@ -29,39 +24,14 @@ const ONLINE_FILTERS = [
 ] as const;
 type OnlineFilter = (typeof ONLINE_FILTERS)[number][0];
 
-/** Pill tone for a raw OCPP status. */
-function tone(c: ConnectorLive): string {
-  if (c.status_quality === 'offline') return 'muted';
-  if (c.status === 'Faulted') return 'critical';
-  if (c.status === 'Unavailable' || c.status === 'Reserved') return 'major';
-  return '';
-}
-
-/** "12 s", "5 phút", "3 giờ" ago — D22 "last seen". */
-export function ago(iso: string | null, now = Date.now()): string {
-  if (!iso) return 'chưa từng kết nối';
-  const s = Math.max(0, Math.round((now - Date.parse(iso)) / 1000));
-  if (s < 60) return `${s} s trước`;
-  if (s < 3600) return `${Math.floor(s / 60)} phút trước`;
-  if (s < 86400) return `${Math.floor(s / 3600)} giờ trước`;
-  return `${Math.floor(s / 86400)} ngày trước`;
-}
-
-function useNow(ms = 1000) {
-  const [now, setNow] = useState(Date.now());
-  useEffect(() => {
-    const t = setInterval(() => setNow(Date.now()), ms);
-    return () => clearInterval(t);
-  }, [ms]);
-  return now;
-}
-
 function Row({ cp, now }: { cp: OperatorChargePoint; now: number }) {
   const offline = cp.connectors.some((c) => c.status_quality === 'offline') || !cp.is_online;
   return (
     <tr aria-label={`Charge Point ${cp.display_code ?? cp.serial_number}`}>
       <td>
-        <div className="cell-title">{cp.display_code ?? cp.serial_number}</div>
+        <Link className="cell-title" to={`/operator/charge-points/${cp.id}`}>
+          {cp.display_code ?? cp.serial_number}
+        </Link>
         <div className="muted small">
           {cp.serial_number}
           {cp.model ? ` · ${cp.model}` : ''}
@@ -86,7 +56,7 @@ function Row({ cp, now }: { cp: OperatorChargePoint; now: number }) {
             {cp.connectors.map((c) => (
               <li key={c.connector_id}>
                 <span className="muted small">Connector {c.connector_no}</span>{' '}
-                <span className={`pill ${tone(c)}`}>
+                <span className={`pill ${connectorTone(c)}`}>
                   {c.status_quality === 'offline' ? 'Offline' : c.status}
                   {c.status === 'Faulted' && c.error_code ? ` · ${c.error_code}` : ''}
                 </span>

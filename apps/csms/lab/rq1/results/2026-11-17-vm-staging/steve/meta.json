@@ -1,0 +1,37 @@
+{
+  "config": "steve",
+  "seed": 20261112,
+  "batch": "R5",
+  "scenarios": ["s1", "s2", "s3"],
+  "runsPerScenario": 30,
+  "concurrency": 10,
+  "staggerS": 5,
+  "timing": {
+    "intervalS": 10,
+    "graceS": 120,
+    "offlineExtraMaxS": 60,
+    "retransmitGapS": 1,
+    "gapFactor": 3,
+    "gapThresholdS": 30
+  },
+  "target": {
+    "kind": "steve",
+    "endpoint": "ws://127.0.0.1:8180/steve/websocket/CentralSystemService",
+    "composeFile": "~/powerme/infra/lab/steve/docker-compose.yml",
+    "schema": "evse",
+    "remote": true,
+    "note": "VM staging (Azure 2 vCPU/4 GB, Japan East): SteVe 3.14.1 + MariaDB 10.11.16 trong Docker tren cung VM voi lan do PowerMe; tru gia chay tu may dev o Viet Nam qua SSH tunnel (khong qua Caddy/TLS); CSMS staging review-22 van chay khong tai, demo-station tam dung, container tat doi soat da go"
+  },
+  "rows": 90,
+  "startedAt": "2026-11-17T05:03:09.446Z",
+  "finishedAt": "2026-11-17T05:36:08.869Z",
+  "wallClockS": 1979.4,
+  "git": {
+    "commit": "1b4de6d3538810fb734b51ed306313b7df33b293",
+    "branch": "feat/t133-doi-chung-tren-vm-staging",
+    "dirty": false
+  },
+  "node": "v24.18.1",
+  "platform": "win32-x64",
+  "tolWh": 1
+}

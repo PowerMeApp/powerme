@@ -1,0 +1,63 @@
+# Cấu hình đối chứng "PowerMe TẮT đối soát" của RQ1, chạy TRÊN VM STAGING (T133).
+#
+# Vì sao tồn tại: lần đo 13/11 chạy PowerMe trên VM staging nhưng hai cấu hình đối chứng trên máy
+# dev, nên không cùng tài nguyên. File này dựng một CSMS thứ hai trên cùng VM, cùng ảnh với staging,
+# chỉ khác RECONCILIATION_ENABLED=false, với Postgres RIÊNG (không đụng DB staging: tài liệu
+# DEV-ACCESS cấm chạy CSMS thứ hai trỏ vào DB staging).
+#
+# Không mở gì ra internet: OCPP và Postgres chỉ publish ra loopback của VM, trụ giả trên máy dev nối
+# qua SSH tunnel. SteVe dùng infra/lab/steve/docker-compose.yml (cũng chỉ loopback).
+#
+# Chạy trên VM, trong thư mục này (cách đầy đủ: README.md):
+#   ./up.sh        # sinh rq1.env (mật khẩu DB), kéo ảnh, migrate, khởi động
+#   ./down.sh      # dừng và XOÁ dữ liệu thí nghiệm (volume)
+# REGISTRY và TAG lấy từ infra/staging/.env (cùng ảnh đang chạy trên staging).
+name: powerme-rq1-off
+
+services:
+  csms-off:
+    image: ${REGISTRY:?REGISTRY chưa đặt (đọc từ infra/staging/.env)}/powerme-csms:${TAG:?TAG chưa đặt}
+    restart: 'no'
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgres://rq1:${RQ1_OFF_DB_PASSWORD:?RQ1_OFF_DB_PASSWORD chưa đặt (up.sh sinh)}@postgres-off:5432/powerme_rq1_off
+      OCPP_PORT: '9000'
+      # Chỉ khác staging ở dòng này.
+      RECONCILIATION_ENABLED: 'false'
+      # Console và Driver API không dùng cho thí nghiệm.
+      CONSOLE_ENABLED: 'false'
+      # Như staging: trụ phải có credential (harness --hidden-site băm CP_PASSWORD cho từng trụ).
+      ALLOW_LEGACY_NO_CREDENTIAL: 'false'
+      # Trụ nối thẳng qua SSH tunnel, không qua Caddy.
+      OCPP_TRUST_PROXY: 'false'
+      # Tham số thời gian = mặc định sản phẩm, ghi tường minh để đối chiếu với staging.
+      OFFLINE_GRACE_S: '120'
+      METER_VALUE_SAMPLE_INTERVAL_S: '10'
+      RECONCILE_GAP_FACTOR: '3'
+      RECONCILE_ENERGY_TOLERANCE_WH: '1'
+      REPLAY_SKEW_THRESHOLD_S: '5'
+    ports:
+      - '127.0.0.1:9100:9000' # OCPP-J, chỉ loopback của VM
+    depends_on:
+      postgres-off:
+        condition: service_healthy
+
+  postgres-off:
+    image: postgres:16.4-alpine # cùng phiên bản với staging
+    restart: 'no'
+    environment:
+      POSTGRES_USER: rq1
+      POSTGRES_PASSWORD: ${RQ1_OFF_DB_PASSWORD:?RQ1_OFF_DB_PASSWORD chưa đặt (up.sh sinh)}
+      POSTGRES_DB: powerme_rq1_off
+    ports:
+      - '127.0.0.1:5434:5432' # harness nạp định danh và đọc kết quả qua SSH tunnel
+    volumes:
+      - rq1-off-pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U rq1 -d powerme_rq1_off']
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+volumes:
+  rq1-off-pg:
