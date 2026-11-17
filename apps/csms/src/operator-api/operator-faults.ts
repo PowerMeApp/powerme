@@ -1,7 +1,7 @@
 /**
  * Operator fault API (FE-04a, UC-OPS-03, screen 21; D37–D42) behind RolesGuard `operator_staff`:
  *   GET  /api/operator/v1/faults?status=open|all|raised|acknowledged|resetting|resolved
- *        [&page=1..][&page_size=1..100]   → { items, total, page, page_size }   (contract §2.4)
+ *        [&page=1..][&page_size=1..100][&charge_point_id=]   → { items, total, page, page_size }
  *   POST /api/operator/v1/faults/{id}/acknowledge | close     (no body)
  *   POST /api/operator/v1/faults/{id}/reset                   { type: Soft|Hard, force?: boolean }
  * Every call is scoped to the token's Operator (a FaultEvent of another Operator is 404) and records
@@ -34,7 +34,14 @@ const STATUSES: readonly string[] = [
 ] satisfies FaultListFilter[];
 
 export type FaultRoute =
-  | { kind: 'list'; status: FaultListFilter; page: number; pageSize: number }
+  | {
+      kind: 'list';
+      status: FaultListFilter;
+      page: number;
+      pageSize: number;
+      /** FE-05: only this charge point (still scoped to the Operator). */
+      chargePointId?: number;
+    }
   | { kind: 'action'; id: number; action: FaultAction };
 
 /** Matches `rest` (path after /api/operator/v1); null if it is not a fault route. */
@@ -47,7 +54,7 @@ export function matchFaultRoute(rest: string, query: URLSearchParams): FaultRout
   }
   const keys = [...query.keys()];
   if (
-    keys.some((k) => k !== 'status' && k !== 'page' && k !== 'page_size') ||
+    keys.some((k) => !['status', 'page', 'page_size', 'charge_point_id'].includes(k)) ||
     new Set(keys).size !== keys.length
   )
     throw new FaultActionError(400, 'invalid_input', 'query');
@@ -64,7 +71,16 @@ export function matchFaultRoute(rest: string, query: URLSearchParams): FaultRout
       'invalid_input',
       `status=${STATUSES.join('|')}, page=1..${MAX_PAGE}, page_size=1..${MAX_PAGE_SIZE}`,
     );
-  return { kind: 'list', status: status as FaultListFilter, page, pageSize };
+  const cp = query.get('charge_point_id');
+  if (cp !== null && !/^[1-9][0-9]{0,14}$/.test(cp))
+    throw new FaultActionError(400, 'invalid_input', 'charge_point_id');
+  return {
+    kind: 'list',
+    status: status as FaultListFilter,
+    page,
+    pageSize,
+    ...(cp === null ? {} : { chargePointId: Number(cp) }),
+  };
 }
 
 /** Plain decimal, no sign or leading zero; NaN otherwise. */
@@ -86,8 +102,14 @@ export async function runFaultRoute(
   };
   if (route.kind === 'list') {
     const [rows, total] = await Promise.all([
-      actions.list(route.status, route.pageSize, actor, (route.page - 1) * route.pageSize),
-      actions.count(route.status, actor),
+      actions.list(
+        route.status,
+        route.pageSize,
+        actor,
+        (route.page - 1) * route.pageSize,
+        route.chargePointId,
+      ),
+      actions.count(route.status, actor, route.chargePointId),
     ]);
     return {
       items: rows.map((f) => toDto(f, actions)),
@@ -132,13 +154,15 @@ function ids(r: { id: number; status: string }) {
   return { id: String(r.id), status: r.status };
 }
 
-function toDto(f: FaultListItem, actions: FaultActions) {
+/** The `OperatorFault` wire shape; also used by the charge point detail (FE-05). */
+export function toDto(f: FaultListItem, actions: FaultActions) {
   const deadline =
     f.status === 'resetting' && f.resetRequestedAt
       ? new Date(f.resetRequestedAt.getTime() + actions.resetTimeoutS * 1000).toISOString()
       : null;
   return {
     id: String(f.id),
+    charge_point_id: String(f.chargePointId),
     event_no: f.eventNo,
     kind:
       f.source === 'driver_report'

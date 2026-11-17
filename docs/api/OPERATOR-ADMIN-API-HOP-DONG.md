@@ -338,7 +338,7 @@ tách theo bề mặt — refresh token không mang `role`, role đọc lại t�
 |---|---|---|---|---|
 | `GET /operator/v1/summary` | operator_staff | UC-OPS-02/03, Table 5 #17 | **done** FE-03 · `operator-monitoring.ts` · Nghĩa | số trụ theo trạng thái, súng theo nhóm BR-P38, sự cố mở theo mức, hàng việc review / unattributed (cùng luật `listPending`) / T72 (`driver_charge_intents.state='unknown'` chưa gắn phiên) |
 | `GET /operator/v1/charge-points` | operator_staff | UC-OPS-02, FR-10, BR-P10, BR-P38/39 | **done** FE-03 · `operator-monitoring.ts` · Nghĩa | lọc `site_id`, `lifecycle` (mặc định ẩn `decommissioned`), `online`; page/page_size; trạng thái OCPP nguyên văn từng súng + `status_quality` (offline 900 s / stale 2 × heartbeat, cùng ngưỡng Driver API) |
-| `GET /operator/v1/charge-points/{id}` | operator_staff | UC-OPS-02/04, Table 5 #20 | planned · Nghĩa | súng, sự cố mở, 20 lệnh gần nhất |
+| `GET /operator/v1/charge-points/{id}` | operator_staff | UC-OPS-02/04, Table 5 #20 | **done** FE-05 · `operator-monitoring.ts` · Nghĩa | súng, sự cố mở (cùng DTO màn 21, có `allowed_actions`), 20 lệnh gần nhất; trụ của Operator khác hoặc không có → 404; trụ `decommissioned` vẫn xem được theo id |
 | `GET /operator/v1/charge-points/{id}/metrics` | operator_staff | UC-OPS-02, FR-10, BR-P43 | planned · Trí | `window=7d\|30d`; từ `connector_status_events` |
 | `POST /operator/v1/charge-points/{id}/commands` | operator_staff | UC-OPS-04, FR-11, BR-P01/P06/P07 | **console** (chỉ remote_stop) · Trí | `action` ∈ `remote_start`, `remote_stop`, `reset`; 202; Idempotency-Key |
 | `GET /operator/v1/commands/{id}` | operator_staff | UC-OPS-04 | planned · Trí | đọc `remote_commands` |
@@ -348,7 +348,7 @@ tách theo bề mặt — refresh token không mang `role`, role đọc lại t�
 
 | Endpoint | Role | UC / FR / BR | Trạng thái · người làm | Ghi chú |
 |---|---|---|---|---|
-| `GET /operator/v1/faults` | operator_staff | UC-OPS-03, FR-10, STM-6 | **done** FE-04 · `FaultActions` · Nghĩa | `status=open\|all\|raised\|acknowledged\|resetting\|resolved`, page/page_size → `{items, total, page, page_size}`; còn thiếu lọc `charge_point_id` (FE-05) |
+| `GET /operator/v1/faults` | operator_staff | UC-OPS-03, FR-10, STM-6 | **done** FE-04 · `FaultActions` · Nghĩa | `status=open\|all\|raised\|acknowledged\|resetting\|resolved`, page/page_size → `{items, total, page, page_size}`; lọc `charge_point_id` (FE-05, vẫn giới hạn theo Operator) |
 | `POST /operator/v1/faults/{id}/acknowledge` | operator_staff | STM-6 t2 | **console** · Nghĩa | console ghi `acknowledged_by = null`; route mới ghi người gọi |
 | `POST /operator/v1/faults/{id}/reset` | operator_staff | STM-6 t4, BR-P07, WF-04 #12 | **console** `resetFault` · Nghĩa | đồng bộ; `type`/`force` chuyển từ query vào body; Idempotency-Key |
 | `POST /operator/v1/faults/{id}/close` | operator_staff | STM-6 t7, BR-P42 | **console** · Nghĩa | |
@@ -732,7 +732,7 @@ trạng thái (2xx/4xx nghiệp vụ khác với 401/403). Ba điều kiện c�
 | 5 | `GET /api/operator/v1/sites` | 401 | 403 | ✓ | 403 | planned |
 | 6 | `GET /api/operator/v1/charge-points` | 401 | 403 | ✓ | 403 | implemented (FE-03) |
 | 7 | `POST /api/operator/v1/charge-points` | 401 | 403 | ✓ | 403 | service |
-| 8 | `GET /api/operator/v1/charge-points/{chargePointId}` | 401 | 403 | ✓ | 403 | planned |
+| 8 | `GET /api/operator/v1/charge-points/{chargePointId}` | 401 | 403 | ✓ | 403 | implemented (FE-05) |
 | 9 | `GET /api/operator/v1/charge-points/{chargePointId}/metrics` | 401 | 403 | ✓ | 403 | planned |
 | 10 | `POST /api/operator/v1/charge-points/{chargePointId}/disable` | 401 | 403 | ✓ | 403 | planned |
 | 11 | `POST /api/operator/v1/charge-points/{chargePointId}/enable` | 401 | 403 | ✓ | 403 | planned |

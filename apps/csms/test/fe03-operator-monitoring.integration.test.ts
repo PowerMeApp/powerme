@@ -14,6 +14,7 @@ import { ConsoleServer } from '../src/console/console.server.js';
 import { createDb, type Db } from '../src/db/db.module.js';
 import { ConnectionRegistry } from '../src/ocpp-gateway/connection-registry.js';
 import { hashChargePointPassword } from '../src/stations/charge-point-credential.js';
+import { FaultService } from '../src/stations/faults/fault.service.js';
 import { resetAndMigrate } from './helpers/apply-migrations.js';
 
 const DATABASE_URL = process.env['DATABASE_URL'];
@@ -150,7 +151,7 @@ describeDb('FE-03 operator monitoring (screens 17, 18; BR-P16, D19–D25)', () =
     server = new ConsoleServer(
       config,
       new ConsoleQueries(db, config, registry),
-      new ConsoleCommands(db, registry),
+      new ConsoleCommands(db, registry, new FaultService(db, config)),
       db,
     );
     await server.start();
@@ -269,6 +270,75 @@ describeDb('FE-03 operator monitoring (screens 17, 18; BR-P16, D19–D25)', () =
       sessions_to_review: 0,
       unattributed_sessions: 0,
     });
+  });
+
+  it('FE-05: detail adds capabilities, the open faults of this charge point and the 20 latest commands', async () => {
+    for (let i = 0; i < 22; i++)
+      await q(
+        `INSERT INTO remote_commands(charge_point_id,connector_no,action,status,requested_at,error)
+         VALUES($1,NULL,'Reset',$2,now()-($3::int*interval '1 minute'),$4)`,
+        [ids['A-STALE'], i === 0 ? 'rejected' : 'accepted', i, i === 0 ? 'Rejected' : null],
+      );
+    await q(
+      "UPDATE charge_points SET firmware_version='1.4.2',rated_power_kw=120,reports_soc=true WHERE id=$1",
+      [ids['A-STALE']],
+    );
+    const d = await get(`/charge-points/${ids['A-STALE']}`, tokens['a']);
+    expect(d.status).toBe(200);
+    expect(d.body).toMatchObject({
+      id: ids['A-STALE'],
+      serial_number: 'A-STALE',
+      firmware_version: '1.4.2',
+      rated_power_kw: 120,
+      reports_soc: true,
+      supports_reservation: false,
+      site: { site_code: 'FE03-A' },
+    });
+    expect(d.body.connectors.map((c: any) => [c.status, c.error_code])).toEqual([
+      ['Faulted', 'GroundFailure'],
+      ['Finishing', null],
+    ]);
+    // Only this charge point's faults, same DTO as screen 21 (actions included).
+    expect(d.body.open_faults).toHaveLength(1);
+    expect(d.body.open_faults[0]).toMatchObject({
+      charge_point_id: ids['A-STALE'],
+      kind: 'faulted',
+      error_code: 'GroundFailure',
+      allowed_actions: ['acknowledge'],
+    });
+    expect(d.body.recent_commands).toHaveLength(20);
+    expect(d.body.recent_commands[0]).toMatchObject({
+      charge_point_id: ids['A-STALE'],
+      action: 'Reset',
+      connector_no: null,
+      status: 'rejected',
+      error: 'Rejected',
+      sent_at: null,
+    });
+    const times = d.body.recent_commands.map((c: any) => Date.parse(c.requested_at));
+    expect([...times].sort((x, y) => y - x)).toEqual(times);
+    // The whole-charge-point Offline fault shows on that charge point's detail.
+    const off = (await get(`/charge-points/${ids['A-OFF']}`, tokens['a'])).body;
+    expect(off.open_faults.map((f: any) => f.kind)).toEqual(['offline']);
+    expect(off.recent_commands).toEqual([]);
+    // A decommissioned charge point is still reachable by id; the list stays without extras.
+    expect((await get(`/charge-points/${ids['A-OLD']}`, tokens['a'])).body.lifecycle).toBe(
+      'decommissioned',
+    );
+    const listed = (await get('/charge-points', tokens['a'])).body.items[0];
+    expect(listed).not.toHaveProperty('firmware_version');
+    expect(listed).not.toHaveProperty('extra');
+  });
+
+  it('FE-05: another Operator’s or an unknown charge point is 404; no query on the detail', async () => {
+    for (const path of [
+      `/charge-points/${ids['B-FRESH']}`,
+      '/charge-points/999999',
+      '/charge-points/abc',
+    ])
+      expect([path, (await get(path, tokens['a'])).status]).toEqual([path, 404]);
+    expect((await get(`/charge-points/${ids['A-FRESH']}?x=1`, tokens['a'])).status).toBe(400);
+    expect((await get(`/charge-points/${ids['A-FRESH']}`)).status).toBe(401);
   });
 
   it('rejects bad queries and methods', async () => {

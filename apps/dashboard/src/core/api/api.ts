@@ -15,6 +15,7 @@ import type {
   ApiErrorBody,
   ChargePointLifecycle,
   ChargePointPage,
+  OperatorChargePointDetail,
   OperatorSummary,
   DashboardMe,
   FaultActionResponse,
@@ -133,9 +134,13 @@ export const api = createApi({
     adminMe: b.query<DashboardMe, void>({ query: () => 'admin/v1/me' }),
     // Screen 21 (FE-04b, UC-OPS-03): FaultEvents of the signed-in staff's Operator.
     // One page of the server's order (D39); `page` is 1-based.
-    operatorFaults: b.query<OperatorFaultList, { status: FaultListStatus; page: number }>({
-      query: ({ status, page }) =>
-        `operator/v1/faults?status=${status}&page=${page}&page_size=${FAULT_PAGE_SIZE}`,
+    operatorFaults: b.query<
+      OperatorFaultList,
+      { status: FaultListStatus; page: number; chargePointId?: string }
+    >({
+      query: ({ status, page, chargePointId }) =>
+        `operator/v1/faults?status=${status}&page=${page}&page_size=${FAULT_PAGE_SIZE}` +
+        (chargePointId ? `&charge_point_id=${chargePointId}` : ''),
       providesTags: ['Fault'],
     }),
     // Fault actions also change the open-fault tiles of screen 17.
@@ -167,6 +172,11 @@ export const api = createApi({
       },
       providesTags: ['ChargePoint'],
     }),
+    // Screen 20 (FE-05): one charge point, its open faults and latest commands.
+    operatorChargePoint: b.query<OperatorChargePointDetail, string>({
+      query: (id) => `operator/v1/charge-points/${id}`,
+      providesTags: ['ChargePoint', 'Fault'],
+    }),
   }),
 });
 
@@ -180,6 +190,7 @@ export const {
   useCloseFaultMutation,
   useOperatorSummaryQuery,
   useOperatorChargePointsQuery,
+  useOperatorChargePointQuery,
 } = api;
 
 /** Vietnamese text for any error of this API. */

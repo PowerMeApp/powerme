@@ -89,13 +89,19 @@ export class FaultActions {
   }
 
   /** With an actor: only FaultEvents of that staff's Operator (BR-P11, BR-P16, D3). */
-  async list(filter: FaultListFilter, limit: number, actor: FaultActor | null = null, offset = 0) {
-    return this.requireFaults().list(filter, limit, actor?.operatorId, offset);
+  async list(
+    filter: FaultListFilter,
+    limit: number,
+    actor: FaultActor | null = null,
+    offset = 0,
+    chargePointId?: number,
+  ) {
+    return this.requireFaults().list(filter, limit, actor?.operatorId, offset, chargePointId);
   }
 
   /** Total rows behind `list` for the same filter and actor (screen 21 pager). */
-  async count(filter: FaultListFilter, actor: FaultActor | null = null) {
-    return this.requireFaults().count(filter, actor?.operatorId);
+  async count(filter: FaultListFilter, actor: FaultActor | null = null, chargePointId?: number) {
+    return this.requireFaults().count(filter, actor?.operatorId, chargePointId);
   }
 
   /** t2. */

@@ -4,9 +4,10 @@
  * Buttons come from the server's `allowed_actions` (D38); the server still decides, and a refused
  * action shows its message on the alert. Reset: Soft by default, Hard selectable (D40); on 409
  * `sessions_active` a second confirmation lists the sessions and resends with `force`.
- * Ported from the FE-01 reference; the Charge Point Detail link arrives with FE-05 (D41).
+ * Ported from the FE-01 reference; the serial links to Charge Point Detail (FE-05, D41).
  */
 import { useEffect, useState } from 'react';
+import { Link } from 'react-router';
 import type { FaultAction, OperatorFault, ResetType } from '@powerme/shared';
 import { ConfirmDialog } from '../../components/ConfirmDialog';
 import {
@@ -119,7 +120,9 @@ export function FaultRow({ fault }: { fault: OperatorFault }) {
         )}
       </td>
       <td>
-        <div className="nowrap">{fault.charge_point_serial}</div>
+        <Link className="nowrap" to={`/operator/charge-points/${fault.charge_point_id}`}>
+          {fault.charge_point_serial}
+        </Link>
         {fault.station_name && <div className="muted small">{fault.station_name}</div>}
         {!fault.charge_point_online && <span className="pill muted">Charge Point offline</span>}
       </td>

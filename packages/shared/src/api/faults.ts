@@ -17,6 +17,8 @@ export interface OperatorFault {
   id: string;
   event_no: number;
   kind: FaultKind;
+  /** FE-05: links to Charge Point Detail (screen 20). */
+  charge_point_id: string;
   charge_point_serial: string;
   /** Charging Station name; null when the charge point has no site yet. */
   station_name: string | null;
@@ -41,6 +43,8 @@ export interface OperatorFault {
 /** GET /api/operator/v1/faults query. Server order (D39) is kept across pages. */
 export interface OperatorFaultQuery {
   status?: FaultListStatus;
+  /** FE-05: only this charge point. */
+  charge_point_id?: string;
   /** From 1 (contract §2.4). */
   page?: number;
   /** 1..100, default 50. */
