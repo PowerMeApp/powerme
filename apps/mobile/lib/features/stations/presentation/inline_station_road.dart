@@ -94,78 +94,83 @@ class _InlineStationRoadState extends ConsumerState<InlineStationRoad> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         if (failed) FailureNotice(roadError(roads.error, copy)),
-        TextButton.icon(
-          key: ValueKey('station-road-${station.id}'),
-          icon: const Icon(Icons.route_outlined),
-          label: Text(
-            input == null
-                ? copy.text(
-                    'Chọn điểm đi để xem đường',
-                    'Choose a starting point',
-                  )
-                : copy.text(
-                    'Xem quãng đường và thời gian',
-                    'See road distance and time',
-                  ),
-          ),
-          onPressed: roads.active != null
-              ? null
-              : () async {
-                  if (input == null) {
-                    showModalBottomSheet<void>(
-                      context: context,
-                      useSafeArea: true,
-                      isScrollControlled: true,
-                      builder: (context) => SingleChildScrollView(
-                        padding: EdgeInsets.fromLTRB(
-                          20,
-                          20,
-                          20,
-                          20 + MediaQuery.viewInsetsOf(context).bottom,
-                        ),
-                        child: const DiscoveryOriginPanel(
-                          closeAfterSelection: true,
-                        ),
-                      ),
-                    );
-                  } else {
-                    final confirmed = await showDialog<bool>(
-                      context: context,
-                      builder: (dialogContext) => AlertDialog(
-                        scrollable: true,
-                        title: Text(
-                          copy.text('Xem đường đến trạm', 'Route to station'),
-                        ),
-                        content: Text(roadDisclosure(copy)),
-                        actions: [
-                          TextButton(
-                            onPressed: () => Navigator.pop(dialogContext),
-                            child: Text(copy.text('Hủy', 'Cancel')),
+        if (!failed || canRetryDiscovery(roads.error))
+          TextButton.icon(
+            key: ValueKey('station-road-${station.id}'),
+            icon: const Icon(Icons.route_outlined),
+            label: Text(
+              input == null
+                  ? copy.text(
+                      'Chọn điểm đi để xem đường',
+                      'Choose a starting point',
+                    )
+                  : copy.text(
+                      'Xem quãng đường và thời gian',
+                      'See road distance and time',
+                    ),
+            ),
+            onPressed: roads.active != null
+                ? null
+                : () async {
+                    if (input == null) {
+                      showModalBottomSheet<void>(
+                        context: context,
+                        useSafeArea: true,
+                        isScrollControlled: true,
+                        builder: (context) => SingleChildScrollView(
+                          padding: EdgeInsets.fromLTRB(
+                            20,
+                            20,
+                            20,
+                            20 + MediaQuery.viewInsetsOf(context).bottom,
                           ),
-                          FilledButton(
-                            key: const Key('confirm-inline-road'),
-                            onPressed: () => Navigator.pop(dialogContext, true),
-                            child: Text(copy.text('Xem đường', 'View route')),
+                          child: const DiscoveryOriginPanel(
+                            closeAfterSelection: true,
                           ),
-                        ],
-                      ),
-                    );
-                    if (!mounted ||
-                        confirmed != true ||
-                        input !=
-                            ref.read(selectedRoadInputProvider(station.id))) {
-                      return;
+                        ),
+                      );
+                    } else {
+                      final confirmed = await showDialog<bool>(
+                        context: context,
+                        builder: (dialogContext) => AlertDialog(
+                          scrollable: true,
+                          title: Text(
+                            copy.text('Xem đường đến trạm', 'Route to station'),
+                          ),
+                          content: Text(roadDisclosure(copy)),
+                          actions: [
+                            TextButton(
+                              onPressed: () => Navigator.pop(dialogContext),
+                              child: Text(copy.text('Hủy', 'Cancel')),
+                            ),
+                            FilledButton(
+                              key: const Key('confirm-inline-road'),
+                              onPressed: () =>
+                                  Navigator.pop(dialogContext, true),
+                              child: Text(copy.text('Xem đường', 'View route')),
+                            ),
+                          ],
+                        ),
+                      );
+                      if (!mounted ||
+                          confirmed != true ||
+                          input !=
+                              ref.read(selectedRoadInputProvider(station.id))) {
+                        return;
+                      }
+                      final controller = ref.read(
+                        discoveryRoadsProvider.notifier,
+                      );
+                      _controller = controller;
+                      _requested = input;
+                      await controller.request(
+                        input,
+                        consentToVietmap: confirmed == true,
+                      );
+                      _requested = null;
                     }
-                    final controller = ref.read(
-                      discoveryRoadsProvider.notifier,
-                    );
-                    _controller = controller;
-                    _requested = input;
-                    await controller.request(input);
-                    _requested = null;
-                  }
-                },
-        ),
+                  },
+          ),
       ],
     );
   }

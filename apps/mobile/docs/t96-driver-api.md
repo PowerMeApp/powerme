@@ -25,11 +25,14 @@ Set-Location E:/Project/PowerMe/powerme/apps/mobile
 if (!(Test-Path config/api.local.json)) {
     Copy-Item config/api.example.json config/api.local.json
 }
+if (!(Test-Path config/vietmap.local.json)) {
+    Copy-Item config/vietmap.example.json config/vietmap.local.json
+}
 & E:/MobileDev/Flutter/bin/flutter.bat run -t lib/main.dart
 ```
 
 - HTTP debug chỉ chấp nhận `localhost`, `127.0.0.1` và `10.0.2.2`. Thiết bị Android thật cần URL HTTPS mà thiết bị truy cập được. Profile/release yêu cầu HTTPS và xác minh TLS mặc định.
-- Thiếu file, URL rỗng hoặc cấu hình sai sẽ hiện lỗi kết nối. Stop/Run lại sau khi sửa file. File local được Git bỏ qua nhưng vẫn đóng gói vào app. Chỉ để URL và phiên bản consent công khai trong đó.
+- Build cần đủ hai file local. Để trống `tileApiKey` nếu chỉ dùng danh sách trạm. URL rỗng hoặc cấu hình API sai sẽ hiện lỗi kết nối. Stop/Run lại sau khi sửa file. File local được Git bỏ qua nhưng vẫn đóng gói vào app. Chỉ để URL và phiên bản consent công khai trong đó.
 - Widget test và công cụ chụp ảnh dùng harness trong `test/support` cho các màn chưa nối API.
 
 ## 3. Kiểm thử thủ công
@@ -46,8 +49,8 @@ if (!(Test-Path config/api.local.json)) {
 1. Giữ [tunnel hiện tại](api-tunnel.md) và `config/api.local.json` hiện có. Chọn Android Emulator rồi chạy `lib/main.dart` với cấu hình đang dùng.
 2. Đăng nhập bằng tài khoản Driver test chưa có xe hoặc tạo tài khoản test nếu cấu hình consent hiện tại đã mở đăng ký. Xác nhận **Tài khoản → Xe của tôi** báo danh sách trống.
 3. Bấm **Thêm xe**, chọn một mẫu từ danh mục, nhập biển số test chưa dùng và bấm **Lưu xe**. Kiểm tra biển số theo dạng server trả, chuẩn cổng và **Xe mặc định** trên xe đầu tiên.
-4. Thêm xe thứ hai, bấm **Đặt mặc định** trên xe đó, rồi **Gỡ xe** và xác nhận. Kiểm tra xe đầu tiên trở lại mặc định. Gỡ xe cuối và xác nhận danh sách trống. Sau đó bấm **Tải lại hồ sơ** để đối chiếu.
-5. Nếu mất kết nối khi lưu/gỡ, kết nối lại và dùng **Tải lại hồ sơ** để kiểm tra kết quả trước khi thử lại. Nếu nhập lại biển đang đăng ký, UI hiện lỗi biển đã được đăng ký và giữ form.
+4. Thêm xe thứ hai, để app mở hơn 900 giây, rồi bấm **Đặt mặc định**. Kiểm tra thao tác thành công ngay lần bấm đầu nếu phiên làm mới còn hiệu lực. Gỡ xe mặc định và xác nhận xe còn lại trở thành mặc định. Gỡ xe cuối rồi tải lại hồ sơ để kiểm tra danh sách trống.
+5. Nếu mất kết nối khi thêm xe và kết quả chưa rõ, kết nối lại và chọn **Tải lại hồ sơ**. Kiểm tra app vẫn ở form và giữ biển số, mẫu xe, lựa chọn mặc định và bộ lọc. Đối chiếu danh sách xe trước khi thử lưu lại. Nếu nhận lỗi biển đã đăng ký, kiểm tra lỗi chỉ hiện trên form vừa gửi.
 
 ## 5. Kiểm thử tìm trạm và gợi ý trên emulator
 

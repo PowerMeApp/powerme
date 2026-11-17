@@ -188,36 +188,167 @@ void main() {
     ]);
   });
 
-  test('POST 401 repairs credentials through /me and never replays', () async {
-    var reads = 0;
+  for (final (method, path, status) in [
+    ('POST', 'vehicles', 201),
+    ('PATCH', 'vehicles/9', 200),
+    ('DELETE', 'vehicles/9', 204),
+  ]) {
+    test('$method replays once after an authenticated 401 refresh', () async {
+      final fixture = DriverApiFixture((request) async {
+        if (request.path == 'auth/login') return reply(200, tokens(accessA));
+        if (request.path == 'auth/refresh') {
+          return reply(200, tokens(accessB, login: false));
+        }
+        final bearer = request.headers['Authorization'];
+        if (request.path == 'me') return reply(200, account());
+        expect((request.method, request.path), (method, path));
+        if (bearer == 'Bearer $accessA') {
+          return reply(401, {'error': 'unauthorized'});
+        }
+        expect(bearer, 'Bearer $accessB');
+        return status == 204
+            ? ResponseBody.fromString('', 204)
+            : reply(status, ownVehicle());
+      });
+      final session = sessionWith(fixture);
+      final repo = ApiProfileRepository(session);
+      await session.signIn('test@example.invalid', 'fixture password');
+      await switch (method) {
+        'POST' => repo.addVehicle(registration),
+        'PATCH' => repo.selectVehicle('9', 0),
+        _ => repo.removeVehicle('9', 0),
+      };
+      expect(fixture.requests.map((r) => r.path), [
+        'auth/login',
+        'me',
+        path,
+        'auth/refresh',
+        path,
+        'me',
+      ]);
+      final first = fixture.requests[2];
+      final retry = fixture.requests[4];
+      expect(retry.uri, first.uri);
+      expect(retry.method, first.method);
+      expect(retry.data, first.data);
+    });
+  }
+
+  for (final (code, status, writes, refreshes) in [
+    ('unauthorized', 401, 2, 1),
+    ('unexpected', 401, 1, 0),
+    ('forbidden', 403, 1, 0),
+    ('internal_error', 500, 1, 0),
+    ('', 0, 1, 0),
+    ('', 200, 1, 0),
+  ]) {
+    test('write stops after $status/$code without further replay', () async {
+      final fixture = DriverApiFixture(
+        (request) async => switch (request.path) {
+          'auth/login' => reply(200, tokens(accessA)),
+          'me' => reply(200, account()),
+          'auth/refresh' => reply(200, tokens(accessB, login: false)),
+          'vehicles' when status == 0 => throw DioException(
+            requestOptions: request,
+            type: DioExceptionType.receiveTimeout,
+          ),
+          'vehicles' => reply(status, {'error': code}),
+          _ => throw StateError('Unexpected route'),
+        },
+      );
+      final session = sessionWith(fixture);
+      await session.signIn('test@example.invalid', 'fixture password');
+      await expectLater(
+        ApiProfileRepository(session).addVehicle(registration),
+        throwsA(isA<ProfileException>()),
+      );
+      expect(
+        fixture.requests.where((r) => r.path == 'vehicles'),
+        hasLength(writes),
+      );
+      expect(
+        fixture.requests.where((r) => r.path == 'auth/refresh'),
+        hasLength(refreshes),
+      );
+      expect(fixture.requests.where((r) => r.path == 'me'), hasLength(1));
+      expect(session.account == null, status == 401 || status == 403);
+    });
+  }
+
+  test('logout during a write token refresh prevents replay', () async {
+    final started = Completer<void>();
+    final response = Completer<ResponseBody>();
     final fixture = DriverApiFixture(
       (request) async => switch (request.path) {
         'auth/login' => reply(200, tokens(accessA)),
-        'auth/refresh' => reply(200, tokens(accessB, login: false)),
-        'me' when request.headers['Authorization'] == 'Bearer $accessB' =>
-          reply(200, account(name: 'Hồ sơ mới')),
-        'me' when ++reads == 1 => reply(200, account()),
-        'me' => reply(401, {'error': 'unauthorized'}),
-        'vehicles' => reply(401, {'error': 'unauthorized'}),
+        'me' => reply(200, account()),
+        'vehicles/9' => reply(401, {'error': 'unauthorized'}),
+        'auth/refresh' => () {
+          started.complete();
+          return response.future;
+        }(),
         _ => throw StateError('Unexpected route'),
       },
     );
     final session = sessionWith(fixture);
     await session.signIn('test@example.invalid', 'fixture password');
-    await expectLater(
-      ApiProfileRepository(session).addVehicle(registration),
-      throwsA(isA<ProfileException>()),
+    final pending = expectLater(
+      session.setDefaultVehicle('9'),
+      throwsA(problem(DriverApiProblem.ended)),
     );
-    expect(session.account?.fullName, 'Hồ sơ mới');
+    await started.future;
+    session.signOut();
+    response.complete(reply(200, tokens(accessB, login: false)));
+    await pending;
     expect(fixture.requests.map((r) => r.path), [
       'auth/login',
       'me',
-      'vehicles',
-      'me',
+      'vehicles/9',
       'auth/refresh',
-      'me',
     ]);
   });
+
+  test(
+    'only an owned-vehicle route maps not_found to vehicleMissing',
+    () async {
+      var code = 'not_found';
+      final fixture = DriverApiFixture(
+        (request) async => switch (request.path) {
+          'auth/login' => reply(200, tokens(accessA)),
+          'me' => reply(200, account()),
+          'vehicles' || 'vehicles/9' => reply(404, {'error': code}),
+          _ => throw StateError('Unexpected route'),
+        },
+      );
+      final session = sessionWith(fixture);
+      final repo = ApiProfileRepository(session);
+      await session.signIn('test@example.invalid', 'fixture password');
+      Matcher failsWith(ProfileFailure failure) => throwsA(
+        isA<ProfileException>().having(
+          (error) => error.failure,
+          'failure',
+          failure,
+        ),
+      );
+      await expectLater(
+        repo.addVehicle(registration),
+        failsWith(ProfileFailure.unavailable),
+      );
+      await expectLater(
+        repo.selectVehicle('9', 0),
+        failsWith(ProfileFailure.vehicleMissing),
+      );
+      await expectLater(
+        repo.removeVehicle('9', 0),
+        failsWith(ProfileFailure.vehicleMissing),
+      );
+      code = 'unsupported_route';
+      await expectLater(
+        repo.removeVehicle('9', 0),
+        failsWith(ProfileFailure.unavailable),
+      );
+    },
+  );
 
   test('late mutation cannot reload a replacement account', () async {
     final started = Completer<void>();

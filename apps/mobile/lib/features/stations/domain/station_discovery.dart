@@ -161,20 +161,32 @@ abstract interface class StationDiscoveryRepository {
     String vehicleId,
     StationSearchQuery query, {
     DiscoveryOrigin? origin,
+    bool shareOriginWithPowerMe = false,
     SmartSearchInput? smart,
     bool consentToRoute = false,
     Future<void>? cancelled,
   });
 
-  Future<List<AddressCandidate>> autocomplete(String vehicleId, String text);
+  Future<List<AddressCandidate>> autocomplete(
+    String vehicleId,
+    String text, {
+    required bool consentToVietmap,
+    Future<void>? cancelled,
+  });
 
-  Future<DiscoveryOrigin> resolve(String vehicleId, AddressCandidate candidate);
+  Future<DiscoveryOrigin> resolve(
+    String vehicleId,
+    AddressCandidate candidate, {
+    required bool consentToVietmap,
+    Future<void>? cancelled,
+  });
 
   Future<StationRoadRoute> roadRoute(
     String vehicleId,
     String stationId,
     DiscoveryOrigin origin, {
     required bool includeVinFastOnly,
+    required bool consentToVietmap,
     Future<void>? cancelled,
   });
 }

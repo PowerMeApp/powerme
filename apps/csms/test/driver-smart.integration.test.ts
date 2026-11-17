@@ -420,6 +420,26 @@ type Endpoint = (typeof endpoints)[number];
     }
   });
 
+  it('falls back after cold ranking calls but still serves a user-requested route', async () => {
+    routeSummary = async () => summary(4000, 360000);
+    const path = search(smartRoad + consent);
+    for (let i = 0; i < 8; i++) {
+      const origin = path.replace('latitude=0', `latitude=0.00${i}`);
+      expect((await get(origin)).body.ranking_source).toBe('vietmap_route');
+    }
+    expect(calls).toBe(24);
+    expect((await get(path)).body.ranking_source).toBe('vietmap_route');
+    expect((await get(path.replace('latitude=0', 'latitude=0.012'))).body.ranking_source).toBe(
+      'brief',
+    );
+    expect(calls).toBe(24);
+    expect(await get(paths('route'))).toMatchObject({
+      status: 200,
+      body: { distance_m: 1234 },
+    });
+    expect(calls).toBe(25);
+  });
+
   it('B6.1 no SoC preserves legacy distance search with no_soc', async () => {
     const a = await get(search());
     expect(a.status).toBe(200);

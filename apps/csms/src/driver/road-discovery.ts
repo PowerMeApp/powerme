@@ -71,6 +71,7 @@ export class RoadDiscovery {
           JSON.stringify(['ranking-road', station.site_id, from, destination]),
           () => this.provider.route(from, destination),
           signal,
+          'ranking',
         );
         roads[index] = { ...value, computed_at };
       }

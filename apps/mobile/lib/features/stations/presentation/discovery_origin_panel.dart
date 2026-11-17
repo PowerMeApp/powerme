@@ -19,9 +19,9 @@ class DiscoveryOriginPanel extends ConsumerStatefulWidget {
 
 class _DiscoveryOriginPanelState extends ConsumerState<DiscoveryOriginPanel> {
   final _address = TextEditingController();
-  bool _addressConsent = false;
+  bool _showAddressSearch = false;
   bool _busy = false;
-  String? _addressQuery;
+  AddressSearch? _submittedAddress;
   String? _error;
 
   @override
@@ -47,8 +47,8 @@ class _DiscoveryOriginPanelState extends ConsumerState<DiscoveryOriginPanel> {
         return;
       }
       setState(() {
-        _addressConsent = false;
-        _addressQuery = null;
+        _showAddressSearch = false;
+        _submittedAddress = null;
         _address.clear();
       });
     } catch (error) {
@@ -65,6 +65,7 @@ class _DiscoveryOriginPanelState extends ConsumerState<DiscoveryOriginPanel> {
   }
 
   void _submitAddress(AppCopy copy) {
+    if (!_showAddressSearch) return;
     final value = _address.text.trim();
     setState(() {
       if (value.length < 2 || value.length > 120) {
@@ -75,30 +76,39 @@ class _DiscoveryOriginPanelState extends ConsumerState<DiscoveryOriginPanel> {
         return;
       }
       _error = null;
-      if (_addressQuery == value) {
-        ref.invalidate(
-          addressSearchProvider((
-            session: ref.read(discoverySessionProvider),
-            query: value,
-          )),
-        );
+      final input = (
+        session: ref.read(discoverySessionProvider),
+        query: value,
+        consentToVietmap: _showAddressSearch,
+      );
+      if (_submittedAddress == input) {
+        final error = ref.read(addressSearchProvider(input)).error;
+        if (canRetryDiscovery(error)) {
+          ref.invalidate(addressSearchProvider(input));
+        }
       }
-      _addressQuery = value;
+      _submittedAddress = input;
     });
   }
 
   Future<void> _confirmAddress(AddressCandidate address, AppCopy copy) async {
+    final submitted = _submittedAddress;
     final session = ref.read(discoverySessionProvider);
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
+        scrollable: true,
         title: Text(
           copy.text(
             'Dùng địa chỉ này làm điểm đi?',
             'Use this address as the starting point?',
           ),
         ),
-        content: Text(address.display),
+        content: Text(
+          '${address.display}\n\n'
+          '${copy.text('PowerMe gửi mã địa chỉ đến Vietmap để lấy tọa độ.', 'PowerMe sends the address reference to Vietmap to retrieve its coordinates.')}\n\n'
+          '${originSharingDisclosure(copy)}',
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(context).pop(false),
@@ -114,14 +124,30 @@ class _DiscoveryOriginPanelState extends ConsumerState<DiscoveryOriginPanel> {
     );
     if (!mounted ||
         confirmed != true ||
-        !_addressConsent ||
+        !_showAddressSearch ||
+        submitted != _submittedAddress ||
         session != ref.read(discoverySessionProvider)) {
       return;
     }
     await _updateOrigin(
       copy,
-      () => ref.read(discoveryContextProvider.notifier).selectAddress(address),
+      () => ref
+          .read(discoveryContextProvider.notifier)
+          .selectAddress(
+            address,
+            consentToVietmap: confirmed == true,
+            shareOriginWithPowerMe: confirmed == true,
+          ),
     );
+  }
+
+  void _resetAddressSearch() {
+    setState(() {
+      _showAddressSearch = false;
+      _submittedAddress = null;
+      _error = null;
+      _address.clear();
+    });
   }
 
   @override
@@ -129,9 +155,18 @@ class _DiscoveryOriginPanelState extends ConsumerState<DiscoveryOriginPanel> {
     final copy = ref.watch(discoveryCopyProvider);
     final origin = ref.watch(discoveryContextProvider).origin;
     final session = ref.watch(discoverySessionProvider);
-    final input = _addressQuery == null || !_addressConsent
-        ? null
-        : (session: session, query: _addressQuery!);
+    ref.listen(discoverySessionProvider, (previous, next) {
+      if (previous != next) _resetAddressSearch();
+    });
+    ref.listen(discoveryContextProvider.select((value) => value.origin), (
+      previous,
+      next,
+    ) {
+      if (previous != next) _resetAddressSearch();
+    });
+    final input = _submittedAddress?.session == session
+        ? _submittedAddress
+        : null;
     final results = input == null
         ? null
         : ref.watch(addressSearchProvider(input));
@@ -143,6 +178,7 @@ class _DiscoveryOriginPanelState extends ConsumerState<DiscoveryOriginPanel> {
                   ? copy.text('Chưa chọn điểm đi', 'No starting point selected')
                   : copy.text('Vị trí hiện tại', 'Current location')),
         ),
+        Text(originSharingDisclosure(copy)),
         Wrap(
           spacing: 8,
           runSpacing: 8,
@@ -153,20 +189,21 @@ class _DiscoveryOriginPanelState extends ConsumerState<DiscoveryOriginPanel> {
                   ? null
                   : () => _updateOrigin(
                       copy,
-                      () =>
-                          ref.read(discoveryContextProvider.notifier).locate(),
+                      () => ref
+                          .read(discoveryContextProvider.notifier)
+                          .locate(shareOriginWithPowerMe: true),
                       locating: true,
                     ),
               icon: const Icon(Icons.my_location_outlined),
               label: Text(copy.text('Dùng vị trí của tôi', 'Use my location')),
             ),
-            if (!_addressConsent)
+            if (!_showAddressSearch)
               OutlinedButton.icon(
                 key: const Key('discovery-address-consent'),
                 onPressed: _busy
                     ? null
                     : () => setState(() {
-                        _addressConsent = true;
+                        _showAddressSearch = true;
                         _error = null;
                       }),
                 icon: const Icon(Icons.place_outlined),
@@ -181,7 +218,7 @@ class _DiscoveryOriginPanelState extends ConsumerState<DiscoveryOriginPanel> {
               ),
           ],
         ),
-        if (_addressConsent) ...[
+        if (_showAddressSearch) ...[
           Text(
             copy.text(
               'Từ khóa địa chỉ được gửi đến Vietmap qua PowerMe khi bạn bấm Tìm địa chỉ.',
@@ -199,7 +236,7 @@ class _DiscoveryOriginPanelState extends ConsumerState<DiscoveryOriginPanel> {
               counterText: '',
             ),
             onChanged: (_) => setState(() {
-              _addressQuery = null;
+              _submittedAddress = null;
               _error = null;
             }),
             onSubmitted: (_) => _submitAddress(copy),
@@ -213,14 +250,7 @@ class _DiscoveryOriginPanelState extends ConsumerState<DiscoveryOriginPanel> {
                 child: Text(copy.text('Tìm địa chỉ', 'Find address')),
               ),
               TextButton(
-                onPressed: _busy
-                    ? null
-                    : () => setState(() {
-                        _addressConsent = false;
-                        _addressQuery = null;
-                        _error = null;
-                        _address.clear();
-                      }),
+                onPressed: _busy ? null : _resetAddressSearch,
                 child: Text(
                   copy.text('Hủy tìm địa chỉ', 'Cancel address search'),
                 ),
@@ -233,11 +263,12 @@ class _DiscoveryOriginPanelState extends ConsumerState<DiscoveryOriginPanel> {
               loading: () => const <Widget>[LinearProgressIndicator()],
               error: (error, _) => <Widget>[
                 FailureNotice(roadError(error, copy)),
-                TextButton(
-                  onPressed: () =>
-                      ref.invalidate(addressSearchProvider(input!)),
-                  child: Text(copy.text('Thử lại', 'Retry')),
-                ),
+                if (canRetryDiscovery(error))
+                  TextButton(
+                    onPressed: () =>
+                        ref.invalidate(addressSearchProvider(input!)),
+                    child: Text(copy.text('Thử lại', 'Retry')),
+                  ),
               ],
               data: (items) => <Widget>[
                 if (items.isEmpty)

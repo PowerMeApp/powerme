@@ -74,12 +74,14 @@ class ApiStationRepository
     String vehicleId,
     StationSearchQuery query, {
     DiscoveryOrigin? origin,
+    bool shareOriginWithPowerMe = false,
     SmartSearchInput? smart,
     bool consentToRoute = false,
     Future<void>? cancelled,
   }) async {
     _requireVehicle(vehicleId);
     if (smart != null && !validSmartSearch(smart)) throw _invalid;
+    final sharedOrigin = shareOriginWithPowerMe ? origin : null;
     final request = smart == null ? ++_searchRequest : ++_smartRequest;
     if (smart == null) {
       _found = const [];
@@ -93,10 +95,11 @@ class ApiStationRepository
       'page_size': pageSize,
       'availability': query.availability.apiValue,
       'include_vinfast_only': query.includeVinFastOnly,
-      if (origin != null) ..._coordinates(origin.location),
+      if (sharedOrigin != null) ..._coordinates(sharedOrigin.location),
       if (smart != null) ...{
         'sort': 'smart',
-        if (origin != null && consentToRoute) 'location_consent': true,
+        if (sharedOrigin != null && consentToRoute)
+          'location_consent': consentToRoute,
         if (smart.soc case final soc?) 'soc_percent': _decimal(soc),
         'target_soc_percent': _decimal(smart.target),
       },
@@ -148,12 +151,15 @@ class ApiStationRepository
   @override
   Future<List<AddressCandidate>> autocomplete(
     String vehicleId,
-    String text,
-  ) async {
+    String text, {
+    required bool consentToVietmap,
+    Future<void>? cancelled,
+  }) async {
+    _requireVietmapConsent(consentToVietmap);
     final json = await _read('places/autocomplete', vehicleId, {
       'q': text.trim(),
-      'location_consent': true,
-    });
+      'location_consent': consentToVietmap,
+    }, cancelled: cancelled);
     final value = json['value'];
     if (value is! List || value.length > 10) throw _malformed;
     return List.unmodifiable(
@@ -169,13 +175,16 @@ class ApiStationRepository
   @override
   Future<DiscoveryOrigin> resolve(
     String vehicleId,
-    AddressCandidate candidate,
-  ) async {
+    AddressCandidate candidate, {
+    required bool consentToVietmap,
+    Future<void>? cancelled,
+  }) async {
+    _requireVietmapConsent(consentToVietmap);
     if (!_placeReference.hasMatch(candidate.refId)) throw _invalid;
     final json = await _read('places/resolve', vehicleId, {
       'ref_id': candidate.refId,
-      'location_consent': true,
-    });
+      'location_consent': consentToVietmap,
+    }, cancelled: cancelled);
     final place = _object(json['value']);
     if (place['ref_id'] != candidate.refId) throw _malformed;
     return DiscoveryOrigin.place(
@@ -190,14 +199,16 @@ class ApiStationRepository
     String stationId,
     DiscoveryOrigin origin, {
     required bool includeVinFastOnly,
+    required bool consentToVietmap,
     Future<void>? cancelled,
   }) async {
+    _requireVietmapConsent(consentToVietmap);
     final json = await _read(
       'stations/${Uri.encodeComponent(stationId)}/route',
       vehicleId,
       {
         ..._coordinates(origin.location),
-        'location_consent': true,
+        'location_consent': consentToVietmap,
         'include_vinfast_only': includeVinFastOnly,
       },
       cancelled: cancelled,
@@ -257,6 +268,16 @@ class ApiStationRepository
     );
     _requireVehicle(vehicleId);
     return json;
+  }
+
+  void _requireVietmapConsent(bool granted) {
+    if (!granted) {
+      throw const DriverApiException(
+        DriverApiProblem.http,
+        status: 400,
+        code: 'location_consent_required',
+      );
+    }
   }
 
   void _requireVehicle(String vehicleId) {

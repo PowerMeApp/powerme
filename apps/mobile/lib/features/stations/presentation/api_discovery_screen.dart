@@ -37,6 +37,7 @@ class _StationSearch extends ConsumerStatefulWidget {
 
 class _StationSearchState extends ConsumerState<_StationSearch> {
   final _text = TextEditingController();
+  final _editFocus = FocusNode();
   String _query = '';
   int _page = 1;
   SearchAvailability _availability = SearchAvailability.all;
@@ -45,6 +46,7 @@ class _StationSearchState extends ConsumerState<_StationSearch> {
   @override
   void dispose() {
     _text.dispose();
+    _editFocus.dispose();
     super.dispose();
   }
 
@@ -93,6 +95,7 @@ class _StationSearchState extends ConsumerState<_StationSearch> {
             Expanded(
               child: TextField(
                 key: const Key('station-search-query'),
+                focusNode: _editFocus,
                 controller: _text,
                 textInputAction: TextInputAction.search,
                 maxLength: 120,
@@ -132,6 +135,23 @@ class _StationSearchState extends ConsumerState<_StationSearch> {
             ),
           ],
         ),
+        if (discovery.origin != null) ...[
+          const SizedBox(height: 8),
+          Text(
+            originSharingDisclosure(copy),
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton(
+              key: const Key('clear-discovery-origin'),
+              onPressed: ref
+                  .read(discoveryContextProvider.notifier)
+                  .clearOrigin,
+              child: Text(copy.text('Bỏ điểm đi', 'Clear starting point')),
+            ),
+          ),
+        ],
         const SizedBox(height: 8),
         SingleChildScrollView(
           scrollDirection: Axis.horizontal,
@@ -253,14 +273,28 @@ class _StationSearchState extends ConsumerState<_StationSearch> {
           skipLoadingOnRefresh: false,
           skipLoadingOnReload: false,
           loading: () => const <Widget>[LinearProgressIndicator()],
-          error: (_, _) => <Widget>[
+          error: (error, _) => <Widget>[
             DiscoveryRetry(
-              message: copy.text(
-                'Không tải được danh sách trạm.',
-                'Could not load the station list.',
+              message: roadError(
+                error,
+                copy,
+                fallback: copy.text(
+                  'Không tải được danh sách trạm.',
+                  'Could not load the station list.',
+                ),
+                invalid: copy.text(
+                  'Hãy sửa từ khóa hoặc bộ lọc tìm trạm.',
+                  'Edit the station search keyword or filters.',
+                ),
               ),
               copy: copy,
-              retry: () => ref.invalidate(discoverySearchProvider(input)),
+              retry: canRetryDiscovery(error)
+                  ? () => ref.invalidate(discoverySearchProvider(input))
+                  : null,
+              edit: invalidDiscoveryInput(error)
+                  ? _editFocus.requestFocus
+                  : null,
+              editLabel: copy.text('Sửa từ khóa', 'Edit search'),
             ),
           ],
           data: (page) {

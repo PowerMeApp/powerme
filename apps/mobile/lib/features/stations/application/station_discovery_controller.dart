@@ -60,12 +60,19 @@ class DiscoveryContextState {
 
 class DiscoveryContext extends Notifier<DiscoveryContextState> {
   int _originRequest = 0;
+  Completer<void>? _originCancellation;
+
+  void _cancelOriginUpdate() {
+    ++_originRequest;
+    _originCancellation?.complete();
+    _originCancellation = null;
+  }
 
   @override
   DiscoveryContextState build() {
     ref.watch(authScopeProvider);
     ref.watch(discoveryVehicleProvider);
-    ++_originRequest;
+    ref.onDispose(_cancelOriginUpdate);
     return const DiscoveryContextState();
   }
 
@@ -77,36 +84,56 @@ class DiscoveryContext extends Notifier<DiscoveryContextState> {
   }
 
   void clearOrigin() {
-    ++_originRequest;
+    _cancelOriginUpdate();
     state = DiscoveryContextState(includeVinFastOnly: state.includeVinFastOnly);
   }
 
-  Future<bool> locate() => _updateOrigin((_) async {
-    final location = await ref.read(mapLocationRepositoryProvider).current();
-    if (!location.valid) throw const LocationFailure(LocationIssue.unavailable);
-    return DiscoveryOrigin.device(location);
-  });
+  Future<bool> locate({required bool shareOriginWithPowerMe}) async {
+    if (!shareOriginWithPowerMe) return false;
+    return _updateOrigin((_, _) async {
+      final location = await ref.read(mapLocationRepositoryProvider).current();
+      if (!location.valid) {
+        throw const LocationFailure(LocationIssue.unavailable);
+      }
+      return DiscoveryOrigin.device(location);
+    });
+  }
 
-  Future<bool> selectAddress(AddressCandidate candidate) => _updateOrigin(
-    (vehicle) => ref
-        .read(stationDiscoveryRepositoryProvider)
-        .resolve(vehicle, candidate),
-  );
+  Future<bool> selectAddress(
+    AddressCandidate candidate, {
+    required bool consentToVietmap,
+    required bool shareOriginWithPowerMe,
+  }) async {
+    if (!consentToVietmap || !shareOriginWithPowerMe) return false;
+    return _updateOrigin(
+      (vehicle, cancelled) => ref
+          .read(stationDiscoveryRepositoryProvider)
+          .resolve(
+            vehicle,
+            candidate,
+            consentToVietmap: consentToVietmap,
+            cancelled: cancelled,
+          ),
+    );
+  }
 
   Future<bool> _updateOrigin(
-    Future<DiscoveryOrigin> Function(String vehicleId) action,
+    Future<DiscoveryOrigin> Function(String vehicleId, Future<void> cancelled)
+    action,
   ) async {
-    final request = ++_originRequest;
+    _cancelOriginUpdate();
+    final request = _originRequest;
     final scope = ref.read(authScopeProvider);
     final vehicle = ref.read(discoveryVehicleProvider);
     if (vehicle.isEmpty) return false;
+    final cancel = _originCancellation = Completer<void>();
     bool current() =>
         ref.mounted &&
         request == _originRequest &&
         identical(scope, ref.read(authScopeProvider)) &&
         vehicle == ref.read(discoveryVehicleProvider);
     try {
-      final origin = await action(vehicle);
+      final origin = await action(vehicle, cancel.future);
       if (!current()) return false;
       state = DiscoveryContextState(
         origin: origin,
@@ -116,6 +143,8 @@ class DiscoveryContext extends Notifier<DiscoveryContextState> {
     } catch (_) {
       if (current()) rethrow;
       return false;
+    } finally {
+      if (identical(_originCancellation, cancel)) _originCancellation = null;
     }
   }
 }
@@ -133,26 +162,39 @@ final discoverySearchProvider = FutureProvider.autoDispose
       final repository = _readRepository(ref, search.session);
       final cancel = Completer<void>();
       ref.onDispose(cancel.complete);
+      final acceptedOrigin = ref.read(discoveryContextProvider).origin;
+      final shareOrigin =
+          search.origin != null && identical(search.origin, acceptedOrigin);
       return repository.search(
         search.session.vehicleId,
         search.query,
         origin: search.origin,
+        shareOriginWithPowerMe: shareOrigin,
         smart: search.smart,
-        consentToRoute: search.consentToRoute,
-        cancelled: search.consentToRoute ? cancel.future : null,
+        consentToRoute: shareOrigin && search.consentToRoute,
+        cancelled: shareOrigin ? cancel.future : null,
       );
     }, retry: (_, _) => null);
 
-typedef AddressSearch = ({DiscoverySession session, String query});
+typedef AddressSearch = ({
+  DiscoverySession session,
+  String query,
+  bool consentToVietmap,
+});
 
 final addressSearchProvider = FutureProvider.autoDispose
-    .family<List<AddressCandidate>, AddressSearch>(
-      (ref, input) => _readRepository(
-        ref,
-        input.session,
-      ).autocomplete(input.session.vehicleId, input.query),
-      retry: (_, _) => null,
-    );
+    .family<List<AddressCandidate>, AddressSearch>((ref, input) {
+      ref.watch(discoverySessionProvider);
+      final repository = _readRepository(ref, input.session);
+      final cancel = Completer<void>();
+      ref.onDispose(cancel.complete);
+      return repository.autocomplete(
+        input.session.vehicleId,
+        input.query,
+        consentToVietmap: input.consentToVietmap,
+        cancelled: cancel.future,
+      );
+    }, retry: (_, _) => null);
 
 typedef SelectedRoute = ({
   DiscoverySession session,
@@ -189,8 +231,12 @@ class DiscoveryRoads extends Notifier<DiscoveryRoadState> {
     if (cancel != null && !cancel.isCompleted) cancel.complete();
   }
 
-  Future<void> request(SelectedRoute input) async {
-    if (_cancel != null ||
+  Future<void> request(
+    SelectedRoute input, {
+    required bool consentToVietmap,
+  }) async {
+    if (!consentToVietmap ||
+        _cancel != null ||
         input.session != ref.read(discoverySessionProvider) ||
         input.origin != ref.read(discoveryContextProvider).origin ||
         !input.origin.location.valid) {
@@ -207,6 +253,7 @@ class DiscoveryRoads extends Notifier<DiscoveryRoadState> {
         input.stationId,
         input.origin,
         includeVinFastOnly: input.includeVinFastOnly,
+        consentToVietmap: consentToVietmap,
         cancelled: cancel.future,
       );
       final now = DateTime.now();

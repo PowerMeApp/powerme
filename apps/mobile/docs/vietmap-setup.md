@@ -4,23 +4,19 @@
 
 T96 chạy Driver API từ `lib/main.dart`. Các bước cấu hình key bên dưới ghi lại cách thiết lập Vietmap của slice 30/10. Widget test và công cụ chụp ảnh dùng `DriverAppTestHarness` trong `test/support`. [Hướng dẫn chạy T96](t96-driver-api.md).
 
-File local đã được tạo: `E:/Project/PowerMe/powerme/apps/mobile/config/vietmap.local.json`.
-Điền key Tile/Map của riêng bạn vào giá trị `apiKey`; không gửi key vào chat.
+Từ `apps/mobile`, copy `config/api.example.json` và `config/vietmap.example.json` lần lượt thành `config/api.local.json` và `config/vietmap.local.json` nếu chưa có file local. Build cần cả hai file. Để trống `tileApiKey` nếu chỉ dùng danh sách trạm.
 
 ```json
-{"apiKey": "DIEN_KEY_CUA_BAN"}
+{"tileApiKey": ""}
 ```
 
-File thật bị gitignore; template commit được là `config/vietmap.example.json`.
-Để dùng bản đồ Vietmap, copy template thành `vietmap.local.json` trước khi build.
-Không ghi key vào Dart define, source, README, log, QR hay manifest. Không overwrite file local khi cập nhật code.
-Key maps phía client vẫn có thể bị trích từ app; ignore chỉ tránh commit. Dùng key riêng cho development, hạn mức và restrictions do Vietmap hỗ trợ; không dùng credential thanh toán/signing.
+Hai file local bị Git bỏ qua nhưng được đóng gói và có thể đọc từ app. Tạo key riêng trong Vietmap Console → Consumers → Detail. Bật Tilemap, tắt Search/Place/Route cho key đưa vào app và đặt giới hạn phù hợp. Kiểm quyền ở Console vì Dart chỉ đọc chuỗi cấu hình. Trường `apiKey` cũ vẫn được ưu tiên thấp hơn để không phải sửa file local hiện có. Chỉ lưu key Search/Route của backend qua biến môi trường `VIETMAP_SEARCH_API_KEY` trong hạ tầng. [Hướng dẫn quản lý key Vietmap](https://maps.vietmap.vn/docs/map-api/console/manage-api-key/) · [Đóng gói asset Flutter](https://docs.flutter.dev/ui/assets/assets-and-images).
 
 Style dark của slice 30/10 được xác minh theo tài liệu chính thức:
 `https://maps.vietmap.vn/maps/styles/dm/style.json?apikey={your-apikey}`.
 
 Bản đồ khởi đầu quanh Nhà Văn hóa Sinh viên ĐHQG TP.HCM, Đông Hòa (10.87534, 106.80003, zoom 16). Đây là camera mặc định, không là vị trí người dùng.
-Bấm **Vị trí của tôi** trên map để xin quyền foreground và lấy một vị trí. Không xin khi mở màn, không theo dõi nền/stream, không lưu vị trí vào history hoặc gửi backend. Nếu từ chối/tắt GPS/timeout, map vẫn pan/zoom; dùng search/list trạm để tiếp tục. Quyền bị từ chối vĩnh viễn: bật lại trong Android Settings → Apps → PowerMe/driver_app → Permissions → Location.
+Bấm **Vị trí của tôi** trên map để xin quyền foreground và lấy một vị trí. Không xin khi mở màn, không theo dõi nền/stream, không lưu vị trí vào history. Ở chế độ Driver API, PowerMe nhận tọa độ trong các lần tìm trạm sau khi bạn đồng ý dùng vị trí GPS hoặc địa chỉ làm điểm đi. Bạn có thể bỏ điểm đi ngay dưới thanh tìm kiếm. Tìm địa chỉ và xem tuyến có thông báo riêng về việc gửi thông tin sang Vietmap. Nếu từ chối/tắt GPS/timeout, map vẫn pan/zoom; dùng search/list trạm để tiếp tục. Quyền bị từ chối vĩnh viễn: bật lại trong Android Settings → Apps → PowerMe/driver_app → Permissions → Location.
 
 ## Phạm vi và kiến trúc
 

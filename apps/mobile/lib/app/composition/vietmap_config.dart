@@ -9,13 +9,13 @@ const vietmapInitialCenter = MapLocation(10.87534, 106.80003);
 final vietmapConfigProvider = Provider<VietmapConfig?>((ref) => null);
 
 class VietmapConfig {
-  const VietmapConfig(this._key);
-  final String _key;
-  bool get configured => _key.trim().isNotEmpty;
+  const VietmapConfig(this._tileKey);
+  final String _tileKey;
+  bool get configured => _tileKey.trim().isNotEmpty;
   String get styleUrl => Uri.https(
     'maps.vietmap.vn',
     '/maps/styles/dm/style.json',
-    {'apikey': _key},
+    {'apikey': _tileKey},
   ).toString();
 
   static Future<VietmapConfig> load(AssetBundle bundle) async {
@@ -23,7 +23,7 @@ class VietmapConfig {
       final data = jsonDecode(
         await bundle.loadString('config/vietmap.local.json'),
       );
-      final key = data is Map ? data['apiKey'] : null;
+      final key = data is Map ? (data['tileApiKey'] ?? data['apiKey']) : null;
       return VietmapConfig(key is String ? key.trim() : '');
     } catch (_) {
       return const VietmapConfig('');

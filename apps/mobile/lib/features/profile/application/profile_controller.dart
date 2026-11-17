@@ -52,13 +52,15 @@ class ProfileController extends Notifier<ProfileState> {
       _change((repo, revision) => repo.updateName(name, revision));
   Future<bool> saveVehicle(VehicleDraft draft, String? id) =>
       _change((repo, revision) => repo.saveVehicle(draft, id, revision));
-  Future<bool> addVehicle(VehicleRegistration registration) =>
-      _change((repo, _) {
-        if (repo case VehicleManagementRepository vehicles) {
-          return vehicles.addVehicle(registration);
-        }
-        throw const ProfileException(ProfileFailure.unavailable);
-      });
+  Future<bool> addVehicle(
+    VehicleRegistration registration, {
+    required void Function(ProfileFailure) onFailure,
+  }) => _change((repo, _) {
+    if (repo case VehicleManagementRepository vehicles) {
+      return vehicles.addVehicle(registration);
+    }
+    throw const ProfileException(ProfileFailure.unavailable);
+  }, onFailure: onFailure);
   Future<bool> removeVehicle(String id) =>
       _change((repo, revision) => repo.removeVehicle(id, revision));
   Future<bool> selectVehicle(String id) =>
@@ -73,6 +75,7 @@ class ProfileController extends Notifier<ProfileState> {
   Future<bool> _change(
     Future<DriverProfile> Function(ProfileRepository, int) action, {
     bool reading = false,
+    void Function(ProfileFailure)? onFailure,
   }) async {
     if (state.busy || (!reading && !state.canChange)) return false;
     final scope = ref.read(authScopeProvider);
@@ -91,14 +94,16 @@ class ProfileController extends Notifier<ProfileState> {
       return true;
     } catch (error) {
       if (_current(scope, request)) {
+        final failure =
+            recovery ??
+            (error is ProfileException
+                ? error.failure
+                : ProfileFailure.unavailable);
         state = ProfileState(
           ref.read(profileRepositoryProvider).read(),
-          failure:
-              recovery ??
-              (error is ProfileException
-                  ? error.failure
-                  : ProfileFailure.unavailable),
+          failure: failure.needsRefresh || onFailure == null ? failure : null,
         );
+        onFailure?.call(failure);
       }
       return false;
     }

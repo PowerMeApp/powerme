@@ -39,6 +39,7 @@ class _Suggestions extends ConsumerStatefulWidget {
 
 class _SuggestionsState extends ConsumerState<_Suggestions> {
   final _soc = TextEditingController();
+  final _editFocus = FocusNode();
   ({SmartSearchInput input, bool atEstimateTarget})? _submitted;
   DiscoveryOrigin? _consentedOrigin;
   bool _consentedVinFastFilter = false;
@@ -47,6 +48,7 @@ class _SuggestionsState extends ConsumerState<_Suggestions> {
   @override
   void dispose() {
     _soc.dispose();
+    _editFocus.dispose();
     super.dispose();
   }
 
@@ -168,6 +170,7 @@ class _SuggestionsState extends ConsumerState<_Suggestions> {
               label: batteryLabel,
               child: TextField(
                 key: const Key('suggestion-soc'),
+                focusNode: _editFocus,
                 controller: _soc,
                 keyboardType: const TextInputType.numberWithOptions(
                   decimal: true,
@@ -227,14 +230,28 @@ class _SuggestionsState extends ConsumerState<_Suggestions> {
             skipLoadingOnRefresh: false,
             skipLoadingOnReload: false,
             loading: () => const <Widget>[LinearProgressIndicator()],
-            error: (_, _) => <Widget>[
+            error: (error, _) => <Widget>[
               DiscoveryRetry(
-                message: copy.text(
-                  'Không tải được gợi ý.',
-                  'Could not load suggestions.',
+                message: roadError(
+                  error,
+                  copy,
+                  fallback: copy.text(
+                    'Không tải được gợi ý.',
+                    'Could not load suggestions.',
+                  ),
+                  invalid: copy.text(
+                    'Hãy kiểm tra và sửa mức pin đã nhập.',
+                    'Check and edit the battery level you entered.',
+                  ),
                 ),
                 copy: copy,
-                retry: () => ref.invalidate(discoverySearchProvider(input)),
+                retry: canRetryDiscovery(error)
+                    ? () => ref.invalidate(discoverySearchProvider(input))
+                    : null,
+                edit: invalidDiscoveryInput(error)
+                    ? _editFocus.requestFocus
+                    : null,
+                editLabel: copy.text('Sửa mức pin', 'Edit battery level'),
               ),
             ],
             data: (page) => [

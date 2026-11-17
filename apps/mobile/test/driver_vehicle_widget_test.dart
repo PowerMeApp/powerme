@@ -417,6 +417,8 @@ void main() {
     expect(find.text('51A-00001'), findsOneWidget);
     await tester.tap(find.byTooltip('Quay lại'));
     await tester.pumpAndSettle();
+    await _tap(tester, 'open-vehicle-garage');
+    expect(find.text('Biển số này đã được đăng ký.'), findsNothing);
     await _openVehicleActions(tester, '9');
     await _tap(tester, 'remove-9');
     await _tap(tester, 'confirm-remove-vehicle');
@@ -448,9 +450,10 @@ void main() {
       final fixture = DriverApiFixture(
         (request) async => switch (request.path) {
           'auth/login' => reply(200, tokens(accessA)),
-          'me' when !submitted => reply(200, account(withVehicle: false)),
+          'me' when !submitted => reply(200, account()),
           'me' when blocked => reply(503, {'error': 'auth_unavailable'}),
           'me' => reply(200, account(vehicles: [added])),
+          'stations' => reply(200, page([])),
           'vehicle-models' => reply(200, {
             'items': [leaf],
           }),
@@ -467,8 +470,14 @@ void main() {
       );
       await _open(tester, fixture);
       await _tap(tester, _add);
+      final search = find.byKey(const Key('vehicle-model-search'));
+      await tester.enterText(search, 'Leaf');
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(ChoiceChip, 'Nissan'));
+      await tester.pumpAndSettle();
       await _enterPlate(tester, '30A-123.45');
       await _chooseModel(tester);
+      await _tap(tester, 'vehicle-make-default');
       await _tap(tester, _save);
       final notice = find.textContaining(
         received ? 'Đã ghi nhận thay đổi.' : 'Chưa xác nhận được thay đổi.',
@@ -481,8 +490,30 @@ void main() {
       blocked = false;
       await _tap(tester, _reload);
       expect(find.text('30A-123.45'), findsOneWidget);
-      expect(find.text('Xe mặc định'), findsOneWidget);
       expect(fixture.requests.where((r) => r.path == 'vehicles'), hasLength(1));
+      if (received) {
+        expect(find.text('Xe mặc định'), findsOneWidget);
+        expect(find.byKey(const Key(_save)), findsNothing);
+      } else {
+        expect(_canSave(tester), isTrue);
+        expect(tester.widget<TextField>(search).controller!.text, 'Leaf');
+        expect(
+          tester
+              .widget<ChoiceChip>(find.widgetWithText(ChoiceChip, 'Nissan'))
+              .selected,
+          isTrue,
+        );
+        expect(
+          tester
+              .widget<CheckboxListTile>(
+                find.byKey(const Key('vehicle-make-default')),
+              )
+              .value,
+          isTrue,
+        );
+        expect(find.text('39.5 kWh'), findsOneWidget);
+        expect(find.textContaining('Đã tải lại hồ sơ.'), findsOneWidget);
+      }
     });
   }
 }

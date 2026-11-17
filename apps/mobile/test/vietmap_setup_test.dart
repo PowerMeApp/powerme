@@ -31,6 +31,16 @@ class _Location implements MapLocationRepository {
 }
 
 void main() {
+  testWidgets('bundle includes only the two public config assets', (
+    tester,
+  ) async {
+    final manifest = await AssetManifest.loadFromAssetBundle(rootBundle);
+    expect(
+      manifest.listAssets().where((asset) => asset.startsWith('config/')),
+      unorderedEquals(['config/api.local.json', 'config/vietmap.local.json']),
+    );
+  });
+
   test(
     'Config invalid/missing data stays unconfigured; no key in diagnostics',
     () async {
@@ -40,7 +50,7 @@ void main() {
         false,
       );
       final config = await VietmapConfig.load(
-        _Bundle('{"apiKey":"test value"}'),
+        _Bundle('{"tileApiKey":"test value","apiKey":"legacy"}'),
       );
       expect(config.configured, true);
       final uri = Uri.parse(config.styleUrl);
@@ -48,6 +58,8 @@ void main() {
       expect(uri.path, '/maps/styles/dm/style.json');
       expect(uri.queryParameters['apikey'], 'test value');
       expect(config.toString(), isNot(contains('test value')));
+      final legacy = await VietmapConfig.load(_Bundle('{"apiKey":"legacy"}'));
+      expect(Uri.parse(legacy.styleUrl).queryParameters['apikey'], 'legacy');
     },
   );
   test(

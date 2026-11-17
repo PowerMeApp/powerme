@@ -62,7 +62,8 @@ flutter:
   # the material Icons class.
   uses-material-design: true
   assets:
-    - config/
+    - config/api.local.json
+    - config/vietmap.local.json
     - assets/brand/powerme-master-lockup.png
     - assets/brand/powerme-wordmark.png
     - assets/brand/powerme-master-icon.png

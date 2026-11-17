@@ -157,21 +157,26 @@ class DriverApiSession {
     Map<String, Object?>? body,
   ]) async {
     final session = _activeSession();
+    final accessToken = session.accessToken;
+    Future<Response<String>> send(String token) => _send(
+      session,
+      path,
+      method: method,
+      expectedStatus: expectedStatus,
+      body: body,
+      accessToken: token,
+    );
     try {
-      await _send(
-        session,
-        path,
-        method: method,
-        expectedStatus: expectedStatus,
-        body: body,
-        accessToken: session.accessToken,
-      );
-    } on DriverApiException catch (error) {
-      if (error.status == 403) _end(session, DriverSessionEnd.forbidden);
-      if (error.status == 401) {
-        // Recover credentials through GET /me before allowing a manual retry.
-        await _refreshAccount(session);
+      try {
+        await send(accessToken);
+      } on DriverApiException catch (error) {
+        // The Driver API rejects this request before the write handler runs.
+        if (error.status != 401 || error.code != 'unauthorized') rethrow;
+        await _renewAccessToken(session, accessToken);
+        await send(session.accessToken);
       }
+    } on DriverApiException catch (error) {
+      _endOnAuthFailure(session, error);
       rethrow;
     }
     try {
@@ -196,22 +201,26 @@ class DriverApiSession {
       } on DriverApiException catch (error) {
         if (error.status != 401) rethrow;
       }
-      _requireCurrent(session);
-      if (session.accessToken == accessToken) {
-        await _refreshOnce(session);
-      }
-      _requireCurrent(session);
+      await _renewAccessToken(session, accessToken);
       return await _get(session, path, session.accessToken, query, cancel);
     } on DriverApiException catch (error) {
-      if (error.status == 401 || error.status == 403) {
-        _end(
-          session,
-          error.status == 403
-              ? DriverSessionEnd.forbidden
-              : DriverSessionEnd.expired,
-        );
-      }
+      _endOnAuthFailure(session, error);
       rethrow;
+    }
+  }
+
+  Future<void> _renewAccessToken(_Session session, String rejectedToken) async {
+    _requireCurrent(session);
+    if (session.accessToken == rejectedToken) await _refreshOnce(session);
+    _requireCurrent(session);
+  }
+
+  void _endOnAuthFailure(_Session session, DriverApiException error) {
+    switch (error.status) {
+      case 401:
+        _end(session, DriverSessionEnd.expired);
+      case 403:
+        _end(session, DriverSessionEnd.forbidden);
     }
   }
 
@@ -303,6 +312,8 @@ class DriverApiSession {
         status == null ? DriverApiProblem.connection : DriverApiProblem.http,
         status: status,
         code: switch (json?['error']) {
+          'unauthorized' => 'unauthorized',
+          'not_found' => 'not_found',
           'invalid_credentials' => 'invalid_credentials',
           'invalid_email' => 'invalid_email',
           'invalid_password' => 'invalid_password',
@@ -313,8 +324,18 @@ class DriverApiSession {
           'unknown_vehicle_model' => 'unknown_vehicle_model',
           'plate_taken' => 'plate_taken',
           'vehicle_in_use' => 'vehicle_in_use',
+          'location_consent_required' => 'location_consent_required',
+          'origin_coordinates_required' => 'origin_coordinates_required',
+          'invalid_search' => 'invalid_search',
           'provider_unavailable' => 'provider_unavailable',
           'station_location_unavailable' => 'station_location_unavailable',
+          _ => null,
+        },
+        mapAvailability: switch ((status, json?['error'], json?['detail'])) {
+          (503, 'provider_unavailable', 'unconfigured') =>
+            DriverMapAvailability.unconfigured,
+          (503, 'provider_unavailable', 'credentials') =>
+            DriverMapAvailability.credentials,
           _ => null,
         },
       );
