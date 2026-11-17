@@ -589,6 +589,7 @@ describeDb('migration 0015 — refunds và lịch quét billing (nâng cấp DB 
       insertRow('e_invoices', {
         top_up_id: await newTopUp(),
         amount_vnd: 200000,
+        vat_rate: 10,
         vat_amount_vnd: 18182,
         ...cols,
       });
