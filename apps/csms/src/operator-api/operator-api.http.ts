@@ -7,6 +7,7 @@
  *   GET  /api/operator/v1/charge-points, GET /api/operator/v1/summary  (FE-03, operator-monitoring.ts)
  *   GET  /api/operator/v1/charge-points/{id}  (FE-05, screen 20)
  *   GET  /api/admin/v1/me     admin
+ *   GET  /api/admin/v1/summary  admin  (FE-14, screen 27, admin-platform.ts)
  * RolesGuard runs before route matching, so an unknown path without a valid token is 401, not 404.
  * CORS: localhost origins only (Vite dev server). JSON: snake_case, string ids, `{ error, detail }`.
  */
@@ -17,6 +18,7 @@ import { FaultActionError, type FaultActions } from '../console/fault-actions.js
 import { AuthError, StaffAccounts, type DashboardAuthConfig } from '../users/auth.js';
 import { rolesGuard, type Principal } from '../users/roles-guard.js';
 import type { ConnectionRegistry } from '../ocpp-gateway/connection-registry.js';
+import { matchAdminRoute, runAdminSummary } from './admin-platform.js';
 import { matchFaultRoute, runFaultRoute } from './operator-faults.js';
 import {
   matchMonitoringRoute,
@@ -132,6 +134,12 @@ export function createOperatorApiListener(
           faults,
         ),
       );
+      return;
+    }
+    const adminRoute = surface === 'admin' ? matchAdminRoute(rest ?? '', url.searchParams) : null;
+    if (adminRoute) {
+      allow(req, res, 'GET');
+      send(res, 200, await runAdminSummary(db, monitoring.thresholds));
       return;
     }
     if (rest !== '/me') throw new AuthError(404, 'not_found');

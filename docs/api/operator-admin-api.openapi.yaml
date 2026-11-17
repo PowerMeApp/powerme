@@ -2093,9 +2093,9 @@ paths:
       tags: [platform]
       operationId: getAdminSummary
       x-roles: [admin]
-      x-status: console
-      x-source: 'GET /api/admin/summary (một phần: có trụ/phiên/đối soát/bản tin, thiếu user, thẻ, ngoại lệ thanh toán)'
-      x-owner: Nghĩa (T97)
+      x-status: implemented
+      x-source: 'operator-api/admin-platform.ts (FE-14)'
+      x-owner: Nghĩa (FE-14)
       x-refs: [UC-ADM-07, 'Table 5 #27']
       summary: Số tài khoản, trụ đã đăng ký, thẻ, ngoại lệ thanh toán mở — màn hình đầu Admin Console
       responses:
