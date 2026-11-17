@@ -125,6 +125,20 @@ export const topUpExceptionKindEnum = pgEnum('top_up_exception_kind', [
   'unresolved_07',
   'loyalty_error',
 ]);
+/**
+ * Loại lần trả mâu thuẫn (migration 0024, T32 Phần 8b). `extra_payment`: đã có khoản trễ, thêm
+ * lần trả khác giao dịch. `amount_differs`: cùng giao dịch đã cộng / đã ghi khoản trễ, khác số tiền.
+ */
+export const topUpPaymentConflictReasonEnum = pgEnum('top_up_payment_conflict_reason', [
+  'extra_payment',
+  'amount_differs',
+]);
+/** Đường nhận kết quả thanh toán VNPay (migration 0024). */
+export const paymentResultSourceEnum = pgEnum('payment_result_source', [
+  'ipn',
+  'querydr',
+  'recheck',
+]);
 export const eInvoiceStatusEnum = pgEnum('e_invoice_status', [
   'requested',
   'issued',

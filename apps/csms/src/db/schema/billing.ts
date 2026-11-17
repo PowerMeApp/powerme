@@ -1,7 +1,7 @@
 /**
  * Module chủ: `billing` (WP5).
  * credit_accounts, credit_transactions, top_ups, refunds (0015), e_invoices, invoice_adjustments,
- * loyalty_accounts, loyalty_transactions.
+ * loyalty_accounts, loyalty_transactions, top_up_payment_conflicts (0024).
  *
  * Việc nền (refund, e-invoice, điều chỉnh) chạy bằng quét DB (WF-02 decisions D7): `status` +
  * `next_attempt_at` nằm trên dòng nghiệp vụ, có index `(status, next_attempt_at)`.
@@ -30,9 +30,11 @@ import {
   eInvoiceErrorKindEnum,
   eInvoiceStatusEnum,
   loyaltyTransactionTypeEnum,
+  paymentResultSourceEnum,
   refundKindEnum,
   refundStatusEnum,
   topUpExceptionKindEnum,
+  topUpPaymentConflictReasonEnum,
   topUpStatusEnum,
 } from './enums.js';
 import { reservations } from './ops.js';
@@ -466,5 +468,56 @@ export const loyaltyTransactions = pgTable(
     uniqueIndex('loyalty_transactions_one_adjust_per_top_up')
       .on(t.topUpId)
       .where(sql`${t.transactionType} = 'adjust' AND ${t.topUpId} IS NOT NULL`),
+  ],
+);
+
+/**
+ * Lần trả thành công mâu thuẫn với kết quả đã ghi trên top-up (migration 0024, T32 Phần 8b, Ân
+ * chốt 16/11). Một dòng mỗi (top-up, `vnp_TransactionNo`); `TopUpService.applyLockedResult` ghi
+ * bằng `INSERT … ON CONFLICT DO NOTHING` dưới khoá `top_ups` → `credit_accounts`, không đụng
+ * `top_ups` (`status`, `late_*`, `exception_kind`). Admin xem ở Billing Exceptions (Phần 10), không
+ * có nút hoàn.
+ */
+export const topUpPaymentConflicts = pgTable(
+  'top_up_payment_conflicts',
+  {
+    id: bigint('id', { mode: 'number' }).primaryKey().generatedAlwaysAsIdentity(),
+    topUpId: bigint('top_up_id', { mode: 'number' })
+      .notNull()
+      .references(() => topUps.id),
+    /** `vnp_TransactionNo` của lần trả mâu thuẫn (cùng kiểu `top_ups.late_gateway_ref`). */
+    gatewayTransactionNo: varchar('gateway_transaction_no', { length: 100 }).notNull(),
+    /** Số VNPay thực trừ, VND (`vnp_Amount / 100`) ≥ 0. Gửi lại với số khác không ghi đè. */
+    amountVnd: bigint('amount_vnd', { mode: 'number' }).notNull(),
+    /** `vnp_PayDate`; thiếu thì `now()` của DB. */
+    paidAt: timestamp('paid_at', { withTimezone: true }).notNull(),
+    source: paymentResultSourceEnum('source').notNull(),
+    reason: topUpPaymentConflictReasonEnum('reason').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .notNull()
+      .defaultNow()
+      .$onUpdate(() => new Date()),
+    /** Lúc Admin bấm "Đã xử lý" (Phần 10); có ⇔ có `reviewedBy`, bắt buộc `reviewNote`. */
+    reviewedAt: timestamp('reviewed_at', { withTimezone: true }),
+    /** admins.user_id của Admin đã xử lý (như `refunds.requested_by`). */
+    reviewedBy: bigint('reviewed_by', { mode: 'number' }).references(() => admins.userId),
+    reviewNote: text('review_note'),
+  },
+  (t) => [
+    unique('top_up_payment_conflicts_top_up_txn_key').on(t.topUpId, t.gatewayTransactionNo),
+    index('top_up_payment_conflicts_reviewed_by_idx').on(t.reviewedBy),
+    index('top_up_payment_conflicts_unreviewed_idx')
+      .on(t.createdAt)
+      .where(sql`${t.reviewedAt} IS NULL`),
+    check('top_up_payment_conflicts_amount_check', sql`${t.amountVnd} >= 0`),
+    check(
+      'top_up_payment_conflicts_reviewed_check',
+      sql`(${t.reviewedAt} IS NULL) = (${t.reviewedBy} IS NULL)`,
+    ),
+    check(
+      'top_up_payment_conflicts_review_note_check',
+      sql`${t.reviewedAt} IS NULL OR btrim(coalesce(${t.reviewNote}, '')) <> ''`,
+    ),
   ],
 );

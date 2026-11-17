@@ -10,6 +10,11 @@
  * `onPendingTimeout` → querydr ngoài transaction → áp kết quả; `recheckTopUp` cho nút "Kiểm tra
  * lại" của Admin (route ở Phần 10). IPN, querydr và recheck ghi kết quả qua MỘT hàm
  * `applyLockedResult` (chỗ duy nhất ghi `credited`, `failed`, `expired`, khoản trễ, `loyalty_error`).
+ * Phần 8b (theo review #143, Ân chốt 16/11): VNPay báo đã trả mà không cộng được (số thực trừ khác
+ * `amount_paid_vnd`, hoặc tài khoản `closed`) khi còn `pending` → `failed` + khoản trễ (STM-4 #8);
+ * khoản trễ luôn ghi số VNPay thực trừ; log `ipn_applied` / `querydr_applied` sau commit.
+ * Phần 8b bổ sung (Ân chốt 16/11, migration 0024): lần trả thành công mâu thuẫn ghi một dòng
+ * `top_up_payment_conflicts` (không đụng `top_ups`), log `${source}_conflicting_result` sau commit.
  *
  * Ba lớp chống trùng (nguyên tắc 2 của billing):
  *   1. Idempotency-Key theo tài khoản + `request_hash` (migration 0019);
@@ -26,11 +31,13 @@ import { DB, Db } from '../db/db.module.js';
 import { BackgroundWork, BackgroundWorkRunner } from './background-work.js';
 import { BACKGROUND_WORK_CONFIG, BackgroundWorkConfig } from './background-work.config.js';
 import { LoyaltyLedgerCorrupt, RedemptionRejected, TopUpRejected } from './billing-errors.js';
-import { CreditLedgerService, LedgerClient } from './credit-ledger.service.js';
+import { CreditAccountStatus, CreditLedgerService, LedgerClient } from './credit-ledger.service.js';
 import { LeasedRow, lockLeased, runLeasedBatch } from './due-rows.js';
 import { computeQuote } from './loyalty-lots.js';
 import { LoyaltyService } from './loyalty.service.js';
 import {
+  ConflictReason,
+  NotCreditableReason,
   TOP_UP_STATUSES,
   TopUpGuards,
   TopUpOutcome,
@@ -130,11 +137,14 @@ export function ipnReply(code: IpnRspCode): IpnReply {
 
 /**
  * Kết quả đã commit của IPN / querydr / recheck; truyền cho `afterPaymentCommitted` (Phần 7 gắn
- * e-invoice một chỗ). `expired` từ Phần 8 (vòng quét).
+ * e-invoice một chỗ, **chỉ** khi `credited`). `expired` từ Phần 8 (vòng quét). `not_creditable`
+ * (Phần 8b, STM-4 #8): đã trả nhưng không cộng được → `failed` + khoản trễ; không hoá đơn.
  */
 export interface PaymentResultCommitted {
   topUpId: number;
-  outcome: 'credited' | 'failed' | 'late_payment' | 'expired';
+  outcome: 'credited' | 'failed' | 'late_payment' | 'expired' | 'not_creditable';
+  /** Chỉ có khi `outcome = 'not_creditable'`. */
+  reason?: NotCreditableReason;
 }
 
 /** Dòng `top_ups` đã khoá FOR UPDATE, đủ cột cho `applyLockedResult`. */
@@ -148,6 +158,7 @@ type LockedTopUpRow = {
   points_redeemed: number;
   gateway_transaction_no: string | null;
   late_gateway_ref: string | null;
+  late_amount_vnd: string | null;
 };
 
 type RecheckTopUpRow = LockedTopUpRow & {
@@ -157,19 +168,50 @@ type RecheckTopUpRow = LockedTopUpRow & {
 };
 
 const LOCKED_COLS = `id, status, credit_account_id, gateway_reference, amount_vnd, amount_paid_vnd,
-  points_redeemed, gateway_transaction_no, late_gateway_ref`;
+  points_redeemed, gateway_transaction_no, late_gateway_ref, late_amount_vnd`;
 
 type ResultSource = 'ipn' | 'querydr' | 'recheck';
 
+/** Dòng `credit_accounts` đã khoá FOR UPDATE. */
+type LockedAccount = { id: string; driver_id: string; status: CreditAccountStatus };
+
 /** Kết quả thanh toán đã chuẩn hoá, áp lên dòng đã khoá (IPN, querydr, recheck dùng chung). */
 type LockedResult =
-  | { event: 'PAYMENT_SUCCEEDED'; transactionNo: string; payDate: Date | null }
+  | {
+      event: 'PAYMENT_SUCCEEDED';
+      transactionNo: string;
+      payDate: Date | null;
+      /** Số VNPay thực trừ, **VND** (`vnp_Amount / 100`; `vnp_Amount` luôn chia hết cho 100). */
+      amountVnd: number;
+    }
   | { event: 'PAYMENT_FAILED' }
   | { event: 'TIMEOUT_NOT_PAID'; exceptionKind?: 'unresolved_04' | 'unresolved_07' };
 
+/** Trường log `ipn_applied` / `querydr_applied` / `payment_not_creditable` (ghi sau commit). */
+interface AppliedLog {
+  top_up_id: number;
+  gateway_reference: string;
+  outcome: PaymentResultCommitted['outcome'];
+  vnp_TransactionNo: string | null;
+  reason?: NotCreditableReason;
+  amount_paid_vnd: number;
+  late_amount_vnd?: number;
+}
+
+/** Log `${source}_conflicting_result`, ghi sau commit. */
+interface ConflictLog {
+  /** `log` chỉ khi VNPay gửi lại cùng giao dịch mâu thuẫn đã ghi, cùng số tiền. */
+  level: 'error' | 'log';
+  fields: Record<string, unknown>;
+}
+
 interface Applied {
   outcome: TopUpOutcome;
+  /** Có khi đã ghi gì đó lên `top_ups`; luôn đi cùng `log`. */
   committed?: PaymentResultCommitted;
+  log?: AppliedLog;
+  /** Có khi `outcome = 'conflicting_result'`. */
+  conflictLog?: ConflictLog;
 }
 
 /** Kết quả `recheckTopUp` (nút "Kiểm tra lại" của Admin, route ở Phần 10). */
@@ -202,7 +244,7 @@ function recheckIneligible(row: RecheckTopUpRow | undefined): RecheckIneligible 
 
 /** Lý do chưa ngã ngũ đáng warn / error (bảng 3.1: không tin response; hoặc VNPay trả lạ). */
 const QUERY_WARN_REASONS = new Set(['signature', 'tmn_code', 'txn_ref']);
-const QUERY_ERROR_REASONS = new Set(['transaction_type', 'amount_mismatch']);
+const QUERY_ERROR_REASONS = new Set(['transaction_type']);
 
 interface IpnInput {
   ref: string;
@@ -307,28 +349,21 @@ export class TopUpService implements BackgroundWork, OnModuleInit {
    */
   async onPendingTimeout(row: LeasedRow, signal?: AbortSignal): Promise<void> {
     const top = (
-      await this.db.$client.query<{
-        gateway_reference: string;
-        created_at: Date;
-        amount_paid_vnd: string;
-      }>('SELECT gateway_reference, created_at, amount_paid_vnd FROM top_ups WHERE id = $1', [
-        row.id,
-      ])
+      await this.db.$client.query<{ gateway_reference: string; created_at: Date }>(
+        'SELECT gateway_reference, created_at FROM top_ups WHERE id = $1',
+        [row.id],
+      )
     ).rows[0];
     if (!top) return;
     const result = await this.vnpay.queryTransaction(
-      {
-        gatewayReference: top.gateway_reference,
-        createdAt: top.created_at,
-        amountPaidVnd: Number(top.amount_paid_vnd),
-      },
+      { gatewayReference: top.gateway_reference, createdAt: top.created_at },
       signal,
     );
     // Đang shutdown: không ghi gì, lease hết hạn thì dòng tự đến hạn lại.
     if (signal?.aborted) return;
     this.logQueryResult('querydr', row.id, top.gateway_reference, result);
 
-    const committed = await this.transaction(async (c) => {
+    const applied = await this.transaction(async (c) => {
       const locked = await lockLeased<LockedTopUpRow>(c, 'top_ups', row);
       // Token = lease của mình. Mọi đường rời pending đặt next_attempt_at = NULL, nên còn khớp token
       // nghĩa là dòng vẫn pending; không khớp (IPN đã chốt, runner khác lấy lại) → bỏ kết quả.
@@ -339,12 +374,14 @@ export class TopUpService implements BackgroundWork, OnModuleInit {
       const account = await this.lockAccount(c, locked.credit_account_id);
       const r = await this.timeoutResult(c, locked, result);
       if (!r) return undefined;
-      const applied = await this.applyLockedResult(c, locked, account, r, 'querydr', {
+      return this.applyLockedResult(c, locked, account, r, 'querydr', {
         vnp_TransactionNo: result.kind === 'paid' ? result.transactionNo : null,
       });
-      return applied.committed;
     });
-    if (committed) await this.afterCommit(committed, 'top_up_timeout_after_commit_failed');
+    if (applied?.log) this.logApplied('querydr', applied.log);
+    if (applied?.conflictLog) this.logConflict('querydr', applied.conflictLog);
+    if (applied?.committed)
+      await this.afterCommit(applied.committed, 'top_up_timeout_after_commit_failed');
   }
 
   /**
@@ -366,7 +403,6 @@ export class TopUpService implements BackgroundWork, OnModuleInit {
     const q = await this.vnpay.queryTransaction({
       gatewayReference: top.gateway_reference,
       createdAt: top.created_at,
-      amountPaidVnd: Number(top.amount_paid_vnd),
     });
     this.logQueryResult('recheck', topUpId, top.gateway_reference, q);
 
@@ -387,7 +423,12 @@ export class TopUpService implements BackgroundWork, OnModuleInit {
             c,
             row,
             account,
-            { event: 'PAYMENT_SUCCEEDED', transactionNo: q.transactionNo, payDate: q.payDate },
+            {
+              event: 'PAYMENT_SUCCEEDED',
+              transactionNo: q.transactionNo,
+              payDate: q.payDate,
+              amountVnd: q.amount,
+            },
             'recheck',
             { vnp_TransactionNo: q.transactionNo },
           );
@@ -396,15 +437,21 @@ export class TopUpService implements BackgroundWork, OnModuleInit {
             return {
               reply: { result: 'late_payment_recorded' } as RecheckResult,
               committed: applied.committed,
+              log: applied.log,
             };
           }
           if (applied.outcome === 'already_applied') {
             await markReviewed();
             return { reply: { result: 'already_recorded' } as RecheckResult };
           }
+          // Không đặt exception_reviewed_at: ngoại lệ unresolved_* chưa được giải quyết.
           if (applied.outcome === 'conflicting_result')
-            return { reply: { result: 'conflicting_result' } as RecheckResult };
-          // `expired` chỉ cho late_payment / already_applied / conflicting_result (STM-4).
+            return {
+              reply: { result: 'conflicting_result' } as RecheckResult,
+              conflictLog: applied.conflictLog,
+            };
+          // `expired` chỉ cho late_payment / already_applied / conflicting_result (STM-4); #8
+          // (`not_creditable`) chỉ có ở `pending`.
           throw new Error(`recheck_unexpected_outcome: ${applied.outcome}`);
         }
         case 'failed':
@@ -424,6 +471,8 @@ export class TopUpService implements BackgroundWork, OnModuleInit {
           };
       }
     });
+    if (out.log) this.logApplied('recheck', out.log);
+    if (out.conflictLog) this.logConflict('recheck', out.conflictLog);
     if (out.committed) await this.afterCommit(out.committed, 'recheck_after_commit_failed');
     return out.reply;
   }
@@ -490,10 +539,12 @@ export class TopUpService implements BackgroundWork, OnModuleInit {
    * query thô; luôn trả `{RspCode, Message}` (route trả HTTP 200), không ném.
    *
    * Kiểm request (không ghi gì nếu lỗi): thiếu cấu hình → 99; chữ ký sai / thiếu / `vnp_TmnCode`
-   * khác → 97; không thấy `vnp_TxnRef` → 01; `vnp_Amount ≠ amount_paid_vnd × 100` → 04. Chưa ngã ngũ
-   * (`classifyIpn`) → không ghi gì, 00. Còn lại đi qua `TopUpStateMachine` trong MỘT transaction:
-   * #2 cộng tiền + trừ điểm, #3 failed, khoản trễ ghi `late_*`, lặp → 02, mâu thuẫn → 02 + log error.
-   * Lỗi bất ngờ → rollback, 99 (VNPay gọi lại).
+   * khác → 97; không thấy `vnp_TxnRef` → 01; IPN **không thành công** mà `vnp_Amount ≠
+   * amount_paid_vnd × 100` → 04. Chưa ngã ngũ (`classifyIpn`) → không ghi gì, 00. Còn lại đi qua
+   * `TopUpStateMachine` trong MỘT transaction: #2 cộng tiền + trừ điểm, #3 failed, #8 đã trả mà
+   * không cộng được (sai số tiền / tài khoản `closed`) → `failed` + khoản trễ, 00 (Phần 8b; 00 để
+   * VNPay ngừng gửi lại: 01 / 04 / 97 / 99 đều làm VNPay retry), khoản trễ ghi `late_*`, lặp → 02,
+   * mâu thuẫn → 02 + log error. Lỗi bất ngờ → rollback, 99 (VNPay gọi lại).
    */
   async applyPaymentResult(params: Record<string, string>): Promise<IpnReply> {
     try {
@@ -509,8 +560,9 @@ export class TopUpService implements BackgroundWork, OnModuleInit {
   }
 
   /**
-   * Điểm gọi sau commit (Phần 6 chưa làm gì). Phần 7: `EInvoiceService.requestForTopUp` khi
-   * `credited`. Realtime số dư mới: repo chưa có kênh realtime cho tài xế (chờ module `realtime`).
+   * Điểm gọi sau commit (Phần 6 chưa làm gì). Phần 7: `EInvoiceService.requestForTopUp` **chỉ** khi
+   * `outcome = 'credited'` (không cho `late_payment` / `not_creditable`). Realtime số dư mới, MSG26:
+   * repo chưa có kênh realtime cho tài xế (chờ module `realtime`).
    */
   protected async afterPaymentCommitted(_result: PaymentResultCommitted): Promise<void> {}
 
@@ -534,10 +586,12 @@ export class TopUpService implements BackgroundWork, OnModuleInit {
     const { kind, oneZero } = classifyIpn(p['vnp_ResponseCode'], p['vnp_TransactionStatus']);
     // Chữ ký đúng mà thiếu / sai dạng trường bắt buộc: không ghi gì, 99 để VNPay gọi lại.
     // vnp_TransactionNo chỉ đọc ở nhánh thành công (giao dịch huỷ có thể mang số 0).
+    // Thành công mà vnp_Amount không chia hết cho 100: không ghi được khoản trễ bằng VND (Phần 8b).
     if (
       !/^[A-Za-z0-9]{1,100}$/.test(ref) ||
       !/^\d{1,15}$/.test(amountRaw) ||
-      (kind === 'succeeded' && !/^\d{1,15}$/.test(transactionNo))
+      (kind === 'succeeded' &&
+        (!/^\d{1,15}$/.test(transactionNo) || BigInt(amountRaw) % 100n !== 0n))
     ) {
       this.log('error', 'ipn_malformed', {
         gateway_reference: ref || null,
@@ -550,6 +604,8 @@ export class TopUpService implements BackgroundWork, OnModuleInit {
     const result = await this.transaction((c) =>
       this.applyIpnIn(c, p, { ref, amountRaw, kind, oneZero, transactionNo }),
     );
+    if (result.log) this.logApplied('ipn', result.log);
+    if (result.conflictLog) this.logConflict('ipn', result.conflictLog);
     if (result.committed) {
       // Đã commit: lỗi việc sau commit không được đổi RspCode (trả 99 sẽ làm VNPay gọi lại một IPN
       // đã áp dụng). Phần 7 (e-invoice) có vòng quét DB bắt lại.
@@ -562,7 +618,12 @@ export class TopUpService implements BackgroundWork, OnModuleInit {
     c: PoolClient,
     p: Record<string, string>,
     v: IpnInput,
-  ): Promise<{ code: IpnRspCode; committed?: PaymentResultCommitted }> {
+  ): Promise<{
+    code: IpnRspCode;
+    committed?: PaymentResultCommitted;
+    log?: AppliedLog;
+    conflictLog?: ConflictLog;
+  }> {
     // Thứ tự khoá cố định: top_ups → credit_accounts (→ loyalty_accounts trong redeemForTopUp).
     const top = (
       await c.query<LockedTopUpRow>(
@@ -578,7 +639,9 @@ export class TopUpService implements BackgroundWork, OnModuleInit {
       vnp_TransactionStatus: p['vnp_TransactionStatus'] ?? null,
     };
 
-    if (BigInt(v.amountRaw) !== BigInt(top.amount_paid_vnd) * 100n) {
+    // Chỉ IPN không thành công dừng ở đây (không có tiền bị trừ, VNPay gọi lại). IPN thành công sai số
+    // tiền đi vào state machine (#8 khi còn pending, khoản trễ / mâu thuẫn khi đã rời pending).
+    if (v.kind !== 'succeeded' && BigInt(v.amountRaw) !== BigInt(top.amount_paid_vnd) * 100n) {
       this.log('warn', 'ipn_amount_mismatch', {
         top_up_id: topUpId,
         gateway_reference: v.ref,
@@ -603,6 +666,7 @@ export class TopUpService implements BackgroundWork, OnModuleInit {
             event: 'PAYMENT_SUCCEEDED',
             transactionNo: v.transactionNo,
             payDate: parseVnpDate(p['vnp_PayDate']),
+            amountVnd: Number(BigInt(v.amountRaw) / 100n),
           }
         : { event: 'PAYMENT_FAILED' };
     const applied = await this.applyLockedResult(c, top, account, r, 'ipn', {
@@ -613,8 +677,10 @@ export class TopUpService implements BackgroundWork, OnModuleInit {
     switch (applied.outcome) {
       case 'transition':
       case 'late_payment':
-        return { code: '00', committed: applied.committed };
+      case 'not_creditable':
+        return { code: '00', committed: applied.committed, log: applied.log };
       case 'conflicting_result':
+        return { code: '02', conflictLog: applied.conflictLog };
       case 'already_applied':
       case 'stale':
       case 'rejected':
@@ -627,25 +693,44 @@ export class TopUpService implements BackgroundWork, OnModuleInit {
    * trong cùng transaction). Dùng chung cho IPN, querydr của vòng quét và `recheckTopUp` (Phần 8,
    * mục 5): chỗ DUY NHẤT ghi `credited` (+ sổ cái, điểm, `loyalty_error`), `failed`, `expired`
    * (+ `unresolved_04/07`) và khoản trễ. Mọi chuyển trạng thái đi qua `TopUpStateMachine`.
+   * Phần 8b: guard số tiền / tài khoản `closed` tính ở đây, dưới khoá; khoản trễ = số VNPay thực trừ.
    */
   private async applyLockedResult(
     c: PoolClient,
     top: LockedTopUpRow,
-    account: { id: string; driver_id: string },
+    account: LockedAccount,
     r: LockedResult,
     source: ResultSource,
     logFields: Record<string, unknown> = {},
   ): Promise<Applied> {
     const topUpId = Number(top.id);
+    const amountPaidVnd = Number(top.amount_paid_vnd);
     const guards: TopUpGuards =
       r.event === 'PAYMENT_SUCCEEDED'
         ? {
             transactionNo: r.transactionNo,
             appliedTransactionNo: top.gateway_transaction_no ?? undefined,
             recordedLateRef: top.late_gateway_ref,
+            amountMismatch: r.amountVnd !== amountPaidVnd,
+            accountClosed: account.status === 'closed',
+            lateAmountMismatch:
+              top.late_amount_vnd !== null && r.amountVnd !== Number(top.late_amount_vnd),
           }
         : {};
     const step = this.stm.apply(top.status, r.event, guards);
+    const done = (committed: PaymentResultCommitted, lateAmountVnd?: number): Applied => ({
+      outcome: step.outcome,
+      committed,
+      log: {
+        top_up_id: topUpId,
+        gateway_reference: top.gateway_reference,
+        outcome: committed.outcome,
+        vnp_TransactionNo: r.event === 'PAYMENT_SUCCEEDED' ? r.transactionNo : null,
+        ...(committed.reason !== undefined && { reason: committed.reason }),
+        amount_paid_vnd: amountPaidVnd,
+        ...(lateAmountVnd !== undefined && { late_amount_vnd: lateAmountVnd }),
+      },
+    });
 
     switch (step.outcome) {
       case 'transition': {
@@ -658,7 +743,7 @@ export class TopUpService implements BackgroundWork, OnModuleInit {
             r.transactionNo,
             source,
           );
-          return { outcome: step.outcome, committed: { topUpId, outcome: 'credited' } };
+          return done({ topUpId, outcome: 'credited' });
         }
         // #3 failed / #4 expired: rời pending (completed_at, next_attempt_at NULL như Phần 6).
         const exceptionKind = r.event === 'TIMEOUT_NOT_PAID' ? (r.exceptionKind ?? null) : null;
@@ -669,33 +754,76 @@ export class TopUpService implements BackgroundWork, OnModuleInit {
              updated_at = now() WHERE id = $1`,
           [topUpId, step.to, exceptionKind],
         );
-        return {
-          outcome: step.outcome,
-          committed: { topUpId, outcome: step.to === 'expired' ? 'expired' : 'failed' },
-        };
+        return done({ topUpId, outcome: step.to === 'expired' ? 'expired' : 'failed' });
+      }
+      case 'not_creditable': {
+        const reason = step.reason;
+        if (
+          r.event !== 'PAYMENT_SUCCEEDED' ||
+          (reason !== 'amount_mismatch' && reason !== 'account_closed')
+        )
+          throw new Error('not_creditable_without_payment');
+        // #8: rời pending sang failed + khoản trễ (số VNPay thực trừ) trong MỘT câu, vì CHECK
+        // top_ups_late_payment_status_check cấm khoản trễ trên pending. Không cộng, không ghi sổ cái,
+        // không trừ điểm, không hoá đơn (Phần 8b).
+        await c.query(
+          `UPDATE top_ups SET status = $2::top_up_status, completed_at = now(),
+             next_attempt_at = NULL, late_gateway_ref = $3,
+             late_paid_at = COALESCE($4::timestamptz, now()), late_amount_vnd = $5,
+             updated_at = now() WHERE id = $1`,
+          [topUpId, step.to, r.transactionNo, r.payDate, r.amountVnd],
+        );
+        return done({ topUpId, outcome: 'not_creditable', reason }, r.amountVnd);
       }
       case 'late_payment': {
         if (r.event !== 'PAYMENT_SUCCEEDED') throw new Error('late_payment_without_payment');
-        // Giữ trạng thái; không cộng, không trừ điểm, không hoá đơn (D4).
+        // Giữ trạng thái; không cộng, không trừ điểm, không hoá đơn (D4). Ghi số VNPay thực trừ
+        // (Phần 8b): Admin hoàn đúng số này (refund VNPay không cho hoàn quá số giao dịch).
         await c.query(
           `UPDATE top_ups SET late_gateway_ref = $2, late_paid_at = COALESCE($3::timestamptz, now()),
              late_amount_vnd = $4, updated_at = now() WHERE id = $1`,
-          [topUpId, r.transactionNo, r.payDate, Number(top.amount_paid_vnd)],
+          [topUpId, r.transactionNo, r.payDate, r.amountVnd],
         );
-        return { outcome: step.outcome, committed: { topUpId, outcome: 'late_payment' } };
+        return done({ topUpId, outcome: 'late_payment' }, r.amountVnd);
       }
-      case 'conflicting_result':
-        // Khoản thứ ba trên cùng top-up, hoặc báo lỗi trên top-up đã cộng: Admin xử lý ngoài hệ thống.
-        this.log('error', `${source}_conflicting_result`, {
+      case 'conflicting_result': {
+        // Admin xử lý ngoài hệ thống. Lần trả thành công mâu thuẫn (có reason) ghi một dòng
+        // top_up_payment_conflicts (0024); báo lỗi trên top-up đã cộng chỉ log. Không đụng top_ups.
+        const fields: Record<string, unknown> = {
           top_up_id: topUpId,
           gateway_reference: top.gateway_reference,
           status: top.status,
           gateway_transaction_no: top.gateway_transaction_no,
           late_gateway_ref: top.late_gateway_ref,
-          amount_paid_vnd: Number(top.amount_paid_vnd),
+          amount_paid_vnd: amountPaidVnd,
+          late_amount_vnd: top.late_amount_vnd === null ? null : Number(top.late_amount_vnd),
+          paid_amount_vnd: r.event === 'PAYMENT_SUCCEEDED' ? r.amountVnd : null,
           ...logFields,
-        });
-        return { outcome: step.outcome };
+        };
+        const reason = step.reason;
+        if (
+          r.event !== 'PAYMENT_SUCCEEDED' ||
+          (reason !== 'extra_payment' && reason !== 'amount_differs')
+        )
+          return { outcome: step.outcome, conflictLog: { level: 'error', fields } };
+        const recorded = await this.recordConflict(c, topUpId, r, source, reason);
+        // VNPay gửi lại cùng giao dịch cùng số tiền: không phải mâu thuẫn mới → mức log.
+        const level =
+          !recorded.inserted && recorded.existingAmountVnd === r.amountVnd ? 'log' : 'error';
+        return {
+          outcome: step.outcome,
+          conflictLog: {
+            level,
+            fields: {
+              ...fields,
+              reason,
+              conflict_id: recorded.id,
+              inserted: recorded.inserted,
+              ...(!recorded.inserted && { existing_amount_vnd: recorded.existingAmountVnd }),
+            },
+          },
+        };
+      }
       case 'already_applied':
       case 'stale':
       case 'rejected':
@@ -715,7 +843,12 @@ export class TopUpService implements BackgroundWork, OnModuleInit {
   ): Promise<LockedResult | null> {
     switch (q.kind) {
       case 'paid':
-        return { event: 'PAYMENT_SUCCEEDED', transactionNo: q.transactionNo, payDate: q.payDate };
+        return {
+          event: 'PAYMENT_SUCCEEDED',
+          transactionNo: q.transactionNo,
+          payDate: q.payDate,
+          amountVnd: q.amount,
+        };
       case 'failed':
         return { event: 'PAYMENT_FAILED' };
       case 'not_found':
@@ -783,17 +916,73 @@ export class TopUpService implements BackgroundWork, OnModuleInit {
     }
   }
 
-  /** Khoá `credit_accounts` (sau `top_ups`, thứ tự cố định). */
-  private async lockAccount(
+  /**
+   * Ghi một dòng `top_up_payment_conflicts` (0024) cho lần trả thành công mâu thuẫn. Bên gọi đã
+   * khoá `top_ups` → `credit_accounts`. VNPay gửi lại cùng giao dịch → `ON CONFLICT DO NOTHING`,
+   * trả dòng đã có (không ghi đè `amount_vnd`).
+   */
+  private async recordConflict(
     c: PoolClient,
-    accountId: string,
-  ): Promise<{ id: string; driver_id: string }> {
+    topUpId: number,
+    r: Extract<LockedResult, { event: 'PAYMENT_SUCCEEDED' }>,
+    source: ResultSource,
+    reason: ConflictReason,
+  ): Promise<{ id: number; inserted: boolean; existingAmountVnd: number }> {
+    const inserted = (
+      await c.query<{ id: string }>(
+        `INSERT INTO top_up_payment_conflicts
+           (top_up_id, gateway_transaction_no, amount_vnd, paid_at, source, reason)
+         VALUES ($1, $2, $3, COALESCE($4::timestamptz, now()), $5::payment_result_source,
+           $6::top_up_payment_conflict_reason)
+         ON CONFLICT (top_up_id, gateway_transaction_no) DO NOTHING
+         RETURNING id`,
+        [topUpId, r.transactionNo, r.amountVnd, r.payDate, source, reason],
+      )
+    ).rows[0];
+    if (inserted)
+      return { id: Number(inserted.id), inserted: true, existingAmountVnd: r.amountVnd };
+    const prev = (
+      await c.query<{ id: string; amount_vnd: string }>(
+        `SELECT id, amount_vnd FROM top_up_payment_conflicts
+         WHERE top_up_id = $1 AND gateway_transaction_no = $2`,
+        [topUpId, r.transactionNo],
+      )
+    ).rows[0]!;
+    return { id: Number(prev.id), inserted: false, existingAmountVnd: Number(prev.amount_vnd) };
+  }
+
+  /** Log `${source}_conflicting_result` SAU commit (kết quả bị rollback không được log). */
+  private logConflict(source: ResultSource, log: ConflictLog): void {
+    this.log(log.level, `${source}_conflicting_result`, log.fields);
+  }
+
+  /** Khoá `credit_accounts` (sau `top_ups`, thứ tự cố định); `status` cho guard #8. */
+  private async lockAccount(c: PoolClient, accountId: string): Promise<LockedAccount> {
     return (
-      await c.query<{ id: string; driver_id: string }>(
-        'SELECT id, driver_id FROM credit_accounts WHERE id = $1 FOR UPDATE',
+      await c.query<LockedAccount>(
+        'SELECT id, driver_id, status FROM credit_accounts WHERE id = $1 FOR UPDATE',
         [accountId],
       )
     ).rows[0]!;
+  }
+
+  /**
+   * Log kết quả đã áp dụng, gọi SAU commit (kết quả bị rollback không được log). `already_applied` /
+   * `stale` không log (VNPay gửi lại tới 10 lần). #8 thêm `payment_not_creditable` mức error.
+   */
+  private logApplied(source: ResultSource, log: AppliedLog): void {
+    if (source === 'ipn') this.log('log', 'ipn_applied', { ...log });
+    else this.log('log', 'querydr_applied', { ...log, source });
+    if (log.outcome === 'not_creditable')
+      this.log('error', 'payment_not_creditable', {
+        top_up_id: log.top_up_id,
+        gateway_reference: log.gateway_reference,
+        reason: log.reason ?? null,
+        vnp_TransactionNo: log.vnp_TransactionNo,
+        amount_paid_vnd: log.amount_paid_vnd,
+        late_amount_vnd: log.late_amount_vnd ?? null,
+        source,
+      });
   }
 
   /** Việc sau commit: lỗi chỉ log, không đổi kết quả đã commit. */
@@ -819,11 +1008,18 @@ export class TopUpService implements BackgroundWork, OnModuleInit {
       fields['reason'] = q.reason;
       fields['response_code'] = q.responseCode ?? null;
       fields['transaction_status'] = q.transactionStatus ?? null;
+      // Response không tin được (Phần 8b, 5.1): mã / câu thô CHƯA xác thực, chỉ để đọc log.
+      if (q.unverified) {
+        fields['unverified_response_code'] = q.unverified.responseCode ?? null;
+        fields['unverified_message'] = q.unverified.message ?? null;
+        fields['has_secure_hash'] = q.unverified.hasSecureHash;
+      }
     } else if (q.kind === 'failed') {
       fields['response_code'] = q.responseCode;
       fields['transaction_status'] = q.transactionStatus;
     } else if (q.kind === 'paid') {
       fields['vnp_TransactionNo'] = q.transactionNo;
+      fields['amount_vnd'] = q.amount;
     }
     const level =
       q.kind === 'unresolved' && QUERY_ERROR_REASONS.has(q.reason)

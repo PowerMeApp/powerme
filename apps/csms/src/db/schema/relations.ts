@@ -12,6 +12,7 @@ import {
   loyaltyAccounts,
   loyaltyTransactions,
   refunds,
+  topUpPaymentConflicts,
   topUps,
 } from './billing.js';
 import { ocppMessageLog, remoteCommands } from './ocpp-log.js';
@@ -246,6 +247,16 @@ export const topUpsRelations = relations(topUps, ({ one, many }) => ({
   loyaltyTransactions: many(loyaltyTransactions),
   // Từ migration 0015 (STM-10): TopUp 1 – 0..* Refund; Admin quyết định hoàn ở refunds.requestedBy (B5).
   refunds: many(refunds),
+  // Từ migration 0024 (T32 Phần 8b): TopUp 1 – 0..* lần trả mâu thuẫn.
+  paymentConflicts: many(topUpPaymentConflicts),
+}));
+
+export const topUpPaymentConflictsRelations = relations(topUpPaymentConflicts, ({ one }) => ({
+  topUp: one(topUps, { fields: [topUpPaymentConflicts.topUpId], references: [topUps.id] }),
+  reviewer: one(admins, {
+    fields: [topUpPaymentConflicts.reviewedBy],
+    references: [admins.userId],
+  }),
 }));
 
 export const refundsRelations = relations(refunds, ({ one }) => ({

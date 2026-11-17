@@ -1,7 +1,8 @@
 /**
  * Unit test querydr VNPay (T32 Phần 8, SD-2d, bảng 3.1 của Ân 12/11): dựng request, kiểm và phân
  * loại response (hàm thuần), `VnpayAdapter.queryTransaction` với fetch giả (không gọi mạng thật),
- * và cấu hình `VNPAY_API_URL` / `VNPAY_SERVER_IP`.
+ * và cấu hình `VNPAY_API_URL` / `VNPAY_SERVER_IP`. Phần 8b: `paid` mang số thực trừ (không so ở
+ * adapter), `vnp_Amount` lẻ ×100 → malformed, mã / câu thô của response chưa xác thực, chỉ https.
  *
  * Chuỗi ký mong đợi viết TAY theo thứ tự của tài liệu `truy-van-hoan-tien/querydr&refund.html`
  * (nối bằng `|`, không encode); chữ ký tính độc lập bằng node:crypto — không gọi lại hàm ký của
@@ -13,11 +14,14 @@ import {
   newQuerydrRequestId,
   QUERYDR_TIMEOUT_MS,
   querydrRequest,
+  UNVERIFIED_FIELD_MAX,
+  unverifiedResponseInfo,
   VnpayAdapter,
   vnpDate,
 } from './vnpay.adapter.js';
 import {
   loadVnpayApiConfig,
+  loadVnpayConfig,
   VNPAY_DEFAULT_SERVER_IP,
   VNPAY_SANDBOX_API_URL,
   VnpayConfig,
@@ -34,7 +38,6 @@ const CFG: VnpayConfig = {
 const TOP_UP = {
   gatewayReference: 'PMABC123',
   createdAt: new Date('2026-11-12T17:30:00Z'), // GMT+7: 13/11 00:30:00
-  amountPaidVnd: 200_000,
 };
 const hmac = (data: string) => createHmac('sha512', SECRET).update(data, 'utf8').digest('hex');
 
@@ -83,7 +86,7 @@ function signedResponse(
   return out;
 }
 
-const EXPECT = { tmnCode: CFG.tmnCode, txnRef: TOP_UP.gatewayReference, amountPaidVnd: 200_000 };
+const EXPECT = { tmnCode: CFG.tmnCode, txnRef: TOP_UP.gatewayReference };
 
 describe('querydrRequest (T32 Phần 8)', () => {
   const NOW = new Date('2026-11-12T17:47:05Z'); // GMT+7: 13/11 00:47:05
@@ -199,10 +202,16 @@ describe('classifyQuerydrResponse — bảng 3.1 (Ân 12/11)', () => {
     ).toMatchObject({ kind: 'unresolved', reason: 'transaction_type' });
   });
 
-  it('paid mà vnp_Amount ≠ amount_paid_vnd × 100 → unresolved amount_mismatch (không cộng)', () => {
+  it('paid với số tiền khác: vẫn paid, mang số VNPay thực trừ (VND); so số tiền ở service (Phần 8b)', () => {
     expect(
       classifyQuerydrResponse(signedResponse({ vnp_Amount: '200000' }), EXPECT, SECRET),
-    ).toMatchObject({ kind: 'unresolved', reason: 'amount_mismatch' });
+    ).toMatchObject({ kind: 'paid', amount: 2_000 });
+  });
+
+  it('paid mà vnp_Amount không chia hết cho 100 → unresolved malformed', () => {
+    expect(
+      classifyQuerydrResponse(signedResponse({ vnp_Amount: '20000050' }), EXPECT, SECRET),
+    ).toMatchObject({ kind: 'unresolved', reason: 'malformed' });
   });
 
   it('chữ ký sai / thiếu / ký bằng secret khác → unresolved signature', () => {
@@ -352,11 +361,86 @@ describe('VnpayAdapter.queryTransaction (fetch giả)', () => {
     await expect(p).resolves.toEqual({ kind: 'unresolved', reason: 'network' });
   });
 
+  it('response không chữ ký (RC 94, VNPay chặn querydr lặp) → unresolved signature, kèm mã / câu thô chưa xác thực', async () => {
+    const f = ok({ vnp_ResponseCode: '94', vnp_Message: 'Request is duplicated' });
+    await expect(new VnpayAdapter(CFG, API, f).queryTransaction(TOP_UP)).resolves.toEqual({
+      kind: 'unresolved',
+      reason: 'signature',
+      unverified: { responseCode: '94', message: 'Request is duplicated', hasSecureHash: false },
+    });
+  });
+
+  it('ký đúng nhưng vnp_TxnRef khác → txn_ref kèm mã thô; lý do khác (http_status, response_code) không kèm', async () => {
+    await expect(
+      new VnpayAdapter(CFG, API, ok(signedResponse({ vnp_TxnRef: 'PMOTHER' }))).queryTransaction(
+        TOP_UP,
+      ),
+    ).resolves.toMatchObject({
+      reason: 'txn_ref',
+      unverified: { responseCode: '00', hasSecureHash: true },
+    });
+    const rc99 = await new VnpayAdapter(
+      CFG,
+      API,
+      ok(signedResponse({ vnp_ResponseCode: '99' })),
+    ).queryTransaction(TOP_UP);
+    expect(rc99).toEqual({ kind: 'unresolved', reason: 'response_code', responseCode: '99' });
+  });
+
   it('chưa cấu hình → ném, không gọi HTTP', async () => {
     const f = ok(signedResponse());
     const adapter = new VnpayAdapter({ ...CFG, configured: false }, API, f);
     await expect(adapter.queryTransaction(TOP_UP)).rejects.toThrow('vnpay_unconfigured');
     expect(f).not.toHaveBeenCalled();
+  });
+});
+
+describe('unverifiedResponseInfo (Phần 8b, 5.1)', () => {
+  it('lấy vnp_ResponseCode / vnp_Message thô, cắt ≤ 200 ký tự; không đọc giá trị chữ ký', () => {
+    const long = 'x'.repeat(500);
+    const info = unverifiedResponseInfo({
+      vnp_ResponseCode: 99,
+      vnp_Message: long,
+      vnp_SecureHash: 'deadbeef',
+    });
+    expect(info).toEqual({
+      responseCode: '99',
+      message: 'x'.repeat(UNVERIFIED_FIELD_MAX),
+      hasSecureHash: true,
+    });
+    expect(UNVERIFIED_FIELD_MAX).toBe(200);
+    expect(JSON.stringify(info)).not.toContain('deadbeef');
+  });
+
+  it('kiểu sai bị bỏ; body không phải object → chỉ hasSecureHash false', () => {
+    expect(unverifiedResponseInfo({ vnp_ResponseCode: { a: 1 }, vnp_Message: null })).toEqual({
+      hasSecureHash: false,
+    });
+    expect(unverifiedResponseInfo(null)).toEqual({ hasSecureHash: false });
+    expect(unverifiedResponseInfo(['94'])).toEqual({ hasSecureHash: false });
+  });
+});
+
+describe('VNPay chỉ nhận https (Phần 8b, mục 4)', () => {
+  it('VNPAY_API_URL http:// → lỗi cấu hình; https:// → nhận', () => {
+    expect(() => loadVnpayApiConfig({ VNPAY_API_URL: 'http://vnpay.test/api' })).toThrow(
+      'invalid_vnpay_config: VNPAY_API_URL phải là URL https',
+    );
+    expect(loadVnpayApiConfig({ VNPAY_API_URL: 'https://vnpay.test/api' }).apiUrl).toBe(
+      'https://vnpay.test/api',
+    );
+  });
+
+  it('VNPAY_URL http:// → lỗi cấu hình; https:// → nhận; VNPAY_RETURN_URL vẫn nhận http', () => {
+    expect(() => loadVnpayConfig({ VNPAY_URL: 'http://vnpay.test/pay' })).toThrow(
+      'invalid_vnpay_config: VNPAY_URL phải là URL https',
+    );
+    expect(loadVnpayConfig({ VNPAY_URL: 'https://vnpay.test/pay' }).payUrl).toBe(
+      'https://vnpay.test/pay',
+    );
+    expect(loadVnpayConfig({ VNPAY_RETURN_URL: 'http://localhost:3000/r' }).returnUrl).toBe(
+      'http://localhost:3000/r',
+    );
   });
 });
 
