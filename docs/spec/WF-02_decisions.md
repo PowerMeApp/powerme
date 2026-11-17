@@ -1,6 +1,6 @@
 # WF-02 – Quyết định thiết kế
 
-> Đặt tại `docs/spec/WF-02_decisions.md`. Cập nhật: 14/11/2026 (D2, D3, D4, D7, "Còn mở" theo T32 Phần 8; D3, D4, D7, D8 theo T32 Phần 6 13/11; D2 theo T32 Phần 5, 12/11).
+> Đặt tại `docs/spec/WF-02_decisions.md`. Cập nhật: 17/11/2026 (D3, D5, D7, "Còn mở" theo T32 Phần 7); 14/11/2026 (D2, D3, D4, D7, "Còn mở" theo T32 Phần 8; D3, D4, D7, D8 theo T32 Phần 6 13/11; D2 theo T32 Phần 5, 12/11).
 > **Nguồn chính là diagram trong `diagrams/report4/class/CD-2/` + `diagrams/report4/sequence/SD-2a…2f/`** (CD-2, SD-2a…2f v2.0, 01/11/2026, bản đã chia sẻ vào tài liệu chung của nhóm). File này chỉ ghi lại:
 > (1) những điểm trong diagram mà code phải bám, viết ra cho dễ tra;
 > (2) cách khớp diagram với repo hiện tại;
@@ -120,7 +120,7 @@ Nghĩa của cột đã có:
 | ⊕ Đã trả nhưng không cộng được (IPN thành công, top-up `pending`, sai số tiền hoặc tài khoản `closed`; T32 Phần 8b) | `pending → failed` (STM-4 #8) + khoản trễ = số VNPay thực trừ | 00 |
 | Đã áp dụng rồi | không ghi gì | 02 |
 | Thanh toán lỗi hoặc huỷ | `pending → failed` | 00 |
-| Đã trả | `pending → credited`, `CreditLedgerService.post(+amountVnd)` (`in_shortfall → active` nếu số dư ≥ 0), `LoyaltyService.redeemForTopUp` nếu có dùng điểm, `EInvoiceService.requestForTopUp` chạy sau commit | 00 |
+| Đã trả | `pending → credited`, `CreditLedgerService.post(+amountVnd)` (`in_shortfall → active` nếu số dư ≥ 0), `LoyaltyService.redeemForTopUp` nếu có dùng điểm, ~~`EInvoiceService.requestForTopUp` chạy sau commit~~ → thay bởi T32 Phần 7 17/11: `EInvoiceService.requestForTopUp` tạo dòng `e_invoices` `requested` **trong cùng transaction** (sau `post` và bước điểm); sau commit chỉ đánh thức việc nền `e-invoice-issue` | 00 |
 
 ⊕ **Cài đặt T32 Phần 6 (13/11, Khang + Ân chốt 12–13/11).** Code: `billing/top-up.service.ts` (`applyPaymentResult`), `billing/vnpay.adapter.ts` (`verifyIpnSignature`, `classifyIpn`, `parseVnpDate`), route `billing/vnpay-ipn.http.ts` (thay `VnpayIpnController`, gắn trong `console.server.ts` trước nhánh console). Migration 0021.
 - **Kiểm request, không ghi gì nếu lỗi** (theo thứ tự):
@@ -158,7 +158,7 @@ Nghĩa của cột đã có:
   - IPN lặp sau đó: cùng `vnp_TransactionNo` cùng số → `already_applied` (02); khác số → `conflicting_result` (02, D4 ⊕ 3.4; ⊕ bổ sung: dòng `top_up_payment_conflicts` `amount_differs`).
   - `PaymentResultCommitted.outcome = 'not_creditable'` (+ `reason`); Phần 7 chỉ gắn e-invoice khi `credited`. MSG26: chưa có kênh, không phát.
 - ⊕ **Log áp dụng** (T32 Phần 8b; thử sandbox 14/11 thấy IPN áp dụng xong không có log nào): sau commit (kết quả bị rollback không log) ghi `ipn_applied` (IPN) / `querydr_applied` (vòng quét và recheck, kèm `source`), mức log: `top_up_id`, `gateway_reference`, `outcome` (`credited` / `failed` / `expired` / `late_payment` / `not_creditable`), `vnp_TransactionNo`, `amount_paid_vnd`, có thì `reason`, `late_amount_vnd`. #8 thêm `payment_not_creditable` mức **error** (`reason` `amount_mismatch` / `account_closed`, `source` `ipn` / `querydr` / `recheck`). `already_applied` / `stale` không log (VNPay gửi lại tới 10 lần).
-- Sau commit: `afterPaymentCommitted` (Phần 6 chưa làm gì; lỗi ở đây chỉ log error `ipn_after_commit_failed`, vẫn trả RspCode của transaction đã commit, không trả 99). Phần 7 gọi `EInvoiceService.requestForTopUp` ở đây. Realtime: repo chưa có kênh realtime cho tài xế, chưa phát.
+- Sau commit: `afterPaymentCommitted` (lỗi ở đây chỉ log error `ipn_after_commit_failed`, vẫn trả RspCode của transaction đã commit, không trả 99). ~~Phần 7 gọi `EInvoiceService.requestForTopUp` ở đây.~~ → thay bởi T32 Phần 7 17/11: `outcome = 'credited'` → chỉ `EInvoiceService.kickIssue()` (dòng hoá đơn đã tạo trong transaction, lỗi / sập sau commit không làm mất hoá đơn). Realtime: repo chưa có kênh realtime cho tài xế, chưa phát.
 - ⊕ **Đường áp kết quả dùng chung** (T32 Phần 8 14/11): phần sau khi đã khoá `top_ups` → `credit_accounts` tách thành `applyLockedResult` (state machine → `credit()` gồm savepoint điểm / `failed` / `expired` + `unresolved_*` / khoản trễ / `already_applied` / `conflicting_result`), dùng cho IPN, querydr của vòng quét và `recheckTopUp`. Đây là chỗ **duy nhất** ghi `credited`, khoản trễ và `exception_kind = 'loyalty_error'`. Cộng qua querydr ghi `gateway_transaction_no = vnp_TransactionNo` của response querydr (IPN tới sau cùng số → `already_applied` → 02). `afterPaymentCommitted` gọi cho **cả** đường querydr (try / catch riêng, log `top_up_timeout_after_commit_failed`) và khoản trễ của recheck (`recheck_after_commit_failed`); `PaymentResultCommitted.outcome` thêm `expired`. Tên log của IPN giữ nguyên; đường khác dùng tiền tố `querydr_` / `recheck_`. Hành vi IPN không đổi (test Phần 6 không sửa assertion).
 
 Cộng tiền, dòng sổ cái và điểm nằm trong **một** DB transaction, nên IPN lặp không cộng hai lần.
@@ -265,6 +265,35 @@ Cộng tiền, dòng sổ cái và điểm nằm trong **một** DB transaction,
 
 ## D5. E-invoice (SD-2c, STM-7) và InvoiceAdjustment
 
+⊕ **T32 Phần 7 (Khang chốt 17/11):**
+- **Tạo dòng trong cùng transaction cộng tiền** (thay SD-2b "requestForTopUp sau commit"): `EInvoiceService.requestForTopUp(client, topUpId)` nhận client của transaction bên gọi (không tự BEGIN/COMMIT), gọi trong nhánh `credited` của `TopUpService.applyLockedResult` sau `credit()` và bước điểm. Lý do: INSERT sau commit thì sập giữa commit và `afterPaymentCommitted` làm mất hoá đơn mà không gì quét lại được (D7: DB là nguồn sự thật); cùng cách `refunds` tạo cùng transaction với quyết định hoàn (D1). `INSERT … ON CONFLICT (top_up_id) DO NOTHING`: một hoá đơn mỗi top-up. Nguồn cộng tiền thật chỉ có IPN và querydr của vòng quét (recheck chỉ ghi khoản trễ / mâu thuẫn, không `credited`); cả hai đi qua nhánh này. Không hoá đơn cho `late_payment`, `not_creditable`, `failed`, `expired`, `conflicting_result`, `already_applied`. Lỗi INSERT rollback cả giao dịch như mọi lỗi DB (không SAVEPOINT). Sau commit chỉ `kickIssue()`; việc gọi nhà cung cấp chạy nền.
+- **Số tiền:** `amount_vnd` = `top_ups.amount_paid_vnd` (số thực thu, BR-P04 "for the amount collected"), **đã gồm VAT**; phần giảm bằng điểm không lên hoá đơn. `vat_amount_vnd` = phần thuế nằm trong tổng = `round(amount × r / (100 + r))`, làm tròn nửa lên, tính bằng BigInt (`splitVat`, `billing/e-invoice.ts`).
+- **Thuế suất theo thời điểm thu tiền** (`top_ups.completed_at`, cùng transaction), không theo lúc gọi nhà cung cấp (retry có thể vắt qua 31/12):
+  - trước `2027-01-01T00:00:00+07:00` → 8% (Nghị quyết 204/2025/QH15, Nghị định 174/2025/NĐ-CP, hết hiệu lực 31/12/2026);
+  - từ mốc đó → 10%.
+
+  Quy tắc nằm ở một hàm thuần `vatRateAt` (hằng số, không đọc biến môi trường). Thuế suất lưu ở cột **`e_invoices.vat_rate`** (migration 0025: `smallint` NOT NULL không DEFAULT, CHECK `IN (0, 5, 8, 10)`), để hoá đơn điều chỉnh (Phần 9) dùng đúng thuế suất gốc, không suy ngược từ `vat_amount_vnd`. Lượt gọi nhà cung cấp gửi đúng `amount_vnd` / `vat_rate` / `vat_amount_vnd` đã lưu trên dòng, không tính lại; `completed_at` chỉ dùng làm `paidAt`. Giả định thuế suất: xem "Còn mở".
+- **Nhà cung cấp:** `EInvoiceProviderAdapter.createInvoice(input, signal)` trả `{issued, invoiceNo}` hoặc lỗi `transient` / `data` kèm message.
+  - Input: khoá idempotent = `e_invoices.id`, mô tả "Trả trước dịch vụ sạc xe điện", `amountVnd`, `vatRate`, `vatAmountVnd`, `paidAt`. **Không có người mua** (người tiêu dùng cá nhân, SRS §3.4.1).
+  - **Idempotent theo khoá**: gọi lại cùng khoá trả cùng `invoiceNo`. Nhà cung cấp đã cấp số mà tx2 mất lease (hoặc sập) thì lượt sau gọi lại; nhà cung cấp thật không được cấp hai hoá đơn.
+  - Timeout 10 s bọc ngoài adapter (`callProvider`) → `transient`; adapter ném → `transient`; số hoá đơn rỗng / quá 20 ký tự → `data` (không ghi được `varchar(20)`).
+  - Thông tin người bán thuộc cấu hình adapter thật (xem "Còn mở").
+- **Stub** (`StubEInvoiceProvider`): không gọi HTTP; `invoiceNo` = `STUB-` + base36 của khoá (ổn định, ≤ 18 ký tự). `EINVOICE_STUB_MODE=success|transient|data` (mặc định `success`), `EINVOICE_STUB_DELAY_MS` (0–60000, mặc định 0); giá trị sai → `invalid_einvoice_config` lúc khởi động.
+- **Worker `e-invoice-issue`** (`EInvoiceService` tự cài `BackgroundWork`, luôn đăng ký):
+  1. `runLeasedBatch` trên `e_invoices` (`status IN ('requested','failed') AND next_attempt_at <= now()`);
+  2. gọi nhà cung cấp ngoài transaction;
+  3. tx2 `lockLeased`: `null` → bỏ kết quả, log `e_invoice_lease_lost`;
+  4. `EInvoiceStateMachine` (STM-7) → một câu UPDATE (`updated_at = now()`). `failed → requested` (`RETRY_DUE`, #6) làm ở **tx2**, vì tx1 là `claimDue` dùng chung.
+
+  Kết quả:
+  - thành công → `issued`, log `e_invoice_issued`;
+  - lỗi tạm thời và `attempt_count` (sau lượt) < `RETRY_LIMIT` → `failed`, `next_attempt_at = now() + nextRetry(n)`;
+  - còn lại → `needs_review`, `next_attempt_at` NULL, log error `e_invoice_needs_review`.
+
+  `last_error_message` cắt còn 500 ký tự. Thành công không xoá `last_error_*`.
+- **Admin retry** `EInvoiceService.adminRetry(invoiceId, adminId)` (route Phần 10): chỉ `needs_review` → `requested` (`ADMIN_RETRY`, #7), `next_attempt_at = now()`, giữ `attempt_count`, sau commit `kickIssue`. Không có hoá đơn → `EInvoiceNotFound` (404); trạng thái khác → `InvalidTransition('STM-7', …)` (409). Repo chưa có bảng audit nên `adminId` chỉ ghi vào log `e_invoice_admin_retry`.
+- Gửi hoá đơn cho tài xế (STM-7 #2 "/ send invoice to Driver"): chưa có kênh, không làm.
+
 - `EInvoiceService.issue(invoiceId)` chạy nền; `EInvoiceProviderAdapter.createInvoice(...)` timeout 10 s.
   - Có `invoiceNo` → `requested → issued`.
   - Lỗi tạm thời, chưa hết 4 lượt → `requested → failed`, attempt + 1, hẹn 5 phút / 30 phút / 2 giờ. Đến hạn: `failed → requested` rồi thử lại.
@@ -322,7 +351,7 @@ Diagram chỉ ghi "job" / "queue" / "after commit". Repo chưa có BullMQ (Redis
   2. gọi bên ngoài, ngoài transaction;
   3. tx thứ hai khoá lại dòng (`lockLeased`, kiểm `next_attempt_at` còn đúng lease của mình) rồi ghi kết quả qua state machine.
 
-  Sập giữa chừng thì hết lease dòng tự đến hạn lại. Lease không tăng `attempt_count`. Các điều kiện đến hạn:
+  Sập giữa chừng thì hết lease dòng tự đến hạn lại. Lease không tăng `attempt_count` (rủi ro: mục "Lỗi lặp ở tx2" của "Còn mở"; ⊕ T32 Phần 7 17/11: PR 8c sửa chung trong `due-rows.ts`, bao cả `e_invoices`). Các điều kiện đến hạn:
   - `refunds`: `status = 'requested' AND next_attempt_at <= now()` → `RefundService.send`.
   - `e_invoices`, `invoice_adjustments`: `status IN ('requested','failed') AND next_attempt_at <= now()` → `EInvoiceService.issue` / điều chỉnh.
   - ~~`top_ups`: `status = 'pending' AND expires_at <= now()` → `TopUpService.onPendingTimeout` (dùng `expires_at` đã có; D4 09/11: chạy lúc `expires_at + 2 phút`). Không có `next_attempt_at`, nên cách giữ chỗ do Phần 5/8 chọn (interface `BackgroundWork.runDue` không ràng buộc).~~ → thay bởi T32 Phần 6 13/11: `top_ups`: `status = 'pending' AND next_attempt_at <= now()` → `TopUpService.onPendingTimeout` (0021 thêm `next_attempt_at`, D4; giữ chỗ như các bảng khác bằng `runLeasedBatch`).
@@ -434,6 +463,10 @@ Chốt 09/11: WP5 làm job hết hạn điểm.
 - **Sandbox không gửi lại IPN** trong ~30 phút sau khi nhận HTTP 403 (thử 16/11), khác tài liệu VNPay (gọi lại tối đa 10 lần, cách 5 phút). Hệ quả: querydr là đường duy nhất bắt được khoản đã trả mà IPN không tới (ca E 16/11 đã chứng minh đường này chạy). Ca "IPN tới sau khi querydr đã cộng → 02" mới chỉ có test integration làm bằng chứng.
 - **querydr trả `paid` với txn khác bị bỏ khi mất lease** (T32 Phần 8b bổ sung ghi lại, Khang 16/11; chưa sửa code): IPN cộng txn A trong lúc querydr đang chạy, querydr trả `paid` với txn B ≠ A → `lockLeased` trả `null` → kết quả querydr bị bỏ. Nếu B là lần trả thật thứ hai, chỉ bắt được khi IPN của B tới. Khó xảy ra (VNPay thường trả cùng giao dịch cho một `vnp_TxnRef`), nhưng sandbox 16/11 cho thấy VNPay có thể không gửi lại IPN. Hướng xử lý sau: khi `lockLeased` trả `null` mà querydr là `paid` với txn khác `gateway_transaction_no`, áp kết quả như IPN (khoá theo `id`, không theo token) → khoản trễ hoặc dòng `top_up_payment_conflicts`.
 - **Lỗi lặp ở tx2 của vòng quét** (T32 Phần 8b ghi lại, chưa sửa): lease không đếm số lần thử. Một lỗi lặp lại ở tx2 (sau querydr; trước 8b có `account_closed`, nay #8 xử lý; còn lại: lỗi DB / lỗi code bất kỳ) làm `runLeasedBatch` log warn rồi để dòng giữ lease → hết lease lại tới hạn → gọi querydr lại. Hệ quả: gọi VNPay lặp mỗi `BILLING_WORKER_LEASE_MS` (có thể dính `94`), log lặp, top-up kẹt `pending` không bao giờ hết lịch. Hướng xử lý có thể làm: đếm lần thử (cột mới, cần migration), hoặc tx2 lỗi thì vẫn hẹn mốc kế của `QUERYDR_SCHEDULE_MIN` trong một transaction riêng (hết lịch → `expired`).
+- **Thuế suất hoá đơn** (T32 Phần 7, Khang 17/11): giả định dịch vụ sạc xe điện thuộc nhóm 10% được giảm còn 8% tới hết 31/12/2026 (Nghị quyết 204/2025/QH15, Nghị định 174/2025/NĐ-CP). **Chưa tra Phụ lục I–III** (danh mục không được giảm). Nếu dịch vụ này thuộc danh mục loại trừ thì chỉ sửa `vatRateAt` (`billing/e-invoice.ts`), và viết migration sửa `vat_rate` / `vat_amount_vnd` của các dòng chưa `issued`.
+- **Lease không đếm lần thử, cả với `e_invoices`** (T32 Phần 7 ghi lại): giống mục "Lỗi lặp ở tx2" của top-up. Dòng làm tiến trình sập, hoặc gặp lỗi lặp ở tx2, được thử lại sau mỗi lease mà không bị đếm, nên nhà cung cấp bị gọi lặp. Ví dụ lỗi lặp: nhà cung cấp trả `invoice_no` đã có ở dòng khác → 23505 UNIQUE. PR 8c sửa chung trong `due-rows.ts`, bao cả `e_invoices`.
+- **Top-up `credited` trước khi deploy Phần 7** (sandbox trên staging) không có hoá đơn và không tạo bù (T32 Phần 7).
+- **Thông tin người bán** (MST, mẫu số, ký hiệu hoá đơn) và biến môi trường của nhà cung cấp thật (MISA): chốt khi làm provider thật; stub không dùng (T32 Phần 7).
 - **Đánh thức trễ quá +60 phút** (worker dừng lâu): vòng quét chỉ hỏi querydr một lần rồi hết lịch (`expired`). Đề xuất cho sau (chưa làm): cho Admin "Kiểm tra lại" cả top-up `expired` hết lịch không `exception_kind` (ca lỗi mạng / TS `01`).
 - **Billing Exceptions thêm mục lỗi sổ điểm (`loyalty_error`) và ca 04 / 07 chưa ngã ngũ (`unresolved_04` / `unresolved_07`)**: UC-ADM-08 hiện có 3 tab (Ân / Nghĩa).
 - **Nghĩa `vnp_TransactionStatus` 01 / 04 / 07** (coi là chưa ngã ngũ ở D3): trang tài liệu VNPay đọc được không có bảng mã này nguyên văn; đối chiếu trên sandbox.

@@ -7,7 +7,9 @@
  * expire top-up mà VNPay chưa trả lời dứt khoát (tiền thật thành khoản trễ); hỏi querydr dồn khi
  * đánh thức trễ; mất lịch hẹn lại; recheck đổi trạng thái / số dư hoặc ghi khoản trễ hai lần.
  * Phần 8b: querydr `paid` mà không cộng được (sai số tiền / tài khoản `closed`) phải chốt ngay
- * `failed` + khoản trễ, không lặp querydr mãi và không chờ hết lịch.
+ * `failed` + khoản trễ, không lặp querydr mãi và không chờ hết lịch. Phần 7: querydr `credited` có
+ * hoá đơn tạo cùng transaction; `expired` / `failed` / #8 / recheck (chỉ ghi khoản trễ) thì không;
+ * thuế suất theo `completed_at` hai phía mốc 01/01/2027.
  *
  * querydr giả: `fetch` inject vào `VnpayAdapter`, response ký bằng đúng `querydrResponseSignData` /
  * `vnpSecureHash` với cấu hình test (secret giả) — không gọi mạng thật. Mã TC theo Report 5 bản nộp
@@ -19,6 +21,7 @@ import { Logger } from '@nestjs/common';
 import type { BackgroundWorkConfig } from '../src/billing/background-work.config.js';
 import { CreditLedgerService } from '../src/billing/credit-ledger.service.js';
 import { claimDue } from '../src/billing/due-rows.js';
+import { EInvoiceService } from '../src/billing/e-invoice.service.js';
 import { LoyaltyService } from '../src/billing/loyalty.service.js';
 import { TopUpService } from '../src/billing/top-up.service.js';
 import {
@@ -92,6 +95,8 @@ describeDb('billing: quét top-up quá hạn + querydr (T32 Phần 8, SD-2d)', (
       ),
       undefined,
       WORK,
+      // Phần 7: hoá đơn tạo trong transaction cộng tiền (không runner: không kick).
+      new EInvoiceService(d, { createInvoice: jest.fn() }),
     );
 
   /** Response querydr đã ký (mặc định: RC 00, TS 00, giao dịch thanh toán, đúng số tiền). */
@@ -1090,5 +1095,88 @@ describeDb('billing: quét top-up quá hạn + querydr (T32 Phần 8, SD-2d)', (
       });
       expect(await topUpRow(t.topUpId)).toEqual(before);
     });
+  });
+
+  // ---------------------------------------------------------------------------------------------
+  describe('Phần 7: hoá đơn theo kết quả querydr / recheck và thuế suất theo completed_at', () => {
+    const invoices = (topUpId: number) =>
+      q(
+        `SELECT status::text, amount_vnd, vat_rate, vat_amount_vnd FROM e_invoices
+         WHERE top_up_id=$1`,
+        [topUpId],
+      );
+
+    it('querydr paid → credited, đúng một hoá đơn requested với số thực thu', async () => {
+      const t = await dueTopUp(3, 100_000);
+      script.set(t.ref, PAID);
+      expect(await run()).toBe(1);
+      expect((await topUpRow(t.topUpId))['status']).toBe('credited');
+      expect(await invoices(t.topUpId)).toEqual([
+        { status: 'requested', amount_vnd: '100000', vat_rate: 8, vat_amount_vnd: '7407' },
+      ]);
+    });
+
+    it('querydr paid có dùng điểm → amount_vnd = amount_paid_vnd', async () => {
+      const d = await newDriver();
+      await earn(d, 1000);
+      const t = await dueTopUp(3, 100_000, 600, d);
+      script.set(t.ref, PAID);
+      expect(await run()).toBe(1);
+      expect(await invoices(t.topUpId)).toEqual([
+        expect.objectContaining({ amount_vnd: '94000', vat_amount_vnd: '6963' }),
+      ]);
+    });
+
+    it.each([
+      ['not_found → expired', () => NOT_FOUND, 'expired'],
+      ['failed → failed', () => FAILED, 'failed'],
+      [
+        'paid sai số tiền (#8) → failed + khoản trễ',
+        () => reply({ vnp_Amount: '8000000' }),
+        'failed',
+      ],
+    ] as const)('querydr %s: không hoá đơn', async (_label, handler, status) => {
+      const t = await dueTopUp(3, 100_000);
+      script.set(t.ref, handler());
+      expect(await run()).toBe(1);
+      expect((await topUpRow(t.topUpId))['status']).toBe(status);
+      expect(await invoices(t.topUpId)).toEqual([]);
+    });
+
+    it('recheck paid → late_payment_recorded (top-up vẫn expired): không hoá đơn', async () => {
+      const t = await dueTopUp(61);
+      script.set(t.ref, TS('04'));
+      await run();
+      expect((await topUpRow(t.topUpId))['exception_kind']).toBe('unresolved_04');
+      script.set(t.ref, PAID);
+      expect(await service.recheckTopUp(t.topUpId)).toEqual({ result: 'late_payment_recorded' });
+      expect(await invoices(t.topUpId)).toEqual([]);
+    });
+
+    it.each([
+      ['2026-12-31T23:59:59.999+07:00', 8, '7407'],
+      ['2027-01-01T00:00:00+07:00', 10, '9091'],
+    ])(
+      'requestForTopUp: completed_at = %s → vat_rate %i (theo thời điểm thu tiền, không theo now())',
+      async (completedAt, rate, vat) => {
+        const t = await dueTopUp(3, 100_000);
+        const c = await db.$client.connect();
+        try {
+          await c.query('BEGIN');
+          await c.query(
+            `UPDATE top_ups SET status='credited', completed_at=$2::timestamptz,
+               gateway_transaction_no=$3, next_attempt_at=NULL, updated_at=now() WHERE id=$1`,
+            [t.topUpId, completedAt, nextTxn()],
+          );
+          await new EInvoiceService(db, { createInvoice: jest.fn() }).requestForTopUp(c, t.topUpId);
+          await c.query('COMMIT');
+        } finally {
+          c.release();
+        }
+        expect(await invoices(t.topUpId)).toEqual([
+          { status: 'requested', amount_vnd: '100000', vat_rate: rate, vat_amount_vnd: vat },
+        ]);
+      },
+    );
   });
 });

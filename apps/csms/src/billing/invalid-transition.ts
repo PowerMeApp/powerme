@@ -1,9 +1,10 @@
 /**
- * Lỗi dùng chung cho các máy trạng thái của billing (TopUpStateMachine STM-4, RefundStateMachine
- * STM-10). Tên `InvalidTransition` theo `billing/CLAUDE.md` (bất biến: chuyển không hợp lệ → ném).
+ * Lỗi dùng chung cho các máy trạng thái của billing (TopUpStateMachine STM-4, EInvoiceStateMachine
+ * STM-7, RefundStateMachine STM-10). Tên `InvalidTransition` theo `billing/CLAUDE.md` (bất biến:
+ * chuyển không hợp lệ → ném).
  */
 
-export type BillingMachine = 'STM-4' | 'STM-10';
+export type BillingMachine = 'STM-4' | 'STM-7' | 'STM-10';
 
 /** Cặp (trạng thái, event) không có trong diagram. Route map sang 409. */
 export class InvalidTransition extends Error {
