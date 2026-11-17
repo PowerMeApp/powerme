@@ -10,10 +10,11 @@
 /**
  * Mốc đổi thuế suất: 2027-01-01 00:00:00 giờ Việt Nam (+07:00) = 2026-12-31T17:00:00Z.
  *
- * GIẢ ĐỊNH (decisions "Còn mở", T32 Phần 7 17/11): dịch vụ sạc xe điện thuộc nhóm hàng hoá, dịch vụ
- * chịu thuế suất 10% được giảm còn 8% theo Nghị quyết 204/2025/QH15 và Nghị định 174/2025/NĐ-CP (hết
- * hiệu lực 31/12/2026). CHƯA tra Phụ lục I–III của Nghị định 174/2025 (danh mục không được giảm). Nếu
- * dịch vụ này thuộc danh mục loại trừ thì chỉ sửa `vatRateAt` (và viết migration cho dòng đã ghi).
+ * Dịch vụ sạc xe điện thuộc nhóm hàng hoá, dịch vụ chịu thuế suất 10% được giảm còn 8% theo Nghị
+ * quyết 204/2025/QH15 và Nghị định 174/2025/NĐ-CP (hết hiệu lực 31/12/2026); từ mốc trở về 10% (Luật
+ * Thuế GTGT 48/2024/QH15). Đã đối chiếu Phụ lục I–II NĐ 174/2025 (17/11): dịch vụ sạc không thuộc danh
+ * mục loại trừ; căn cứ ở decisions D5. Thuế suất đổi / được gia hạn thì sửa ở đây (và test hai phía
+ * mốc), không qua biến môi trường.
  */
 export const VAT_RATE_CHANGE_AT = new Date('2027-01-01T00:00:00+07:00');
 

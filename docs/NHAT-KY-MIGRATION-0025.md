@@ -22,7 +22,7 @@
 - Thuế suất theo **thời điểm thu tiền** (`top_ups.completed_at`, ghi cùng transaction cộng tiền), không theo lúc gọi nhà cung cấp: retry có thể vắt qua 31/12.
   - Trước 2027-01-01 00:00 giờ Việt Nam → 8% (Nghị quyết 204/2025/QH15, Nghị định 174/2025/NĐ-CP, hết hiệu lực 31/12/2026).
   - Từ mốc đó → 10%.
-  - Giả định: dịch vụ sạc xe điện thuộc nhóm 10% được giảm (chưa tra Phụ lục I–III Nghị định 174/2025; decisions "Còn mở").
+  - Căn cứ: đã đối chiếu Phụ lục I–II Nghị định 174/2025 (17/11): dịch vụ sạc xe điện không thuộc danh mục loại trừ, nên được giảm còn 8% tới hết 31/12/2026 (decisions D5, "Căn cứ thuế suất").
 - Kiểu `smallint` phần trăm, không dùng `numeric(4,2)`: phép tách VAT tính bằng số nguyên (BigInt), các mức hiện hành đều nguyên.
 
 ## 3. Dữ liệu có sẵn
