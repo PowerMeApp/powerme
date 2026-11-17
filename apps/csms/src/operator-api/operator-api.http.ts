@@ -4,6 +4,7 @@
  *   GET  /api/operator/v1/me  operator_staff
  *   GET  /api/operator/v1/faults, POST …/faults/{id}/acknowledge|reset|close  (FE-04a, operator-faults.ts)
  *   GET  /api/operator/v1/charge-points, GET /api/operator/v1/summary  (FE-03, operator-monitoring.ts)
+ *   GET  /api/operator/v1/charge-points/{id}  (FE-05, screen 20)
  *   GET  /api/admin/v1/me     admin
  * RolesGuard runs before route matching, so an unknown path without a valid token is 401, not 404.
  * CORS: localhost origins only (Vite dev server). JSON: snake_case, string ids, `{ error, detail }`.
@@ -121,6 +122,7 @@ export function createOperatorApiListener(
           db,
           monitoring.thresholds,
           monitoring.registry,
+          faults,
         ),
       );
       return;

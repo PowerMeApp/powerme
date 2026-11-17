@@ -2,6 +2,7 @@
  * Operator charge point monitoring (FE-03, screens 17 and 18) — types only, snake_case as on the
  * wire. Source: apps/csms/src/operator-api/operator-monitoring.ts.
  */
+import type { OperatorFault } from './faults.js';
 
 /** The 9 raw OCPP 1.6 ChargePointStatus values; the dashboard shows them as is (D21). */
 export type ConnectorStatus =
@@ -44,6 +45,32 @@ export interface OperatorChargePoint {
   last_message_at: string | null;
   site: { id: string; site_code: string; site_name: string };
   connectors: ConnectorLive[];
+}
+
+/** One row of `remote_commands` (UC-OPS-04); `action` is the OCPP action name as sent. */
+export interface RemoteCommandRow {
+  id: string;
+  charge_point_id: string;
+  action: string;
+  connector_no: number | null;
+  status: 'pending' | 'sent' | 'accepted' | 'rejected' | 'timeout' | 'failed';
+  requested_at: string;
+  sent_at: string | null;
+  responded_at: string | null;
+  error: string | null;
+}
+
+/** GET /api/operator/v1/charge-points/{id} (FE-05, screen 20). */
+export interface OperatorChargePointDetail extends OperatorChargePoint {
+  firmware_version: string | null;
+  rated_power_kw: number | null;
+  /** BR-P40: the charge point sends SoC. */
+  reports_soc: boolean;
+  supports_reservation: boolean;
+  /** Same DTO as screen 21, with `allowed_actions`. */
+  open_faults: OperatorFault[];
+  /** Newest first, at most 20. */
+  recent_commands: RemoteCommandRow[];
 }
 
 /** GET /api/operator/v1/charge-points query. */

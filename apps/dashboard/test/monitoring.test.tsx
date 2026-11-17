@@ -1,7 +1,7 @@
 /** Screens 17 and 18 (FE-03, UC-OPS-02) against a fake CSMS. */
 import { screen, waitFor, within } from '@testing-library/react';
 import type { OperatorChargePoint, OperatorSummary } from '@powerme/shared';
-import { ago } from '../src/pages/operator/ChargePointListPage';
+import { ago } from '../src/features/chargePoints/format';
 import { fakeCsms, renderApp, session, STAFF } from './render';
 
 const SUMMARY: OperatorSummary = {

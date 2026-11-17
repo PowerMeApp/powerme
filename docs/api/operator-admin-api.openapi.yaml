@@ -402,8 +402,9 @@ paths:
       tags: [monitoring]
       operationId: getOperatorChargePoint
       x-roles: [operator_staff]
-      x-status: planned
-      x-owner: Nghĩa
+      x-status: implemented
+      x-source: 'operator-api/operator-monitoring.ts (FE-05)'
+      x-owner: Nghĩa (FE-05)
       x-refs: [UC-OPS-02, UC-OPS-04, 'Table 5 #20']
       summary: Chi tiết trụ — súng, sự cố gần đây, lệnh gần đây
       parameters:

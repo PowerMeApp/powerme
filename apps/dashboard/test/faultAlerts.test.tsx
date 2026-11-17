@@ -7,6 +7,7 @@ const base: OperatorFault = {
   id: '7',
   event_no: 1007,
   kind: 'faulted',
+  charge_point_id: '1',
   charge_point_serial: 'RH24D1-00001',
   station_name: 'Tram sac demo Quan 1',
   connector_no: 1,
@@ -85,6 +86,11 @@ describe('Cảnh báo sự cố (màn 21)', () => {
     expect(o.getByRole('button', { name: 'Xác nhận' })).toBeInTheDocument();
     expect(o.getByText('Charge Point offline')).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Cảnh báo sự cố' })).toBeInTheDocument();
+    // D41 (FE-05): the serial opens Charge Point Detail.
+    expect(a.getByRole('link', { name: 'RH24D1-00001' })).toHaveAttribute(
+      'href',
+      '/operator/charge-points/1',
+    );
     expect(seen[0]).toMatchObject({
       search: '?status=open&page=1&page_size=20',
       authorization: 'Bearer token-10',

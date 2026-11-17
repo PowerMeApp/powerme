@@ -8,6 +8,7 @@ import { useAppSelector } from '../core/store/store';
 import { AppShell } from '../layouts/AppShell';
 import { AdminHomePage } from '../pages/admin/AdminHomePage';
 import { LoginPage } from '../pages/LoginPage';
+import { ChargePointDetailPage } from '../pages/operator/ChargePointDetailPage';
 import { ChargePointListPage } from '../pages/operator/ChargePointListPage';
 import { FaultAlertsPage } from '../pages/operator/FaultAlertsPage';
 import { OperatorHomePage } from '../pages/operator/OperatorHomePage';
@@ -32,6 +33,7 @@ export const routes: RouteObject[] = [
     children: [
       { index: true, element: <OperatorHomePage /> }, // 17
       { path: 'charge-points', element: <ChargePointListPage /> }, // 18
+      { path: 'charge-points/:id', element: <ChargePointDetailPage /> }, // 20
       { path: 'faults', element: <FaultAlertsPage /> }, // 21
       { path: '*', element: <Navigate to="/operator" replace /> },
     ],
