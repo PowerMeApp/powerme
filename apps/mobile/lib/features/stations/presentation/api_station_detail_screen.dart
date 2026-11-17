@@ -1,4 +1,6 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
@@ -6,6 +8,7 @@ import '../../../core/l10n/app_copy.dart';
 import '../../../core/theme/powerme_theme.dart';
 import '../../../core/widgets/flow_page.dart';
 import '../application/station_discovery_controller.dart';
+import '../domain/map_location.dart';
 import '../domain/station_discovery.dart';
 import '../domain/station.dart';
 import 'api_discovery_components.dart';
@@ -25,6 +28,7 @@ class ApiStationDetailScreen extends ConsumerWidget {
     final copy = ref.watch(discoveryCopyProvider);
     final station = ref.watch(selectedDiscoveryStationProvider);
     final selected = station?.id == id ? station : null;
+    final destination = selected?.location;
     return DiscoveryPage(
       title: copy.text('Chi tiết trạm', 'Station details'),
       copy: copy,
@@ -78,6 +82,18 @@ class ApiStationDetailScreen extends ConsumerWidget {
             ),
           ),
           const SizedBox(height: 16),
+          if (destination != null &&
+              destination.valid &&
+              !kIsWeb &&
+              (defaultTargetPlatform == TargetPlatform.android ||
+                  defaultTargetPlatform == TargetPlatform.iOS)) ...[
+            _StationMapsButton(
+              key: ValueKey((vehicle, id, destination)),
+              destination: destination,
+              copy: copy,
+            ),
+            const SizedBox(height: 12),
+          ],
           _StationRoutePanel(key: ValueKey((vehicle, id)), station: selected),
           const SizedBox(height: 8),
           DiscoveryHeading(
@@ -129,6 +145,75 @@ class ApiStationDetailScreen extends ConsumerWidget {
       ],
     );
   }
+}
+
+class _StationMapsButton extends StatefulWidget {
+  const _StationMapsButton({
+    super.key,
+    required this.destination,
+    required this.copy,
+  });
+
+  final MapLocation destination;
+  final AppCopy copy;
+
+  @override
+  State<_StationMapsButton> createState() => _StationMapsButtonState();
+}
+
+class _StationMapsButtonState extends State<_StationMapsButton> {
+  static const _channel = MethodChannel('powerme/station_maps');
+  bool _opening = false;
+  bool _failed = false;
+
+  Future<void> _open() async {
+    if (_opening) return;
+    setState(() {
+      _opening = true;
+      _failed = false;
+    });
+    bool opened;
+    try {
+      opened =
+          await _channel.invokeMethod<bool>('openDestination', {
+            'latitude': widget.destination.latitude,
+            'longitude': widget.destination.longitude,
+          }) ??
+          false;
+    } on PlatformException {
+      opened = false;
+    } on MissingPluginException {
+      opened = false;
+    }
+    if (!mounted) return;
+    setState(() {
+      _opening = false;
+      _failed = !opened;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) => Column(
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    children: [
+      OutlinedButton.icon(
+        key: const Key('open-station-maps'),
+        onPressed: _opening ? null : _open,
+        icon: const Icon(Icons.open_in_new),
+        label: Text(widget.copy.text('Mở ứng dụng bản đồ', 'Open map app')),
+      ),
+      if (_failed)
+        Semantics(
+          liveRegion: true,
+          child: Text(
+            widget.copy.text(
+              'Không mở được ứng dụng bản đồ.',
+              'Could not open the map app.',
+            ),
+          ),
+        ),
+    ],
+  );
 }
 
 class _StationRoutePanel extends ConsumerStatefulWidget {

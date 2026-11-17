@@ -10,7 +10,7 @@ info:
     console hiện tại và câu hỏi mở nằm ở `OPERATOR-ADMIN-API-HOP-DONG.md` cùng thư mục.
 
     Đăng nhập là một route chung `/api/auth/v1/login` cho cả hai bề mặt (ADR-0018), làm mới
-    access token qua `/api/auth/v1/refresh` (quyết định 12/11, T125 — chưa có code). Mọi
+    access token qua `/api/auth/v1/refresh` (quyết định 12/11, T125). Mọi
     `/api/operator/v1/*` và `/api/admin/v1/*` đi qua RolesGuard **trước khi khớp route**: đường
     dẫn chưa có route mà không có token hợp lệ nhận 401, không phải 404.
 
@@ -32,8 +32,6 @@ info:
       trong code, route chưa), `in_progress` (đang làm ở nhánh khác), `planned` (chưa có code).
     - `x-owner`: người làm route (theo WP; BM04 không có trong repo — Trí sửa nếu lệch).
     - `x-refs`: UC / FR / BR / STM trong SRS (report3-srs.md), phiếu v1.3 và thiết kế.
-    Riêng hai route đăng nhập / refresh có thêm `x-target`: trạng thái đích theo T125 khi code
-    hiện tại khác hợp đồng.
 
     Quy ước chung giống Driver API (`driver-api.openapi.yaml`):
     - JSON snake_case. Tiền là số nguyên VND, điện năng là số nguyên Wh, thời gian ISO 8601 UTC;
@@ -47,9 +45,8 @@ info:
   x-owner: Trí (WP2) — hợp đồng; route theo `x-owner` từng operation
   x-status: >-
     v0.1 — hợp đồng; trên main 9c90f34 chỉ có `POST /auth/v1/login`, `GET /operator/v1/me`,
-    `GET /admin/v1/me` (FE-01a #118, ADR-0018); các route còn lại chưa có. Từ 12/11 (Ân chốt,
-    T125) hợp đồng là **đích**: access token 900 s + `POST /auth/v1/refresh`; code hiện vẫn phát
-    token 8 giờ, không refresh — chỗ nào khác nhau có ghi "hiện tại" trong mô tả
+    `GET /admin/v1/me` (FE-01a #118, ADR-0018); các route còn lại chưa có. T125 (Ân chốt 12/11)
+    thêm `POST /auth/v1/refresh`: access token 900 s + refresh token 12 giờ
 servers:
   - url: http://localhost:3000/api
     description: CSMS cục bộ (cùng tiến trình, cùng cổng với console và Driver API)
@@ -90,10 +87,7 @@ paths:
       operationId: dashboardLogin
       x-roles: [public]
       x-status: implemented
-      x-target: >-
-        implemented (8 h, không refresh) — đích 900 s + refresh theo T125 (quyết định Ân 12/11;
-        owner chờ phân công, đề xuất Nghĩa)
-      x-owner: Nghĩa (FE-01a, #118); thay đổi T125 chờ phân công
+      x-owner: Nghĩa (FE-01a #118, T125)
       x-refs: [F-13, UC-ACC-04, UC-ACC-05, BR-P16, NFR-SEC-01, ADR-0018, T125]
       summary: Nhân viên operator và Admin đăng nhập email + mật khẩu (một endpoint, màn 16 và 26)
       description: |
@@ -122,11 +116,8 @@ paths:
         - Access token: JWT HS256 `typ: JWT`, khoá `DASHBOARD_JWT_SECRET_BASE64`, `iss` / `aud`
           theo `DASHBOARD_JWT_ISSUER` / `_AUDIENCE`; claim `sub` (users.id), `role`, `iat`, `exp`,
           `jti` (UUID); nhân viên thêm `operator_id`, `staff_role`.
-        - **Đích (T125, Ân chốt 12/11):** `exp` = `iat` + **900 s**, response thêm
-          `refresh_token` + `refresh_expires_in` (xem `POST /auth/v1/refresh`). **Hiện tại (main,
-          #118):** `exp` = `iat` + 28 800 s (8 giờ), `expires_in: 28800`, không có hai trường
-          refresh — dashboard phải chịu được cả hai cho tới khi T125 merge (đọc `expires_in`,
-          không gán cứng; thiếu `refresh_token` thì hết hạn là đăng nhập lại).
+        - `exp` = `iat` + **900 s** (T125, Ân chốt 12/11); response kèm `refresh_token` +
+          `refresh_expires_in` (xem `POST /auth/v1/refresh`).
       security: []
       requestBody:
         required: true
@@ -135,7 +126,7 @@ paths:
             schema: { $ref: '#/components/schemas/LoginRequest' }
       responses:
         '200':
-          description: Access token (đích 900 s; hiện 8 giờ), refresh token (đích) và người dùng (cùng hình dạng với `/me`)
+          description: Access token 900 s, refresh token và người dùng (cùng hình dạng với `/me`)
           headers:
             Cache-Control:
               schema: { type: string, const: no-store }
@@ -156,14 +147,13 @@ paths:
       tags: [auth]
       operationId: dashboardRefresh
       x-roles: [public]
-      x-status: planned
-      x-target: planned · T125 (Ân chốt 12/11) — owner chờ phân công; đề xuất Nghĩa vì #118 là của Nghĩa
-      x-owner: chờ phân công (đề xuất Nghĩa, T125)
+      x-status: implemented
+      x-owner: Nghĩa (T125)
       x-refs: [F-13, UC-ACC-04, UC-ACC-05, BR-P16, NFR-SEC-01, ADR-0018, T125, BE-21]
       summary: Đổi refresh token lấy access token 900 s mới (không phát refresh token mới)
       description: |
-        **Chưa có code** — hiện route này nhận 404 `not_found` như mọi đường dẫn chưa có dưới
-        `/api/auth/v1`. Thiết kế theo Driver API `/auth/refresh` (BE-21,
+        Code: `StaffAccounts.refresh` (`apps/csms/src/users/auth.ts`), route ở
+        `apps/csms/src/operator-api/operator-api.http.ts`. Thiết kế theo Driver API `/auth/refresh` (BE-21,
         `apps/csms/src/driver/driver-account.ts` `refresh()`), chỉ khác khoá ký và thời hạn:
 
         - Công khai (không cần access token — access token đã hết hạn là lúc gọi route này).
@@ -187,10 +177,9 @@ paths:
         - **Không xoay vòng**: response chỉ có access token mới, không có refresh token mới. Thời
           hạn refresh tính từ lúc đăng nhập; hết hạn thì đăng nhập lại — phiên không kéo dài vô
           hạn khi chưa thu hồi được từng token (không có bảng refresh token, như BE-21).
-        - Thời hạn refresh cấu hình bằng `DASHBOARD_JWT_REFRESH_TTL_S`. **Đề xuất** mặc định
-          43 200 s (12 giờ — một ca làm việc kể cả giao ca), giới hạn 3 600 … 86 400; ngoài
-          khoảng → CSMS không khởi động (như `DRIVER_API_REFRESH_TTL_S`). Con số do Nghĩa chốt
-          (câu hỏi N14 trong hợp đồng).
+        - Thời hạn refresh cấu hình bằng `DASHBOARD_JWT_REFRESH_TTL_S`: mặc định 43 200 s (12 giờ
+          — một ca làm việc kể cả giao ca; Nghĩa chốt 16/11, N14), giới hạn 3 600 … 86 400; ngoài
+          khoảng → CSMS không khởi động (như `DRIVER_API_REFRESH_TTL_S`).
         - Không có bộ đếm thử sai (Driver API cũng không): refresh token sai không đoán được vì có
           chữ ký. `DASHBOARD_JWT_*` trống cả ba → 503 `auth_unavailable`.
         - Đăng xuất vẫn là dashboard xoá cả hai token; không có `logout` phía server.
@@ -2448,9 +2437,8 @@ components:
         `DASHBOARD_JWT_AUDIENCE` — không dùng chung khoá, issuer hay audience với Driver API.
         Claim bắt buộc `sub` (users.id, bigint dạng chuỗi), `role` ∈ {`operator_staff`, `admin`}
         (enum `user_role`), `iat`, `exp`; nhân viên có thêm `operator_id`, `staff_role`; có `jti`.
-        Đích (T125, Ân chốt 12/11): sống **900 s**, kiểm cả `exp` lẫn tuổi tính từ `iat` ≤ 900 s,
-        không có dung sai đồng hồ; hết hạn thì dashboard gọi `POST /auth/v1/refresh`. Hiện tại
-        (main, #118): sống 8 giờ (`iat` ≤ 28 800 s), không có refresh token. Refresh token
+        Sống **900 s** (T125, Ân chốt 12/11), kiểm cả `exp` lẫn tuổi tính từ `iat` ≤ 900 s,
+        không có dung sai đồng hồ; hết hạn thì dashboard gọi `POST /auth/v1/refresh`. Refresh token
         (`typ: refresh+jwt`) không bao giờ được nhận ở đây → 401.
 
         Header: đúng **một** `Authorization: Bearer <jwt>` (≤ 8 192 ký tự); hai header hoặc sai
@@ -2795,23 +2783,22 @@ components:
     LoginResponse:
       type: object
       description: |
-        `packages/shared/src/api/auth.ts` `LoginResponse`. **Đích T125**: `expires_in: 900` và có
-        `refresh_token`, `refresh_expires_in`. **Hiện tại (main, #118)**: `expires_in: 28800`, không
-        có hai trường refresh; type TS shared đổi cùng PR T125.
+        `packages/shared/src/api/auth.ts` `LoginResponse` (T125: `expires_in: 900`, có
+        `refresh_token`, `refresh_expires_in`).
       required: [access_token, token_type, expires_in, refresh_token, refresh_expires_in, user]
       properties:
         access_token: { type: string, description: 'JWT HS256, typ JWT, khoá DASHBOARD_JWT_*' }
         token_type: { type: string, const: Bearer }
-        expires_in: { type: integer, const: 900, description: 'Giây. Hiện tại code trả 28800 (8 giờ) cho tới T125' }
+        expires_in: { type: integer, const: 900, description: Giây }
         refresh_token:
           type: string
           maxLength: 8192
-          description: 'JWT HS256, typ refresh+jwt, token_use refresh, không có role; chỉ dùng cho POST /auth/v1/refresh (T125 — chưa có)'
+          description: 'JWT HS256, typ refresh+jwt, token_use refresh, không có role; chỉ dùng cho POST /auth/v1/refresh (T125)'
         refresh_expires_in:
           type: integer
           minimum: 3600
           maximum: 86400
-          description: 'Giây, theo DASHBOARD_JWT_REFRESH_TTL_S — đề xuất mặc định 43200 (12 giờ), Nghĩa chốt (N14)'
+          description: 'Giây, theo DASHBOARD_JWT_REFRESH_TTL_S — mặc định 43200 (12 giờ, N14)'
         user: { $ref: '#/components/schemas/DashboardUser' }
     RefreshRequest:
       type: object

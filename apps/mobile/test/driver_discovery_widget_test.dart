@@ -11,6 +11,7 @@ import 'package:driver_app/features/stations/domain/map_location.dart';
 import 'package:driver_app/features/stations/presentation/road_map_canvas.dart';
 import 'package:driver_app/features/stations/presentation/vietmap_surface.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
@@ -78,6 +79,84 @@ class _DeviceLocation implements MapLocationRepository {
 }
 
 void main() {
+  testWidgets(
+    'opens only the selected destination on tap without a route',
+    (tester) async {
+      const channel = MethodChannel('powerme/station_maps');
+      final messenger = tester.binding.defaultBinaryMessenger;
+      final calls = <MethodCall>[];
+      messenger.setMockMethodCallHandler(channel, (call) async {
+        calls.add(call);
+        return calls.length > 1;
+      });
+      addTearDown(() => messenger.setMockMethodCallHandler(channel, null));
+      final sites = [
+        station('31', 'Trạm Võ Văn Tần'),
+        station('32', 'Trạm thiếu tọa độ', coordinates: false),
+        {...station('33', 'Trạm có tọa độ sai'), 'longitude': 181},
+      ];
+      for (final site in sites) {
+        final connectors = site['connectors']! as List<Map<String, Object?>>;
+        for (var index = 0; index < connectors.length; index++) {
+          connectors[index]['connector_id'] = '${site['site_id']}${index + 1}';
+        }
+      }
+      final fixture = DriverApiFixture((r) async {
+        return switch (r.path) {
+          'auth/login' => reply(200, tokens(accessA)),
+          'me' => reply(200, account(vehicles: [leafVehicle()])),
+          'stations' => reply(200, page(sites)),
+          _ => throw StateError('Unexpected request'),
+        };
+      });
+      await _login(tester, fixture);
+      await _tap(tester, _key('toggle-station-map'));
+      await _tap(tester, _key('station-result-31'));
+      final open = _key('open-station-maps');
+      final error = find.text('Không mở được ứng dụng bản đồ.');
+      expect(find.text('Mở ứng dụng bản đồ'), findsOneWidget);
+      expect(calls, isEmpty);
+      expect(_key('request-station-route'), findsNothing);
+      await _tap(tester, open);
+      expect(calls.single.method, 'openDestination');
+      expect(calls.single.arguments, {'latitude': 10.8, 'longitude': 106.7});
+      expect(error, findsOneWidget);
+      expect(
+        tester
+            .widget<Semantics>(
+              find.ancestor(
+                of: error,
+                matching: find.byWidgetPredicate(
+                  (widget) =>
+                      widget is Semantics &&
+                      widget.properties.liveRegion == true,
+                ),
+              ),
+            )
+            .properties
+            .liveRegion,
+        isTrue,
+      );
+      await _tap(tester, open);
+      expect(calls, hasLength(2));
+      expect(error, findsNothing);
+
+      final router = GoRouter.of(tester.element(open));
+      for (final id in ['32', '33']) {
+        router.go('/discover');
+        await tester.pumpAndSettle();
+        if (_key('station-map-results').evaluate().isNotEmpty) {
+          await _tap(tester, _key('toggle-station-map'));
+        }
+        await _tap(tester, _key('station-result-$id'));
+        expect(open, findsNothing);
+      }
+      expect(calls, hasLength(2));
+      expect(_requests(fixture, 'stations/31/route'), isEmpty);
+    },
+    variant: const TargetPlatformVariant({TargetPlatform.android}),
+  );
+
   testWidgets(
     'configured map shows route geometry, traffic legend and manual maneuvers',
     (tester) async {
@@ -439,11 +518,13 @@ void main() {
       expect(find.text('Trụ TRU-12 · Cổng 1'), findsOneWidget);
       expect(find.textContaining('Dữ liệu có thể đã cũ'), findsOneWidget);
       expect(_requests(fixture, 'stations/31/route'), isEmpty);
+      expect(_key('open-station-maps'), findsOneWidget);
       await _tap(tester, _key('request-station-route'));
       expect(
         find.textContaining('Chưa lấy được dữ liệu bản đồ'),
         findsOneWidget,
       );
+      expect(_key('open-station-maps'), findsOneWidget);
       await _tap(tester, find.text('Thử lại'));
       expect(find.text('Chưa có dữ liệu'), findsOneWidget);
       expect(_key('route-preview-start'), findsNothing);

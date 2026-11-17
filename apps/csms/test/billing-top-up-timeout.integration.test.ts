@@ -6,6 +6,8 @@
  * chuyển `pending → expired`. Hỏng âm thầm có thể là: cộng hai lần khi đua với IPN hoặc hai runner;
  * expire top-up mà VNPay chưa trả lời dứt khoát (tiền thật thành khoản trễ); hỏi querydr dồn khi
  * đánh thức trễ; mất lịch hẹn lại; recheck đổi trạng thái / số dư hoặc ghi khoản trễ hai lần.
+ * Phần 8b: querydr `paid` mà không cộng được (sai số tiền / tài khoản `closed`) phải chốt ngay
+ * `failed` + khoản trễ, không lặp querydr mãi và không chờ hết lịch.
  *
  * querydr giả: `fetch` inject vào `VnpayAdapter`, response ký bằng đúng `querydrResponseSignData` /
  * `vnpSecureHash` với cấu hình test (secret giả) — không gọi mạng thật. Mã TC theo Report 5 bản nộp
@@ -423,7 +425,7 @@ describeDb('billing: quét top-up quá hạn + querydr (T32 Phần 8, SD-2d)', (
       ['TS 04', TS('04')],
       ['RC 94', reply({ vnp_ResponseCode: '94' })],
       ['sai chữ ký', reply({ vnp_SecureHash: 'ab'.repeat(64) })],
-      ['paid sai số tiền', reply({ vnp_Amount: '1' })],
+      ['paid vnp_Amount lẻ ×100 (sai dạng)', reply({ vnp_Amount: '1' })],
     ])('%s → vẫn pending, không cộng', async (_name, h) => {
       const t = await dueTopUp(3);
       if (h) script.set(t.ref, h);
@@ -630,6 +632,26 @@ describeDb('billing: quét top-up quá hạn + querydr (T32 Phần 8, SD-2d)', (
       expect(await balance(t.driverId)).toBe(100_000);
     });
 
+    it('Phần 8b bổ sung: nguồn querydr không sinh dòng top_up_payment_conflicts — querydr trả paid txn khác sau khi IPN đã cộng → mất lease, bỏ kết quả, 0 dòng', async () => {
+      // Vòng quét chỉ giữ chỗ pending; lockLeased khớp token ⇒ còn pending (mọi đường rời pending
+      // đặt next_attempt_at = NULL); nhánh pending của STM-4 không trả conflicting_result. Ca duy
+      // nhất querydr gặp top-up đã cộng là đua với IPN, và khi đó kết quả querydr bị bỏ.
+      const t = await dueTopUp(3);
+      const g = gated(PAID);
+      script.set(t.ref, g.handler);
+      const sweep = run();
+      await g.inside;
+      expect((await service.applyPaymentResult(ipn(t))).RspCode).toBe('00');
+      g.open();
+      await sweep;
+      expect(
+        await one('SELECT count(*)::int AS n FROM top_up_payment_conflicts WHERE top_up_id=$1', [
+          t.topUpId,
+        ]),
+      ).toEqual({ n: 0 });
+      expect(logged(errorSpy, 'querydr_conflicting_result')).toEqual([]);
+    });
+
     it('querydr cộng trước, IPN cùng vnp_TransactionNo tới sau → 02, không ghi gì', async () => {
       const t = await dueTopUp(3);
       script.set(t.ref, PAID);
@@ -713,6 +735,132 @@ describeDb('billing: quét top-up quá hạn + querydr (T32 Phần 8, SD-2d)', (
   });
 
   // ---------------------------------------------------------------------------------------------
+  describe('Phần 8b: querydr paid mà không cộng được → failed + khoản trễ (STM-4 #8)', () => {
+    const logSpy = () => Logger.prototype.log as unknown as jest.SpyInstance;
+
+    it('querydr paid + tài khoản closed → failed + khoản trễ; không giữ chỗ lại, querydr chỉ gọi một lần qua nhiều lượt quét', async () => {
+      const t = await dueTopUp(3);
+      await q("UPDATE credit_accounts SET status='closed', closed_at=now() WHERE driver_id=$1", [
+        t.driverId,
+      ]);
+      script.set(t.ref, PAID);
+      expect(await run()).toBe(1);
+      const row = await topUpRow(t.topUpId);
+      expect(row).toMatchObject({
+        status: 'failed',
+        next_attempt_at: null,
+        late_gateway_ref: String(txn),
+        late_amount_vnd: String(t.amountPaidVnd),
+        gateway_transaction_no: null,
+      });
+      expect(row['completed_at']).not.toBeNull();
+      expect(await balance(t.driverId)).toBe(0);
+      expect(await creditRows(t.topUpId)).toBe(0);
+      // Các lượt sau: dòng đã rời pending, next_attempt_at NULL → không ai giữ chỗ / gọi lại.
+      expect(await run()).toBe(0);
+      expect(await run()).toBe(0);
+      expect(calls).toHaveLength(1);
+      expect(logged(errorSpy, 'payment_not_creditable')).toEqual([
+        {
+          event: 'payment_not_creditable',
+          top_up_id: t.topUpId,
+          gateway_reference: t.ref,
+          reason: 'account_closed',
+          vnp_TransactionNo: String(txn),
+          amount_paid_vnd: t.amountPaidVnd,
+          late_amount_vnd: t.amountPaidVnd,
+          source: 'querydr',
+        },
+      ]);
+      expect(logged(logSpy(), 'querydr_applied')).toEqual([
+        {
+          event: 'querydr_applied',
+          top_up_id: t.topUpId,
+          gateway_reference: t.ref,
+          outcome: 'not_creditable',
+          vnp_TransactionNo: String(txn),
+          reason: 'account_closed',
+          amount_paid_vnd: t.amountPaidVnd,
+          late_amount_vnd: t.amountPaidVnd,
+          source: 'querydr',
+        },
+      ]);
+    });
+
+    it('querydr paid sai số tiền → failed ngay lần đầu (không hẹn lại), late_amount_vnd = số thực trừ; IPN cùng vnp_TransactionNo tới sau → 02', async () => {
+      const t = await dueTopUp(3, 100_000);
+      script.set(t.ref, reply({ vnp_Amount: String(80_000 * 100) }));
+      expect(await run()).toBe(1);
+      const no = String(txn);
+      expect(await topUpRow(t.topUpId)).toMatchObject({
+        status: 'failed',
+        next_attempt_at: null,
+        late_gateway_ref: no,
+        late_amount_vnd: '80000',
+      });
+      expect(calls).toHaveLength(1);
+      expect(logged(errorSpy, 'payment_not_creditable')).toEqual([
+        expect.objectContaining({ reason: 'amount_mismatch', late_amount_vnd: 80_000 }),
+      ]);
+      const before = await topUpRow(t.topUpId);
+      expect(
+        (
+          await service.applyPaymentResult(
+            ipn(t, { vnp_TransactionNo: no, vnp_Amount: String(80_000 * 100) }),
+          )
+        ).RspCode,
+      ).toBe('02');
+      expect(await topUpRow(t.topUpId)).toEqual(before);
+    });
+
+    it('querydr paid → log querydr_applied (credited) sau commit; querydr_result paid có amount_vnd', async () => {
+      const t = await dueTopUp(3);
+      script.set(t.ref, PAID);
+      await run();
+      expect(logged(logSpy(), 'querydr_applied')).toEqual([
+        {
+          event: 'querydr_applied',
+          top_up_id: t.topUpId,
+          gateway_reference: t.ref,
+          outcome: 'credited',
+          vnp_TransactionNo: String(txn),
+          amount_paid_vnd: t.amountPaidVnd,
+          source: 'querydr',
+        },
+      ]);
+      expect(logged(logSpy(), 'querydr_result')).toEqual([
+        expect.objectContaining({ kind: 'paid', amount_vnd: t.amountPaidVnd }),
+      ]);
+    });
+
+    it('response không chữ ký RC 94 ("Request is duplicated") → unresolved/signature, log có unverified_response_code, không có chữ ký', async () => {
+      const t = await dueTopUp(3);
+      script.set(
+        t.ref,
+        async () =>
+          new Response(
+            JSON.stringify({ vnp_ResponseCode: '94', vnp_Message: 'Request is duplicated' }),
+            { status: 200 },
+          ),
+      );
+      await run();
+      expect((await topUpRow(t.topUpId))['status']).toBe('pending');
+      const logs = logged(warnSpy, 'querydr_result');
+      expect(logs).toEqual([
+        expect.objectContaining({
+          kind: 'unresolved',
+          reason: 'signature',
+          response_code: null,
+          unverified_response_code: '94',
+          unverified_message: 'Request is duplicated',
+          has_secure_hash: false,
+        }),
+      ]);
+      expect(JSON.stringify(logs)).not.toContain('SecureHash');
+    });
+  });
+
+  // ---------------------------------------------------------------------------------------------
   describe('recheckTopUp — "Kiểm tra lại" của Admin (chốt Khang 14/11)', () => {
     /** Top-up đã hết lịch với exception_kind cho trước (qua vòng quét thật). */
     async function unresolved(kind: '04' | '07' = '04'): Promise<Made> {
@@ -753,6 +901,64 @@ describeDb('billing: quét top-up quá hạn + querydr (T32 Phần 8, SD-2d)', (
         result: 'not_eligible',
         reason: 'already_reviewed',
       });
+    });
+
+    it('Phần 8b: paid sai số tiền → late_payment_recorded, khoản trễ = số thực trừ, exception_reviewed_at, vẫn expired; log querydr_applied (recheck)', async () => {
+      const t = await unresolved();
+      const before = await money(t);
+      script.set(t.ref, reply({ vnp_Amount: String(30_000 * 100) }));
+      expect(await service.recheckTopUp(t.topUpId)).toEqual({ result: 'late_payment_recorded' });
+      const row = await topUpRow(t.topUpId);
+      expect(row).toMatchObject({
+        status: 'expired',
+        late_gateway_ref: String(txn),
+        late_amount_vnd: '30000',
+      });
+      expect(row['exception_reviewed_at']).not.toBeNull();
+      expect(await money(t)).toEqual(before);
+      // unresolved() đã chạy vòng quét (querydr_applied expired); chỉ xét dòng của recheck.
+      expect(
+        logged(Logger.prototype.log as unknown as jest.SpyInstance, 'querydr_applied').filter(
+          (l) => l['source'] === 'recheck',
+        ),
+      ).toEqual([
+        expect.objectContaining({
+          top_up_id: t.topUpId,
+          outcome: 'late_payment',
+          late_amount_vnd: 30_000,
+          source: 'recheck',
+        }),
+      ]);
+    });
+
+    it('Phần 8b bổ sung: expired + unresolved_04, recheck paid mâu thuẫn → dòng source = recheck, exception_kind giữ, exception_reviewed_at vẫn NULL', async () => {
+      const t = await unresolved('04');
+      expect((await service.applyPaymentResult(ipn(t))).RspCode).toBe('00'); // khoản trễ
+      const before = await topUpRow(t.topUpId);
+      script.set(t.ref, reply({ vnp_Amount: String(40_000 * 100) }));
+      expect(await service.recheckTopUp(t.topUpId)).toEqual({ result: 'conflicting_result' });
+      expect(await topUpRow(t.topUpId)).toEqual(before);
+      expect(before).toMatchObject({
+        exception_kind: 'unresolved_04',
+        exception_reviewed_at: null,
+      });
+      expect(
+        await q(
+          `SELECT gateway_transaction_no, amount_vnd, source, reason
+           FROM top_up_payment_conflicts WHERE top_up_id=$1`,
+          [t.topUpId],
+        ),
+      ).toEqual([
+        {
+          gateway_transaction_no: String(txn),
+          amount_vnd: '40000',
+          source: 'recheck',
+          reason: 'extra_payment',
+        },
+      ]);
+      expect(logged(errorSpy, 'recheck_conflicting_result')).toEqual([
+        expect.objectContaining({ inserted: true, reason: 'extra_payment' }),
+      ]);
     });
 
     it('IPN đã ghi khoản trễ cùng số trước lúc recheck → already_recorded, không ghi lần hai, đánh dấu đã xem', async () => {

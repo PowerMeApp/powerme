@@ -1,6 +1,7 @@
 /** Screen 21 — Fault Alerts (FE-04b, D38–D42) against a fake CSMS. */
 import { screen, waitFor, within } from '@testing-library/react';
 import type { OperatorFault } from '@powerme/shared';
+import { kindLabel } from '../src/features/alerts/FaultRow';
 import { fakeCsms, renderApp, session, STAFF } from './render';
 
 const base: OperatorFault = {
@@ -77,6 +78,9 @@ describe('Cảnh báo sự cố (màn 21)', () => {
     expect(await screen.findByText('Faulted · GroundFailure · Connector 1')).toBeInTheDocument();
     expect(screen.getByText('Offline · toàn Charge Point')).toBeInTheDocument();
     expect(screen.getByText('Driver report · Connector 2')).toBeInTheDocument();
+    expect(kindLabel({ ...report, error_code: 'GroundFailure' })).toBe(
+      'Driver report · GroundFailure · Connector 2',
+    );
     expect(screen.getByText('2 tài xế báo lỗi')).toBeInTheDocument();
     const a = within(await alert(1007));
     expect(a.getByRole('button', { name: 'Reset' })).toBeInTheDocument();

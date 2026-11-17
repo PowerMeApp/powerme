@@ -36,10 +36,14 @@ const BUTTON: Record<FaultAction, string> = {
 
 const where = (no: number | null) => (no ? `Connector ${no}` : 'toàn Charge Point');
 
-/** D39 kind label: Faulted · code · Connector, Offline · whole charge point, Driver report · Connector. */
+/**
+ * D39 kind label: Faulted · code · Connector, Offline · whole charge point, Driver report · Connector.
+ * A driver report that also got a hardware code (T131) shows it: Driver report · code · Connector.
+ */
 export function kindLabel(f: OperatorFault): string {
   if (f.kind === 'offline') return 'Offline · toàn Charge Point';
-  if (f.kind === 'driver_report') return `Driver report · ${where(f.connector_no)}`;
+  if (f.kind === 'driver_report')
+    return `Driver report · ${f.error_code ? `${f.error_code} · ` : ''}${where(f.connector_no)}`;
   return `Faulted · ${f.error_code ?? '—'} · ${where(f.connector_no)}`;
 }
 

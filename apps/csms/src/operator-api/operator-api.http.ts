@@ -1,6 +1,7 @@
 /**
  * IOperatorAPI (Report 4 component 02 `operator-api`, ADR-0018) on the console port:
  *   POST /api/auth/v1/login   public, staff and admins (screens 16, 26)
+ *   POST /api/auth/v1/refresh public, refresh token → new 900 s access token (T125)
  *   GET  /api/operator/v1/me  operator_staff
  *   GET  /api/operator/v1/faults, POST …/faults/{id}/acknowledge|reset|close  (FE-04a, operator-faults.ts)
  *   GET  /api/operator/v1/charge-points, GET /api/operator/v1/summary  (FE-03, operator-monitoring.ts)
@@ -87,10 +88,16 @@ export function createOperatorApiListener(
       throw new AuthError(400, 'invalid_input');
 
     if (surface === 'auth') {
-      if (rest !== '/login') throw new AuthError(404, 'not_found');
+      if (rest !== '/login' && rest !== '/refresh') throw new AuthError(404, 'not_found');
       allow(req, res, 'POST');
       const body = await readJsonObject(req, res);
-      send(res, 200, await accounts.login(body, req.socket.remoteAddress ?? 'unknown'));
+      send(
+        res,
+        200,
+        rest === '/login'
+          ? await accounts.login(body, req.socket.remoteAddress ?? 'unknown')
+          : await accounts.refresh(body),
+      );
       return;
     }
     if (surface !== 'operator' && surface !== 'admin') throw new AuthError(404, 'not_found');
