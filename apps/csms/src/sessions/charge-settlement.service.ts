@@ -8,7 +8,10 @@ import {
 } from '../config.js';
 import { DB, Db } from '../db/db.module.js';
 import {
+  meterAt,
+  MeterPoint,
   resolveTariffClock,
+  TARIFF_BOUNDARY_INTERPOLATED_PREFIX,
   TARIFF_CLOCK_FALLBACK_PREFIX,
   TARIFF_CLOCK_OFFSET_PREFIX,
   TARIFF_CLOCK_UNTRUSTED,
@@ -54,6 +57,13 @@ interface PricedSegment {
   end: Date;
   energy: bigint;
   numerator: bigint;
+}
+
+/** Các phần giá của phiên, kèm số biên khung giá phải nội suy số đo (0 = không biên nào). */
+interface PricedSession {
+  segments: PricedSegment[];
+  interpolated: number;
+  maxGapMs: number;
 }
 
 @Injectable()
@@ -265,8 +275,11 @@ export class ChargeSettlementService {
         received_stopped_at: session.received_stopped_at,
         meter_stop_wh: session.meter_stop_wh,
       });
-      const segments = await this.pricedSegments(c, session, timeline);
-      if (!segments) return pending('tariff_coverage_or_boundary_meter_required');
+      // Từ T134 lý do này chỉ còn cho lỗi cấu hình biểu giá (không có, hoặc có hai khung phủ một thời
+      // điểm): thiếu mẫu công tơ ở biên không còn giữ phiên, số đo tại biên được nội suy.
+      const priced = await this.pricedSegments(c, session, timeline);
+      if (!priced) return pending('tariff_coverage_or_boundary_meter_required');
+      const { segments } = priced;
       const numerator = segments.reduce((sum, segment) => sum + segment.numerator, 0n);
       // WP3/T72: BR-P45 rounds the exact total once, never each tariff portion independently.
       const amount = (numerator + 500n) / 1000n;
@@ -366,6 +379,17 @@ export class ChargeSettlementService {
               ],
         );
       }
+      if (priced.interpolated) {
+        await c.query(
+          `INSERT INTO reconciliation_records(session_id,record_no,record_type,resolution)
+           SELECT $1,coalesce(max(record_no),0)+1,'tariff_boundary_interpolated',$2
+           FROM reconciliation_records WHERE session_id=$1`,
+          [
+            sessionId,
+            `${TARIFF_BOUNDARY_INTERPOLATED_PREFIX}${priced.interpolated} max_gap_s=${Math.round(priced.maxGapMs / 1000)}`,
+          ],
+        );
+      }
       await c.query(
         `INSERT INTO charging_statements(session_id,driver_id,energy_wh,amount_vnd,earned_points,debit_id,loyalty_entry_id)
         VALUES($1,$2,$3,$4,$5,$6,$7)`,
@@ -421,7 +445,7 @@ export class ChargeSettlementService {
     c: PoolClient,
     session: BillableSession,
     timeline: PricingTimeline,
-  ): Promise<PricedSegment[] | undefined> {
+  ): Promise<PricedSession | undefined> {
     const { rows } = await c.query<{ id: string; price: string }>(
       `SELECT t.id,t.price_per_kwh_vnd AS price
        FROM tariff_periods t
@@ -436,14 +460,42 @@ export class ChargeSettlementService {
     // Không có hoặc có hai khung giá cùng lúc là lỗi cấu hình giá, không phải lỗi đồng hồ.
     if (rows.length !== 1) return undefined;
     const energy = BigInt(session.energy_wh!);
+    return {
+      segments: [
+        {
+          tariffId: rows[0]!.id,
+          start: timeline.start,
+          end: timeline.end,
+          energy,
+          numerator: energy * BigInt(rows[0]!.price),
+        },
+      ],
+      interpolated: 0,
+      maxGapMs: 0,
+    };
+  }
+
+  /** Chuỗi số đo tích luỹ của phiên trên trục giờ tính giá: bắt đầu, từng mẫu công tơ, dừng. */
+  private async meterPoints(
+    c: PoolClient,
+    session: BillableSession,
+    start: Date,
+    end: Date,
+    offsetMs: number,
+  ): Promise<MeterPoint[]> {
+    const { rows } = await c.query<{ at: Date; wh: string }>(
+      `SELECT cp_timestamp AS at,CASE WHEN unit='kWh' THEN value*1000 ELSE value END AS wh
+       FROM meter_values WHERE session_id=$1 AND measurand='Energy.Active.Import.Register'
+         AND phase IS NULL AND (unit IN ('Wh','kWh') OR unit IS NULL)
+       ORDER BY cp_timestamp,received_at`,
+      [session.id],
+    );
     return [
-      {
-        tariffId: rows[0]!.id,
-        start: timeline.start,
-        end: timeline.end,
-        energy,
-        numerator: energy * BigInt(rows[0]!.price),
-      },
+      { at: start.getTime(), wh: Number(session.meter_start_wh) },
+      ...rows
+        .map((row) => ({ at: row.at.getTime() + offsetMs, wh: Number(row.wh) }))
+        .filter((point) => point.at > start.getTime() && point.at < end.getTime()),
+      { at: end.getTime(), wh: Number(session.meter_stop_wh) },
     ];
   }
 
@@ -451,7 +503,7 @@ export class ChargeSettlementService {
     c: PoolClient,
     session: BillableSession,
     timeline: PricingTimeline,
-  ): Promise<PricedSegment[] | undefined> {
+  ): Promise<PricedSession | undefined> {
     const { start, end, clock } = timeline;
     if (
       !Number.isFinite(start.getTime()) ||
@@ -480,23 +532,21 @@ export class ChargeSettlementService {
     );
     let cursor = start.getTime();
     let previous = BigInt(session.meter_start_wh);
+    const stop = BigInt(session.meter_stop_wh!);
     const result: PricedSegment[] = [];
+    let points: MeterPoint[] | undefined;
+    let interpolated = 0;
+    let maxGapMs = 0;
     for (const tariff of rows) {
       const left = Math.max(start.getTime(), tariff.starts.getTime());
       const right = Math.min(end.getTime(), tariff.ends.getTime());
       if (right < left || (right === left && start.getTime() !== end.getTime())) continue;
       if (left !== cursor) return undefined;
       let meter: bigint;
-      if (right === end.getTime()) meter = BigInt(session.meter_stop_wh!);
+      if (right === end.getTime()) meter = stop;
       else {
-        const sample = (
-          await c.query<{ wh: string }>(
-            `SELECT CASE WHEN unit='kWh' THEN value*1000 ELSE value END AS wh
-             FROM meter_values WHERE session_id=$1 AND cp_timestamp=$2 AND measurand='Energy.Active.Import.Register'
-             AND phase IS NULL AND (unit IN ('Wh','kWh') OR unit IS NULL)`,
-            [session.id, new Date(right - offsetMs)],
-          )
-        ).rows;
+        // Số đo tại biên, theo thứ tự ưu tiên: bằng chứng của operator → mẫu công tơ đúng biên →
+        // nội suy tuyến tính giữa hai số đo kề biên (quyết định 17/11: không giữ phiên vì thiếu mẫu).
         const evidence = (
           await c.query<{ meter_wh: string }>(
             `SELECT meter_wh FROM charge_tariff_boundary_evidence
@@ -504,14 +554,23 @@ export class ChargeSettlementService {
             [session.id, new Date(right), clock],
           )
         ).rows[0];
-        if (sample.length > 1 || (sample.length === 1 && !/^\d+(?:\.0+)?$/.test(sample[0]!.wh)))
-          return undefined;
-        if (!sample.length && !evidence) return undefined;
-        meter = sample.length ? BigInt(sample[0]!.wh.split('.')[0]!) : BigInt(evidence!.meter_wh);
-        if (evidence && meter !== BigInt(evidence.meter_wh)) return undefined;
+        if (evidence) meter = BigInt(evidence.meter_wh);
+        else {
+          points ??= await this.meterPoints(c, session, start, end, offsetMs);
+          const reading = meterAt(points, right);
+          if (!reading || !Number.isFinite(reading.wh)) return undefined;
+          meter = BigInt(Math.round(reading.wh));
+          if (reading.gapMs) {
+            interpolated++;
+            maxGapMs = Math.max(maxGapMs, reading.gapMs);
+          }
+        }
+        // Làm tròn Wh tại biên và chuỗi đo không đơn điệu không được làm một phần âm hay vượt
+        // meterStop: tổng các phần luôn đúng bằng điện năng của phiên (BR-P45 làm tròn tiền một lần).
+        if (meter < previous) meter = previous;
+        if (meter > stop) meter = stop;
       }
       const energy = meter - previous;
-      if (energy < 0n) return undefined;
       result.push({
         tariffId: tariff.id,
         start: new Date(left),
@@ -528,6 +587,6 @@ export class ChargeSettlementService {
       result.reduce((sum, portion) => sum + portion.energy, 0n) !== BigInt(session.energy_wh!)
     )
       return undefined;
-    return result;
+    return { segments: result, interpolated, maxGapMs };
   }
 }

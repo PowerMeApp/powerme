@@ -492,8 +492,10 @@ export class ReconciliationService {
         and(
           eq(reconciliationRecords.sessionId, sessionId),
           inArray(reconciliationRecords.recordType, ['meter_gap', 'conflict', 'late_sample']),
-          // Bản ghi gap_closed (T132) không mang kết luận đối soát: bỏ qua khi so "kết luận gần nhất".
+          // Bản ghi gap_closed (T132) và meter_evidence_conflict (T134) không mang kết luận đối soát:
+          // bỏ qua khi so "kết luận gần nhất".
           sql`coalesce(${reconciliationRecords.resolution}, '') NOT LIKE ${`${GAP_CLOSED_PREFIX}%`}`,
+          sql`coalesce(${reconciliationRecords.resolution}, '') NOT LIKE ${`${METER_EVIDENCE_CONFLICT_PREFIX}%`}`,
         ),
       )
       .orderBy(desc(reconciliationRecords.recordNo))

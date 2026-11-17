@@ -2,6 +2,7 @@ import {
   checkTariffTime,
   ClockFrame,
   measureClockOffset,
+  meterAt,
   parseChargePointTime,
   readChargePointTime,
 } from './tariff-clock.js';
@@ -32,14 +33,20 @@ describe('T101 charge-point tariff clock', () => {
   });
 
   it('T134 still reads a timestamp without a zone or with a sub-millisecond fraction, marked inexact', () => {
-    expect(readChargePointTime('2026-11-11T05:00:00')).toEqual({ at: time(0), exact: false });
+    expect(readChargePointTime('2026-11-11T05:00:00')).toEqual({
+      at: time(0),
+      exact: false,
+      zoned: false,
+    });
     expect(readChargePointTime('2026-11-11T05:00:00.1239Z')).toEqual({
       at: time(123),
       exact: false,
+      zoned: true,
     });
     expect(readChargePointTime('2026-11-11T12:00:00.5+07:00')).toEqual({
       at: time(500),
       exact: true,
+      zoned: true,
     });
     for (const raw of ['2026-02-30T05:00:00', '2026-11-11T24:00:00', '2026-11-11 05:00:00', 5])
       expect(readChargePointTime(raw)).toBeNull();
@@ -77,6 +84,7 @@ describe('T101 charge-point tariff clock', () => {
 describe('T134 clock offset measured on live frames of one connection epoch', () => {
   const TOLERANCE = 300_000;
   const LIVE = 5_000;
+  const UNSTABLE = 'tariff_clock_offset_unstable';
   /** Bản tin trụ ghi lúc `cpS` giây, CSMS nhận lúc `receivedS` giây. */
   const frame = (cpS: number, receivedS: number, epoch = 1): ClockFrame => ({
     epoch,
@@ -107,7 +115,7 @@ describe('T134 clock offset measured on live frames of one connection epoch', ()
   });
 
   it('leaves backfilled frames out: waiting in the offline queue only makes the offset larger', () => {
-    // Trụ chậm 600 s. Ba mẫu phát bù tới thành một loạt (chờ 430, 420, 410 s) rồi hai mẫu live.
+    // Trụ chậm 600 s. Ba mẫu phát bù tới thành một loạt (chờ 430, 420, 410 s) rồi ba mẫu live.
     expect(
       measure([
         frame(0, 1030),
@@ -115,34 +123,97 @@ describe('T134 clock offset measured on live frames of one connection epoch', ()
         frame(20, 1030.2),
         frame(440, 1040),
         frame(450, 1050),
+        frame(460, 1060),
       ]),
-    ).toEqual({ offsetMs: 600_000, epoch: 1, liveFrames: 2 });
+    ).toEqual({ offsetMs: 600_000, epoch: 1, liveFrames: 3 });
   });
 
   it('does not take a burst of queued frames, or a single frame, as a measurement', () => {
     // Phiên diễn ra hoàn toàn offline: mọi bản tin tới trong một loạt sau khi nối lại.
     expect(measure([frame(0, 7200), frame(10, 7200.1), frame(20, 7200.2)])).toBeUndefined();
-    // Hai bản tin cách nhau chưa tới ngưỡng live trên đồng hồ trụ có thể cùng nằm trong một loạt.
-    expect(measure([frame(0, 7200), frame(4, 7200.1)])).toBeUndefined();
     expect(measure([frame(0, 600)])).toBeUndefined();
     expect(measure([])).toBeUndefined();
   });
 
-  it('measures each epoch on its own and keeps the first measurable one', () => {
+  it('H2: needs three paced frames or 60 s on the charge point clock before a group counts as live', () => {
+    // Mẫu cuối 11:49:55,0 và stop 11:50:00,5 phát bù lúc 12:30, tới cách nhau 0,6 s: độ lệch của
+    // hai bản tin chỉ khác nhau 4,9 s nhưng đây là một loạt phát bù, không phải đồng hồ chậm 2403 s.
+    expect(measure([frame(-5.5, 2400), frame(0, 2400.6)])).toBeUndefined();
+    // Ba bản tin trong 6 giây giờ trụ vẫn có thể là một loạt phát bù.
+    expect(measure([frame(0, 2400), frame(3, 2400.3), frame(6, 2400.6)])).toBeUndefined();
+    // Hai bản tin live cách nhau chưa tới 60 s không đủ; thêm bản tin thứ ba thì đủ.
+    expect(measure([frame(0, 600), frame(30, 630)])).toBeUndefined();
+    expect(measure([frame(0, 600), frame(15, 615), frame(30, 630)])).toEqual({
+      offsetMs: 600_000,
+      epoch: 1,
+      liveFrames: 3,
+    });
+  });
+
+  it.each([
+    ['slow then synced', 600, 0],
+    ['fast then synced', -600, 0],
+  ])('H1: a clock corrected inside one epoch (%s) is unstable', (_name, before, after) => {
     expect(
-      measure([frame(0, 9000, 1), frame(100, 700, 2), frame(160, 760, 2), frame(220, 900, 3)]),
-    ).toEqual({ offsetMs: 600_000, epoch: 2, liveFrames: 2 });
+      measure([
+        frame(0, before),
+        frame(60, 60 + before),
+        frame(120, 120 + before),
+        frame(200, 200 + after),
+        frame(260, 260 + after),
+        frame(320, 320 + after),
+      ]),
+    ).toBe(UNSTABLE);
+  });
+
+  it('keeps the least delayed of two live groups that agree within the tolerance', () => {
+    // Nhóm thứ hai chậm đều 100 s (mạng nghẽn): cùng một đồng hồ, lấy nhóm ít chờ nhất.
+    expect(
+      measure([frame(0, 0), frame(60, 60), frame(200, 300), frame(260, 360), frame(320, 420)]),
+    ).toEqual({ offsetMs: 0, epoch: 1, liveFrames: 2 });
+  });
+
+  it('decision 4: a clock that is off must be measured, and agree, in every epoch of the session', () => {
+    // Hai epoch đều đo được và khớp nhau trong dung sai → dùng số đo của epoch đầu.
     expect(
       measure([frame(0, 600, 1), frame(60, 660, 1), frame(500, 1000, 2), frame(560, 1060, 2)]),
     ).toEqual({ offsetMs: 600_000, epoch: 1, liveFrames: 2 });
-  });
-
-  it('reports an unstable clock when two epochs disagree by more than the tolerance', () => {
+    // Lệch nhau quá dung sai (đồng hồ được chỉnh lúc nối lại).
     expect(
       measure([frame(0, 600, 1), frame(60, 660, 1), frame(500, 500, 2), frame(560, 560, 2)]),
-    ).toBe('tariff_clock_offset_unstable');
-    expect(
-      measure([frame(0, 600, 1), frame(60, 660, 1), frame(500, 800, 2), frame(560, 860, 2)]),
-    ).toEqual({ offsetMs: 600_000, epoch: 1, liveFrames: 2 });
+    ).toBe(UNSTABLE);
+    // H3: epoch sau chỉ có một bản tin, không đo được → không được nhận độ lệch của epoch đầu.
+    expect(measure([frame(0, -600, 1), frame(60, -540, 1), frame(900, 900, 2)])).toBe(UNSTABLE);
+    expect(measure([frame(0, 9000, 1), frame(100, 700, 2), frame(160, 760, 2)])).toBe(UNSTABLE);
+  });
+
+  it('does not need every epoch when the measured clock is within the tolerance', () => {
+    expect(measure([frame(0, 2, 1), frame(60, 62, 1), frame(100, 9000, 2)])).toEqual({
+      offsetMs: 2000,
+      epoch: 1,
+      liveFrames: 2,
+    });
+  });
+});
+
+describe('T134 meter reading at a tariff boundary', () => {
+  const points = [
+    { at: 0, wh: 1000 },
+    { at: 60_000, wh: 1200 },
+    { at: 180_000, wh: 1800 },
+  ];
+
+  it('uses a reading taken exactly on the boundary as it is', () => {
+    expect(meterAt(points, 60_000)).toEqual({ wh: 1200, gapMs: 0 });
+  });
+
+  it('interpolates linearly between the two readings around the boundary', () => {
+    expect(meterAt(points, 90_000)).toEqual({ wh: 1350, gapMs: 120_000 });
+    expect(meterAt(points, 15_000)).toEqual({ wh: 1050, gapMs: 60_000 });
+  });
+
+  it('has no reading outside the series', () => {
+    expect(meterAt(points, -1)).toBeNull();
+    expect(meterAt(points, 180_001)).toBeNull();
   });
 });

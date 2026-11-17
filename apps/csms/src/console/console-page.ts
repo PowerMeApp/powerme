@@ -320,6 +320,10 @@ header button:hover:not(:disabled) { background: var(--accent); color: var(--pan
       case 'tariff_clock_offset':
         var offset = /offset_s=(-?\d+)/.exec(r.resolution || '');
         return 'Đồng hồ trụ lệch ' + (offset ? (offset[1] < 0 ? 'nhanh ' : 'chậm ') + Math.abs(offset[1]) + ' s' : '?') + ': đã cộng độ lệch vào mọi mốc giờ của phiên trước khi chia khung giá';
+      case 'tariff_boundary_interpolated':
+        var nb = /boundaries=(\d+)/.exec(r.resolution || '');
+        var gap = /max_gap_s=(\d+)/.exec(r.resolution || '');
+        return 'Không có mẫu công tơ đúng ' + (nb ? nb[1] : '?') + ' ranh giới khung giá: số Wh tại ranh giới được nội suy giữa hai số đo kề nhau (cách nhau nhiều nhất ' + (gap ? gap[1] : '?') + ' s)';
       case 'meter_evidence_conflict':
         return 'Bản tin lặp có số đo khác bản đã lưu (' + r.resolution + ')';
       case 'conflict':

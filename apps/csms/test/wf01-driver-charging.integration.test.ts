@@ -1013,7 +1013,6 @@ describeDb('WP3/T31 WF-01 service journey with real OCPP + Postgres', () => {
     await expect(
       settlement.recordTariffBoundary(admin, sid, utcTime(5, 0), 1400, 'wrong role'),
     ).rejects.toThrow('not_found');
-    expect(await settlement.settle(sid)).toBe('pending');
     await settlement.recordTariffBoundary(
       op,
       sid,
@@ -1111,11 +1110,27 @@ describeDb('WP3/T31 WF-01 service journey with real OCPP + Postgres', () => {
     ).toHaveLength(1);
   });
 
-  it('T101 does not interpolate a reading one millisecond from the tariff boundary', async () => {
+  it('T134 interpolates the boundary reading when the nearest sample is one millisecond off the tariff boundary', async () => {
     await twoBands();
+    await q("UPDATE tariff_periods SET price_per_kwh_vnd=3 WHERE band='peak'");
     const near = new Date(utcTime(5, 0).getTime() - 1);
     const sid = await pricingFixture(utcTime(4, 59), utcTime(5, 1), 800, { boundary: near });
-    await expectSettlementPending(sid, 'tariff_coverage_or_boundary_meter_required');
+    expect(await settlement.settle(sid)).toBe('posted');
+    await expectChargePointClock(sid, utcTime(5, 1));
+    // Mẫu 1400 Wh lúc 11:59:59,999; stop 1800 Wh lúc 12:01 → tại 12:00 là 1400,007 → 1400 Wh.
+    expect(await segments(sid)).toEqual([
+      {
+        band: 'normal',
+        segment_start: utcTime(4, 59),
+        segment_end: utcTime(5, 0),
+        energy_wh: '400',
+      },
+      { band: 'peak', segment_start: utcTime(5, 0), segment_end: utcTime(5, 1), energy_wh: '400' },
+    ]);
+    expect(await boundaryRecords(sid)).toEqual([
+      { resolution: 'tariff_boundary=interpolated boundaries=1 max_gap_s=60' },
+    ]);
+    expect((await service.statement(driver, sid)).amount_vnd).toBe('2');
   });
 
   it('T134 prices a session whose boundary meter has no inbound frame at the receipt-start band, without holding it', async () => {
@@ -1176,6 +1191,14 @@ describeDb('WP3/T31 WF-01 service journey with real OCPP + Postgres', () => {
     return q(
       `SELECT t.band,s.segment_start,s.segment_end,s.energy_wh FROM session_tariff_segments s
        JOIN tariff_periods t ON t.id=s.tariff_period_id WHERE s.session_id=$1 ORDER BY s.segment_start`,
+      [sid],
+    );
+  }
+
+  async function boundaryRecords(sid: number) {
+    return q(
+      `SELECT resolution FROM reconciliation_records
+       WHERE session_id=$1 AND record_type='tariff_boundary_interpolated' ORDER BY record_no`,
       [sid],
     );
   }
@@ -1277,7 +1300,6 @@ describeDb('WP3/T31 WF-01 service journey with real OCPP + Postgres', () => {
        VALUES($1,$2,1500,$3,'Prior CP clock evidence')`,
       [sid, boundary, op],
     );
-    await expectSettlementPending(sid, 'tariff_coverage_or_boundary_meter_required');
     await expect(
       settlement.recordTariffBoundary(op, sid, utcTime(4, 50), 1200, 'CP interval only'),
     ).rejects.toThrow('boundary_outside_session');
@@ -1297,6 +1319,7 @@ describeDb('WP3/T31 WF-01 service journey with real OCPP + Postgres', () => {
         { boundary_at: boundary, meter_wh: '1200', pricing_clock: 'cp_offset' },
       ]),
     );
+    expect(await boundaryRecords(sid)).toEqual([]);
     expect(await service.statement(driver, sid)).toMatchObject({ amount_vnd: '1400' });
     expect(
       await q(
@@ -1495,18 +1518,20 @@ describeDb('WP3/T31 WF-01 service journey with real OCPP + Postgres', () => {
   }
 
   it.each([
-    [600, 'slow'],
-    [-600, 'fast'],
+    [600, 'slow', undefined],
+    [-600, 'fast', undefined],
+    // Mọi bản tin tới trễ đúng 0,4 s: số đo 600,4 s, cộng 600 s (làm tròn tới giây).
+    [600, 'slow, measured 600.4 s', 400],
   ])(
     'T134 (a) adds a constant %s s offset (%s clock) to start, stop and every sample, then splits at the band boundary',
-    async (offsetS) => {
+    async (offsetS, _name, constantLagMs) => {
       await twoBands();
       await q("UPDATE tariff_periods SET price_per_kwh_vnd=3 WHERE band='peak'");
       // Giờ thật 11:55–12:05 ICT; trụ ghi lệch đúng 10 phút; CSMS nhận live (trễ mạng dưới 1 s).
       const boundary = utcTime(5, 0);
       const sent = (at: Date, wh?: string, lagMs = 0) => ({
         cp: new Date(at.getTime() - offsetS * 1000),
-        received: new Date(at.getTime() + lagMs),
+        received: new Date(at.getTime() + (constantLagMs ?? lagMs)),
         wh,
       });
       const sid = await clockSession([
@@ -1517,6 +1542,7 @@ describeDb('WP3/T31 WF-01 service journey with real OCPP + Postgres', () => {
         { action: 'stop', ...sent(utcTime(5, 5)) },
       ]);
       await expectOffset(sid, offsetS, utcTime(5, 5), 5);
+      expect(await boundaryRecords(sid)).toEqual([]);
       // Không chỉnh thì cả phiên rơi vào một khung (11:45–11:55 hoặc 12:05–12:15 ICT).
       expect(await segments(sid)).toEqual([
         {
@@ -1620,22 +1646,59 @@ describeDb('WP3/T31 WF-01 service journey with real OCPP + Postgres', () => {
     expect(await segments(sid)).toHaveLength(1);
   });
 
-  it('T134 keeps an energy sample whose timestamp has no zone or a sub-millisecond fraction and only distrusts the clock', async () => {
+  it('T134 keeps an energy sample whose timestamp has no zone or a sub-millisecond fraction (real strict gateway) and only distrusts the clock', async () => {
     const sid = await observedStart();
-    const from = new Date(startTimestamp).getTime();
-    const at = (offset: number) => new Date(from + offset);
-    await clockMeter(at(1000).toISOString().replace('Z', ''), '1200', at(1000));
-    await clockMeter(at(2000).toISOString().replace('Z', '4567Z'), '1400', at(2000));
-    await stopAt(at(3000));
+    // ocpp-rpc strictMode của client từ chối gửi; gửi thô để chứng minh phía CSMS nhận và xử lý.
+    const sendRaw = async (id: string, timestamp: string, value: string) => {
+      (client as unknown as { sendRaw(message: string): void }).sendRaw(
+        JSON.stringify([
+          2,
+          id,
+          'MeterValues',
+          {
+            connectorId: 1,
+            transactionId: transaction,
+            meterValue: [{ timestamp, sampledValue: [{ value, unit: 'Wh' }] }],
+          },
+        ]),
+      );
+      await until(
+        async () =>
+          (
+            await q(
+              "SELECT 1 FROM ocpp_message_log WHERE unique_id=$1 AND direction='out' AND message_type=3",
+              [id],
+            )
+          ).length === 1,
+      );
+    };
+    // Giờ địa phương không ghi múi giờ: đọc là UTC thì lệch 7 giờ so với lúc lấy mẫu.
+    const local = new Date(Date.now() + 7 * 3600000).toISOString().replace('Z', '');
+    const fraction = new Date();
+    await sendRaw('raw-long-fraction', fraction.toISOString().replace('Z', '4567Z'), '1200');
+    await sendRaw('raw-no-zone', local, '1400');
+    meterStop = 1800;
+    await sendStop();
     expect(
       await q(
-        'SELECT cp_timestamp,value::int AS wh FROM meter_values WHERE session_id=$1 ORDER BY cp_timestamp',
+        "SELECT validation_error FROM ocpp_message_log WHERE unique_id LIKE 'raw-%' AND direction='in'",
+      ),
+    ).toEqual([{ validation_error: null }, { validation_error: null }]);
+    // Mẫu thiếu múi giờ được lưu với giờ CSMS nhận; mẫu có phần lẻ dài được cắt tới mili giây.
+    const stored = await q(
+      'SELECT value::int AS wh,cp_timestamp,received_at FROM meter_values WHERE session_id=$1 ORDER BY value',
+      [sid],
+    );
+    expect(stored.map((row) => row.wh)).toEqual([1200, 1400]);
+    expect(stored[0]!.cp_timestamp).toEqual(fraction);
+    expect(stored[1]!.cp_timestamp).toEqual(stored[1]!.received_at);
+    // Không sinh khe hở giả: chuỗi đo của một phiên dài chưa tới một giây không có chỗ đứt.
+    expect(
+      await q(
+        "SELECT record_type FROM reconciliation_records WHERE session_id=$1 AND record_type IN ('meter_gap','late_sample','conflict')",
         [sid],
       ),
-    ).toEqual([
-      { cp_timestamp: at(1000), wh: 1200 },
-      { cp_timestamp: at(2000), wh: 1400 },
-    ]);
+    ).toEqual([]);
     expect(
       await q(
         "SELECT split_part(note,' ',1) AS reason FROM session_status_history WHERE session_id=$1 AND event='TARIFF_CLOCK_UNTRUSTED'",
@@ -1645,9 +1708,174 @@ describeDb('WP3/T31 WF-01 service journey with real OCPP + Postgres', () => {
       { reason: 'tariff_clock_invalid_timestamp' },
       { reason: 'tariff_clock_invalid_timestamp' },
     ]);
-    await expectFallback(sid, 'tariff_clock_invalid_timestamp', at(3000));
+    const stopped = (await q('SELECT received_stopped_at FROM sessions WHERE id=$1', [sid]))[0]!
+      .received_stopped_at as Date;
+    await expectFallback(sid, 'tariff_clock_invalid_timestamp', stopped);
     expect((await service.statement(driver, sid)).energy_wh).toBe('800');
   });
+
+  it('T134 (H1) falls back when the clock is corrected in the middle of one connection epoch', async () => {
+    await twoBands();
+    await q("UPDATE tariff_periods SET price_per_kwh_vnd=1000 WHERE band='normal'");
+    await q("UPDATE tariff_periods SET price_per_kwh_vnd=3000 WHERE band='peak'");
+    // Trụ chậm 10 phút, phiên thật 11:50–12:21 ICT. Heartbeat.conf lúc 12:14:30 đồng bộ giờ: bản tin
+    // tới 12:14 lệch 600 s, từ 12:15 lệch 0. Không có một độ lệch nào đúng cho cả phiên.
+    const slow = (at: Date, wh?: string) => ({
+      cp: new Date(at.getTime() - 600000),
+      received: at,
+      wh,
+    });
+    const synced = (at: Date, wh?: string) => ({ cp: at, received: at, wh });
+    const sid = await clockSession([
+      { action: 'start', ...slow(utcTime(4, 50)) },
+      { action: 'meter', ...slow(utcTime(4, 52), '1050') },
+      { action: 'meter', ...slow(utcTime(4, 58), '1150') },
+      { action: 'meter', ...slow(utcTime(5, 4), '1250') },
+      { action: 'meter', ...slow(utcTime(5, 10), '1350') },
+      { action: 'meter', ...slow(utcTime(5, 14), '1450') },
+      { action: 'meter', ...synced(utcTime(5, 15), '1500') },
+      { action: 'meter', ...synced(utcTime(5, 17), '1600') },
+      { action: 'meter', ...synced(utcTime(5, 19), '1700') },
+      { action: 'stop', ...synced(utcTime(5, 21)) },
+    ]);
+    await expectFallback(sid, 'tariff_clock_offset_unstable', utcTime(5, 21));
+    expect(await segments(sid)).toEqual([
+      {
+        band: 'normal',
+        segment_start: utcTime(4, 50),
+        segment_end: utcTime(5, 21),
+        energy_wh: '800',
+      },
+    ]);
+    expect((await service.statement(driver, sid)).amount_vnd).toBe('800');
+  });
+
+  it('T134 (H2) does not read two backfilled frames 5.5 s apart as a clock offset', async () => {
+    await twoBands();
+    await q("UPDATE tariff_periods SET price_per_kwh_vnd=1000 WHERE band='normal'");
+    await q("UPDATE tariff_periods SET price_per_kwh_vnd=3000 WHERE band='peak'");
+    // Đồng hồ đúng, phiên offline 11:40–11:50 ICT, nối lại 12:30. Mẫu cuối (11:49:55,0) và stop
+    // (11:50:00,5) tới cách nhau 0,6 s: độ lệch hai bản tin chỉ khác nhau 4,9 s (~2403 s).
+    const at = (hour: number, minute: number, ms = 0) =>
+      new Date(utcTime(hour, minute).getTime() + ms);
+    const stopped = at(4, 50, 500);
+    const sid = await clockSession([
+      { action: 'start', cp: at(4, 40), received: at(5, 30), reconnect: true },
+      { action: 'meter', cp: at(4, 49, 55000), received: at(5, 30, 200), wh: '1700' },
+      { action: 'stop', cp: stopped, received: at(5, 30, 800) },
+    ]);
+    await expectChargePointClock(sid, stopped);
+    expect(await segments(sid)).toEqual([
+      { band: 'normal', segment_start: at(4, 40), segment_end: stopped, energy_wh: '800' },
+    ]);
+    expect((await service.statement(driver, sid)).amount_vnd).toBe('800');
+  });
+
+  it('T134 (H3) falls back when a later epoch of an off-clock session cannot be measured', async () => {
+    await twoBands();
+    await q("UPDATE tariff_periods SET price_per_kwh_vnd=1000 WHERE band='normal'");
+    await q("UPDATE tariff_periods SET price_per_kwh_vnd=3000 WHERE band='peak'");
+    // Trụ nhanh 10 phút, bắt đầu thật 11:40 ICT, mẫu live tới 11:55, rớt mạng, nối lại có
+    // BootNotification chỉnh giờ, stop thật 12:05 với đồng hồ đã đúng. Epoch 2 chỉ có một bản tin.
+    const fast = (at: Date, wh?: string) => ({
+      cp: new Date(at.getTime() + 600000),
+      received: at,
+      wh,
+    });
+    const sid = await clockSession([
+      { action: 'start', ...fast(utcTime(4, 40)) },
+      { action: 'meter', ...fast(utcTime(4, 45), '1200') },
+      { action: 'meter', ...fast(utcTime(4, 50), '1400') },
+      { action: 'meter', ...fast(utcTime(4, 55), '1600') },
+      { action: 'stop', cp: utcTime(5, 5), received: utcTime(5, 5), reconnect: true },
+    ]);
+    await expectFallback(sid, 'tariff_clock_offset_unstable', utcTime(5, 5));
+    expect(await segments(sid)).toEqual([
+      {
+        band: 'normal',
+        segment_start: utcTime(4, 40),
+        segment_end: utcTime(5, 5),
+        energy_wh: '800',
+      },
+    ]);
+  });
+
+  it.each([
+    [0, 'cp'],
+    [600, 'cp_offset'],
+  ])(
+    'T134 interpolates the meter at a band boundary that has no sample (offset %s s, %s) and posts once',
+    async (offsetS, clock) => {
+      await twoBands();
+      await q("UPDATE tariff_periods SET price_per_kwh_vnd=1000 WHERE band='normal'");
+      await q("UPDATE tariff_periods SET price_per_kwh_vnd=3000 WHERE band='peak'");
+      // Phiên thật 11:55–12:05 ICT, mẫu lúc 11:58 (1300 Wh) và 12:02 (1500 Wh): tại 12:00 nội suy
+      // ra 1400 Wh. Normal 400 Wh × 1000 = 400 VND, Peak 400 Wh × 3000 = 1200 VND.
+      const boundary = utcTime(5, 0);
+      const sent = (at: Date, wh?: string) => ({
+        cp: new Date(at.getTime() - offsetS * 1000),
+        received: at,
+        wh,
+      });
+      const sid = await clockSession([
+        { action: 'start', ...sent(utcTime(4, 55)) },
+        { action: 'meter', ...sent(utcTime(4, 58), '1300') },
+        { action: 'meter', ...sent(utcTime(5, 2), '1500') },
+        { action: 'stop', ...sent(utcTime(5, 5)) },
+      ]);
+      expect(await settlement.settle(sid)).toBe('already_posted');
+      expect(
+        await q('SELECT status,priced_clock,priced_ended_at FROM sessions WHERE id=$1', [sid]),
+      ).toEqual([{ status: 'reconciled', priced_clock: clock, priced_ended_at: utcTime(5, 5) }]);
+      expect(
+        await q(
+          `SELECT t.band,s.segment_start,s.segment_end,s.energy_wh,s.amount_vnd,s.exact_amount_milli_vnd
+           FROM session_tariff_segments s JOIN tariff_periods t ON t.id=s.tariff_period_id
+           WHERE s.session_id=$1 ORDER BY s.segment_start`,
+          [sid],
+        ),
+      ).toEqual([
+        {
+          band: 'normal',
+          segment_start: utcTime(4, 55),
+          segment_end: boundary,
+          energy_wh: '400',
+          amount_vnd: '400',
+          exact_amount_milli_vnd: '400000',
+        },
+        {
+          band: 'peak',
+          segment_start: boundary,
+          segment_end: utcTime(5, 5),
+          energy_wh: '400',
+          amount_vnd: '1200',
+          exact_amount_milli_vnd: '1200000',
+        },
+      ]);
+      expect(await boundaryRecords(sid)).toEqual([
+        { resolution: 'tariff_boundary=interpolated boundaries=1 max_gap_s=240' },
+      ]);
+      expect(await clockRecords(sid)).toHaveLength(offsetS ? 1 : 0);
+      expect((await service.statement(driver, sid)).amount_vnd).toBe('1600');
+      expect(
+        await q(
+          "SELECT amount_vnd FROM credit_transactions WHERE session_id=$1 AND transaction_type='session_debit'",
+          [sid],
+        ),
+      ).toEqual([{ amount_vnd: '-1600' }]);
+      expect(
+        await q('SELECT state,reason FROM charge_settlement_jobs WHERE session_id=$1', [sid]),
+      ).toEqual([{ state: 'posted', reason: 'posted' }]);
+      expect(await settlement.retryPending()).toBe(0);
+      const consoleQueries = new ConsoleQueries(db, config, registry);
+      expect(await consoleQueries.reconciliation(20)).toEqual(
+        expect.arrayContaining([expect.objectContaining({ kind: 'tariff_boundary_interpolated' })]),
+      );
+      expect(await consoleQueries.summary()).toMatchObject({
+        reconciliation_by_type: { tariff_boundary_interpolated: 1 },
+      });
+    },
+  );
 
   it('T101 verifies all samples in one MeterValues frame regardless of array order', async () => {
     const sid = await observedStart();
@@ -1718,7 +1946,10 @@ describeDb('WP3/T31 WF-01 service journey with real OCPP + Postgres', () => {
     expect(
       await q("SELECT resolution FROM reconciliation_records WHERE record_type='conflict'"),
     ).toEqual([{ resolution: expect.stringMatching(/^meter_evidence_conflict reason=/) }]);
-    expect(await consoleQueries.summary()).toMatchObject({ reconciliation_conflicts: 0 });
+    expect(await consoleQueries.summary()).toMatchObject({
+      reconciliation_conflicts: 0,
+      reconciliation_by_type: { conflict: 0 },
+    });
     expect(await consoleQueries.sessions(5)).toEqual([
       expect.objectContaining({ id: sid, has_conflict: false }),
     ]);

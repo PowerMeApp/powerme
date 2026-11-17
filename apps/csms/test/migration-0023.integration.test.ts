@@ -1,6 +1,6 @@
 /**
  * Test tích hợp migration 0023 (T134): đồng hồ tính giá `cp_offset` (giờ trụ cộng độ lệch đo được)
- * và loại bản ghi `tariff_clock_offset`.
+ * và hai loại bản ghi `tariff_clock_offset`, `tariff_boundary_interpolated`.
  *
  * Vì sao tồn tại: quyết toán ghi `sessions.priced_clock = 'cp_offset'` và một bản ghi
  * `tariff_clock_offset` trong cùng giao dịch với khoản trừ tiền. Hỏng âm thầm có thể là: CHECK cũ còn
@@ -50,8 +50,10 @@ describe('migration 0023 — tĩnh', () => {
       .split('\n')
       .filter((line) => !line.trimStart().startsWith('--'))
       .join('\n');
-    expect(sql.match(/tariff_clock_offset/g)).toHaveLength(1);
-    expect(sql).toMatch(/ALTER TYPE reconciliation_record_type ADD VALUE 'tariff_clock_offset';/);
+    for (const value of ['tariff_clock_offset', 'tariff_boundary_interpolated']) {
+      expect(sql.match(new RegExp(value, 'g'))).toHaveLength(1);
+      expect(sql).toContain(`ALTER TYPE reconciliation_record_type ADD VALUE '${value}';`);
+    }
     expect(sql).not.toMatch(/\b(INSERT|UPDATE|DELETE)\b/);
   });
 });
@@ -139,9 +141,8 @@ describeDb('migration 0023 — độ lệch đồng hồ trụ (T134)', () => {
       code: '23514',
       constraint: 'charge_tariff_boundary_evidence_pricing_clock_check',
     });
-    await expect(record(cp, 2, 'tariff_clock_offset', 'x')).rejects.toMatchObject({
-      code: '22P02',
-    });
+    for (const type of ['tariff_clock_offset', 'tariff_boundary_interpolated'])
+      await expect(record(cp, 2, type, 'x')).rejects.toMatchObject({ code: '22P02' });
     const snapshot = async () => ({
       sessions: await q('SELECT to_jsonb(s) AS row FROM sessions s ORDER BY id'),
       records: await q('SELECT to_jsonb(r) AS row FROM reconciliation_records r ORDER BY id'),
@@ -232,10 +233,20 @@ describeDb('migration 0023 — độ lệch đồng hồ trụ (T134)', () => {
       ).toEqual([{ is_nullable: 'NO', column_default: "'cp'::text" }]);
     });
 
-    it('loại bản ghi tariff_clock_offset đứng ngay sau tariff_clock_fallback và ghi được', async () => {
+    it('hai loại bản ghi mới đứng ngay sau tariff_clock_fallback và ghi được', async () => {
       const all = await labels();
-      expect(all.indexOf('tariff_clock_offset')).toBe(all.indexOf('tariff_clock_fallback') + 1);
-      expect(all).toEqual(expect.arrayContaining(['tariff_clock_fallback', 'tariff_clock_offset']));
+      const at = all.indexOf('tariff_clock_fallback');
+      expect(all.slice(at, at + 3)).toEqual([
+        'tariff_clock_fallback',
+        'tariff_clock_offset',
+        'tariff_boundary_interpolated',
+      ]);
+      await record(
+        sid,
+        2,
+        'tariff_boundary_interpolated',
+        'tariff_boundary=interpolated boundaries=1 max_gap_s=120',
+      );
       await record(
         sid,
         1,

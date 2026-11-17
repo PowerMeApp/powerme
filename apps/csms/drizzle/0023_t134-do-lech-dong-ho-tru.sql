@@ -9,9 +9,11 @@
 -- được vào mọi mốc giờ trụ của phiên rồi mới chia khung giá, và ghi lại lần chỉnh cho operator. Trước
 -- 0023 chỉ có hai kết quả: `cp` (giờ trụ) và `csms` (giờ nhận của CSMS).
 --
--- 1. `reconciliation_record_type` thêm `tariff_clock_offset` — bản ghi "đã cộng độ lệch N giây".
+-- 1. `reconciliation_record_type` thêm `tariff_clock_offset` — bản ghi "đã cộng độ lệch N giây" —
+--    và `tariff_boundary_interpolated` — bản ghi "số đo tại N biên khung giá được nội suy" (quyết
+--    định của Trí ngày 17/11: phiên vắt biên khung giá mà không có mẫu công tơ đúng biên không bị giữ).
 --    Giá trị enum mới KHÔNG được dùng trong cùng transaction (PostgreSQL cấm): file này chỉ thêm,
---    không ghi dòng nào mang giá trị đó.
+--    không ghi dòng nào mang hai giá trị đó.
 -- 2. `sessions.priced_clock` nhận thêm `cp_offset` (CHECK `sessions_priced_clock_check` viết lại).
 -- 3. `charge_tariff_boundary_evidence.pricing_clock` nhận thêm `cp_offset`: số đo tại biên do operator
 --    xác nhận cho phiên đã chỉnh giờ nằm trên trục giờ đã chỉnh, không lẫn với trục `cp`.
@@ -23,6 +25,7 @@
 BEGIN;
 
 ALTER TYPE reconciliation_record_type ADD VALUE 'tariff_clock_offset';
+ALTER TYPE reconciliation_record_type ADD VALUE 'tariff_boundary_interpolated';
 
 ALTER TABLE sessions
   DROP CONSTRAINT sessions_priced_clock_check,

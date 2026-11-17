@@ -66,11 +66,9 @@ const SESSION_COLUMNS = {
  *  - record_type = late_sample mà kết luận (tiền tố resolution) là conflict;
  *  - DỮ LIỆU CŨ trước 0001: meter_gap có resolution bắt đầu bằng "conflict".
  */
+const NOT_METER_EVIDENCE_CONFLICT = sql`coalesce(${reconciliationRecords.resolution}, '') NOT LIKE ${`${METER_EVIDENCE_CONFLICT_PREFIX}%`}`;
 const IS_CONFLICT = or(
-  and(
-    eq(reconciliationRecords.recordType, 'conflict'),
-    sql`coalesce(${reconciliationRecords.resolution}, '') NOT LIKE ${`${METER_EVIDENCE_CONFLICT_PREFIX}%`}`,
-  ),
+  and(eq(reconciliationRecords.recordType, 'conflict'), NOT_METER_EVIDENCE_CONFLICT),
   and(
     inArray(reconciliationRecords.recordType, ['late_sample', 'meter_gap']),
     like(reconciliationRecords.resolution, 'conflict%'),
@@ -256,9 +254,12 @@ export class ConsoleQueries {
       .select({ status: sessions.status, n: count() })
       .from(sessions)
       .groupBy(sessions.status);
+    // T134: bản ghi meter_evidence_conflict mang record_type = conflict nhưng không phải xung đột
+    // điện năng của đối soát → không tính vào `reconciliation_by_type.conflict`.
     const byRecord = await this.db
       .select({ type: reconciliationRecords.recordType, n: count() })
       .from(reconciliationRecords)
+      .where(NOT_METER_EVIDENCE_CONFLICT)
       .groupBy(reconciliationRecords.recordType);
     const [conflicts] = await this.db
       .select({ n: count() })

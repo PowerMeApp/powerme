@@ -54,7 +54,7 @@ import {
   DEFAULT_TARIFF_CLOCK_TOLERANCE_S,
 } from '../../config.js';
 import { DB, Db, DbExecutor } from '../../db/db.module.js';
-import { checkTariffTimeline } from '../../reconciliation/tariff-clock.js';
+import { resolveTariffClock } from '../../reconciliation/tariff-clock.js';
 import {
   chargePoints,
   connectors,
@@ -581,9 +581,14 @@ export class FaultService implements OnApplicationBootstrap, OnApplicationShutdo
    * EmergencyStop / PowerLoss / Other — thì đóng sự cố và xoá nhãn. Gọi sau StopTransaction.
    *
    * "Bắt đầu sau" so theo giờ trụ đã đối soát (T131, review #139): `cp_started_at` khi đồng hồ trụ
-   * qua đúng phép kiểm của BR-P02 (`checkTariffTimeline`: lệch ≤ dung sai, đúng epoch); không qua
-   * thì giờ CSMS nhận, nhưng chỉ khi phiên không phải bản gửi bù (`delivered_offline`). Phiên gửi bù
-   * mà đồng hồ trụ không kiểm được thì không biết nó bắt đầu lúc nào → không đóng; Operator đóng.
+   * qua đúng phép kiểm của BR-P02 (`resolveTariffClock`; từ T134 cộng thêm độ lệch đo được nếu đồng
+   * hồ lệch quá dung sai); không qua thì giờ CSMS nhận, nhưng chỉ khi phiên không phải bản gửi bù
+   * (`delivered_offline`). Phiên gửi bù mà đồng hồ trụ không kiểm được thì không biết nó bắt đầu lúc
+   * nào → không đóng; Operator đóng.
+   *
+   * Tìm sự cố `driver_report` đang mở TRƯỚC (một truy vấn không khoá): hầu hết StopTransaction không
+   * có sự cố nào để đóng và không phải trả giá ba truy vấn log của bước kiểm đồng hồ. Kết quả được
+   * kiểm lại dưới khoá trong transaction bên dưới.
    */
   async onSessionCompleted(transactionNo: number): Promise<'resolved' | 'none'> {
     const session = (
@@ -616,6 +621,19 @@ export class FaultService implements OnApplicationBootstrap, OnApplicationShutdo
       FAULT_STOP_REASONS.has(session.stop_reason ?? 'Local')
     )
       return 'none';
+    const [candidate] = await this.db
+      .select({ id: faultEvents.id })
+      .from(faultEvents)
+      .where(
+        and(
+          eq(faultEvents.chargePointId, Number(session.charge_point_id)),
+          eq(faultEvents.connectorId, Number(session.connector_id)),
+          eq(faultEvents.source, 'driver_report'),
+          ne(faultEvents.status, 'resolved'),
+        ),
+      )
+      .limit(1);
+    if (!candidate) return 'none';
     const startedAt = await this.reconciledStart(session);
     if (startedAt === null) return 'none';
     const at = new Date(session.received_stopped_at);
@@ -1034,12 +1052,9 @@ export class FaultService implements OnApplicationBootstrap, OnApplicationShutdo
     received_stopped_at: Date | null;
     delivered_offline: boolean;
   }): Promise<Date | null> {
-    const toleranceMs =
-      (this.config.tariffClockToleranceS ?? DEFAULT_TARIFF_CLOCK_TOLERANCE_S) * 1000;
     const client = await this.db.$client.connect();
-    let issue: string | undefined;
     try {
-      issue = await checkTariffTimeline(
+      const clock = await resolveTariffClock(
         client,
         {
           ...session,
@@ -1048,12 +1063,14 @@ export class FaultService implements OnApplicationBootstrap, OnApplicationShutdo
           received_started_at: new Date(session.received_started_at),
           received_stopped_at: new Date(session.received_stopped_at!),
         },
-        toleranceMs,
+        (this.config.tariffClockToleranceS ?? DEFAULT_TARIFF_CLOCK_TOLERANCE_S) * 1000,
+        this.config.replaySkewThresholdS * 1000,
       );
+      if (!('issue' in clock))
+        return new Date(new Date(session.cp_started_at).getTime() + clock.offsetMs);
     } finally {
       client.release();
     }
-    if (!issue) return new Date(session.cp_started_at);
     return session.delivered_offline ? null : new Date(session.received_started_at);
   }
 

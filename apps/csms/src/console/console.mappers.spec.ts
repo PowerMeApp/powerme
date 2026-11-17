@@ -156,6 +156,7 @@ describe('reconciliationKind / resolutionNumber / mapReconciliation', () => {
   it.each([
     ['tariff_clock_fallback', 'tariff_clock=csms_fallback reason=tariff_clock_future_timestamp'],
     ['tariff_clock_offset', 'tariff_clock=cp_offset offset_s=600 epoch=1 live_frames=4'],
+    ['tariff_boundary_interpolated', 'tariff_boundary=interpolated boundaries=1 max_gap_s=120'],
   ])('mapReconciliation exposes the %s audit kind', (recordType, resolution) => {
     expect(
       mapReconciliation({
@@ -342,7 +343,7 @@ describe('replay: replayedFlag / epochOpenedAtFor / mapMessage / mapMeterValue',
 });
 
 describe('buildSummary', () => {
-  it('đủ 9 trạng thái phiên và 9 loại đối soát (điền 0), online/offline tính từ registry', () => {
+  it('đủ 9 trạng thái phiên và 10 loại đối soát (điền 0), online/offline tính từ registry', () => {
     const out = buildSummary({
       stationSerials: ['A', 'B', 'C'],
       connectedSerials: new Set(['A', 'Z']),
@@ -359,7 +360,7 @@ describe('buildSummary', () => {
     expect(out.sessions_by_status['review']).toBe(1);
     expect(out.sessions_by_status['failed']).toBe(0);
     expect(out.sessions_total).toBe(3);
-    expect(Object.keys(out.reconciliation_by_type)).toHaveLength(9);
+    expect(Object.keys(out.reconciliation_by_type)).toHaveLength(10);
     expect(out.reconciliation_by_type['conflict']).toBe(0);
     expect(out.reconciliation_by_type['late_sample']).toBe(0);
     expect(out.reconciliation_conflicts).toBe(7);

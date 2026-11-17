@@ -43,6 +43,7 @@ export const RECONCILIATION_TYPES = [
   'late_sample',
   'tariff_clock_fallback',
   'tariff_clock_offset',
+  'tariff_boundary_interpolated',
 ] as const;
 
 export function iso(d: Date | null | undefined): string | null {
@@ -96,6 +97,7 @@ export type ReconciliationKind =
   | 'meter_evidence_conflict'
   | 'tariff_clock_fallback'
   | 'tariff_clock_offset'
+  | 'tariff_boundary_interpolated'
   | 'gap_detected'
   | 'gap_closed'
   | 'replay'
@@ -140,7 +142,8 @@ export function reconciliationKind(
     recordType === 'orphan_stop' ||
     recordType === 'unknown_id_tag' ||
     recordType === 'tariff_clock_fallback' ||
-    recordType === 'tariff_clock_offset'
+    recordType === 'tariff_clock_offset' ||
+    recordType === 'tariff_boundary_interpolated'
   ) {
     return recordType;
   }

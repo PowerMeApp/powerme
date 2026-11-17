@@ -783,7 +783,7 @@ export class SessionsService {
         ),
     );
     let conflictingSample = false;
-    for (const sample of this.flatten(values)) {
+    for (const sample of this.flatten(values, ctx.receivedAt)) {
       const aggregateEnergy =
         sample.measurand === ENERGY_MEASURAND &&
         sample.phase === null &&
@@ -879,14 +879,17 @@ export class SessionsService {
       await this.transition(tx, session, 'LATE_SAMPLE_CONFLICT', ctx.receivedAt, reason);
   }
 
-  private flatten(values: MeterValue[]): FlatSample[] {
+  private flatten(values: MeterValue[], receivedAt: Date): FlatSample[] {
     const out: FlatSample[] = [];
-    for (const mv of values) {
-      // T134: timestamp thiếu múi giờ hoặc có phần lẻ dài hơn mili giây vẫn đọc được (coi là UTC, cắt
-      // tới mili giây) → GIỮ mẫu điện năng; đồng hồ đã bị ingestSamples đánh dấu không tin được.
-      // Chỉ ngày giờ không tồn tại mới không có mốc nào để lưu.
-      const cpTimestamp = readChargePointTime(mv.timestamp)?.at;
-      if (!cpTimestamp) continue;
+    for (const [index, mv] of values.entries()) {
+      // T134: GIỮ mẫu điện năng có timestamp không dùng được cho khung giá; đồng hồ của phiên đã bị
+      // ingestSamples đánh dấu không tin được. Phần lẻ dài hơn mili giây: cắt tới mili giây. Thiếu
+      // múi giờ: không biết trụ ghi giờ nào (đọc là UTC thì giờ địa phương lệch 7 giờ và đối soát
+      // thấy khe hở giả), nên lưu mẫu tại giờ CSMS nhận; cộng thứ tự trong bản tin (ms) để các mẫu
+      // của cùng một bản tin không trùng mốc. Chỉ ngày giờ không tồn tại mới không lưu được.
+      const read = readChargePointTime(mv.timestamp);
+      if (!read) continue;
+      const cpTimestamp = read.zoned ? read.at : new Date(receivedAt.getTime() + index);
       for (const sv of mv.sampledValue) {
         if (!Number.isFinite(Number(sv.value))) {
           this.logger.warn(
