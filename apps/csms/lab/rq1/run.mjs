@@ -23,6 +23,9 @@
  *                                        trên một CSMS không được xoá dữ liệu)
  *   --steve-compose <file>               compose của SteVe để truy vấn MariaDB (infra/lab/steve/docker-compose.yml)
  *   --steve-schema evse|connector        tên bảng súng của SteVe (mặc định evse, SteVe 3.14.1)
+ *   --steve-ssh "<tham số ssh>"          SteVe ở máy khác: truy vấn MariaDB bằng `ssh <tham số> docker compose …`
+ *                                        (vd. "-i ~/.ssh/key deploy@host"); khi đó --steve-compose là đường
+ *                                        dẫn TRÊN máy đó, và --url trỏ vào cổng đã tunnel về máy này
  *   --register-only / --print-sql        (steve) chỉ đăng ký trụ + thẻ / chỉ in SQL đăng ký rồi thoát
  *   --s2-queue-lost-p 0..1               THĂM DÒ, ngoài 3 kịch bản chính thức: xác suất S2 làm mất hẳn
  *                                        hàng đợi MeterValues (mặc định 0). Khác 0 thì KHÔNG dùng cho NFR-02.
@@ -245,12 +248,19 @@ async function main() {
   try {
     if (config === 'steve') {
       const endpoint = args.url ?? 'ws://127.0.0.1:8180/steve/websocket/CentralSystemService';
-      const composeFile = path.resolve(
-        args['steve-compose'] ??
-          path.join(REPO_ROOT, 'infra', 'lab', 'steve', 'docker-compose.yml'),
-      );
+      const steveSsh = args['steve-ssh']
+        ? String(args['steve-ssh']).split(/\s+/).filter(Boolean)
+        : null;
+      if (steveSsh && !args['steve-compose'])
+        throw new Error('--steve-ssh cần --steve-compose là đường dẫn compose trên máy đó');
+      const composeFile = steveSsh
+        ? String(args['steve-compose'])
+        : path.resolve(
+            args['steve-compose'] ??
+              path.join(REPO_ROOT, 'infra', 'lab', 'steve', 'docker-compose.yml'),
+          );
       adapter = createSteveAdapter({
-        query: dockerMariadbQuery({ composeFile }),
+        query: dockerMariadbQuery({ composeFile, ssh: steveSsh }),
         endpoint,
         schema: args['steve-schema'] ?? 'evse',
       });
@@ -259,6 +269,8 @@ async function main() {
         endpoint,
         composeFile,
         schema: args['steve-schema'] ?? 'evse',
+        ...(steveSsh ? { remote: true } : {}),
+        ...(args['target-note'] ? { note: String(args['target-note']) } : {}),
       };
     } else if (args.url) {
       if (!args['db-url']) throw new Error('--url với powerme* cần --db-url để đọc kết quả');
