@@ -1,5 +1,7 @@
 # Hai cấu hình đối chứng của RQ1 trên VM staging (T133)
 
+> **Đã chạy 17/11/2026** theo đúng các bước dưới đây (tắt đối soát 1907,8 s, SteVe 1979,4 s, không lỗi), rồi đã gỡ sạch khỏi VM. Kết quả: `apps/csms/lab/rq1/README.md` mục "Kết quả 14–17/11/2026". SteVe build trên VM nhanh hơn dự kiến (Jetty lên sau khoảng 2 phút, dùng ~450 MiB RAM), không ảnh hưởng CSMS staging.
+
 Lần đo 13/11 chạy PowerMe trên VM staging nhưng hai cấu hình đối chứng (PowerMe tắt đối soát, SteVe 3.14.1) trên máy dev, nên không cùng tài nguyên. Thư mục này dựng hai cấu hình đó **trên cùng VM**, chạy lần lượt, rồi xoá.
 
 | Cấu hình | Dựng bằng | Cổng trên VM (chỉ loopback) |
@@ -21,9 +23,11 @@ Chọn lúc không ai dùng staging. Trên VM (user `deploy`):
 
 ```bash
 cd ~/powerme/infra/lab/rq1-staging
-./up.sh                                                        # CSMS tắt đối soát
+RQ1_TAG=review-17 ./up.sh                                      # CSMS tắt đối soát; RQ1_TAG ghim ảnh của lần đo PowerMe
 docker compose -f ../steve/docker-compose.yml up -d --build    # SteVe (lần đầu rất lâu)
 ```
+
+`RQ1_TAG` để trống thì dùng `TAG` đang chạy trên staging. Ghim nó khi staging đã deploy tag mới hơn tag của lần đo PowerMe, để hai cấu hình PowerMe dùng cùng một bản mã (lần 17/11: staging ở `review-22`, ghim `review-17`).
 
 Trên máy dev, mở tunnel rồi chạy harness (từ `apps/csms`, đã `npm run build`):
 

@@ -67,3 +67,17 @@ Một dòng cho mỗi phiên, đủ để tính lại mọi chỉ số mà khôn
 - Ở kịch bản phát lại `meterStop` cũ, dữ liệu trụ sai, nên phiên ở `review` là **Giữ lại đúng**. Đã kiểm trên staging 09/11 (DS-06, phiên #2: `review`, `diff=2550`).
 - Ở hai kịch bản còn lại, nếu `meterStop` hợp lệ mà phiên vẫn bị giữ (ví dụ do ngưỡng khe hở quá chặt) thì đó là **Giữ lại thừa** và kéo chỉ số xuống. Cần đo trước vài lần để chỉnh ngưỡng trước khi chạy đủ 90 lần.
 - Liên quan PR #120 (đồng hồ trụ): nếu quyết toán giữ phiên chờ vô thời hạn khi đồng hồ trụ lệch, phiên đó không bao giờ có `E_bill`. Cần chốt hướng xử lý ở #120 trước khi chạy, để phân loại không mơ hồ.
+
+## 7. Kết quả (T130, T132, T133)
+
+Bộ số dùng để xét: ba cấu hình chạy trên cùng VM staging, thời gian thật (MeterValues 10 s, `OFFLINE_GRACE_S` 120 s), 3 kịch bản × 30 lần, seed 20261112. Chi tiết, cách chạy và giới hạn: `apps/csms/lab/rq1/README.md` mục "Kết quả 14–17/11/2026"; dữ liệu thô: `apps/csms/lab/rq1/results/2026-11-17-vm-staging/`.
+
+| Cấu hình | Ngày chạy | Đúng / 90 | Cận dưới Wilson 95% | W1 (sai im lặng) | Đạt luật mục 3 |
+|---|---|---|---|---|---|
+| PowerMe (đối soát bật, sau T132) | 14/11/2026 | 90 | 95,9% | 0 | **Đạt** |
+| PowerMe tắt đối soát | 17/11/2026 | 60 | 56,4% | 30 | Không |
+| SteVe 3.14.1 | 17/11/2026 | 60 | 56,4% | 30 | Không |
+
+Tỉ lệ từng kịch bản (chỉ báo cáo): PowerMe 30/30 ở S1, S2, S3; hai cấu hình đối chứng 30/30 ở S1 và S3, 0/30 ở S2. Giữ phiên lại ở PowerMe: precision 30/30, recall 30/30. Ở S2, hai cấu hình đối chứng tính thiếu trung bình 586,4 Wh mỗi phiên (46,4% năng lượng thật).
+
+Giới hạn chính: PowerMe đi qua Caddy + TLS còn hai cấu hình đối chứng đi qua SSH tunnel; ba lượt không cùng ngày; mỗi cấu hình một lần chạy; S2 luôn kèm MeterValues phát bù (biến thể mất hẳn hàng đợi không nằm trong ba kịch bản).

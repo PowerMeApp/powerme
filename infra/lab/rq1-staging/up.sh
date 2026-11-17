@@ -11,6 +11,8 @@ STAGING_ENV=../../staging/.env
 if [ ! -s rq1.env ]; then
   umask 077
   printf 'RQ1_OFF_DB_PASSWORD=%s\n' "$(openssl rand -hex 24)" > rq1.env
+  # RQ1_TAG ghim ảnh CSMS (vd. tag của lần đo PowerMe); dòng TAG ở đây ghi đè TAG của staging.
+  if [ -n "${RQ1_TAG:-}" ]; then printf 'TAG=%s\n' "$RQ1_TAG" >> rq1.env; fi
 fi
 chmod 600 rq1.env
 
