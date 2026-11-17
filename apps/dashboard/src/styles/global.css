@@ -346,46 +346,46 @@ textarea.input {
 .table-wrap {
   overflow-x: auto;
 }
-table.faults {
+table.data-table {
   width: 100%;
   border-collapse: collapse;
   font-size: 14px;
 }
-table.faults th,
-table.faults td {
+table.data-table th,
+table.data-table td {
   padding: 12px 14px;
   text-align: left;
   vertical-align: top;
   border-bottom: 1px solid var(--line);
 }
-table.faults th {
+table.data-table th {
   color: var(--muted);
   font-weight: 600;
   font-size: 13px;
   white-space: nowrap;
   background: var(--graphite-2);
 }
-table.faults td {
+table.data-table td {
   min-width: 90px;
 }
-table.faults td:nth-child(2) {
+table.data-table td:nth-child(2) {
   min-width: 240px;
 }
-table.faults td > * + * {
+table.data-table td > * + * {
   margin-top: 4px;
 }
-table.faults td.num {
+table.data-table td.num {
   font-weight: 700;
   min-width: 0;
   border-left: 4px solid var(--muted);
 }
-table.faults tr.sev-critical td.num {
+table.data-table tr.sev-critical td.num {
   border-left-color: var(--danger);
 }
-table.faults tr.sev-major td.num {
+table.data-table tr.sev-major td.num {
   border-left-color: var(--warning);
 }
-table.faults tr.sev-minor td.num {
+table.data-table tr.sev-minor td.num {
   border-left-color: var(--teal);
 }
 .cell-title {
@@ -429,6 +429,41 @@ table.faults tr.sev-minor td.num {
 }
 .note.error {
   color: var(--danger);
+}
+/* FE-03 — screen 17 tiles, screen 18 connector cells. */
+.tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 16px;
+  margin-top: 16px;
+}
+.tile h2 {
+  margin: 0 0 8px;
+  font-size: 15px;
+  color: var(--muted);
+  font-weight: 600;
+}
+.tile-number {
+  margin: 0 0 8px;
+  font-size: 28px;
+  font-weight: 700;
+}
+.tile-number .muted {
+  font-size: 15px;
+  font-weight: 400;
+}
+.tile-list,
+.connector-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
+.tile-link {
+  display: inline-block;
+  margin-top: 12px;
+  font-size: 14px;
 }
 .pager {
   display: flex;

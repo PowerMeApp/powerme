@@ -337,8 +337,8 @@ tách theo bề mặt — refresh token không mang `role`, role đọc lại t�
 
 | Endpoint | Role | UC / FR / BR | Trạng thái · người làm | Ghi chú |
 |---|---|---|---|---|
-| `GET /operator/v1/summary` | operator_staff | UC-OPS-02/03, Table 5 #17 | planned · Nghĩa (T97) | số trụ theo trạng thái, súng theo nhóm BR-P38, sự cố mở theo mức, hàng việc review/unattributed/T72 |
-| `GET /operator/v1/charge-points` | operator_staff | UC-OPS-02, FR-10, BR-P10, BR-P38/39 | **console** `ConsoleQueries.stations` · Nghĩa | thêm lọc operator, site, phân trang; mỗi súng một trạng thái, không gộp |
+| `GET /operator/v1/summary` | operator_staff | UC-OPS-02/03, Table 5 #17 | **done** FE-03 · `operator-monitoring.ts` · Nghĩa | số trụ theo trạng thái, súng theo nhóm BR-P38, sự cố mở theo mức, hàng việc review / unattributed (cùng luật `listPending`) / T72 (`driver_charge_intents.state='unknown'` chưa gắn phiên) |
+| `GET /operator/v1/charge-points` | operator_staff | UC-OPS-02, FR-10, BR-P10, BR-P38/39 | **done** FE-03 · `operator-monitoring.ts` · Nghĩa | lọc `site_id`, `lifecycle` (mặc định ẩn `decommissioned`), `online`; page/page_size; trạng thái OCPP nguyên văn từng súng + `status_quality` (offline 900 s / stale 2 × heartbeat, cùng ngưỡng Driver API) |
 | `GET /operator/v1/charge-points/{id}` | operator_staff | UC-OPS-02/04, Table 5 #20 | planned · Nghĩa | súng, sự cố mở, 20 lệnh gần nhất |
 | `GET /operator/v1/charge-points/{id}/metrics` | operator_staff | UC-OPS-02, FR-10, BR-P43 | planned · Trí | `window=7d\|30d`; từ `connector_status_events` |
 | `POST /operator/v1/charge-points/{id}/commands` | operator_staff | UC-OPS-04, FR-11, BR-P01/P06/P07 | **console** (chỉ remote_stop) · Trí | `action` ∈ `remote_start`, `remote_stop`, `reset`; 202; Idempotency-Key |
@@ -730,7 +730,7 @@ trạng thái (2xx/4xx nghiệp vụ khác với 401/403). Ba điều kiện c�
 | 3 | `GET /api/operator/v1/me` | 401 | 403 | ✓ | 403 | implemented |
 | 4 | `GET /api/admin/v1/me` | 401 | 403 | 403 | ✓ | implemented |
 | 5 | `GET /api/operator/v1/sites` | 401 | 403 | ✓ | 403 | planned |
-| 6 | `GET /api/operator/v1/charge-points` | 401 | 403 | ✓ | 403 | console |
+| 6 | `GET /api/operator/v1/charge-points` | 401 | 403 | ✓ | 403 | implemented (FE-03) |
 | 7 | `POST /api/operator/v1/charge-points` | 401 | 403 | ✓ | 403 | service |
 | 8 | `GET /api/operator/v1/charge-points/{chargePointId}` | 401 | 403 | ✓ | 403 | planned |
 | 9 | `GET /api/operator/v1/charge-points/{chargePointId}/metrics` | 401 | 403 | ✓ | 403 | planned |
@@ -742,7 +742,7 @@ trạng thái (2xx/4xx nghiệp vụ khác với 401/403). Ba điều kiện c�
 | 15 | `PATCH /api/admin/v1/charge-points/{chargePointId}` | 401 | 403 | 403 | ✓ | planned |
 | 16 | `PUT /api/admin/v1/charge-points/{chargePointId}/free-vend-tag` | 401 | 403 | 403 | ✓ | planned |
 | 17 | `POST /api/admin/v1/charge-points/{chargePointId}/decommission` | 401 | 403 | 403 | ✓ | planned |
-| 18 | `GET /api/operator/v1/summary` | 401 | 403 | ✓ | 403 | planned |
+| 18 | `GET /api/operator/v1/summary` | 401 | 403 | ✓ | 403 | implemented (FE-03) |
 | 19 | `POST /api/operator/v1/charge-points/{chargePointId}/commands` | 401 | 403 | ✓ | 403 | console |
 | 20 | `GET /api/operator/v1/commands/{commandId}` | 401 | 403 | ✓ | 403 | planned |
 | 21 | `GET /api/operator/v1/ocpp-messages` | 401 | 403 | ✓ | 403 | console |

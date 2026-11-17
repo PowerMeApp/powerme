@@ -42,6 +42,15 @@ export function AppShell() {
           </NavLink>
           {!admin && (
             <NavLink
+              to="/operator/charge-points"
+              className={({ isActive }) => `nav-link${isActive ? ' active' : ''}`}
+            >
+              <Icon name="plug" />
+              <span>Charge Point</span>
+            </NavLink>
+          )}
+          {!admin && (
+            <NavLink
               to="/operator/faults"
               className={({ isActive }) => `nav-link${isActive ? ' active' : ''}`}
             >

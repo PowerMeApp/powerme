@@ -319,9 +319,9 @@ paths:
       tags: [monitoring]
       operationId: listOperatorChargePoints
       x-roles: [operator_staff]
-      x-status: console
-      x-source: 'GET /api/admin/stations → ConsoleQueries.stations (không lọc operator)'
-      x-owner: Nghĩa
+      x-status: implemented
+      x-source: 'operator-api/operator-monitoring.ts (FE-03)'
+      x-owner: Nghĩa (FE-03)
       x-refs: [UC-OPS-02, FR-10, BR-P10, BR-P38, BR-P39, 'Table 5 #18']
       summary: Đội trụ của operator, kèm trạng thái sống từng súng
       description: |
@@ -686,9 +686,9 @@ paths:
       tags: [monitoring]
       operationId: getOperatorSummary
       x-roles: [operator_staff]
-      x-status: planned
-      x-source: 'khác GET /api/admin/summary (console tóm tắt toàn hệ thống cho demo)'
-      x-owner: Nghĩa (T97)
+      x-status: implemented
+      x-source: 'operator-api/operator-monitoring.ts (FE-03)'
+      x-owner: Nghĩa (FE-03)
       x-refs: [UC-OPS-02, UC-OPS-03, 'Table 5 #17']
       summary: Số trụ theo trạng thái và cảnh báo mở — màn hình đầu của Operator Dashboard
       responses:

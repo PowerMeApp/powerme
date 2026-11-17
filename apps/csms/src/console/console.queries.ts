@@ -79,7 +79,8 @@ export class ConsoleQueries {
   constructor(
     @Inject(DB) private readonly db: Db,
     @Inject(CONFIG) config: CsmsConfig,
-    private readonly registry: ConnectionRegistry,
+    /** Public for the operator API (FE-03: `connected` = socket open in this process). */
+    readonly registry: ConnectionRegistry,
   ) {
     this.detector = new ReplayDetector(config.replaySkewThresholdS);
   }
