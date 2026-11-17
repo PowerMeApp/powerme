@@ -6,6 +6,10 @@
  * staging chưa có mã sandbox vẫn chạy), chỉ đặt `configured = false`; tạo top-up khi đó trả 503
  * `payment_unconfigured` và không ghi dòng nào. Không ghi mã thật vào repo (`infra/.env.example`
  * để trống).
+ *
+ * URL gọi / chuyển tới VNPay (`VNPAY_URL`, `VNPAY_API_URL`) chỉ nhận `https:` ở mọi môi trường (T32
+ * Phần 8b, Khang 16/11); test thay `fetch` nên không cần ngoại lệ `http:`. `VNPAY_RETURN_URL` là URL
+ * của PowerMe (mặc định `http://localhost`), vẫn nhận http(s).
  */
 import { isIP } from 'node:net';
 
@@ -28,18 +32,10 @@ export function loadVnpayConfig(env: NodeJS.ProcessEnv = process.env): VnpayConf
   const hashSecret = (env['VNPAY_HASH_SECRET'] ?? '').trim();
   const payUrl = (env['VNPAY_URL'] ?? '').trim() || VNPAY_SANDBOX_URL;
   const returnUrl = (env['VNPAY_RETURN_URL'] ?? '').trim() || VNPAY_DEFAULT_RETURN_URL;
-  for (const [name, value] of [
-    ['VNPAY_URL', payUrl],
-    ['VNPAY_RETURN_URL', returnUrl],
-  ] as const) {
-    let ok = false;
-    try {
-      ok = ['http:', 'https:'].includes(new URL(value).protocol);
-    } catch {
-      ok = false;
-    }
-    if (!ok) throw new Error(`invalid_vnpay_config: ${name} phải là URL http(s)`);
-  }
+  if (!hasProtocol(payUrl, ['https:']))
+    throw new Error('invalid_vnpay_config: VNPAY_URL phải là URL https');
+  if (!hasProtocol(returnUrl, ['http:', 'https:']))
+    throw new Error('invalid_vnpay_config: VNPAY_RETURN_URL phải là URL http(s)');
   return {
     configured: tmnCode !== '' && hashSecret !== '',
     tmnCode,
@@ -54,7 +50,7 @@ export function loadVnpayConfig(env: NodeJS.ProcessEnv = process.env): VnpayConf
  * Phần 5–6 giữ nguyên hình dạng; cấp qua token `VNPAY_API_CONFIG`.
  *
  * - `VNPAY_API_URL`: endpoint POST JSON (tài liệu `truy-van-hoan-tien/querydr&refund.html`), trống =
- *   sandbox; phải là URL http(s).
+ *   sandbox; phải là URL https.
  * - `VNPAY_SERVER_IP`: `vnp_IpAddr` của querydr = "IP của máy chủ gọi API"; trống = `127.0.0.1`. Nếu
  *   VNPay kiểm IP thì querydr sẽ không ngã ngũ (decisions "Còn mở", chờ thử sandbox).
  */
@@ -76,15 +72,18 @@ export const DEFAULT_VNPAY_API_CONFIG: VnpayApiConfig = {
 export function loadVnpayApiConfig(env: NodeJS.ProcessEnv = process.env): VnpayApiConfig {
   const apiUrl = (env['VNPAY_API_URL'] ?? '').trim() || VNPAY_SANDBOX_API_URL;
   const serverIp = (env['VNPAY_SERVER_IP'] ?? '').trim() || VNPAY_DEFAULT_SERVER_IP;
-  let ok = false;
-  try {
-    ok = ['http:', 'https:'].includes(new URL(apiUrl).protocol);
-  } catch {
-    ok = false;
-  }
-  if (!ok) throw new Error('invalid_vnpay_config: VNPAY_API_URL phải là URL http(s)');
+  if (!hasProtocol(apiUrl, ['https:']))
+    throw new Error('invalid_vnpay_config: VNPAY_API_URL phải là URL https');
   if (isIP(serverIp) === 0) {
     throw new Error('invalid_vnpay_config: VNPAY_SERVER_IP phải là địa chỉ IP');
   }
   return { apiUrl, serverIp };
+}
+
+function hasProtocol(value: string, allowed: readonly string[]): boolean {
+  try {
+    return allowed.includes(new URL(value).protocol);
+  } catch {
+    return false;
+  }
 }

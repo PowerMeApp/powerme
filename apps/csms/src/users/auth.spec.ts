@@ -1,5 +1,10 @@
 import { randomBytes } from 'node:crypto';
-import { assertConfigured, AuthError, loadDashboardAuthConfig } from './auth.js';
+import {
+  assertConfigured,
+  AuthError,
+  DASHBOARD_TOKEN_TTL_S,
+  loadDashboardAuthConfig,
+} from './auth.js';
 
 const key = randomBytes(32).toString('base64');
 const full = {
@@ -38,4 +43,27 @@ describe('loadDashboardAuthConfig (FE-01a, ADR-0018)', () => {
   ])('refuses to start with %s', (_, env) => {
     expect(() => loadDashboardAuthConfig(env)).toThrow();
   });
+
+  it('T125: refresh life is optional (12 h default at use), within 3600..86400', () => {
+    expect(DASHBOARD_TOKEN_TTL_S).toBe(900);
+    expect(loadDashboardAuthConfig(full).refreshTtlS).toBeUndefined();
+    expect(loadDashboardAuthConfig({ ...full, DASHBOARD_JWT_REFRESH_TTL_S: '' }).refreshTtlS).toBe(
+      undefined,
+    );
+    expect(
+      loadDashboardAuthConfig({ ...full, DASHBOARD_JWT_REFRESH_TTL_S: '3600' }).refreshTtlS,
+    ).toBe(3600);
+    expect(loadDashboardAuthConfig({ DASHBOARD_JWT_REFRESH_TTL_S: '86400' })).toEqual({
+      refreshTtlS: 86400,
+    });
+  });
+
+  it.each(['3599', '86401', '0', '-1', '1.5', 'abc', '012'])(
+    'refuses to start with DASHBOARD_JWT_REFRESH_TTL_S=%s',
+    (v) => {
+      expect(() => loadDashboardAuthConfig({ ...full, DASHBOARD_JWT_REFRESH_TTL_S: v })).toThrow(
+        /DASHBOARD_JWT_REFRESH_TTL_S/,
+      );
+    },
+  );
 });

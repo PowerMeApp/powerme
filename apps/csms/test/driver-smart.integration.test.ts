@@ -248,7 +248,8 @@ type Endpoint = (typeof endpoints)[number];
     },
   );
 
-  it('ranks by Route reach, then drive + wait + charge; shares cached summaries across pages', async () => {
+  // BM04 F-03 (Nghĩa): provisional regression mapping with injected Route responses.
+  it('[TC-F03-01 regression] ranks by Route reach and total time, caching across pages', async () => {
     await q("UPDATE connectors SET status='Finishing' WHERE id=$1", [fixture.sites[2]!.connector]);
     const brief = await get(search(smartRoad));
     expect(brief.body.ranking_source).toBe('brief');
@@ -348,7 +349,7 @@ type Endpoint = (typeof endpoints)[number];
     expect(calls).toBe(0);
   });
 
-  it('returns brief on the ranking deadline while shared Route work is still pending', async () => {
+  it('[TC-F03-02 regression] returns brief on the deadline while shared Route work is pending', async () => {
     resetListener({}, 10000);
     const path = search(smartRoad);
     const brief = await get(path);
@@ -367,7 +368,7 @@ type Endpoint = (typeof endpoints)[number];
   });
 
   it.each(['no_route', 'network', '429', 'partial'])(
-    'returns complete brief fallback on %s',
+    '[TC-F03-02 regression] returns complete brief fallback on %s',
     async (failure) => {
       const brief = await get(search(smartRoad));
       if (failure === 'partial') {
@@ -383,7 +384,7 @@ type Endpoint = (typeof endpoints)[number];
     },
   );
 
-  it('bounds the provider shortlist and concurrency independently of pagination', async () => {
+  it('[TC-F03-03 regression] bounds the Route shortlist and concurrency across pages', async () => {
     const extras = [];
     for (let index = 10; index <= 16; index++) extras.push(await addRoadSite(db, index));
     try {

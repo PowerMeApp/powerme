@@ -1,7 +1,9 @@
 /**
  * RTK Query against the real CSMS operator API (PKG-2: core/api; D2, D17). Adds the Bearer token,
  * normalises errors to `ApiError`, and signs the user out when a protected call says the session
- * is no longer valid (401, or 403 for a locked account / Operator or a wrong role).
+ * is no longer valid (401, or 403 for a locked account / Operator or a wrong role). A 401 with a
+ * refresh token first trades it for a new 900 s access token (one call shared by every request
+ * that failed meanwhile) and retries once (T125, contract §2.2b).
  */
 import {
   createApi,
@@ -20,11 +22,12 @@ import type {
   LoginRequest,
   LoginResponse,
   OperatorFaultList,
+  RefreshResponse,
   ResetRequest,
   ResetResponse,
   SessionsActiveError,
 } from '@powerme/shared';
-import { loggedOut, type AuthState } from '../auth/authSlice';
+import { loggedOut, tokenRefreshed, type AuthState } from '../auth/authSlice';
 import { env } from '../config/env';
 
 /** Rows per page on screen 21. */
@@ -59,8 +62,44 @@ const raw = fetchBaseQuery({
   },
 });
 
+type Raw = typeof raw;
+const authOf = (api: Parameters<Raw>[1]) => (api.getState() as { auth: AuthState }).auth;
+
+/** One refresh at a time: every request that hit 401 meanwhile waits on the same call. */
+let refreshing: Promise<'ok' | 'failed' | 'network'> | null = null;
+
+function refreshAccess(api: Parameters<Raw>[1], extra: Parameters<Raw>[2]) {
+  const refreshToken = authOf(api).refreshToken;
+  if (!refreshToken) return Promise.resolve('failed' as const);
+  refreshing ??= (async () => {
+    const r = await raw(
+      { url: 'auth/v1/refresh', method: 'POST', body: { refresh_token: refreshToken } },
+      api,
+      extra,
+    );
+    if (r.data) {
+      api.dispatch(tokenRefreshed(r.data as RefreshResponse));
+      return 'ok' as const;
+    }
+    return r.error?.status === 'FETCH_ERROR' ? ('network' as const) : ('failed' as const);
+  })().finally(() => {
+    refreshing = null;
+  });
+  return refreshing;
+}
+
 const baseQuery: BaseQueryFn<string | FetchArgs, unknown, ApiError> = async (args, api, extra) => {
-  const result = await raw(args, api, extra);
+  const url = typeof args === 'string' ? args : args.url;
+  const sent = authOf(api).token;
+  let result = await raw(args, api, extra);
+  if (result.error?.status === 401 && !url.startsWith('auth/')) {
+    // Another request may already have renewed the token while this one was in flight.
+    const current = authOf(api).token;
+    const renewed = current && current !== sent ? 'ok' : await refreshAccess(api, extra);
+    if (renewed === 'ok') result = await raw(args, api, extra);
+    else if (renewed === 'network')
+      return { error: { status: 'network' }, meta: result.meta } as { error: ApiError };
+  }
   if (!result.error) return { data: result.data, meta: result.meta };
   const e = result.error;
   const status =
@@ -74,7 +113,6 @@ const baseQuery: BaseQueryFn<string | FetchArgs, unknown, ApiError> = async (arg
     ...(retry > 0 ? { retryAfterS: retry } : {}),
     ...(Array.isArray(body?.sessions) ? { sessions: body.sessions } : {}),
   };
-  const url = typeof args === 'string' ? args : args.url;
   if (
     !url.startsWith('auth/') &&
     (status === 401 || (status === 403 && SESSION_ENDED.has(error.code ?? '')))
@@ -155,6 +193,8 @@ export function errorMessage(err: unknown): string {
       return 'Tài khoản đã bị khoá';
     case 'operator_inactive':
       return 'Operator đã ngừng hoạt động';
+    case 'invalid_refresh_token':
+      return 'Phiên đăng nhập đã hết hạn, vui lòng đăng nhập lại';
     case 'auth_unavailable':
       return 'Máy chủ chưa bật đăng nhập';
     // FE-04b fault actions (operator-api/operator-faults.ts).

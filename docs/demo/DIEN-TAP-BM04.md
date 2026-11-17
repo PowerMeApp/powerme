@@ -54,6 +54,77 @@ Bước "get suggestion" của DS-01 (`GET /stations?sort=smart`) **không** n�
 
 `ds-01` trừ tiền thật của tài xế mẫu trong DB đang trỏ tới. Chạy lại lần hai thì số dư bắt đầu từ 145.000.
 
+## F-03 và RQ2 — gợi ý trạm với Vietmap thật
+
+Nghĩa phụ trách F-03. Nhãn trong `driver-smart.integration.test.ts` là ánh xạ tạm chờ đối chiếu
+các dòng TC trong BM04. `TC-F03-01` kiểm thứ tự theo tầm pin và tổng thời gian,
+`TC-F03-02` kiểm fallback về brief, `TC-F03-03` kiểm giới hạn nhóm gọi Route và số lệnh song song.
+Các regression này thay phản hồi Route bằng fixture. Bằng chứng F-03 cần chạy với Vietmap thật.
+
+NFR-RES-01 yêu cầu p95 ≤ 2 giây trên staging với 50 trạm giả lập. Preflight đã thấy 10 trạm;
+chưa có số đo hợp lệ cho cấu hình 50 trạm. Giữ `RANKING_DEADLINE_MS=4000` cho đến khi có
+kết quả hợp lệ. Nếu vượt 2 giây, giảm deadline rồi đo lại cả p95 và tỷ lệ fallback.
+
+Batch local ngày 16/11/2026 với 50 trạm online, tương thích CCS2, ở 50 tọa độ đường bộ:
+
+| Mẫu | Số request | p50 | p95 | Fallback về brief |
+| --- | ---: | ---: | ---: | ---: |
+| Pilot cache lạnh | 1 | 132,23 ms | 132,23 ms | 0/1 |
+| Batch local | 20 | 64,45 ms | 176,86 ms | 0/20 |
+
+Mỗi mẫu có 6 tuyến Vietmap. Batch có 19 mẫu dùng cache và một mẫu làm mới cache mất 189 ms.
+Pilot và batch gọi Vietmap Route thật 12 lượt, đều trả HTTP 200. Kết quả local dùng để kiểm tra
+fixture và runner. Nghiệm thu p95 vẫn cần batch staging với 50 trạm.
+
+Smoke staging trên emulator Pixel 6: tile tải được, tuyến đến Bến Thành hiển thị các đoạn vàng
+và đỏ, xem trước từng chặng hiện mũi tên và nút mở bản đồ mở được Google Maps. Camera QR lên
+hình. Chưa kiểm giải mã mã QR của trụ. Một lần chọn địa chỉ báo lỗi, nên lượt smoke tuyến đường
+dùng vị trí GPS mô phỏng. Chưa chạy build iOS.
+
+Chẩn đoán staging ngày 16/11/2026, ngoài bộ mẫu NFR-RES-01:
+
+- Một lượt `GET /stations?sort=smart` với 10 trạm mất 1037 ms, `ranking_source=vietmap_route`
+  và có 1/10 trạm nhận `road_estimate`. Trạm 78 trả 19621.3 m, 1819 s, lúc
+  `2026-11-16T13:23:43.05Z`. Chín trạm còn lại không có ước tính đường bộ.
+- Lượt riêng `GET /stations/78/route` trả 2622.8 m, 367 s, 7 chỉ dẫn và 9 đoạn giao thông
+  có các mức `low`, `moderate`, `heavy`, lúc `2026-11-16T13:25:32.87Z`.
+  Trường `traffic_quality` trả `unknown`.
+
+1. Chuẩn bị bộ 50 trạm ở vị trí thực, duy nhất, trong cùng bán kính thử và tương thích với xe
+   tài xế. Kiểm các điểm đặt truy cập được bằng đường bộ và có ít nhất 6 trạm đủ điều kiện gọi
+   Route. Mở tunnel staging theo [DEV-ACCESS](../../infra/staging/DEV-ACCESS.md).
+2. Đặt biến cho phiên shell. Nạp access token của tài xế test vào `NFR_DRIVER_ACCESS_TOKEN` từ
+   phiên đăng nhập hợp lệ, giữ ngoài repo và đầu ra. Ghi lại quota Route v4 **còn lại** của key
+   staging từ Console trước từng batch.
+
+   | Biến | Giá trị |
+   | --- | --- |
+   | `NFR_DRIVER_API_URL` | `http://127.0.0.1:3000/api/driver/v1` qua tunnel |
+   | `NFR_VEHICLE_ID` | ID xe tài xế sở hữu |
+   | `NFR_LATITUDE`, `NFR_LONGITUDE` | Điểm đi công khai dùng cho thí nghiệm |
+   | `NFR_RADIUS_KM`, `NFR_SOC_PERCENT` | Bán kính cố định cho cả preflight và mẫu đo, SoC từ 0 đến dưới 80 |
+   | `NFR_REQUESTS`, `NFR_ROUTE_REMAINING` | Số mẫu batch và số lượt Route còn lại, ít nhất 6 × số mẫu |
+   | `NFR_INTERVAL_MS` | Từ 12500 ms, để tối đa 5 request smart mỗi phút từ runner; trên 120 giây nếu đo cold với cùng điểm đi |
+
+3. Từ thư mục gốc repo, chạy `node apps/csms/lab/nfr-res-01/run.mjs` và lưu JSONL ngoài repo.
+   Script kiểm tra 50 trạm bằng `sort=name` trước khi gọi `sort=smart`, đo tuần tự và dừng
+   khi mẫu lỗi. Mỗi dòng sample ghi HTTP status, latency, `ranking_source` và danh sách trạm
+   theo thứ tự trả về. `road_estimate` gồm `distance_m`, `duration_s`, `computed_at` khi có
+   tuyến; dùng `null` khi thiếu. Dùng reach, thời gian lái/chờ/sạc, tổng thời gian và dữ liệu
+   ùn tắc khi có để đối chiếu [quy tắc xếp hạng API](../api/DRIVER-API-HOP-DONG.md#16-t96--xếp-hạng-gợi-ý-theo-đường-bộ-vietmap).
+4. Ghi batch, cold/warm, `n`, p50, p95 (nearest rank) và tỷ lệ `ranking_source=brief` trong các
+   phản hồi hợp lệ vào PR. Báo số mẫu có đủ 6 kết quả Route và dùng `computed_at` để kiểm độ tuổi
+   cache. Runner yêu cầu đủ mẫu và ít nhất một phản hồi có 6 tuyến. HTTP lỗi hoặc thiếu dữ liệu
+   đánh dấu batch không hợp lệ. Canh thời hạn access token khi chia batch.
+
+RQ2 cần 200 lượt cho mỗi nhóm yên tĩnh, cao điểm và có trạm lỗi (600 lượt). So sánh với trạm
+tương thích gần nhất ở cùng điểm đi và điều kiện, báo cả thời gian tới lúc bắt đầu sạc và tới
+mức pin đích. Ghi nguồn xếp hạng và ước tính đường bộ mỗi trạm như F-03. Ngân sách dự kiến
+khoảng 3600 lượt Route cho nhánh gợi ý, chưa tính lượt Route riêng cần cho đối chứng hoặc smoke.
+Quota Trial đã xem trên Console là 200/phút và 1500/ngày. Đối chiếu quota còn lại trước khi chạy,
+chia theo kỳ quota hoặc dùng gói đủ hạn mức. Runner chỉ thực hiện batch đo API; điều phối nhóm
+kịch bản và thu kết quả đối chứng là phần của lần chạy RQ2.
+
 ## DS-07 và DS-08 (không cần dashboard)
 
 ```bash

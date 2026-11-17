@@ -620,6 +620,9 @@ paths:
         nhau trong 2 giờ, hoặc 1 tài xế khi súng Faulted / Unavailable hoặc trụ Offline → sự cố
         `driver_report`, súng bị ẩn khỏi tìm kiếm và mang nhãn "reported issue" (xem tra mã QR).
         Súng đang có sự cố mở → báo cáo gắn vào đó. Cùng tài xế, cùng súng trong 60 s → 409.
+        T131: trong 2 giờ, một tài xế tự mình chỉ mở được một sự cố trên một trụ (báo cáo thêm vẫn
+        201, `reported_issue: false`). Nhãn xoá khi Operator đóng hoặc một phiên trên súng hoàn tất
+        bình thường; đổi trạng thái súng (kể cả Available) không xoá nhãn (BR-P42, D-G).
       parameters:
         - name: connectorId
           in: path
