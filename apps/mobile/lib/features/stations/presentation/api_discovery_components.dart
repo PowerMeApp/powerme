@@ -209,21 +209,31 @@ class DiscoveryRetry extends StatelessWidget {
     super.key,
     required this.message,
     required this.copy,
-    required this.retry,
+    this.retry,
+    this.edit,
+    this.editLabel,
   });
 
   final String message;
   final AppCopy copy;
-  final VoidCallback retry;
+  final VoidCallback? retry;
+  final VoidCallback? edit;
+  final String? editLabel;
 
   @override
   Widget build(BuildContext context) => InfoCard(
     children: [
       FailureNotice(message),
-      OutlinedButton(
-        onPressed: retry,
-        child: Text(copy.text('Thử lại', 'Retry')),
-      ),
+      if (retry != null)
+        OutlinedButton(
+          onPressed: retry,
+          child: Text(copy.text('Thử lại', 'Retry')),
+        ),
+      if (edit != null)
+        OutlinedButton(
+          onPressed: edit,
+          child: Text(editLabel ?? copy.text('Sửa thông tin', 'Edit inputs')),
+        ),
     ],
   );
 }
@@ -430,7 +440,62 @@ class _RouteMapPreviewState extends State<RouteMapPreview> {
   }
 }
 
-String roadError(Object? error, AppCopy copy) => switch (error) {
+String originSharingDisclosure(AppCopy copy) => copy.text(
+  'Khi bạn dùng điểm đi, PowerMe nhận tọa độ đó mỗi lần tìm trạm. Bạn có thể bỏ điểm đi bất cứ lúc nào.',
+  'While a starting point is selected, PowerMe receives its coordinates with each station search. You can clear it at any time.',
+);
+
+bool invalidDiscoveryInput(Object? error) =>
+    error is DriverApiException &&
+    error.status == 400 &&
+    error.code == 'invalid_search';
+
+bool canRetryDiscovery(Object? error) => switch (error) {
+  DriverApiException(mapAvailability: _?) => false,
+  DriverApiException(
+    status: 400,
+    code: 'invalid_search' ||
+        'location_consent_required' ||
+        'origin_coordinates_required',
+  ) =>
+    false,
+  DriverApiException(code: 'station_location_unavailable') => false,
+  DriverApiException(status: 404) => false,
+  _ => true,
+};
+
+String roadError(
+  Object? error,
+  AppCopy copy, {
+  String? fallback,
+  String? invalid,
+}) => switch (error) {
+  DriverApiException(mapAvailability: DriverMapAvailability.unconfigured) =>
+    copy.text(
+      'Tìm địa chỉ và tính đường hiện chưa được PowerMe bật. Bạn vẫn có thể tìm trạm theo tên.',
+      'PowerMe has not enabled address search and routing. You can still find stations by name.',
+    ),
+  DriverApiException(mapAvailability: DriverMapAvailability.credentials) =>
+    copy.text(
+      'Dịch vụ địa chỉ và tính đường chưa khả dụng. Hãy liên hệ hỗ trợ PowerMe hoặc tìm trạm theo tên.',
+      'Address search and routing are unavailable. Contact PowerMe support or find stations by name.',
+    ),
+  DriverApiException(status: 400, code: 'location_consent_required') =>
+    copy.text(
+      'Hãy chọn lại và xác nhận chia sẻ thông tin với Vietmap để tiếp tục.',
+      'Select again and confirm sharing with Vietmap to continue.',
+    ),
+  DriverApiException(status: 400, code: 'origin_coordinates_required') =>
+    copy.text(
+      'Hãy chọn lại điểm đi để tiếp tục.',
+      'Choose your starting point again to continue.',
+    ),
+  DriverApiException(status: 400, code: 'invalid_search') =>
+    invalid ??
+        copy.text(
+          'Hãy sửa thông tin đã nhập hoặc chọn lại điểm đi.',
+          'Edit your input or choose the starting point again.',
+        ),
   DriverApiException(status: 429) => copy.text(
     'Dịch vụ bản đồ đang bận. Vui lòng thử lại sau.',
     'The map service is busy. Please try again later.',
@@ -443,10 +508,12 @@ String roadError(Object? error, AppCopy copy) => switch (error) {
     'Xe hoặc trạm không còn khả dụng.',
     'The vehicle or station is no longer available.',
   ),
-  _ => copy.text(
-    'Chưa lấy được dữ liệu bản đồ. Vui lòng thử lại.',
-    'Map data could not be loaded. Please try again.',
-  ),
+  _ =>
+    fallback ??
+        copy.text(
+          'Chưa lấy được dữ liệu bản đồ. Vui lòng thử lại.',
+          'Map data could not be loaded. Please try again.',
+        ),
 };
 
 String locationError(Object error, AppCopy copy) => switch (error) {

@@ -28,6 +28,9 @@ class _VehicleAddScreenState extends ConsumerState<VehicleAddScreen> {
   String? _modelId;
   bool _modelRequired = false;
   bool _makeDefault = false;
+  ProfileFailure? _addFailure;
+  bool _acceptedNeedsRefresh = false;
+  bool _checkVehiclesAfterRefresh = false;
 
   @override
   void dispose() {
@@ -45,7 +48,11 @@ class _VehicleAddScreenState extends ConsumerState<VehicleAddScreen> {
     if (!state.canChange || catalog.isLoading || models == null) return;
     final model = VehicleCatalog(models).find(_modelId);
     final validPlate = _form.currentState!.validate();
-    setState(() => _modelRequired = model == null);
+    setState(() {
+      _modelRequired = model == null;
+      _addFailure = null;
+      _checkVehiclesAfterRefresh = false;
+    });
     if (!validPlate || model == null) return;
     FocusScope.of(context).unfocus();
     final saved = await ref
@@ -56,18 +63,41 @@ class _VehicleAddScreenState extends ConsumerState<VehicleAddScreen> {
             modelId: model.id,
             makeDefault: _makeDefault,
           ),
+          onFailure: (failure) {
+            if (!mounted) return;
+            setState(() {
+              _acceptedNeedsRefresh =
+                  failure == ProfileFailure.mutationNeedsRefresh;
+              _addFailure = failure.needsRefresh ? null : failure;
+            });
+          },
         );
     if (saved && mounted && ModalRoute.isCurrentOf(context) == true) _back();
   }
 
   void _reloadModels() {
-    setState(() => _modelId = null);
+    setState(() {
+      _modelId = null;
+      _addFailure = null;
+    });
     ref.invalidate(vehicleModelsProvider);
   }
 
   Future<void> _reloadProfile() async {
+    final failure = ref.read(profileControllerProvider).failure;
+    final shouldClose =
+        _acceptedNeedsRefresh && failure == ProfileFailure.mutationNeedsRefresh;
     final loaded = await ref.read(profileControllerProvider.notifier).refresh();
-    if (loaded && mounted && ModalRoute.isCurrentOf(context) == true) _back();
+    if (!loaded || !mounted) return;
+    if (shouldClose && ModalRoute.isCurrentOf(context) == true) {
+      _back();
+    } else {
+      setState(() {
+        _acceptedNeedsRefresh = false;
+        _checkVehiclesAfterRefresh =
+            failure == ProfileFailure.mutationUnconfirmed;
+      });
+    }
   }
 
   @override
@@ -93,6 +123,7 @@ class _VehicleAddScreenState extends ConsumerState<VehicleAddScreen> {
     final available = VehicleCatalog(models);
     final selected = available.find(_modelId);
     final needsRefresh = state.failure?.needsRefresh == true;
+    final failure = needsRefresh ? state.failure : _addFailure;
     final canSave = state.canChange && !catalog.isLoading && models.isNotEmpty;
 
     return Scaffold(
@@ -147,12 +178,18 @@ class _VehicleAddScreenState extends ConsumerState<VehicleAddScreen> {
                 )
               else
                 _catalogPicker(copy, available, enabled: canSave),
-              if (state.failure != null)
-                FailureNotice(vehicleManagementMessage(copy, state.failure!)),
+              if (failure != null)
+                FailureNotice(vehicleManagementMessage(copy, failure))
+              else if (_checkVehiclesAfterRefresh)
+                FailureNotice(
+                  copy.text(
+                    'Đã tải lại hồ sơ. Hãy kiểm tra danh sách xe trước khi lưu lại.',
+                    'Profile reloaded. Check your vehicles before saving again.',
+                  ),
+                ),
               if (!catalog.isLoading &&
                   !needsRefresh &&
-                  (models.isEmpty ||
-                      state.failure == ProfileFailure.unknownModel))
+                  (models.isEmpty || failure == ProfileFailure.unknownModel))
                 OutlinedButton.icon(
                   key: const Key('reload-vehicle-models'),
                   onPressed: state.busy ? null : _reloadModels,

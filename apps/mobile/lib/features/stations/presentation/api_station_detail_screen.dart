@@ -249,7 +249,7 @@ class _StationRoutePanelState extends ConsumerState<_StationRoutePanel> {
       _requested = input;
       final controller = ref.read(discoveryRoadsProvider.notifier);
       _controller = controller;
-      controller.request(input);
+      controller.request(input, consentToVietmap: true);
     }
 
     final originPicker = ExpansionTile(
@@ -315,7 +315,7 @@ class _StationRoutePanelState extends ConsumerState<_StationRoutePanel> {
           DiscoveryRetry(
             message: roadError(roads.error, copy),
             copy: copy,
-            retry: () => request(input),
+            retry: canRetryDiscovery(roads.error) ? () => request(input) : null,
           ),
       ],
     );

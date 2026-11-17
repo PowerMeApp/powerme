@@ -95,15 +95,18 @@ class ApiProfileRepository
 
   @override
   Future<DriverProfile> removeVehicle(String id, int revision) =>
-      _change(() => _session.removeVehicle(id));
+      _change(() => _session.removeVehicle(id), targetsExistingVehicle: true);
 
   @override
-  Future<DriverProfile> selectVehicle(String id, int revision) =>
-      _change(() => _session.setDefaultVehicle(id));
+  Future<DriverProfile> selectVehicle(String id, int revision) => _change(
+    () => _session.setDefaultVehicle(id),
+    targetsExistingVehicle: true,
+  );
 
   Future<DriverProfile> _change(
-    Future<DriverAccountResponse> Function() write,
-  ) async {
+    Future<DriverAccountResponse> Function() write, {
+    bool targetsExistingVehicle = false,
+  }) async {
     try {
       return _profile(await write());
     } on DriverApiException catch (error) {
@@ -118,7 +121,9 @@ class ApiProfileRepository
           ProfileFailure.plateTaken,
         DriverApiException(status: 409, code: 'vehicle_in_use') =>
           ProfileFailure.vehicleInUse,
-        DriverApiException(status: 404) => ProfileFailure.vehicleMissing,
+        DriverApiException(status: 404, code: 'not_found')
+            when targetsExistingVehicle =>
+          ProfileFailure.vehicleMissing,
         DriverApiException(problem: DriverApiProblem.ended) =>
           ProfileFailure.unavailable,
         DriverApiException(status: final int status)

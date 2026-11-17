@@ -15,6 +15,8 @@ Slice xe đã kiểm local với Flutter 3.44.2. Toàn bộ 115 test pass, analy
 
 Restyle đăng ký và thêm xe T96 đã kiểm local bằng Flutter 3.44.2. `dart format` kiểm 109 file, `flutter analyze --no-pub` sạch, `flutter test --no-pub` qua 118 test. Ảnh Flutter 390 × 844 dùng transport fixture. Chờ kiểm trên thiết bị và staging cho restyle này.
 
+Review hồ sơ xe T96 đã kiểm local bằng Flutter 3.44.2. Format kiểm 7 file Dart đã sửa, analyzer sạch và toàn bộ 146 test pass, gồm 23 test API/widget hồ sơ xe. Lần này kiểm bằng transport fixture, chưa build APK hoặc smoke trên staging. [Kịch bản kiểm lại](docs/t96-driver-api.md#4-kiểm-thử-xe-qua-tunnel-api).
+
 Đọc [screen/function reference](docs/screens.md) và [architecture reference](docs/architecture.md) trước khi code. Đây là hai tài liệu chuẩn của mobile; [AGENTS.md](AGENTS.md) bắt buộc đọc chúng. SRS/registration và sơ đồ hiện hành dẫn từ đó thay thế các bản tóm tắt MB cũ.
 
 ## Phạm vi
@@ -38,7 +40,7 @@ Restyle đăng ký và thêm xe T96 đã kiểm local bằng Flutter 3.44.2. `da
 ```bash
 cd apps/mobile
 cp config/api.example.json config/api.local.json           # cấu hình API cho Android Emulator
-cp config/vietmap.example.json config/vietmap.local.json   # nếu dùng bản đồ Vietmap
+cp config/vietmap.example.json config/vietmap.local.json   # có thể để trống tileApiKey
 flutter pub get
 dart format --output=none --set-exit-if-changed .
 flutter analyze
@@ -46,7 +48,7 @@ flutter test
 flutter run                  # chọn Android Emulator API 24+ khi được hỏi
 ```
 
-Sửa `API_BASE_URL` theo môi trường, rồi Stop và Run lại khi đổi file. Các file JSON trong `config/` được đóng gói vào app. Chỉ đưa cấu hình client công khai vào thư mục này.
+Sửa `API_BASE_URL` theo môi trường, rồi Stop và Run lại khi đổi file. Chỉ `config/api.local.json` và `config/vietmap.local.json` được đóng gói. Hai file bắt buộc khi build và chỉ được chứa cấu hình công khai. Xem [cách cấp key chỉ dùng Tilemap](docs/vietmap-setup.md).
 
 CI (`.github/workflows/ci.yml`, job `Flutter · Format · Analyze · Test`) chạy đúng bốn lệnh kiểm tra trên với Flutter 3.44.2 cho mọi PR chạm `apps/mobile`. Kết quả 01/11 trên mã PR #70: analyze sạch, **85/85 test**, format sạch sau commit `dart format`.
 

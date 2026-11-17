@@ -380,6 +380,9 @@ Luật (WF-04-PLAN Q75–Q81, 11/11/2026):
 
 ## 16. T96 — xếp hạng gợi ý theo đường bộ Vietmap
 
+Xếp hạng tự động ngừng gọi mới khi tổng lượt gọi trong cửa sổ một phút đạt 24/30 theo tài xế, 108/120 toàn hệ thống hoặc đã có 3/4 yêu cầu đang chạy. Khi chạm ngưỡng, gợi ý về `ranking_source=brief`. Tra địa chỉ, lấy tọa độ địa chỉ và xem tuyến do tài xế yêu cầu vẫn dùng phần hạn mức còn lại. Cache hit, yêu cầu gộp và yêu cầu bị từ chối trước khi gọi Vietmap không trừ lượt. Giới hạn trong CSMS không thay quota của Vietmap.
+
+
 `GET /api/driver/v1/stations?vehicle_id=…&sort=smart&latitude=…&longitude=…&soc_percent=…&location_consent=true&page_size=3`.
 Chỉ chuyển tọa độ khi tài xế gửi `sort=smart` và `location_consent=true` rõ ràng, có điểm đi và
 pin hợp lệ, dùng xe sở hữu đủ thông số. Thiếu hoặc gửi `false` dùng brief, kể cả client cũ.

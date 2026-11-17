@@ -79,6 +79,97 @@ class _DeviceLocation implements MapLocationRepository {
 }
 
 void main() {
+  testWidgets('Discover and suggestions guide edits for invalid_search', (
+    tester,
+  ) async {
+    final fixture = DriverApiFixture(
+      (r) async => switch (r.path) {
+        'auth/login' => reply(200, tokens(accessA)),
+        'me' => reply(200, account(vehicles: [leafVehicle()])),
+        'stations' => reply(400, {'error': 'invalid_search'}),
+        _ => throw StateError('Unexpected route'),
+      },
+    );
+    await _login(tester, fixture);
+    expect(find.text('Thử lại'), findsNothing);
+    await _tap(tester, find.text('Sửa từ khóa'));
+    expect(tester.testTextInput.isVisible, isTrue);
+    expect(_requests(fixture, 'stations'), hasLength(1));
+    await _tap(tester, _key('open-suggestions'));
+    await _text(tester, 'suggestion-soc', '15');
+    await _tap(tester, _key('submit-smart-search'));
+    expect(find.text('Thử lại'), findsNothing);
+    final before = _requests(fixture, 'stations').length;
+    await _tap(tester, find.text('Sửa mức pin'));
+    expect(tester.testTextInput.isVisible, isTrue);
+    expect(_requests(fixture, 'stations'), hasLength(before));
+  });
+
+  testWidgets('missing and rejected map keys do not offer Retry', (
+    tester,
+  ) async {
+    final location = _DeviceLocation(
+      () async => const MapLocation(10.77, 106.66),
+    );
+    final fixture = DriverApiFixture(
+      (r) async => switch (r.path) {
+        'auth/login' => reply(200, tokens(accessA)),
+        'me' => reply(200, account(vehicles: [leafVehicle()])),
+        'stations' => reply(200, page([station('31', 'Trạm thử')])),
+        'places/autocomplete' => reply(503, {
+          'error': 'provider_unavailable',
+          'detail': 'unconfigured',
+        }),
+        'stations/31/route' => reply(503, {
+          'error': 'provider_unavailable',
+          'detail': 'credentials',
+        }),
+        _ => throw StateError('Unexpected route'),
+      },
+    );
+    await _login(tester, fixture, location: location);
+    await _tap(tester, find.text('Điểm đi và bộ lọc'));
+    expect(find.textContaining('PowerMe nhận tọa độ'), findsOneWidget);
+    await _tap(tester, _key('discovery-address-consent'));
+    await _text(tester, 'discovery-address-query', 'Võ Văn Tần');
+    await _tap(tester, _key('submit-discovery-address'));
+    expect(find.textContaining('chưa được PowerMe bật'), findsOneWidget);
+    expect(find.text('Thử lại'), findsNothing);
+    await _tap(tester, _key('submit-discovery-address'));
+    expect(_requests(fixture, 'places/autocomplete'), hasLength(1));
+    await _tap(tester, _key('discovery-use-location'));
+    final search = _requests(fixture, 'stations').last.uri.queryParameters;
+    expect(search, containsPair('latitude', '10.77'));
+    expect(search, isNot(contains('location_consent')));
+    expect(_key('clear-discovery-origin'), findsOneWidget);
+    await _tap(tester, _key('clear-discovery-origin'));
+    expect(
+      _requests(fixture, 'stations').last.uri.queryParameters,
+      isNot(contains('latitude')),
+    );
+    final locationButton = _key('discovery-use-location');
+    if (locationButton.evaluate().isEmpty) {
+      final filters = find.text('Điểm đi và bộ lọc');
+      await tester.scrollUntilVisible(
+        filters,
+        200,
+        scrollable: find.byType(Scrollable).first,
+      );
+      if (locationButton.evaluate().isEmpty) await _tap(tester, filters);
+    }
+    await _tap(tester, locationButton);
+    await tester.scrollUntilVisible(
+      _key('station-result-31'),
+      200,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await _tap(tester, _key('station-result-31'));
+    await _tap(tester, _key('request-station-route'));
+    expect(find.textContaining('liên hệ hỗ trợ PowerMe'), findsOneWidget);
+    expect(find.text('Thử lại'), findsNothing);
+    expect(_key('request-station-route'), findsNothing);
+  });
+
   testWidgets(
     'opens only the selected destination on tap without a route',
     (tester) async {
@@ -207,6 +298,11 @@ void main() {
       await _tap(tester, filters);
       await _tap(tester, _key('discovery-use-location'));
       await _tap(tester, filters);
+      await tester.scrollUntilVisible(
+        _key('station-result-31'),
+        200,
+        scrollable: find.byType(Scrollable).first,
+      );
       await _tap(tester, _key('station-result-31'));
       expect(map, findsNothing);
       expect(_requests(fixture, 'stations/31/route'), isEmpty);
@@ -865,6 +961,11 @@ void main() {
       await _tap(tester, find.text('Điểm đi và bộ lọc'));
       await _tap(tester, _key('discovery-use-location'), settle: false);
       await tester.pump(const Duration(milliseconds: 100));
+      await tester.scrollUntilVisible(
+        _key('station-search-query'),
+        -200,
+        scrollable: find.byType(Scrollable).first,
+      );
       await _text(tester, 'station-search-query', 'old vehicle');
       await _tap(tester, _key('submit-station-search'), settle: false);
       await tester.pump(const Duration(milliseconds: 100));

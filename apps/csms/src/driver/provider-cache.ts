@@ -17,6 +17,7 @@ export class ProviderCache {
     key: string,
     work: () => Promise<T>,
     signal?: AbortSignal,
+    lane: 'interactive' | 'ranking' = 'interactive',
   ): Promise<{ value: T; computed_at: string; cached: boolean }> {
     if (signal?.aborted) throw new ProviderUnavailable('timeout');
     const scoped = JSON.stringify([principal, key]);
@@ -36,9 +37,8 @@ export class ProviderCache {
         computed_at: string;
         cached: boolean;
       };
-    this.spend(principal, 30);
-    this.spend('*', 120);
-    if (this.active >= 4) throw new DriverApiError(429, 'provider_busy');
+    if (this.active >= (lane === 'ranking' ? 3 : 4)) throw new DriverApiError(429, 'provider_busy');
+    this.reserve(principal, now, lane);
     this.active++;
     const task = (async () => {
       try {
@@ -71,16 +71,22 @@ export class ProviderCache {
     });
   }
 
-  private spend(principal: string, limit: number) {
-    const now = this.now();
+  private reserve(principal: string, now: number, lane: 'interactive' | 'ranking') {
     for (const [id, entry] of this.budgets) if (entry.until <= now) this.budgets.delete(id);
-    let budget = this.budgets.get(principal);
-    if (!budget) {
-      if (this.budgets.size >= 1024) throw new DriverApiError(429, 'provider_busy');
-      budget = { until: now + 60000, count: 0 };
-      this.budgets.set(principal, budget);
-    }
-    if (budget.count >= limit) throw new DriverApiError(429, 'provider_rate_limited');
-    budget.count++;
+    const driver = this.budgets.get(principal);
+    const global = this.budgets.get('*');
+    if (
+      (driver?.count ?? 0) >= (lane === 'ranking' ? 24 : 30) ||
+      (global?.count ?? 0) >= (lane === 'ranking' ? 108 : 120)
+    )
+      throw new DriverApiError(429, 'provider_rate_limited');
+    if (this.budgets.size + Number(!driver) + Number(!global) > 1024)
+      throw new DriverApiError(429, 'provider_busy');
+    // Charge both windows only after both budgets and concurrency admit the miss.
+    this.budgets.set(principal, {
+      until: driver?.until ?? now + 60000,
+      count: (driver?.count ?? 0) + 1,
+    });
+    this.budgets.set('*', { until: global?.until ?? now + 60000, count: (global?.count ?? 0) + 1 });
   }
 }

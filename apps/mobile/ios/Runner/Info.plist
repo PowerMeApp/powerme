@@ -5,7 +5,7 @@
 	<key>NSCameraUsageDescription</key>
 	<string>PowerMe dùng camera để quét mã QR trên cổng sạc bạn muốn kết nối.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>PowerMe dùng vị trí khi bạn yêu cầu xem vị trí của mình trên bản đồ.</string>
+	<string>Khi bạn chọn dùng vị trí làm điểm đi, ứng dụng gửi tọa độ đến PowerMe để tìm trạm sạc gần đó.</string>
 	<key>CADisableMinimumFrameDurationOnPhone</key>
 	<true/>
 	<key>CFBundleDevelopmentRegion</key>

@@ -22,6 +22,64 @@ Future<DriverApiSession> _session(DriverApiFixture transport) async {
 
 void main() {
   test(
+    'denied provider consent never sends text, references or coordinates',
+    () async {
+      final transport = DriverApiFixture(
+        (r) async => switch (r.path) {
+          'auth/login' => reply(200, tokens(accessA)),
+          'me' => reply(200, account()),
+          'stations' => reply(200, page([], pageSize: 3)),
+          _ => throw StateError('Unexpected route'),
+        },
+      );
+      final repo = ApiStationRepository(await _session(transport), '9');
+      const origin = DiscoveryOrigin.device(MapLocation(10.77, 106.66));
+      final denied = throwsA(
+        isA<DriverApiException>().having(
+          (error) => error.code,
+          'code',
+          'location_consent_required',
+        ),
+      );
+      final baseline = transport.requests.length;
+      await expectLater(
+        repo.autocomplete('9', 'Private address', consentToVietmap: false),
+        denied,
+      );
+      await expectLater(
+        repo.resolve(
+          '9',
+          const AddressCandidate('abc', 'Private address'),
+          consentToVietmap: false,
+        ),
+        denied,
+      );
+      await expectLater(
+        repo.roadRoute(
+          '9',
+          '31',
+          origin,
+          includeVinFastOnly: false,
+          consentToVietmap: false,
+        ),
+        denied,
+      );
+      expect(transport.requests, hasLength(baseline));
+      await repo.search(
+        '9',
+        initialStationSearch,
+        origin: origin,
+        smart: (soc: 15, target: 80),
+        consentToRoute: true,
+      );
+      final query = transport.requests.last.uri.queryParameters;
+      for (final field in ['latitude', 'longitude', 'location_consent']) {
+        expect(query, isNot(contains(field)));
+      }
+    },
+  );
+
+  test(
     'station query is owned, encoded and retried with refreshed bearer',
     () async {
       final transport = DriverApiFixture(
@@ -129,6 +187,7 @@ void main() {
         '9',
         initialStationSearch,
         origin: const DiscoveryOrigin.device(MapLocation(10.77, 106.66)),
+        shareOriginWithPowerMe: true,
         smart: (soc: 0, target: 80),
       );
       expect(
@@ -197,20 +256,29 @@ void main() {
         },
       );
       final repo = ApiStationRepository(await _session(transport), '9');
-      final candidate = (await repo.autocomplete('9', 'Võ Văn Tần')).single;
+      final candidate = (await repo.autocomplete(
+        '9',
+        'Võ Văn Tần',
+        consentToVietmap: true,
+      )).single;
       expect(transport.requests.last.uri.queryParameters, {
         'vehicle_id': '9',
         'q': 'Võ Văn Tần',
         'location_consent': 'true',
       });
-      final origin = await repo.resolve('9', candidate);
+      final origin = await repo.resolve('9', candidate, consentToVietmap: true);
       expect(transport.requests.last.uri.queryParameters, {
         'vehicle_id': '9',
         'ref_id': 'auto:fixture',
         'location_consent': 'true',
       });
-      Future<StationRoadRoute> route() =>
-          repo.roadRoute('9', '31', origin, includeVinFastOnly: true);
+      Future<StationRoadRoute> route() => repo.roadRoute(
+        '9',
+        '31',
+        origin,
+        includeVinFastOnly: true,
+        consentToVietmap: true,
+      );
       final valid = await route();
       expect(transport.requests.last.uri.queryParameters, {
         'vehicle_id': '9',
@@ -283,6 +351,7 @@ void main() {
         '31',
         const DiscoveryOrigin.device(MapLocation(10.77, 106.66)),
         includeVinFastOnly: false,
+        consentToVietmap: true,
       );
       final valid = await getRoute();
       expect(valid.instructions.map((step) => step.sign), [0, -2, 4]);

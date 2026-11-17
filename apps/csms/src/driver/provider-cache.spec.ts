@@ -96,3 +96,51 @@ it('evicts beyond 128 entries without logging keys or retaining expired values',
   expect((await cache.run('0', '0', work)).cached).toBe(false);
   expect(calls).toBe(130);
 });
+
+it('preserves six driver calls for interactive routes and refreshes the minute window', async () => {
+  let now = 0;
+  const cache = new ProviderCache(() => now);
+  const work = jest.fn(async () => 0);
+  for (let i = 0; i < 24; i++) await cache.run('driver', String(i), work, undefined, 'ranking');
+  await expect(cache.run('driver', 'cold', work, undefined, 'ranking')).rejects.toMatchObject({
+    code: 'provider_rate_limited',
+  });
+  expect((await cache.run('driver', '0', work, undefined, 'ranking')).cached).toBe(true);
+  for (let i = 0; i < 6; i++) await cache.run('driver', `manual-${i}`, work);
+  await expect(cache.run('driver', 'overflow', work)).rejects.toMatchObject({
+    code: 'provider_rate_limited',
+  });
+  expect(work).toHaveBeenCalledTimes(30);
+  now = 60000;
+  await expect(cache.run('driver', 'cold', work, undefined, 'ranking')).resolves.toMatchObject({
+    cached: false,
+  });
+});
+
+it('reserves global calls and an active slot without charging rejected requests', async () => {
+  const cache = new ProviderCache(() => 0);
+  const work = jest.fn(async () => 0);
+  for (let i = 0; i < 105; i++) await cache.run(`driver-${i}`, 'route', work, undefined, 'ranking');
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const pending = [0, 1, 2].map((i) =>
+    cache.run('series', String(i), () => gate, undefined, 'ranking'),
+  );
+  await expect(cache.run('series', 'extra', work, undefined, 'ranking')).rejects.toMatchObject({
+    code: 'provider_busy',
+  });
+  const shared = cache.run('series', '0', () => gate, undefined, 'ranking');
+  await expect(cache.run('series', 'interactive', work)).resolves.toMatchObject({ cached: false });
+  release();
+  await Promise.all([...pending, shared]);
+  await expect(cache.run('next', 'ranking', work, undefined, 'ranking')).rejects.toMatchObject({
+    code: 'provider_rate_limited',
+  });
+  for (let i = 0; i < 11; i++) await cache.run('next', String(i), work);
+  await expect(cache.run('next', 'overflow', work)).rejects.toMatchObject({
+    code: 'provider_rate_limited',
+  });
+  expect(work).toHaveBeenCalledTimes(117);
+});

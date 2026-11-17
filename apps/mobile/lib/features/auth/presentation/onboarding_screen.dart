@@ -339,7 +339,7 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
               keyboardType: TextInputType.emailAddress,
               textInputAction: TextInputAction.next,
               decoration: _fieldDecoration(
-                hint: 'example@powerme.vn',
+                hint: 'email@example.com',
                 icon: Icons.mail_outline_rounded,
               ),
               validator: (value) {

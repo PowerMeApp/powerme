@@ -48,6 +48,8 @@ Availability alert UC-CHG-08 là **Could**, không lẫn 15 view/Must. Hỗ tr�
 
 ## Tiến độ slice hiện tại
 
+**T96 review Vietmap và quyền vị trí**. Views 3/4/15 → FR-03/21, UC-CHG-01/07, BR-P33/41 → Stations, composition và API adapter. Chọn GPS/địa chỉ có thông báo gửi tọa độ cho PowerMe. Có thể bỏ điểm đi ngay dưới ô tìm trạm. Việc gửi từ khóa, mã địa chỉ hoặc tọa độ sang Vietmap cần thao tác xác nhận theo từng luồng. Lỗi cấu hình Vietmap hướng về tìm theo tên, lỗi dữ liệu hướng về sửa đầu vào/điểm đi, lỗi tạm thời cho thử lại. Kiểm bằng fixture và asset manifest trong các test discovery/Vietmap. Kiểm thiết bị và phân quyền key thật còn chờ.
+
 **T96 Phần 2 — pin hiện tại trên ApiApp, chờ smoke trên thiết bị**. View 15 → FR-21, UC-CHG-07, BR-P33/41 → Stations PKG-3, `ApiSuggestionsScreen` và `ApiStationRepository`. Người lái có thể để trống pin. Pin dưới 80% dùng để ước tính đến mốc 80%. Pin từ 80% trở lên vẫn giữ số đã nhập và hiện các trạm phù hợp kèm lý do thiếu ước tính. Widget fixture kiểm nhập liệu, truy vấn và xác nhận dùng điểm đi trong `driver_discovery_widget_test.dart`. [Kiến trúc](architecture.md#t96-discovery--1311) · [Kịch bản kiểm thử](t96-driver-api.md#5-kiểm-thử-tìm-trạm-và-gợi-ý-trên-emulator).
 
 13/11 **T96 discovery — API mode, kiểm local bằng fixture, chờ smoke đăng nhập**. Views 3/4/15 → FR-03/21, UC-CHG-01/07, BR-P03/33/38/39/41 → Stations/Profile/Shared UI PKG-3. Từ Tài khoản mở Khám phá, map dưới thanh tìm trạm với bộ lọc và điểm đi thu gọn. Kết quả phân trang 20, xe mặc định, VinFast override và tình trạng theo backend. Chi tiết đọc snapshot trạm vừa chọn và hiển thị từng cổng theo ID backend. Gợi ý lấy 3 trạm theo thứ tự backend, hiện tầm pin, lý do reach, cổng được chọn và các giá trị nullable. Có luồng riêng tìm và xác nhận địa chỉ, vị trí foreground theo thao tác người dùng, đường Vietmap chỉ sau khi chọn trạm và yêu cầu. Nếu thiếu Tile vẫn có danh sách và tóm tắt tuyến. Các CTA sạc, QR, thanh toán, đặt chỗ và hỗ trợ chưa mở trong API mode. [Kiến trúc](architecture.md#t96-discovery--1311) · [Hợp đồng và kiểm thử](t96-driver-api.md).
@@ -102,6 +104,8 @@ All five current contact sheets visually inspected: supplied logo/palette retain
 ## T96 slice 1 — đăng nhập và hồ sơ qua Driver API
 
 Views 1/2/10 → FR-01/02, UC-ACC-01/02/03, BR-P05/16, NFR-SEC-01 → PKG-3 Auth/Profile/composition. Người dùng đã xác nhận login/logout/register trên staging. Account đọc hồ sơ và xe từ `/me`. Đăng ký staging dùng phiên bản consent từ cấu hình local, gồm đồng ý rõ ràng và thông tin tài khoản. Kiểm thử fixture bao phủ dữ liệu sai, gửi lặp, lỗi API và kết quả chưa xác nhận. Vehicle step và CRUD chưa được tích hợp trong slice, vì vậy NFR-US-02 gồm xe chưa được nghiệm thu. [Kịch bản và giới hạn kiểm thử](t96-driver-api.md).
+
+Review T96 hồ sơ xe (màn 2/10, FR-01/02, UC-ACC-01/03, NFR-SEC-01): Auth/Profile dùng hợp đồng BE-34 và phiên Driver API hiện có. Ca hồi quy kiểm ghi sau khi hết hạn token, phân biệt 404 theo thao tác, lỗi biển số giới hạn trong form và bảo toàn form khi tải lại sau kết quả chưa rõ. [Kịch bản kiểm thử xe](t96-driver-api.md#4-kiểm-thử-xe-qua-tunnel-api).
 
 Run `lib/main.dart` đọc `config/api.local.json` rồi mở màn hình đăng nhập Driver API. Thiếu hoặc sai cấu hình thì hiển thị lỗi kết nối. `DriverAppTestHarness` trong `test/support` giữ kiểm thử các màn chưa tích hợp. Fixture API kiểm tra startup và luồng account. [Hướng dẫn T96](t96-driver-api.md).
 
