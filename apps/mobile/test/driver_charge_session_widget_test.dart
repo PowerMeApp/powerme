@@ -4,6 +4,7 @@ import 'package:dio/dio.dart';
 import 'package:driver_app/app/composition/api_app.dart';
 import 'package:driver_app/app/router.dart';
 import 'package:driver_app/core/api/api_config.dart';
+import 'package:driver_app/core/api/driver_api_session.dart';
 import 'package:driver_app/core/widgets/flow_page.dart' show ValueLine;
 import 'package:driver_app/features/auth/application/auth_controller.dart';
 import 'package:driver_app/features/charging/presentation/charge_flow_visuals.dart';
@@ -513,6 +514,215 @@ void main() {
     expect(_count(fixture, _stopPath), 0);
     expect(tester.takeException(), isNull);
   });
+
+  testWidgets(
+    'lost stop response retries the original key and waits for effect',
+    (tester) async {
+      var snapshot = _progress(status: 'paused');
+      final requests = <RequestOptions>[];
+      final fixture = _fixture((request) async {
+        if (request.path == _progressPath) return reply(200, snapshot);
+        if (request.path == _statementPath) return reply(200, _statement());
+        expect(request.path, _stopPath);
+        expect(request.method, 'POST');
+        expect(request.data, isNull);
+        requests.add(request);
+        if (requests.length == 1) {
+          throw DioException(
+            requestOptions: request,
+            type: DioExceptionType.receiveTimeout,
+          );
+        }
+        return reply(202, _stopSnapshot('accepted', 'stopping'));
+      });
+      await _openProgress(tester, fixture);
+      await _tap(tester, _byKey('request-stop-charging'));
+      expect(requests, isEmpty);
+      await _tap(tester, find.text('Hủy'));
+      expect(requests, isEmpty);
+      await _tap(tester, _byKey('request-stop-charging'));
+      await _tap(tester, _byKey('confirm-stop-charging'));
+      expect(requests, hasLength(1));
+      final original = requests.single.headers['Idempotency-Key'];
+      expect(original, matches(RegExp(r'^[a-f0-9-]{36}$')));
+      await _findText(
+        tester,
+        'Chưa nhận được phản hồi. Bạn có thể gửi lại cùng yêu cầu.',
+      );
+
+      snapshot = _progress(status: 'stopping');
+      await _tick(tester);
+      expect(requests, hasLength(1));
+      await _tap(tester, find.byTooltip('Quay lại'));
+      await _tap(tester, _byKey('qr-follow-charge'));
+      await _tap(tester, _byKey('retry-stop-charging'));
+      expect(requests, hasLength(2));
+      expect(requests.last.headers['Idempotency-Key'], original);
+      await _findText(
+        tester,
+        'Đã ghi nhận yêu cầu dừng. Đang cập nhật tiến độ phiên.',
+      );
+      expect(find.text('Bảng kê phiên sạc'), findsNothing);
+      expect(_count(fixture, _statementPath), 0);
+      expect(_byKey('retry-stop-charging'), findsNothing);
+
+      snapshot = _progress(
+        status: 'closed',
+        settlement: 'pending',
+        meterStop: 0,
+      );
+      await _tick(tester);
+      await _findText(tester, 'Đang chờ quyết toán.');
+      expect(_count(fixture, _statementPath), 0);
+      snapshot = {...snapshot, 'settlement_state': 'posted'};
+      await _tick(tester);
+      await _findText(tester, 'Tín dụng đã trừ');
+      expect(_count(fixture, _statementPath), 1);
+      expect(requests, hasLength(2));
+      final progressReads = _count(fixture, _progressPath);
+      await tester.binding.handlePopRoute();
+      await _tick(tester, const Duration(seconds: 10));
+      expect(_byKey('qr-manual-reference'), findsOneWidget);
+      expect(_byKey('qr-follow-charge'), findsNothing);
+      expect(_count(fixture, _progressPath), progressReads);
+      expect(
+        fixture.requests.where((r) => r.path.startsWith('charges/')),
+        isEmpty,
+      );
+    },
+  );
+
+  testWidgets(
+    'rejection permits a new confirmed key, pending conflict blocks it',
+    (tester) async {
+      final requests = <RequestOptions>[];
+      final fixture = _fixture((request) async {
+        if (request.path == _progressPath) {
+          return reply(200, _progress(status: 'orphaned', online: false));
+        }
+        expect(request.path, _stopPath);
+        requests.add(request);
+        return requests.length == 1
+            ? reply(202, _stopSnapshot('rejected', 'orphaned'))
+            : reply(409, {'error': 'stop_pending_or_unknown'});
+      });
+      await _openProgress(tester, fixture);
+      for (var i = 0; i < 2; i++) {
+        await _tap(tester, _byKey('request-stop-charging'));
+        await _tap(tester, _byKey('confirm-stop-charging'));
+        expect(requests, hasLength(i + 1));
+      }
+      expect(
+        requests.first.headers['Idempotency-Key'],
+        isNot(requests.last.headers['Idempotency-Key']),
+      );
+      await _findText(
+        tester,
+        'Chưa xác nhận được kết quả dừng. Đang theo dõi phiên.',
+      );
+      expect(_byKey('request-stop-charging'), findsNothing);
+      expect(_byKey('retry-stop-charging'), findsNothing);
+      final reads = _count(fixture, _progressPath);
+      await _tick(tester);
+      expect(_count(fixture, _progressPath), greaterThan(reads));
+      expect(requests, hasLength(2));
+    },
+  );
+
+  testWidgets('a recovered rejection does not prove the intent was released', (
+    tester,
+  ) async {
+    final keys = <Object?>[];
+    final fixture = _fixture((request) async {
+      if (request.path == _progressPath) return reply(200, _progress());
+      expect(request.path, _stopPath);
+      keys.add(request.headers['Idempotency-Key']);
+      if (keys.length == 1) {
+        throw DioException(
+          requestOptions: request,
+          type: DioExceptionType.receiveTimeout,
+        );
+      }
+      return reply(202, _stopSnapshot('rejected', 'active'));
+    });
+    await _openProgress(tester, fixture);
+    await _tap(tester, _byKey('request-stop-charging'));
+    await _tap(tester, _byKey('confirm-stop-charging'));
+    await _tap(tester, _byKey('retry-stop-charging'));
+    expect(keys, hasLength(2));
+    expect(keys.first, keys.last);
+    await _findText(
+      tester,
+      'Chưa xác nhận được kết quả dừng. Đang theo dõi phiên.',
+    );
+    expect(_byKey('request-stop-charging'), findsNothing);
+    expect(_byKey('retry-stop-charging'), findsNothing);
+  });
+
+  for (final (status, code, message) in [
+    (
+      409,
+      'session_not_stoppable',
+      'Hiện chưa thể yêu cầu dừng phiên. Đang cập nhật tiến độ.',
+    ),
+    (404, 'not_found', 'Không tìm thấy phiên có thể dừng từ ứng dụng.'),
+  ]) {
+    testWidgets('stop HTTP $status leaves progress authoritative', (
+      tester,
+    ) async {
+      var progress = _progress();
+      final fixture = _fixture(
+        (request) async => switch (request.path) {
+          _progressPath => reply(200, progress),
+          _stopPath => reply(status, {'error': code}),
+          _ => throw StateError('Unexpected path'),
+        },
+      );
+      await _openProgress(tester, fixture);
+      await _tap(tester, _byKey('request-stop-charging'));
+      await _tap(tester, _byKey('confirm-stop-charging'));
+      await _findText(tester, message);
+      expect(find.text('Đang sạc'), findsOneWidget);
+      expect(_count(fixture, _statementPath), 0);
+      expect(_byKey('request-stop-charging'), findsNothing);
+      progress = _progress(
+        status: 'closed',
+        meterStop: 0,
+        settlement: 'pending',
+      );
+      await _tick(tester);
+      await _findText(tester, 'Đang chờ quyết toán.');
+      expect(_count(fixture, _stopPath), 1);
+    });
+  }
+
+  test(
+    'session reads reject path injection, out-of-range ID and wrong principal',
+    () async {
+      final fixture = _fixture(
+        (r) async => throw StateError('Unexpected ${r.path}'),
+      );
+      final session = DriverApiSession(_config, adapter: fixture);
+      addTearDown(session.dispose);
+      await session.signIn('test@example.invalid', 'fixture password');
+      for (final id in [
+        '78/statement',
+        '78?driver_id=8',
+        '01',
+        '9007199254740992',
+      ]) {
+        await expectLater(
+          session.readChargeProgress(_driver, id, CancelToken()),
+          throwsException,
+        );
+      }
+      await expectLater(
+        session.readChargeStatement('8', '78', CancelToken()),
+        throwsException,
+      );
+      expect(fixture.requests.map((r) => r.path), ['auth/login', 'me']);
+    },
+  );
 }
 
 final _config = ApiConfig.parse('https://fixture.invalid/api/driver/v1');
@@ -551,6 +761,13 @@ Map<String, Object?> _startedCharge() => {
   'effect_confirmed': true,
   'version': 1,
   'max_energy_wh': null,
+};
+
+Map<String, Object> _stopSnapshot(String command, String session) => {
+  'command_id': '53',
+  'command_status': command,
+  'session_status': session,
+  'effect_confirmed': false,
 };
 
 Map<String, Object?> _progress({
