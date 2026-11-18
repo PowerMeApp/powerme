@@ -17,6 +17,10 @@ Restyle đăng ký và thêm xe T96 đã kiểm local bằng Flutter 3.44.2. `da
 
 Review hồ sơ xe T96 đã kiểm local bằng Flutter 3.44.2. Format kiểm 7 file Dart đã sửa, analyzer sạch và toàn bộ 146 test pass, gồm 23 test API/widget hồ sơ xe. Lần này kiểm bằng transport fixture, chưa build APK hoặc smoke trên staging. [Kịch bản kiểm lại](docs/t96-driver-api.md#4-kiểm-thử-xe-qua-tunnel-api).
 
+Slice tín dụng sạc và dừng thủ công T96 đã kiểm local bằng Flutter 3.44.2 / Dart 3.12.2. Format 147 file (0 thay đổi), `flutter analyze --no-pub` sạch, 23 ca kiểm tập trung và toàn bộ 155 ca fixture pass. App mở tín dụng từ **Tài khoản** và dừng từ **Theo dõi phiên** sau khi xác nhận. Smoke API trên thiết bị và staging còn chờ. [Hợp đồng và kịch bản kiểm](docs/t96-driver-api.md#9-tín-dụng-sạc-và-dừng-thủ-công).
+
+Bản tích hợp T96 ghép lên mốc `3866840` kiểm local bằng Flutter 3.44.2 và Dart 3.12.2. Format kiểm 155 file, analyzer sạch, toàn bộ 175 ca fixture pass và công cụ chụp luồng sạc pass với font SDK. Chờ kiểm trên thiết bị và staging.
+
 Đọc [screen/function reference](docs/screens.md) và [architecture reference](docs/architecture.md) trước khi code. Đây là hai tài liệu chuẩn của mobile; [AGENTS.md](AGENTS.md) bắt buộc đọc chúng. SRS/registration và sơ đồ hiện hành dẫn từ đó thay thế các bản tóm tắt MB cũ.
 
 ## Phạm vi
