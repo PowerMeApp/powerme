@@ -21,6 +21,8 @@ import '../features/stations/presentation/station_detail_screen.dart';
 import '../features/stations/presentation/station_actions_screens.dart';
 import '../features/support/presentation/report_screen.dart';
 import '../features/charging/presentation/charging_screens.dart';
+import '../features/charging/application/charge_session_controller.dart';
+import '../features/charging/presentation/charge_session_screen.dart';
 import '../features/charging/presentation/qr_connect_screen.dart';
 import '../features/payments/presentation/payment_screens.dart';
 import '../features/history/presentation/history_screens.dart';
@@ -48,6 +50,12 @@ final routerProvider = Provider<GoRouter>((ref) {
                   (path == '/register' && registrationEnabled)
               ? null
               : '/login';
+        }
+        if (path == '/charge-session') {
+          return state.uri.hasQuery ||
+                  ref.read(confirmedChargeSessionProvider) == null
+              ? '/scan'
+              : null;
         }
         return path == '/profile' ||
                 path == '/vehicles' ||
@@ -113,6 +121,10 @@ final routerProvider = Provider<GoRouter>((ref) {
             GoRoute(
               path: '/suggestions',
               builder: (context, state) => const ApiSuggestionsScreen(),
+            ),
+            GoRoute(
+              path: '/charge-session',
+              builder: (context, state) => const ChargeSessionScreen(),
             ),
           ],
         ),

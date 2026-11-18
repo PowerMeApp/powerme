@@ -9,10 +9,13 @@ import '../../../core/widgets/flow_page.dart';
 import '../../profile/application/profile_controller.dart';
 import '../../stations/application/connector_lookup_controller.dart';
 import '../../stations/application/station_discovery_controller.dart';
-import '../../stations/domain/station.dart';
-import '../../stations/presentation/station_copy.dart';
+import '../application/charge_session_controller.dart';
+import '../application/charge_start_controller.dart';
 import '../application/charging_controller.dart';
 import '../application/qr_connection_controller.dart';
+import 'charge_flow_visuals.dart';
+import 'charge_start_attempt_panel.dart';
+import 'charge_start_panel.dart';
 import 'charging_screens.dart';
 
 class QrConnectScreen extends ConsumerStatefulWidget {
@@ -80,6 +83,7 @@ class _QrConnectScreenState extends ConsumerState<QrConnectScreen>
   Future<void> _connect(String reference, {bool camera = false}) async {
     if (camera && (!_foreground || !_isScanCurrent)) return;
     if (widget.apiMode) {
+      if (ref.read(chargeStartProvider) != null) return;
       final lookup = ref.read(connectorLookupProvider);
       if (camera && (lookup.failure != null || lookup.connector != null)) {
         return;
@@ -119,7 +123,38 @@ class _QrConnectScreenState extends ConsumerState<QrConnectScreen>
   Widget build(BuildContext context) {
     final profile = ref.watch(profileControllerProvider).profile;
     final copy = AppCopy(profile.language);
-    if (widget.apiMode && ref.watch(discoveryVehicleProvider).isEmpty) {
+    final selection = widget.apiMode
+        ? ref.watch(discoverySessionProvider)
+        : null;
+    final attempt = widget.apiMode ? ref.watch(chargeStartProvider) : null;
+    if (widget.apiMode) {
+      ref.listen(chargeStartProvider, (previous, next) {
+        if (previous != null && next == null) _reference.clear();
+      });
+    }
+    if (attempt != null) {
+      return ChargeFlowPage(
+        key: const Key('qr-start-attempt'),
+        title: copy.scanQr,
+        showBack: false,
+        children: [
+          ChargeStartAttemptPanel(
+            key: ValueKey(attempt.attempt.request),
+            copy: copy,
+            view: attempt,
+            visible: _foreground && _isScanCurrent,
+            isCurrent: () => _foreground && _isScanCurrent,
+            onFollow: ref.watch(confirmedChargeSessionProvider) == null
+                ? null
+                : () => context.push('/charge-session'),
+            onReturnToScan: () {
+              ref.read(chargeStartProvider.notifier).clear();
+            },
+          ),
+        ],
+      );
+    }
+    if (selection != null && selection.vehicleId.isEmpty) {
       final hasVehicles = profile.vehicles.isNotEmpty;
       return FlowPage(
         title: copy.scanQr,
@@ -158,6 +193,24 @@ class _QrConnectScreenState extends ConsumerState<QrConnectScreen>
     final qr = widget.apiMode ? null : ref.watch(qrConnectionProvider);
     final lookup = widget.apiMode ? ref.watch(connectorLookupProvider) : null;
     final connector = lookup?.connector;
+    if (connector != null && selection != null) {
+      return ChargeFlowPage(
+        key: const Key('qr-selected-connector'),
+        title: copy.scanQr,
+        showBack: false,
+        children: [
+          ChargeConnectorPanel(
+            copy: copy,
+            selection: selection,
+            connector: connector,
+            vehicle: profile.selectedVehicle,
+            onRecheck: () =>
+                _connect('${connector.displayCode}/${connector.number}'),
+            onRescan: _retryCamera,
+          ),
+        ],
+      );
+    }
     final error = switch (lookup?.failure) {
       ConnectorLookupFailure.invalidCode => copy.text(
         'Mã cổng chưa đúng. Nhập mã trụ và số cổng, ví dụ PM-01/1.',
@@ -176,11 +229,7 @@ class _QrConnectScreenState extends ConsumerState<QrConnectScreen>
     final blocked = view != null && blocksQrConnection(view);
     final busy = lookup?.busy ?? _opening;
     final cameraReady =
-        _foreground &&
-        _isScanCurrent &&
-        !busy &&
-        connector == null &&
-        lookup?.failure == null;
+        _foreground && _isScanCurrent && !busy && lookup?.failure == null;
     return FlowPage(
       title: copy.scanQr,
       showBack: false,
@@ -234,64 +283,36 @@ class _QrConnectScreenState extends ConsumerState<QrConnectScreen>
           ).textTheme.bodyMedium?.copyWith(color: PowerMeColors.muted),
         ),
         const SizedBox(height: 20),
-        if (connector == null)
-          ClipRRect(
-            borderRadius: BorderRadius.circular(20),
-            child: SizedBox(
-              height: 280,
-              child: blocked
-                  ? Center(
-                      child: Text(
-                        copy.text(
-                          'Mở phiên hiện tại để tiếp tục.',
-                          'Open your current session to continue.',
-                        ),
+        ClipRRect(
+          borderRadius: BorderRadius.circular(20),
+          child: SizedBox(
+            height: 280,
+            child: blocked
+                ? Center(
+                    child: Text(
+                      copy.text(
+                        'Mở phiên hiện tại để tiếp tục.',
+                        'Open your current session to continue.',
                       ),
-                    )
-                  : cameraReady
-                  ? _QrCamera(
-                      key: ValueKey(_retry),
-                      copy: copy,
-                      onCode: (code) => _connect(code, camera: true),
-                      onRetry: _retryCamera,
-                    )
-                  : Center(
-                      child: busy
-                          ? const CircularProgressIndicator()
-                          : const Icon(Icons.qr_code_scanner, size: 64),
                     ),
-            ),
-          ),
-        if (connector != null)
-          Semantics(
-            liveRegion: true,
-            child: InfoCard(
-              spacing: 8,
-              children: [
-                Text(
-                  connector.stationName,
-                  style: Theme.of(context).textTheme.titleMedium,
-                ),
-                Text(
-                  copy.text(
-                    'Trụ ${connector.displayCode} · Cổng ${connector.number}',
-                    'Charger ${connector.displayCode} · Connector ${connector.number}',
+                  )
+                : cameraReady
+                ? _QrCamera(
+                    key: ValueKey(_retry),
+                    copy: copy,
+                    onCode: (code) => _connect(code, camera: true),
+                    onRetry: _retryCamera,
+                  )
+                : Center(
+                    child: busy
+                        ? const CircularProgressIndicator()
+                        : const Icon(Icons.qr_code_scanner, size: 64),
                   ),
-                ),
-                Text(
-                  connector.status == StationStatus.available
-                      ? copy.text('Trống', 'Available')
-                      : statusLabel(connector.status, copy),
-                ),
-                if (connector.reportedIssue)
-                  Text(copy.text('Cổng đã được báo lỗi', 'Reported issue')),
-              ],
-            ),
-          )
-        else
-          const SizedBox(height: 20),
+          ),
+        ),
+        const SizedBox(height: 20),
         FailureNotice(error),
-        if (error != null || connector != null) ...[
+        if (error != null) ...[
           TextButton(
             onPressed: _retryCamera,
             child: Text(copy.text('Quét lại', 'Scan again')),
