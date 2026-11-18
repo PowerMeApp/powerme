@@ -109,6 +109,136 @@ class DriverApiSession {
         await _protectedRead(_activeSession(), 'vehicle-models'),
       );
 
+  Future<Map<String, dynamic>> startCharge({
+    required String principalId,
+    required String key,
+    required String connectorId,
+    required String vehicleId,
+    required int energyLimitWh,
+  }) async {
+    final session = _ownedSession(principalId);
+    final body = <String, Object?>{
+      'connector_id': connectorId,
+      'vehicle_id': vehicleId,
+      'mode': 'energy_kwh',
+      'energy_limit_wh': energyLimitWh,
+    };
+    return _withProtectedSession(
+      session,
+      (token) => _request(
+        session,
+        'charges',
+        method: 'POST',
+        expectedStatus: 202,
+        body: body,
+        accessToken: token,
+        idempotencyKey: key,
+      ),
+    );
+  }
+
+  Future<Map<String, dynamic>> readCharge(
+    String principalId,
+    String key,
+  ) async => _protectedRead(
+    _ownedSession(principalId),
+    'charges/${Uri.encodeComponent(key)}',
+  );
+
+  Future<Map<String, dynamic>> readCredit(
+    String principalId,
+    CancelToken cancel,
+  ) => _readForPrincipal(principalId, 'credit', cancel);
+
+  Future<Map<String, dynamic>> readCreditTransactions(
+    String principalId,
+    int page,
+    int pageSize,
+    CancelToken cancel,
+  ) => _readForPrincipal(principalId, 'credit/transactions', cancel, {
+    'page': page,
+    'page_size': pageSize,
+  });
+
+  Future<Map<String, dynamic>> stopCharge(
+    String principalId,
+    String sessionId,
+    String key,
+  ) async {
+    _validateSessionId(sessionId);
+    final session = _ownedSession(principalId);
+    return _withProtectedSession(
+      session,
+      (token) => _request(
+        session,
+        'sessions/$sessionId/stop',
+        method: 'POST',
+        expectedStatus: 202,
+        accessToken: token,
+        idempotencyKey: key,
+      ),
+    );
+  }
+
+  Future<Map<String, dynamic>> readChargeProgress(
+    String principalId,
+    String sessionId,
+    CancelToken cancel,
+  ) async {
+    _validateSessionId(sessionId);
+    return _readForPrincipal(
+      principalId,
+      'sessions/$sessionId/progress',
+      cancel,
+    );
+  }
+
+  Future<Map<String, dynamic>> readChargeStatement(
+    String principalId,
+    String sessionId,
+    CancelToken cancel,
+  ) async {
+    // The ledger returns PostgreSQL bigint IDs as strings.
+    if (!_statementSessionId.hasMatch(sessionId) ||
+        (sessionId.length == 19 &&
+            sessionId.compareTo('9223372036854775807') > 0)) {
+      throw _malformed;
+    }
+    return _readForPrincipal(
+      principalId,
+      'sessions/$sessionId/statement',
+      cancel,
+    );
+  }
+
+  void _validateSessionId(String sessionId) {
+    if (!_chargeSessionId.hasMatch(sessionId) ||
+        int.parse(sessionId) > 9007199254740991) {
+      throw _malformed;
+    }
+  }
+
+  Future<Map<String, dynamic>> _readForPrincipal(
+    String principalId,
+    String path,
+    CancelToken cancel, [
+    Map<String, Object?>? query,
+  ]) async {
+    final session = _ownedSession(principalId);
+    session.reads.add(cancel);
+    try {
+      return await _protectedRead(session, path, query, cancel);
+    } finally {
+      session.reads.remove(cancel);
+    }
+  }
+
+  _Session _ownedSession(String principalId) {
+    final session = _activeSession();
+    if (session.account!.id != principalId) throw _sessionEnded;
+    return session;
+  }
+
   Future<Map<String, dynamic>> readForVehicle(
     String path,
     String vehicleId,
@@ -192,17 +322,29 @@ class DriverApiSession {
     String path, [
     Map<String, Object?>? query,
     CancelToken? cancel,
-  ]) async {
+  ]) => _withProtectedSession(
+    session,
+    (token) => _get(session, path, token, query, cancel),
+    cancel: cancel,
+  );
+
+  Future<Map<String, dynamic>> _withProtectedSession(
+    _Session session,
+    Future<Map<String, dynamic>> Function(String token) request, {
+    CancelToken? cancel,
+  }) async {
     _requireCurrent(session);
     final accessToken = session.accessToken;
     try {
       try {
-        return await _get(session, path, accessToken, query, cancel);
+        return await request(accessToken);
       } on DriverApiException catch (error) {
         if (error.status != 401) rethrow;
+        if (cancel?.isCancelled == true) throw _sessionEnded;
       }
       await _renewAccessToken(session, accessToken);
-      return await _get(session, path, session.accessToken, query, cancel);
+      if (cancel?.isCancelled == true) throw _sessionEnded;
+      return await request(session.accessToken);
     } on DriverApiException catch (error) {
       _endOnAuthFailure(session, error);
       rethrow;
@@ -263,6 +405,7 @@ class DriverApiSession {
     Map<String, Object?>? body,
     Map<String, Object?>? query,
     String? accessToken,
+    String? idempotencyKey,
     CancelToken? cancel,
   }) async {
     final response = await _send(
@@ -273,6 +416,7 @@ class DriverApiSession {
       body: body,
       query: query,
       accessToken: accessToken,
+      idempotencyKey: idempotencyKey,
       cancel: cancel,
     );
     return _decodeObject(response.data) ?? (throw _malformed);
@@ -286,6 +430,7 @@ class DriverApiSession {
     Map<String, Object?>? body,
     Map<String, Object?>? query,
     String? accessToken,
+    String? idempotencyKey,
     CancelToken? cancel,
   }) async {
     _requireCurrent(session);
@@ -299,9 +444,10 @@ class DriverApiSession {
         options: Options(
           method: method,
           contentType: body == null ? null : Headers.jsonContentType,
-          headers: accessToken == null
-              ? null
-              : {'Authorization': 'Bearer $accessToken'},
+          headers: {
+            if (accessToken != null) 'Authorization': 'Bearer $accessToken',
+            'Idempotency-Key': ?idempotencyKey,
+          },
         ),
       );
     } on DioException catch (error) {
@@ -329,6 +475,18 @@ class DriverApiSession {
           'invalid_search' => 'invalid_search',
           'provider_unavailable' => 'provider_unavailable',
           'station_location_unavailable' => 'station_location_unavailable',
+          'idempotency_conflict' => 'idempotency_conflict',
+          'stop_pending_or_unknown' => 'stop_pending_or_unknown',
+          'session_not_stoppable' => 'session_not_stoppable',
+          'invalid_idempotency_key' => 'invalid_idempotency_key',
+          'reserved_idempotency_key' => 'reserved_idempotency_key',
+          'credit_unavailable' => 'credit_unavailable',
+          'connector_unavailable' => 'connector_unavailable',
+          'connector_busy_or_unknown' => 'connector_busy_or_unknown',
+          'tariff_unavailable' => 'tariff_unavailable',
+          'vehicle_not_owned_or_incompatible' =>
+            'vehicle_not_owned_or_incompatible',
+          'unsupported_mode' => 'unsupported_mode',
           _ => null,
         },
         mapAvailability: switch ((status, json?['error'], json?['detail'])) {
@@ -387,6 +545,8 @@ class _Session {
 
 const _malformed = DriverApiException(DriverApiProblem.malformed);
 const _sessionEnded = DriverApiException(DriverApiProblem.ended);
+final _chargeSessionId = RegExp(r'^[1-9][0-9]{0,15}$');
+final _statementSessionId = RegExp(r'^[1-9][0-9]{0,18}$');
 
 Map<String, dynamic>? _decodeObject(Object? body) {
   if (body is! String || body.isEmpty) return null;
