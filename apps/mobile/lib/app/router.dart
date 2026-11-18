@@ -24,6 +24,7 @@ import '../features/charging/presentation/charging_screens.dart';
 import '../features/charging/application/charge_session_controller.dart';
 import '../features/charging/presentation/charge_session_screen.dart';
 import '../features/charging/presentation/qr_connect_screen.dart';
+import '../features/payments/presentation/charging_credit_screen.dart';
 import '../features/payments/presentation/payment_screens.dart';
 import '../features/history/presentation/history_screens.dart';
 import '../features/loyalty/presentation/loyalty_screen.dart';
@@ -58,6 +59,8 @@ final routerProvider = Provider<GoRouter>((ref) {
               : null;
         }
         return path == '/profile' ||
+                path == '/credit' ||
+                path == '/history' ||
                 path == '/vehicles' ||
                 path == '/vehicles/new' ||
                 _apiVehiclePath.hasMatch(path) ||
@@ -121,6 +124,15 @@ final routerProvider = Provider<GoRouter>((ref) {
             GoRoute(
               path: '/suggestions',
               builder: (context, state) => const ApiSuggestionsScreen(),
+            ),
+            GoRoute(
+              path: '/history',
+              builder: (context, state) =>
+                  const ChargingCreditScreen(historyOnly: true),
+            ),
+            GoRoute(
+              path: '/credit',
+              builder: (context, state) => const ChargingCreditScreen(),
             ),
             GoRoute(
               path: '/charge-session',

@@ -138,13 +138,12 @@ void main() {
     expect(find.text('Tài xế kiểm thử'), findsOneWidget);
     expect(find.text('VinFast VF 8'), findsOneWidget);
     expect(find.textContaining('51A-00001'), findsOneWidget);
-    expect(find.text('Tín dụng sạc'), findsNothing);
+    expect(find.text('Tín dụng sạc'), findsOneWidget);
     expect(find.byKey(const Key('edit-profile')), findsNothing);
     expect(find.byKey(const Key('add-vehicle')), findsOneWidget);
     expect(find.byKey(const Key('edit-9')), findsNothing);
     expect(tester.widget<NavigationBar>(bar).selectedIndex, 2);
     for (final route in [
-      '/credit',
       '/station/test',
       '/vehicles/9/edit',
       '/start?connector=21',

@@ -45,6 +45,12 @@ class ProfileScreen extends ConsumerWidget {
             label: Text(copy.text('Khám phá trạm sạc', 'Explore stations')),
           ),
           const SizedBox(height: 20),
+          MenuRow(
+            label: copy.text('Tín dụng sạc', 'Charging credit'),
+            icon: Icons.account_balance_wallet_outlined,
+            onTap: () => context.push('/credit'),
+          ),
+          const SizedBox(height: 12),
           const VehicleDashboard(),
           const SizedBox(height: 8),
           _SignOutButton(copy: copy),
