@@ -6,6 +6,8 @@ import '../../core/api/api_config.dart';
 import '../../core/api/driver_api_session.dart';
 import '../../features/auth/application/auth_controller.dart';
 import '../../features/auth/data/api_auth_repository.dart';
+import '../../features/charging/application/charge_start_controller.dart';
+import '../../features/charging/data/api_charge_start_repository.dart';
 import '../../features/profile/application/profile_controller.dart';
 import '../../features/profile/data/api_profile_repository.dart';
 import '../../features/stations/application/connector_lookup_controller.dart';
@@ -59,6 +61,9 @@ class ApiApp extends StatelessWidget {
       ),
       profileRepositoryProvider.overrideWith(
         (ref) => ApiProfileRepository(ref.watch(_apiSessionProvider)),
+      ),
+      chargeStartRepositoryProvider.overrideWith(
+        (ref) => ApiChargeStartRepository(ref.watch(_apiSessionProvider)),
       ),
       connectorLookupRepositoryProvider.overrideWith((ref) {
         ref.watch(discoverySessionProvider);

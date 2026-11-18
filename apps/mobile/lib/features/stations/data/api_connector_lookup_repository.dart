@@ -60,6 +60,8 @@ class ApiConnectorLookupRepository implements ConnectorLookupRepository {
       stationName: name,
       status: status,
       reportedIssue: issue == true,
+      canRequestStart:
+          online && (rawStatus == 'Available' || rawStatus == 'Preparing'),
     );
   }
 
