@@ -46,13 +46,13 @@ String invoiceLabel(
   ),
 };
 
-class CreditScreen extends ConsumerStatefulWidget {
-  const CreditScreen({super.key});
+class PreviewTopUpScreen extends ConsumerStatefulWidget {
+  const PreviewTopUpScreen({super.key});
   @override
-  ConsumerState<CreditScreen> createState() => _CreditScreenState();
+  ConsumerState<PreviewTopUpScreen> createState() => _PreviewTopUpScreenState();
 }
 
-class _CreditScreenState extends ConsumerState<CreditScreen> {
+class _PreviewTopUpScreenState extends ConsumerState<PreviewTopUpScreen> {
   final amount = TextEditingController(text: '200000');
   final points = TextEditingController();
   @override
@@ -103,29 +103,8 @@ class _CreditScreenState extends ConsumerState<CreditScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    copy.text('Tín dụng khả dụng', 'Available credit'),
-                    style: const TextStyle(color: PowerMeColors.muted),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    vnd(credit.availableVnd),
-                    style: text.headlineLarge?.copyWith(
-                      color: PowerMeColors.teal,
-                      fontSize: 32,
-                      letterSpacing: -.6,
-                      fontWeight: FontWeight.w800,
-                      fontFeatures: const [FontFeature.tabularFigures()],
-                    ),
-                  ),
-                  const SizedBox(height: 24),
                   MetricGrid(
                     items: [
-                      MetricItem(
-                        copy.text('Số dư đã ghi sổ', 'Posted balance'),
-                        vnd(credit.balanceVnd),
-                        Icons.account_balance_wallet_outlined,
-                      ),
                       MetricItem(
                         copy.text('Điểm có thể đổi', 'Redeemable points'),
                         '${credit.availablePoints}',
@@ -133,16 +112,6 @@ class _CreditScreenState extends ConsumerState<CreditScreen> {
                       ),
                     ],
                   ),
-                  if (credit.balanceVnd < 0)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 16),
-                      child: Text(
-                        copy.text(
-                          'Số dư đang âm. Lần nạp tiếp theo sẽ bù phần còn thiếu trước.',
-                          'Balance is negative. The next top-up will cover the shortfall first.',
-                        ),
-                      ),
-                    ),
                 ],
               ),
             ),
@@ -411,63 +380,6 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
           ),
         ),
       ],
-    );
-  }
-}
-
-class CreditSummary extends ConsumerWidget {
-  const CreditSummary({super.key});
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final s = ref.watch(paymentsControllerProvider);
-    final copy = AppCopy(ref.watch(profileControllerProvider).profile.language);
-    return HeroCard(
-      accent: PowerMeColors.gold,
-      padding: const EdgeInsets.all(16),
-      child: LayoutBuilder(
-        builder: (context, box) {
-          final balance = Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                copy.text('Tín dụng khả dụng', 'Available credit'),
-                style: const TextStyle(color: PowerMeColors.muted),
-              ),
-              const SizedBox(height: 4),
-              Text(
-                vnd(s.credit?.availableVnd),
-                style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                  fontWeight: FontWeight.w800,
-                ),
-              ),
-            ],
-          );
-          final topup = FilledButton.tonalIcon(
-            style: FilledButton.styleFrom(
-              backgroundColor: PowerMeColors.gold.withValues(alpha: .16),
-              foregroundColor: PowerMeColors.gold,
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-              textStyle: Theme.of(context).textTheme.labelLarge,
-            ),
-            onPressed: () => context.push('/credit'),
-            icon: const Icon(Icons.add_rounded, size: 18),
-            label: Text(copy.text('Nạp tín dụng', 'Top up credit')),
-          );
-          return box.maxWidth < 300 ||
-                  MediaQuery.textScalerOf(context).scale(14) / 14 > 1.3
-              ? Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [balance, const SizedBox(height: 12), topup],
-                )
-              : Row(
-                  children: [
-                    Expanded(child: balance),
-                    const SizedBox(width: 8),
-                    topup,
-                  ],
-                );
-        },
-      ),
     );
   }
 }

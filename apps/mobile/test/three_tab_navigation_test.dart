@@ -25,6 +25,7 @@ import 'scanner_platform_fake.dart';
 import 'package:driver_app/features/charging/application/qr_connection_controller.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'support/preview_routes.dart';
 
 class _SignedIn extends AuthController {
   @override
@@ -97,6 +98,7 @@ void main() {
     await tester.pumpWidget(
       ProviderScope(
         overrides: [
+          previewRoutesProvider.overrideWith((ref) => buildPreviewRoutes()),
           authControllerProvider.overrideWith(_SignedIn.new),
           authRepositoryProvider.overrideWithValue(FakeAuthRepository(store)),
           authScopeProvider.overrideWith((ref) {

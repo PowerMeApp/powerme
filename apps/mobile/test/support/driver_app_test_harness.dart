@@ -1,3 +1,4 @@
+import 'package:driver_app/app/router.dart';
 import 'dart:async';
 
 import 'package:driver_app/app/composition/vietmap_config.dart';
@@ -29,6 +30,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter/material.dart';
 
 import 'fake_auth_repository.dart';
+import 'preview_routes.dart';
 
 final _clockProvider = Provider<DateTime Function()>((ref) => DateTime.now);
 final _storeProvider = Provider((ref) => DemoStore());
@@ -80,6 +82,7 @@ class DriverAppTestHarness extends StatelessWidget {
   @override
   Widget build(BuildContext context) => ProviderScope(
     overrides: [
+      previewRoutesProvider.overrideWith((ref) => buildPreviewRoutes()),
       vietmapConfigProvider.overrideWithValue(mapConfig),
       mapLocationRepositoryProvider.overrideWithValue(
         DeviceLocationRepository(),

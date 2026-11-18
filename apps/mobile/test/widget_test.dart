@@ -18,6 +18,7 @@ import 'package:driver_app/features/stations/data/mock_station_repository.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'support/preview_routes.dart';
 
 void main() {
   WidgetController.hitTestWarningShouldBeFatal = true;
@@ -177,6 +178,7 @@ void main() {
         );
         final container = ProviderContainer.test(
           overrides: [
+            previewRoutesProvider.overrideWith((ref) => buildPreviewRoutes()),
             paymentsRepositoryProvider.overrideWithValue(
               MockPaymentsRepository(
                 store,
