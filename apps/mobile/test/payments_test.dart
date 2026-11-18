@@ -10,10 +10,10 @@ import 'package:driver_app/demo/station_actions_store.dart';
 import 'package:driver_app/features/auth/domain/auth_scope.dart';
 import 'package:driver_app/features/auth/application/auth_controller.dart';
 import 'package:driver_app/features/charging/domain/charging.dart';
-import 'package:driver_app/features/charging/data/mock_charging_repository.dart';
+import 'support/mock_charging_repository.dart';
 import 'package:driver_app/features/loyalty/domain/loyalty.dart';
 import 'package:driver_app/features/payments/domain/payments.dart';
-import 'package:driver_app/features/payments/data/mock_payments_repository.dart';
+import 'support/mock_payments_repository.dart';
 import 'package:driver_app/features/payments/application/payments_controller.dart';
 
 void main() {

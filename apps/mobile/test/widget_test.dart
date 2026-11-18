@@ -9,7 +9,7 @@ import 'package:driver_app/demo/charging_store.dart';
 import 'package:driver_app/demo/payment_store.dart';
 import 'package:driver_app/demo/station_actions_store.dart';
 import 'package:driver_app/features/payments/application/payments_controller.dart';
-import 'package:driver_app/features/payments/data/mock_payments_repository.dart';
+import 'support/mock_payments_repository.dart';
 import 'package:driver_app/features/profile/application/profile_controller.dart';
 import 'package:driver_app/features/profile/data/mock_profile_repository.dart';
 import 'package:driver_app/features/profile/domain/driver_profile.dart';
