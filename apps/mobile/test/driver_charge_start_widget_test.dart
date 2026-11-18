@@ -2,15 +2,19 @@ import 'dart:async';
 
 import 'package:dio/dio.dart';
 import 'package:driver_app/app/composition/api_app.dart';
+import 'package:driver_app/app/driver_tab_bar.dart';
 import 'package:driver_app/core/api/api_config.dart';
 import 'package:driver_app/core/api/driver_api_session.dart';
 import 'package:driver_app/core/theme/powerme_theme.dart';
+import 'package:driver_app/features/auth/application/auth_controller.dart';
 import 'package:driver_app/features/auth/domain/auth_scope.dart';
 import 'package:driver_app/features/charging/data/api_charge_start_repository.dart';
 import 'package:driver_app/features/charging/domain/charge_start.dart';
 import 'package:driver_app/features/charging/domain/charging.dart';
 import 'package:driver_app/features/charging/presentation/charge_flow_visuals.dart';
+import 'package:driver_app/features/profile/application/profile_controller.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 
@@ -289,6 +293,111 @@ void main() {
     );
     expect(tester.takeException(), isNull);
   });
+
+  testWidgets(
+    'an offered cap requires consent for the original vehicle and a new key',
+    (tester) async {
+      final firstResult = Completer<ResponseBody>();
+      String vehicle = '9';
+      var chargePosts = 0;
+      final fixture = _fixture((r) async {
+        if (r.path.startsWith('connectors/')) return reply(200, _connector());
+        if (r.path.startsWith('vehicles/')) {
+          vehicle = r.path.split('/').last;
+          return reply(200, ownVehicle(id: vehicle));
+        }
+        if (r.path == 'charges') {
+          return switch (++chargePosts) {
+            1 => firstResult.future,
+            2 => reply(202, _snapshot('topuprequired')),
+            _ => reply(202, _snapshot('start_timeout')),
+          };
+        }
+        throw StateError('Unexpected ${r.method} ${r.path}');
+      }, selected: () => vehicle);
+      final camera = await _openQr(tester, fixture);
+      await _scan(tester, camera);
+      await _enterLimit(tester, '20');
+      await _tap(tester, 'qr-submit-start');
+      final container = _container(tester);
+      final profile = container.read(profileControllerProvider.notifier);
+      unawaited(profile.selectVehicle('10'));
+      await tester.pumpAndSettle();
+      firstResult.complete(
+        reply(202, _snapshot('requiresconfirmation', limit: 9012)),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('9,012 kWh'), findsOneWidget);
+      expect(find.text('VinFast VF 8 · 51A-00001'), findsOneWidget);
+      expect(_key('qr-accept-charge-limit'), findsNothing);
+      expect(chargePosts, 1);
+      unawaited(profile.selectVehicle('9'));
+      await tester.pumpAndSettle();
+      await _tap(tester, 'qr-accept-charge-limit', twice: true);
+      expect(chargePosts, 2);
+      final posts = fixture.requests.where((r) => r.path == 'charges').toList();
+      expect(
+        posts.last.headers['Idempotency-Key'],
+        isNot(posts.first.headers['Idempotency-Key']),
+      );
+      expect(posts.last.data, {
+        'connector_id': '31',
+        'vehicle_id': '9',
+        'mode': 'energy_kwh',
+        'energy_limit_wh': 9012,
+      });
+      expect(
+        find.textContaining('Tín dụng sạc dưới mức tối thiểu'),
+        findsOneWidget,
+      );
+      expect(_key('qr-resend-charge'), findsNothing);
+      final cameraStarts = camera.starts;
+      await _tap(tester, 'qr-clear-charge');
+      expect(camera.starts, greaterThan(cameraStarts));
+      expect(_key('qr-charge-energy'), findsNothing);
+      await _scan(tester, camera);
+      await _enterLimit(tester, '2.5');
+      await _tap(tester, 'qr-submit-start');
+      expect(find.textContaining('Trụ chưa bắt đầu phiên'), findsOneWidget);
+      expect(
+        fixture.requests.last.headers['Idempotency-Key'],
+        isNot(posts.last.headers['Idempotency-Key']),
+      );
+      await _tap(tester, 'qr-clear-charge');
+      expect(_key('qr-manual-reference'), findsOneWidget);
+      expect(_key('qr-charge-energy'), findsNothing);
+    },
+  );
+
+  testWidgets(
+    'logout drops a pending charge and a late result across re-login',
+    (tester) async {
+      final lateStart = Completer<ResponseBody>();
+      final fixture = _fixture((r) async {
+        if (r.path.startsWith('connectors/')) return reply(200, _connector());
+        if (r.path == 'charges' && r.method == 'POST') return lateStart.future;
+        throw StateError('Unexpected ${r.method} ${r.path}');
+      });
+      final camera = await _openQr(tester, fixture);
+      await _scan(tester, camera);
+      await _enterLimit(tester, '1');
+      await _tap(tester, 'qr-submit-start');
+      _container(tester).read(authControllerProvider.notifier).signOut();
+      await tester.pumpAndSettle();
+      await enterAccount(tester);
+      await _tap(tester, 'nav-charging');
+      lateStart.complete(reply(202, _snapshot('active', session: '78')));
+      await tester.pumpAndSettle();
+      await tester.pump(const Duration(seconds: 3));
+      expect(find.text('Trụ đã bắt đầu phiên sạc.'), findsNothing);
+      expect(_key('qr-check-charge'), findsNothing);
+      expect(_key('qr-manual-reference'), findsOneWidget);
+      expect(
+        fixture.requests.where((r) => r.path.startsWith('charges')),
+        hasLength(1),
+      );
+    },
+  );
 }
 
 Finder _key(String key) => find.byKey(Key(key));
@@ -312,6 +421,9 @@ Future<void> _scan(WidgetTester tester, ScannerPlatformFake camera) async {
   camera.emit('powerme:connector:PM-T96/2');
   await tester.pumpAndSettle();
 }
+
+ProviderContainer _container(WidgetTester tester) =>
+    ProviderScope.containerOf(tester.element(find.byType(DriverTabBar)));
 
 Future<ScannerPlatformFake> _openQr(
   WidgetTester tester,
