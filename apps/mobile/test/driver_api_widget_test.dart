@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:dio/dio.dart';
 import 'package:driver_app/app/composition/api_app.dart';
+import 'package:driver_app/app/driver_tab_bar.dart';
 import 'package:driver_app/core/api/api_config.dart';
 import 'package:driver_app/features/profile/application/profile_controller.dart';
 import 'package:flutter/material.dart';
@@ -124,12 +125,28 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Đăng ký hiện chưa khả dụng.'), findsOneWidget);
     await enterAccount(tester);
-    final bar = find.byType(NavigationBar);
-    final navigation = tester.widget<NavigationBar>(bar);
-    expect(navigation.selectedIndex, 0);
+    final bar = find.byType(DriverTabBar);
+    final navigation = tester.widget<DriverTabBar>(bar);
+    expect(navigation.selected, DriverTab.discover);
+    final tabs = [
+      for (final name in [
+        'discovery',
+        'history',
+        'charging',
+        'credit',
+        'account',
+      ])
+        find.byKey(Key('nav-$name')),
+    ];
+    for (var i = 1; i < tabs.length; i++) {
+      expect(
+        tester.getCenter(tabs[i]).dx,
+        greaterThan(tester.getCenter(tabs[i - 1]).dx),
+      );
+    }
     expect(
-      navigation.destinations.cast<NavigationDestination>().map((d) => d.label),
-      ['Khám phá', 'Quét QR', 'Tài khoản'],
+      find.descendant(of: bar, matching: find.text('Sạc')),
+      findsOneWidget,
     );
     final router = GoRouter.of(tester.element(bar));
     expect(router.routeInformationProvider.value.uri.path, '/discover');
@@ -142,7 +159,7 @@ void main() {
     expect(find.byKey(const Key('edit-profile')), findsNothing);
     expect(find.byKey(const Key('add-vehicle')), findsOneWidget);
     expect(find.byKey(const Key('edit-9')), findsNothing);
-    expect(tester.widget<NavigationBar>(bar).selectedIndex, 2);
+    expect(tester.widget<DriverTabBar>(bar).selected, DriverTab.account);
     for (final route in [
       '/station/test',
       '/vehicles/9/edit',
@@ -215,8 +232,8 @@ void main() {
       await tester.pumpAndSettle();
       expect(router.routeInformationProvider.value.uri.path, '/scan');
       expect(
-        tester.widget<NavigationBar>(find.byType(NavigationBar)).selectedIndex,
-        1,
+        tester.widget<DriverTabBar>(find.byType(DriverTabBar)).selected,
+        DriverTab.charging,
       );
       expect(camera.starts, 1);
       expect(find.textContaining('Cho phép Camera'), findsOneWidget);
@@ -299,7 +316,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(camera.starts, 1);
       final container = ProviderScope.containerOf(
-        tester.element(find.byType(NavigationBar)),
+        tester.element(find.byType(DriverTabBar)),
       );
       camera.emit('powerme:connector:PM-T96/2');
       camera.emit('powerme:connector:PM-T96/2');
@@ -424,8 +441,8 @@ void main() {
     });
     expect(find.text('Thêm xe để tìm trạm tương thích.'), findsOneWidget);
     expect(
-      tester.widget<NavigationBar>(find.byType(NavigationBar)).selectedIndex,
-      0,
+      tester.widget<DriverTabBar>(find.byType(DriverTabBar)).selected,
+      DriverTab.discover,
     );
     await tester.tap(find.byKey(const Key('nav-account')));
     await tester.pumpAndSettle();

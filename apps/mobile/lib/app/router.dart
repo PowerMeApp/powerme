@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../core/l10n/app_copy.dart';
+import 'driver_tab_bar.dart';
 import '../core/theme/powerme_theme.dart';
 import '../features/profile/application/profile_controller.dart';
 import '../features/profile/presentation/profile_screen.dart';
@@ -225,12 +226,40 @@ class DriverAppShell extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final copy = AppCopy(ref.watch(profileControllerProvider).profile.language);
+    if (apiMode) {
+      final hasSession = ref.watch(confirmedChargeSessionProvider) != null;
+      final activeTab = switch (path) {
+        '/history' => DriverTab.history,
+        '/scan' || '/charge-session' => DriverTab.charging,
+        '/credit' => DriverTab.credit,
+        '/profile' => DriverTab.account,
+        _ => DriverTab.discover,
+      };
+      return Scaffold(
+        body: child,
+        bottomNavigationBar: DriverTabBar(
+          copy: copy,
+          selected: activeTab,
+          hasSession: hasSession,
+          onSelect: (tab) {
+            final destination = switch (tab) {
+              DriverTab.discover => '/discover',
+              DriverTab.history => '/history',
+              DriverTab.charging => hasSession ? '/charge-session' : '/scan',
+              DriverTab.credit => '/credit',
+              DriverTab.account => '/profile',
+            };
+            if (path != destination) context.go(destination);
+          },
+        ),
+      );
+    }
     final selected = switch (path) {
       '/charging' || '/scan' => 1,
       '/profile' => 2,
       _ => 0,
     };
-    final paths = [apiMode ? '/discover' : '/', '/scan', '/profile'];
+    const paths = ['/', '/scan', '/profile'];
     final destinations = [
       (
         key: 'nav-discovery',
