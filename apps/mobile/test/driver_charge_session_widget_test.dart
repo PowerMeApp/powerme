@@ -5,6 +5,7 @@ import 'package:driver_app/app/composition/api_app.dart';
 import 'package:driver_app/app/router.dart';
 import 'package:driver_app/core/api/api_config.dart';
 import 'package:driver_app/core/widgets/flow_page.dart' show ValueLine;
+import 'package:driver_app/features/auth/application/auth_controller.dart';
 import 'package:driver_app/features/charging/presentation/charge_flow_visuals.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -18,6 +19,7 @@ import 'scanner_platform_fake.dart';
 
 const _connectorPath = 'connectors/by-code/PM-T96/2';
 const _progressPath = 'sessions/78/progress';
+const _stopPath = 'sessions/78/stop';
 const _statementPath = 'sessions/78/statement';
 const _driver = '7';
 const _timestamp = '2026-11-16T01:02:00.000Z';
@@ -203,6 +205,313 @@ void main() {
     expect(_byKey('qr-follow-charge'), findsOneWidget);
     expect(_byKey('qr-clear-charge'), findsNothing);
     expect(_count(fixture, 'charges'), 1);
+  });
+
+  testWidgets(
+    'foreground QR detects the end and offers the session or scanner',
+    (tester) async {
+      final interrupted = Completer<ResponseBody>();
+      final completed = _progress(status: 'review', meterStop: 500);
+      var reads = 0;
+      final fixture = _fixture((request) async {
+        expect(request.path, _progressPath);
+        return switch (++reads) {
+          1 => reply(200, _progress()),
+          2 => interrupted.future,
+          3 => reply(
+            200,
+            _progress(
+              status: 'closed',
+              meterStop: 500,
+              at: '2026-11-16T01:01:00Z',
+            ),
+          ),
+          4 => reply(200, {...completed, 'session_id': '79'}),
+          _ => reply(200, completed),
+        };
+      });
+      await _start(tester, await _signIn(tester, fixture));
+      expect(reads, 0);
+      expect(_byKey('qr-clear-charge'), findsNothing);
+      await _tick(tester);
+      await _tick(tester);
+      await _tick(tester);
+      expect(reads, 2);
+      final backgroundRead = fixture.requests.last.cancelToken!;
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+      await _tick(tester, const Duration(seconds: 20));
+      expect(backgroundRead.isCancelled, isTrue);
+      expect(reads, 2);
+      interrupted.complete(reply(200, completed));
+
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      await tester.pump();
+      await _tick(tester);
+      expect(reads, 3);
+      expect(_byKey('qr-clear-charge'), findsNothing);
+      await _tick(tester);
+      expect(reads, 4);
+      expect(_byKey('qr-clear-charge'), findsNothing);
+      await _tick(tester);
+      expect(reads, 5);
+      await _findText(tester, 'Phiên sạc đã kết thúc.');
+      await _findText(tester, 'Quét mã khác');
+      await _tap(tester, find.text('Xem phiên đã kết thúc'));
+      await _findText(tester, 'Phiên đang chờ kiểm tra để quyết toán.');
+      await _tap(tester, _byKey('charge-session-return-to-scan'));
+      expect(_byKey('qr-manual-reference'), findsOneWidget);
+      expect(_byKey('qr-follow-charge'), findsNothing);
+      expect(reads, 6);
+      expect(_count(fixture, 'charges'), 1);
+    },
+  );
+
+  testWidgets('scan another code clears the previous manual entry from QR', (
+    tester,
+  ) async {
+    final fixture = _fixture((request) async {
+      expect(request.path, _progressPath);
+      return reply(200, _progress(status: 'closed', meterStop: 400));
+    });
+    await _signIn(tester, fixture);
+    await _tap(tester, _byKey('nav-charging'));
+    final reference = _byKey('qr-manual-reference');
+    await _reveal(tester, reference);
+    await tester.enterText(reference, 'PM-T96/2');
+    await _tap(tester, _byKey('qr-connect'));
+    await _submitStart(tester);
+
+    await _tick(tester);
+    await _tap(tester, find.text('Quét mã khác'));
+    expect(tester.widget<TextField>(reference).controller!.text, isEmpty);
+    expect(_byKey('qr-charge-energy'), findsNothing);
+    expect(_count(fixture, _connectorPath), 1);
+    expect(_count(fixture, _statementPath), 0);
+    expect(_count(fixture, 'charges'), 1);
+  });
+
+  testWidgets('billing review, missing ownership and ineligible are bounded', (
+    tester,
+  ) async {
+    var response = reply(200, _progress(status: 'review'));
+    final fixture = _fixture((r) async {
+      expect(r.path, _progressPath);
+      return response;
+    });
+    await _openProgress(tester, fixture);
+    await _findText(tester, 'Phiên đang chờ kiểm tra để quyết toán.');
+    await _tick(tester, const Duration(seconds: 20));
+    expect(_count(fixture, _progressPath), 1);
+    response = reply(
+      200,
+      _progress(
+        status: 'closed',
+        settlement: 'posted',
+        meterStop: 0,
+        review: true,
+      ),
+    );
+    await _tap(tester, find.text('Thử cập nhật'));
+    await _findText(tester, 'Phiên đang chờ kiểm tra để quyết toán.');
+    await _tick(tester, const Duration(seconds: 10));
+    expect(_count(fixture, _progressPath), 2);
+    response = reply(200, {..._progress(), 'session_id': '79'});
+    await _tap(tester, find.text('Thử cập nhật'));
+    expect(find.text('Không tìm thấy phiên sạc.'), findsOneWidget);
+    expect(find.text('Trạng thái phiên'), findsNothing);
+    response = reply(404, {'error': 'not_found'});
+    await _tap(tester, find.text('Thử cập nhật'));
+    await _tick(tester, const Duration(seconds: 20));
+    expect(_count(fixture, _progressPath), 4);
+    response = reply(
+      200,
+      _progress(
+        status: 'reconciled',
+        settlement: 'ineligible',
+        meterStop: 0,
+        energy: 0,
+      ),
+    );
+    await _tap(tester, find.text('Thử cập nhật'));
+    await _findText(tester, 'Phiên này không có bảng kê quyết toán.');
+    await _tick(tester, const Duration(seconds: 20));
+    expect(_count(fixture, _progressPath), 5);
+    expect(_count(fixture, _statementPath), 0);
+  });
+
+  testWidgets(
+    'statement recovery uses saved eligibility and verifies ownership',
+    (tester) async {
+      var meterAvailable = false;
+      var reads = 0;
+      final fixture = _fixture((r) async {
+        if (r.path == _progressPath) {
+          return reply(
+            200,
+            _progress(
+              status: 'reconciled',
+              settlement: 'posted',
+              meterStop: meterAvailable ? 0 : null,
+            ),
+          );
+        }
+        expect(r.path, _statementPath);
+        return switch (++reads) {
+          1 => reply(404, {'error': 'not_found'}),
+          2 => reply(200, {..._statement(), 'driver_id': '8'}),
+          3 => reply(200, {..._statement(), 'session_id': '79'}),
+          4 => reply(503, {'error': 'unavailable'}),
+          5 => reply(200, {..._statement(), 'amount_vnd': '100'}),
+          _ => reply(200, {
+            ..._statement(),
+            'energy_wh': 0,
+            'amount_vnd': 0,
+            'earned_points': 0,
+          }),
+        };
+      });
+      await _openProgress(tester, fixture);
+      await _findText(tester, 'Chưa có chỉ số chốt để xác nhận bảng kê.');
+      expect(reads, 0);
+      meterAvailable = true;
+      await _tap(tester, find.text('Thử cập nhật'));
+      await _findText(tester, 'Bảng kê chưa có. Bạn có thể thử tải lại.');
+      await _tick(tester, const Duration(seconds: 20));
+      expect(reads, 1);
+      for (var attempt = 2; attempt <= 6; attempt++) {
+        await _tap(tester, find.text('Tải lại bảng kê'));
+        expect(reads, attempt);
+        if (attempt < 6) expect(find.text('Tín dụng đã trừ'), findsNothing);
+      }
+      await _findText(tester, '0 kWh');
+      await _findText(tester, '0 đ');
+      await _findText(tester, '0');
+      expect(_count(fixture, _progressPath), 2);
+    },
+  );
+
+  testWidgets(
+    'logout rejects a late statement and direct access after re-login',
+    (tester) async {
+      final delayed = Completer<ResponseBody>();
+      final fixture = _fixture(
+        (r) async => switch (r.path) {
+          _progressPath => reply(
+            200,
+            _progress(status: 'closed', settlement: 'posted', meterStop: 0),
+          ),
+          _statementPath => delayed.future,
+          _ => throw StateError('Unexpected ${r.method} ${r.path}'),
+        },
+      );
+      await _openProgress(tester, fixture);
+      final scope = _container(tester);
+      final token = fixture.requests.last.cancelToken!;
+      scope.read(authControllerProvider.notifier).signOut();
+      await tester.pumpAndSettle();
+      expect(token.isCancelled, isTrue);
+      await enterAccount(tester);
+      delayed.complete(reply(200, _statement()));
+      scope.read(routerProvider).go('/charge-session');
+      await tester.pumpAndSettle();
+      expect(_byKey('qr-manual-reference'), findsOneWidget);
+      expect(find.text('Bảng kê phiên sạc'), findsNothing);
+      expect(_count(fixture, _progressPath), 1);
+      expect(_count(fixture, _statementPath), 1);
+    },
+  );
+
+  testWidgets('tab switches keep a settling target until returning to scan', (
+    tester,
+  ) async {
+    var snapshot = _progress(
+      status: 'closed',
+      settlement: 'pending',
+      meterStop: 10400,
+      energy: 10000,
+    );
+    final fixture = _fixture(
+      (r) async => switch (r.path) {
+        _progressPath => reply(200, snapshot),
+        _statementPath => reply(200, _statement()),
+        _ => throw StateError('Unexpected ${r.method} ${r.path}'),
+      },
+    );
+    final camera = await _signIn(tester, fixture);
+    await _start(tester, camera);
+    final router = _container(tester).read(routerProvider);
+    await _tap(tester, _byKey('nav-charging'));
+    final cameraStarts = camera.starts;
+    await _findText(tester, 'Đang chờ quyết toán.');
+    await _tap(tester, _byKey('nav-account'));
+    final before = _count(fixture, _progressPath);
+    await _tick(tester, const Duration(seconds: 12));
+    expect(_count(fixture, _progressPath), before);
+    expect(camera.starts, cameraStarts);
+
+    await _tap(tester, _byKey('nav-charging'));
+    expect(router.routeInformationProvider.value.uri.path, '/charge-session');
+    await _findText(tester, 'Đang chờ quyết toán.');
+    snapshot = {...snapshot, 'settlement_state': 'posted'};
+    await _tick(tester);
+    await _findText(tester, 'Bảng kê phiên sạc');
+    await _tap(tester, _byKey('nav-discovery'));
+    await _tap(tester, _byKey('nav-charging'));
+    await _findText(tester, 'Bảng kê phiên sạc');
+    expect(camera.starts, cameraStarts);
+
+    await _tap(tester, _byKey('charge-session-return-to-scan'));
+    expect(router.routeInformationProvider.value.uri.path, '/scan');
+    expect(_byKey('qr-manual-reference'), findsOneWidget);
+    await _tap(tester, _byKey('nav-account'));
+    await _tap(tester, _byKey('nav-charging'));
+    expect(router.routeInformationProvider.value.uri.path, '/scan');
+    expect(_byKey('qr-follow-charge'), findsNothing);
+  });
+
+  testWidgets('stop sheet at 320px/200% stays live and Back cancels', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(320, 600));
+    tester.platformDispatcher.textScaleFactorTestValue = 2;
+    addTearDown(() async {
+      tester.platformDispatcher.clearTextScaleFactorTestValue();
+      await tester.binding.setSurfaceSize(null);
+    });
+
+    var snapshot = _progress(consumed: 2500, estimate: 12500);
+    final fixture = _fixture((request) async {
+      expect(request.path, _progressPath);
+      return reply(200, snapshot);
+    });
+    await _openProgress(tester, fixture);
+    await _tap(tester, _byKey('request-stop-charging'));
+    final sheet = find.byType(BottomSheet);
+    expect(sheet, findsOneWidget);
+    final confirm = _byKey('confirm-stop-charging');
+    await _reveal(tester, confirm);
+    expect(confirm.hitTestable(), findsOneWidget);
+    expect(_count(fixture, _stopPath), 0);
+    await tester.binding.handlePopRoute();
+    await tester.pumpAndSettle();
+    expect(sheet, findsNothing);
+    expect(_count(fixture, _stopPath), 0);
+
+    await _tap(tester, _byKey('request-stop-charging'));
+    snapshot = _progress(
+      status: 'closed',
+      settlement: 'pending',
+      meterStop: 0,
+      energy: 0,
+    );
+    await _tick(tester);
+    expect(_count(fixture, _progressPath), 2);
+    expect(tester.widget<FilledButton>(confirm).onPressed, isNull);
+    await _tap(tester, find.text('Hủy'));
+    expect(sheet, findsNothing);
+    expect(_byKey('request-stop-charging'), findsNothing);
+    expect(_count(fixture, _stopPath), 0);
+    expect(tester.takeException(), isNull);
   });
 }
 
