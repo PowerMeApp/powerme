@@ -23,8 +23,14 @@
 //   offline trụ chấp nhận hai thẻ hợp lệ theo danh sách cục bộ; pin đầy → reason "Other";
 //   hai súng chia đều 120 kW; config key hỗ trợ là tập con tự chọn.
 //
-// Đồng hồ mô phỏng: mọi timestamp OCPP dùng đồng hồ mô phỏng (tăng nhanh ×speed khi demo tăng tốc).
-// Thời gian MẠNG (rớt mạng, thử lại 30 s) luôn là giây thật.
+// Đồng hồ mô phỏng: mọi timestamp OCPP dùng đồng hồ mô phỏng (tăng nhanh ×speed khi chọn ×10/×20).
+// Thời gian MẠNG (rớt mạng, thử lại 30 s, ConnectionTimeOut) luôn là giây thật. Đồng hồ mô phỏng
+// KHÔNG tự quay về giờ thật khi về ×1 — dùng hành động `syncclock` (QA-03, xem README).
+//
+// Hành trình phiên (QA-03): mỗi súng giữ tối đa 2 "hành trình" (phiên trước + phiên hiện tại) — các
+// bước RemoteStart → StartTransaction → transactionId → Charging → RemoteStop → StopTransaction kèm
+// giờ thật, và chuỗi điểm kWh/kW/SoC cho biểu đồ (event 'point'). Chỉ là sổ ghi cho trang từng trụ,
+// không đổi bản tin OCPP nào.
 
 import { EventEmitter } from 'node:events';
 import ocpp from 'ocpp-rpc';
@@ -101,6 +107,7 @@ export function createStation(options = {}) {
     mode: { type: 'full', value: null },
     remoteWait: null, // { idTag, until } — RemoteStart đang chờ cắm súng
     tx: null,
+    journeys: [], // tối đa 2: [phiên trước, phiên hiện tại]
     last: { kw: 0, v: 0, a: 0 },
   });
   const conns = new Map([
@@ -142,6 +149,51 @@ export function createStation(options = {}) {
     changed();
   }
   const changed = () => events.emit('change');
+
+  // ── Hành trình phiên (chỉ để hiển thị, QA-03) ─────────────────────────────
+  // Một hành trình "đóng" khi phiên đã dừng (đã sinh StopTransaction) hoặc kết thúc mà không có
+  // phiên (RemoteStart bị từ chối/hết hạn, thẻ bị từ chối). Bước đến muộn (kết quả StopTransaction
+  // sau phát bù) vẫn được gắn vào đúng hành trình qua tham chiếu tx.journey.
+  let jSeq = 0;
+  function openJourney(c) {
+    const last = c.journeys.at(-1);
+    if (last && !last.closed) return last;
+    const j = { id: ++jSeq, openedAt: Date.now(), closed: false, steps: [], series: [], lastPt: 0 };
+    c.journeys.push(j);
+    if (c.journeys.length > 2) c.journeys.shift();
+    return j;
+  }
+  function jAdd(j, kind, info = {}) {
+    if (!j) return;
+    j.steps.push({ t: Date.now(), sim: simIso(), kind, ...info });
+    if (j.steps.length > 30) j.steps.splice(1, 1); // giữ bước đầu tiên
+    changed();
+  }
+  function jStep(c, kind, info, { close = false } = {}) {
+    const j = openJourney(c);
+    jAdd(j, kind, info);
+    if (close) j.closed = true;
+    return j;
+  }
+  // Điểm biểu đồ: s = giây mô phỏng từ lúc bắt đầu phiên, r = giây thật.
+  function pushPoint(c, force = false) {
+    const tx = c.tx;
+    const j = tx?.journey;
+    if (!j) return;
+    const now = Date.now();
+    if (!force && now - j.lastPt < 1000) return;
+    j.lastPt = now;
+    const p = {
+      s: Math.round((sim.ms - tx.startSim) / 1000),
+      r: Math.round((now - tx.startReal) / 1000),
+      kwh: Math.round(tx.wh / 10) / 100,
+      kw: Math.round(c.last.kw * 10) / 10,
+      soc: c.vehicleSoc == null ? null : Math.round(c.vehicleSoc * 10) / 10,
+    };
+    j.series.push(p);
+    if (j.series.length > 400) j.series = j.series.filter((_, i) => i % 2 === 0 || i === 400);
+    events.emit('point', { connector: c.id, jid: j.id, p });
+  }
 
   function attachLogging(c) {
     c.on('message', ({ message, outbound }) => {
@@ -224,7 +276,12 @@ export function createStation(options = {}) {
         if (q.tx && q.tx.id == null && q.action !== 'StartTransaction') return queue.push(q);
         try {
           const res = await emit(q.action, q.payload, { tx: q.tx });
-          if (q.action === 'StartTransaction') onStartResult(q.tx, res);
+          if (q.action === 'StartTransaction') onStartResult(q.tx, res, true);
+          if (q.action === 'StopTransaction' && res)
+            jAdd(q.tx?.journey, 'stopResult', {
+              status: res.idTagInfo?.status ?? null,
+              replay: true,
+            });
         } catch {}
       };
       for (const q of ordered) await send(q);
@@ -387,6 +444,7 @@ export function createStation(options = {}) {
       if (c.remoteWait && nowReal > c.remoteWait.until) {
         c.remoteWait = null;
         tl('info', `RemoteStart súng ${c.id} hết hạn 120 s — chưa cắm súng`);
+        jStep(c, 'remoteExpired', { sec: cfgNum('ConnectionTimeOut') }, { close: true });
       }
       if (!c.tx) {
         c.last = { kw: 0, v: 0, a: 0 };
@@ -400,6 +458,7 @@ export function createStation(options = {}) {
       c.vehicleSoc = Math.min(100, c.vehicleSoc + (dWh / (BATTERY_KWH * 1000)) * 100);
       c.last = { kw, v, a: (kw * 1000) / v };
       tx.wh = Math.floor(tx.whF);
+      pushPoint(c);
       if (sim.ms - tx.lastSample >= cfgNum('MeterValueSampleInterval') * 1000) {
         tx.lastSample = sim.ms;
         sendMeter(c).catch(() => {});
@@ -441,9 +500,14 @@ export function createStation(options = {}) {
   }
 
   // ── Phiên sạc ─────────────────────────────────────────────────────────────
-  function onStartResult(tx, res) {
+  function onStartResult(tx, res, replay = false) {
     if (!res) return;
     tx.id = res.transactionId;
+    jAdd(tx.journey, 'startResult', {
+      txId: res.transactionId,
+      status: res.idTagInfo?.status ?? null,
+      replay,
+    });
     if (res.idTagInfo?.status !== 'Accepted') {
       tl(
         'warn',
@@ -463,20 +527,27 @@ export function createStation(options = {}) {
       whF: 0,
       wh: 0,
       startSim: sim.ms,
+      startReal: Date.now(),
       lastSample: sim.ms,
       stopping: false,
       limitHit: false,
     };
     c.tx = tx;
     c.remoteWait = null;
+    tx.journey = openJourney(c);
+    const online = net.state === 'online';
+    jAdd(tx.journey, 'startSent', { idTag, source, meterStart: tx.meterStart, queued: !online });
+    pushPoint(c, true);
     changed();
     const res = await emit(
       'StartTransaction',
       { connectorId: c.id, idTag, meterStart: tx.meterStart, timestamp: simIso() },
       { tx },
     );
+    if (!res && online) jAdd(tx.journey, 'queued', { action: 'StartTransaction' });
     onStartResult(tx, res);
     await setStatus(c, 'Charging');
+    jAdd(tx.journey, 'charging');
     if (res) flushQueue();
   }
 
@@ -492,18 +563,37 @@ export function createStation(options = {}) {
         `STALE_METERSTOP: gửi meterStop cũ ${meterStop} Wh (chỉ số thật ${actualStop} Wh)`,
       );
     const ts = simIso();
+    pushPoint(c, true);
     c.register = actualStop;
     c.tx = null;
     c.last = { kw: 0, v: 0, a: 0 };
     tx.final = { wh: tx.wh, cost: (tx.wh / 1000) * opt.unitPrice };
     c.lastSession = { ...tx.final, reason, idTag: tx.idTag };
+    const j = tx.journey;
+    if (j) {
+      j.summary = {
+        txId: tx.id,
+        idTag: tx.idTag,
+        meterStart: tx.meterStart,
+        meterStop,
+        wh: tx.wh,
+        kwh: Math.round(tx.wh / 10) / 100,
+        reason,
+        simSec: Math.round((sim.ms - tx.startSim) / 1000),
+        realSec: Math.round((Date.now() - tx.startReal) / 1000),
+      };
+      const online = net.state === 'online' && tx.id != null;
+      jAdd(j, 'stopSent', { reason, meterStart: tx.meterStart, meterStop, queued: !online });
+      j.closed = true;
+    }
     changed();
     await setStatus(c, 'Finishing');
-    await emit(
+    const res = await emit(
       'StopTransaction',
       { idTag: tx.idTag, meterStop, timestamp: ts, reason },
       { tx },
-    ).catch(() => {});
+    ).catch(() => null);
+    if (res) jAdd(j, 'stopResult', { status: res.idTagInfo?.status ?? null });
     if (c.pendingAvail) applyAvailability(c, c.pendingAvail);
   }
 
@@ -579,7 +669,12 @@ export function createStation(options = {}) {
     bootSequence,
     applyAvailability,
     scheduleHeartbeat,
+    jStep,
     reboot: (a) => netActions.reboot(a),
+    syncClock() {
+      sim.ms = Date.now();
+      changed();
+    },
   };
   const actions = { ...makeHmiActions(ctx), ...netActions };
 
@@ -623,6 +718,14 @@ export function createStation(options = {}) {
       pendingAvail: c.pendingAvail,
       inoperative: c.inoperative,
       lastReason: c.lastSession?.reason ?? null,
+      realElapsed: tx ? Math.floor((Date.now() - tx.startReal) / 1000) : 0,
+      journeys: c.journeys.map((j) => ({
+        id: j.id,
+        openedAt: j.openedAt,
+        closed: j.closed,
+        steps: j.steps,
+        summary: j.summary ?? null,
+      })),
     };
   }
   function snapshot() {
@@ -634,6 +737,8 @@ export function createStation(options = {}) {
       unitPrice: opt.unitPrice,
       speed: opt.speed,
       simTime: simIso(),
+      // Đồng hồ trụ (mô phỏng) đi trước giờ thật bao nhiêu giây — tăng dần khi chạy ×10/×20.
+      clockAheadSec: Math.round((sim.ms - Date.now()) / 1000),
       net: {
         state: net.state,
         epoch: net.epoch,
@@ -660,6 +765,12 @@ export function createStation(options = {}) {
     events,
     snapshot,
     logHistory: () => log.slice(),
+    // Chuỗi điểm biểu đồ của mọi hành trình còn giữ: { <jid>: [{ s, r, kwh, kw, soc }] }
+    series() {
+      const out = {};
+      for (const c of conns.values()) for (const j of c.journeys) out[j.id] = j.series;
+      return out;
+    },
     async act(name, args) {
       const fn = actions[name];
       if (!fn) return fail(`Hành động không có: ${name}`);

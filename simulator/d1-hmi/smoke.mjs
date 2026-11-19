@@ -6,6 +6,9 @@
 //   2. Chạy `node server.mjs` làm tiến trình con, trỏ CSMS_URL vào đó (thời gian rút ngắn qua env:
 //      MeterValues 1 s, thử lại 1 s, không mất mẫu khi phát lại để kết quả xác định).
 //   3. Điều khiển bằng POST /api/... như HMI thật, in PASS/FAIL từng khẳng định, exit 1 nếu có FAIL.
+//   4. (QA-03) Chạy thêm MỘT tiến trình server.mjs với HAI trụ (CP_IDS): mỗi trụ boot riêng,
+//      RemoteStart vào trụ 2 không ảnh hưởng trụ 1, API/SSE/trang theo cpId, tốc độ ×20.
+//   CSMS giả tách bản tin theo identity: phần 1–9 chỉ nhìn trụ SMOKE-D1 (đường API cũ).
 // KHÔNG nằm trong CI. Chạy: node simulator/d1-hmi/smoke.mjs
 
 import { spawn } from 'node:child_process';
@@ -26,19 +29,29 @@ let nextTx = 100;
 const known = new Set(['DEMO-CARD-0001', 'DEMO-CARD-0002']);
 const server = new RPCServer({ protocols: ['ocpp1.6'], strictMode: true });
 // Mô phỏng Security Profile 2: CSMS chỉ nhận khi Basic Auth có đúng mật khẩu (CP_PASSWORD của trụ).
-const CP_SECRET = `smoke-${randomBytes(12).toString('hex')}`; // sinh lúc chạy, không phải literal
-const authSeen = []; // mật khẩu nhận được ở mỗi lần bắt tay
+const secret = () => `smoke-${randomBytes(12).toString('hex')}`; // sinh lúc chạy, không phải literal
+const CP_SECRET = secret();
+const PW = { 'SMOKE-D1': CP_SECRET, 'SMOKE-M1': secret(), 'SMOKE-M2': secret() };
+const authSeen = []; // mật khẩu SMOKE-D1 gửi ở mỗi lần bắt tay
+const authOther = []; // [identity, đúng mật khẩu?] của các trụ phần 10
 server.auth((accept, reject, handshake) => {
   const pw = handshake.password?.toString('utf8');
-  authSeen.push(pw);
-  if (pw !== CP_SECRET) return reject(401, 'Invalid credential');
+  if (handshake.identity === 'SMOKE-D1') authSeen.push(pw);
+  else authOther.push([handshake.identity, pw === PW[handshake.identity]]);
+  if (!PW[handshake.identity] || pw !== PW[handshake.identity])
+    return reject(401, 'Invalid credential');
   accept();
 });
+const rxBy = {}; // identity khác SMOKE-D1 → bản tin nhận được
+const cpBy = {}; // identity → RPCServerClient hiện tại
 server.on('client', (client) => {
-  const conn = ++connCount;
-  cp = client;
+  const main = client.identity === 'SMOKE-D1';
+  const conn = main ? ++connCount : 0;
+  if (main) cp = client;
+  cpBy[client.identity] = client;
+  const sink = main ? rx : (rxBy[client.identity] ??= []);
   const rec = (action) => (ctx) => {
-    rx.push({ action, params: ctx.params, conn, at: Date.now() });
+    sink.push({ action, params: ctx.params, conn, at: Date.now() });
   };
   client.handle('BootNotification', (ctx) => {
     rec('BootNotification')(ctx);
@@ -111,6 +124,205 @@ const child = spawn(process.execPath, [`${HERE}server.mjs`], {
   stdio: ['ignore', 'ignore', 'inherit'],
 });
 
+// ── 10. Nhiều trụ trong một tiến trình (QA-03) ─────────────────────────────
+let child2 = null;
+async function multiStation() {
+  console.log('\n— Nhiều trụ: CP_IDS=SMOKE-M1,SMOKE-M2 —');
+  const PORT2 = HMI_PORT + 1;
+  child2 = spawn(process.execPath, [`${HERE}server.mjs`], {
+    env: {
+      ...process.env,
+      HMI_PORT: String(PORT2),
+      CSMS_URL: `ws://127.0.0.1:${csmsPort}/ocpp`,
+      CP_IDS: 'SMOKE-M1,SMOKE-M2',
+      CP_PASSWORDS: `${PW['SMOKE-M1']},${PW['SMOKE-M2']}`,
+      METER_INTERVAL: '1',
+      RETRY_MS: '1000',
+      REPLAY_LOSS: '0',
+      PING_SEC: '5',
+    },
+    stdio: ['ignore', 'ignore', 'inherit'],
+  });
+  const base = `http://127.0.0.1:${PORT2}`;
+  const g = (p) => fetch(base + p);
+  const st = (id) => g(`/api/${id}/state`).then((r) => r.json());
+  const apiM = async (id, path, body) =>
+    (
+      await fetch(`${base}/api/${id}/${path}`, { method: 'POST', body: JSON.stringify(body ?? {}) })
+    ).json();
+  const m = (id, action, pred = () => true) =>
+    (rxBy[id] ?? []).filter((x) => x.action === action && pred(x));
+  const M1 = 'SMOKE-M1';
+  const M2 = 'SMOKE-M2';
+
+  await until(
+    () => m(M1, 'StatusNotification').length >= 3 && m(M2, 'StatusNotification').length >= 3,
+    15_000,
+    'hai trụ boot',
+  );
+  const heads = [M1, M2].map((id) =>
+    (rxBy[id] ?? [])
+      .slice(0, 4)
+      .map((x) => x.action)
+      .join(','),
+  );
+  check(
+    'Hai trụ: MỖI trụ có socket riêng, Boot rồi Status ×3 của riêng nó',
+    heads.every(
+      (h) => h === 'BootNotification,StatusNotification,StatusNotification,StatusNotification',
+    ) &&
+      cpBy[M1] &&
+      cpBy[M2] &&
+      cpBy[M1] !== cpBy[M2],
+    heads.join(' | '),
+  );
+  check(
+    'Hai trụ: mỗi trụ bắt tay bằng đúng mật khẩu của nó (CP_PASSWORDS cùng thứ tự)',
+    authOther.length >= 2 && authOther.every(([, ok]) => ok),
+    authOther.map(([id, ok]) => `${id}:${ok}`).join(','),
+  );
+  const tong = await (await g('/api/tong')).json();
+  check(
+    'GET /api/tong liệt kê 2 trụ, cả hai online',
+    tong.stations.map((x) => `${x.cpId}:${x.net.state}`).join(',') ===
+      'SMOKE-M1:online,SMOKE-M2:online',
+    JSON.stringify(tong.stations.map((x) => x.cpId)),
+  );
+  const pg = await g(`/tru/${M2}`);
+  const pgText = await pg.text();
+  check(
+    'GET /tru/SMOKE-M2 → trang trụ (có khối "Phiên sạc trên trụ này")',
+    pg.status === 200 && pgText.includes('id="phien"'),
+  );
+  const bad = [
+    '/tru/SMOKE-NOPE',
+    '/tru/%3Cscript%3E',
+    '/api/SMOKE-NOPE/state',
+    '/api/..%2fSMOKE-M1/state',
+    '/events/SMOKE-NOPE',
+  ];
+  const badCodes = [];
+  for (const p of bad) badCodes.push((await g(p)).status);
+  const badPost = await fetch(`${base}/api/SMOKE-NOPE/plug`, { method: 'POST', body: '{}' });
+  check(
+    'cpId lạ / có ".." / thẻ HTML → 404 (trang, API, SSE, POST)',
+    badCodes.every((c) => c === 404) && badPost.status === 404,
+    [...badCodes, badPost.status].join(','),
+  );
+  // SSE theo trụ: chỉ đọc gói "hello" đầu tiên
+  const ac = new AbortController();
+  const sse = await fetch(`${base}/events/${M2}`, { signal: ac.signal });
+  const reader = sse.body.getReader();
+  let buf = '';
+  while (!buf.includes('\n\n')) buf += new TextDecoder().decode((await reader.read()).value);
+  ac.abort();
+  const hello = JSON.parse(
+    buf
+      .split('\n')
+      .find((l) => l.startsWith('data: '))
+      .slice(6),
+  );
+  check(
+    'SSE /events/SMOKE-M2: gói hello là snapshot của SMOKE-M2 (kèm nhật ký + điểm biểu đồ)',
+    hello.state.cpId === M2 && Array.isArray(hello.log) && typeof hello.series === 'object',
+  );
+  check(
+    'Đường cũ /api/state của tiến trình nhiều trụ = trụ đầu tiên',
+    (await (await g('/api/state')).json()).cpId === M1,
+  );
+
+  // RemoteStart vào súng 1 của trụ 2 khi CHƯA cắm súng → Accepted, chờ cắm
+  const n1Before = (rxBy[M1] ?? []).length;
+  const rs = await cpBy[M2].call('RemoteStartTransaction', {
+    idTag: 'DEMO-CARD-0002',
+    connectorId: 1,
+  });
+  const s2 = await st(M2);
+  const s1 = await st(M1);
+  check(
+    'RemoteStart vào trụ 2 (chưa cắm) → Accepted, trụ 2 chờ cắm súng, hành trình có bước remoteStart',
+    rs.status === 'Accepted' &&
+      s2.connectors[0].remoteWaitSec > 0 &&
+      s2.connectors[0].journeys.at(-1)?.steps[0]?.kind === 'remoteStart',
+  );
+  check(
+    'Trụ 1 không bị ảnh hưởng: không chờ cắm, không có hành trình',
+    s1.connectors.every((c) => c.remoteWaitSec == null && c.journeys.length === 0),
+  );
+  await apiM(M2, 'plug', { connector: 1 });
+  await until(() => m(M2, 'StartTransaction').length >= 1, 10_000, 'StartTransaction trụ 2');
+  const start2 = m(M2, 'StartTransaction')[0];
+  check(
+    'Cắm súng trụ 2 → trụ 2 gửi StartTransaction với idTag của RemoteStart',
+    start2?.params.idTag === 'DEMO-CARD-0002' && start2.params.connectorId === 1,
+  );
+  check(
+    'Trụ 1 không gửi StartTransaction / StatusNotification nào trong lúc đó',
+    m(M1, 'StartTransaction').length === 0 &&
+      (rxBy[M1] ?? []).slice(n1Before).every((x) => x.action === 'Heartbeat'),
+  );
+  await until(async () => (await st(M2)).connectors[0].txId != null, 5000, 'txId trụ 2');
+
+  // Tốc độ ×20 riêng trụ 2
+  const bad5 = await apiM(M2, 'speed', { value: 5 });
+  const sp = await apiM(M2, 'speed', { value: 20 });
+  check('Tốc độ: ×5 bị từ chối, ×20 nhận', !bad5.ok && sp.ok, `${bad5.message} / ${sp.message}`);
+  const mvFrom = m(M2, 'MeterValues').length;
+  await sleep(3000);
+  const mv20 = m(M2, 'MeterValues').slice(mvFrom + 1); // bỏ mẫu đầu (đang chuyển tốc độ)
+  const ts = (x) => Date.parse(x.params.meterValue[0].timestamp);
+  const ratio =
+    mv20.length >= 2 ? (ts(mv20.at(-1)) - ts(mv20[0])) / (mv20.at(-1).at - mv20[0].at) : 0;
+  check(
+    '×20: timestamp MeterValues của trụ 2 chạy ~20 lần giờ thật',
+    ratio > 14 && ratio < 26,
+    `${mv20.length} mẫu, tỉ lệ ${ratio.toFixed(1)}`,
+  );
+  const [a2, a1] = [await st(M2), await st(M1)];
+  check(
+    '×20 chỉ áp cho trụ 2: trụ 2 speed 20, đồng hồ đi trước giờ thật; trụ 1 vẫn ×1',
+    a2.speed === 20 && a2.clockAheadSec > 20 && a1.speed === 1 && Math.abs(a1.clockAheadSec) < 2,
+    `M2 lệch ${a2.clockAheadSec}s, M1 lệch ${a1.clockAheadSec}s`,
+  );
+  check(
+    'Trang trụ có thời gian mô phỏng VÀ thời gian thật của phiên',
+    a2.connectors[0].elapsed > a2.connectors[0].realElapsed * 5 &&
+      a2.connectors[0].realElapsed >= 3,
+    `mô phỏng ${a2.connectors[0].elapsed}s / thật ${a2.connectors[0].realElapsed}s`,
+  );
+  const busy = await apiM(M2, 'syncclock');
+  check('Về giờ thật bị từ chối khi đang có phiên', !busy.ok);
+
+  // RemoteStop trụ 2 → StopTransaction; hành trình đủ bước
+  const tx2 = a2.connectors[0].txId;
+  const rstop = await cpBy[M2].call('RemoteStopTransaction', { transactionId: tx2 });
+  await until(() => m(M2, 'StopTransaction').length >= 1, 5000, 'StopTransaction trụ 2');
+  await sleep(300);
+  const stop2 = m(M2, 'StopTransaction')[0];
+  check(
+    'RemoteStop trụ 2 → StopTransaction reason Remote, meterStop > meterStart',
+    rstop.status === 'Accepted' &&
+      stop2?.params.reason === 'Remote' &&
+      stop2.params.meterStop > start2.params.meterStart,
+  );
+  const j = (await st(M2)).connectors[0].journeys.at(-1);
+  const kinds = j.steps.map((x) => x.kind).join(',');
+  check(
+    'Hành trình phiên trụ 2: remoteStart → startSent → startResult → charging → remoteStop → stopSent → stopResult',
+    kinds === 'remoteStart,startSent,startResult,charging,remoteStop,stopSent,stopResult' &&
+      j.summary?.meterStop === stop2.params.meterStop &&
+      j.summary.txId === tx2,
+    kinds,
+  );
+  check('Trụ 1 vẫn không có phiên nào', m(M1, 'StopTransaction').length === 0);
+  await apiM(M2, 'speed', { value: 1 });
+  const sync = await apiM(M2, 'syncclock');
+  check(
+    'Về giờ thật sau phiên: đồng hồ trụ 2 khớp giờ thật',
+    sync.ok && Math.abs((await st(M2)).clockAheadSec) < 2,
+  );
+}
+
 try {
   console.log(`CSMS thử nghiệm :${csmsPort}, HMI :${HMI_PORT}\n`);
 
@@ -155,10 +367,32 @@ try {
     (await get('/static/khong-co.js')).status === 404 &&
       (await get('/static/index.html')).status === 404,
   );
-  const page = await (await get('/')).text();
+  const page = await (await get('/tru/SMOKE-D1')).text();
   check(
-    'Trang HMI có khối trụ + chú thích "Hình minh hoạ — không phải ảnh sản phẩm thật"',
+    'Trang trụ /tru/SMOKE-D1 có khối trụ + chú thích "Hình minh hoạ — không phải ảnh sản phẩm thật"',
     page.includes('id="tru"') && page.includes('Hình minh hoạ — không phải ảnh sản phẩm thật'),
+  );
+  const tongPage = await (await get('/')).text();
+  check('Trang tổng "/" là danh sách trụ', tongPage.includes('/tong/events'));
+  // three.js cho hình 3D: chỉ đúng hai file, từ node_modules
+  const three = await get('/vendor/three/three.module.js');
+  check(
+    'Vendor: /vendor/three/three.module.js → 200 JS (three là devDependency ở gốc repo)',
+    three.status === 200 && (three.headers.get('content-type') ?? '').startsWith('text/javascript'),
+    String(three.status),
+  );
+  const vendEvil = [
+    '/vendor/three/three.cjs',
+    '/vendor/three/..%2fpackage.json',
+    '/vendor/three/%2e%2e',
+    '/vendor/three/..%5c..%5cpackage.json',
+  ];
+  const vendCodes = [];
+  for (const p of vendEvil) vendCodes.push((await get(p)).status);
+  check(
+    'Vendor: file ngoài danh sách / có ".." → 404',
+    vendCodes.every((c) => c === 404),
+    vendCodes.join(','),
   );
 
   // 2. Cắm súng A, quẹt thẻ hợp lệ
@@ -394,11 +628,14 @@ try {
   await api('reboot');
   await until(() => count('BootNotification') > bootsPre, 15_000, 'reboot');
   check('Reboot → BootNotification mới', count('BootNotification') === bootsPre + 1);
+
+  await multiStation();
 } catch (e) {
   failed++;
   console.log('FAIL  ngoại lệ trong smoke test:', e);
 } finally {
   child.kill();
+  child2?.kill();
   await server.close().catch(() => {});
   console.log(failed ? `\n${failed} khẳng định FAIL` : '\nTất cả khẳng định PASS');
   process.exit(failed ? 1 : 0);

@@ -1,10 +1,14 @@
 <!doctype html>
 <!--
-  index.html — màn hình HMI của trụ sạc giả lập D1 (DC 120 kW, hai súng).
+  tru.html — trang của MỘT trụ sạc giả lập D1 (DC 120 kW, hai súng), mở tại /tru/<cpId>.
 
-  LÀM GÌ: hiển thị trạng thái hai súng A/B + mạng + nhật ký OCPP trực tiếp, và gửi lệnh bấm
-    (POST /api/...) tới server.mjs. Trạng thái đến qua SSE (/events), không polling.
-  VÌ SAO MỘT FILE: demo chạy `node server.mjs` là đủ — không build, không CDN, không thư viện.
+  LÀM GÌ: (1) "Phiên sạc trên trụ này" cho người test app tài xế: theo từng súng, phiên đã tới trụ
+    chưa (RemoteStart → StartTransaction → transactionId → Charging → Stop), trụ đang chờ gì, kWh /
+    kW / SoC / thời gian và biểu đồ; (2) hình trụ minh hoạ (3D three.js nếu được, không thì SVG 2D);
+    (3) HMI bấm được (cắm/rút súng, quẹt thẻ, rớt mạng...) + nhật ký OCPP của riêng trụ này.
+    Gửi lệnh POST /api/<cpId>/<hành động>; dữ liệu qua SSE /events/<cpId>, không polling.
+  VÌ SAO KHÔNG BUILD: demo chạy `node server.mjs` là đủ — không CDN; three.js lấy từ node_modules
+    qua /vendor/three/ (xem server.mjs). Mọi chữ đến từ OCPP/CSMS đều qua esc() trước khi vào HTML.
   GIẢ ĐỊNH: số tiền trên màn hình chỉ là tạm tính từ đơn giá cấu hình; CSMS mới là nguồn sự thật.
     Wh được gửi dưới dạng số nguyên (chưa xác nhận firmware Ruihua). Màu: biến CSS, sáng/tối theo
     prefers-color-scheme (hoặc ?theme=dark|light). Nút "Chữ lớn" phóng chữ cho máy chiếu.
@@ -14,7 +18,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>HMI trụ D1</title>
+    <title>Trụ D1</title>
     <link rel="stylesheet" href="/static/tru-sac.css" />
     <style>
       :root {
@@ -398,6 +402,178 @@
           grid-template-columns: repeat(2, 1fr);
         }
       }
+      /* ── QA-03: thanh trên, bộ chọn tốc độ, khối hành trình phiên ───────────── */
+      a.back {
+        color: var(--accent);
+        font-weight: 600;
+        text-decoration: none;
+        white-space: nowrap;
+      }
+      a.back:hover {
+        text-decoration: underline;
+      }
+      .seg {
+        display: inline-flex;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        overflow: hidden;
+      }
+      .seg button {
+        border: 0;
+        border-radius: 0;
+        border-right: 1px solid var(--line);
+        padding: 0.35rem 0.8rem;
+      }
+      .seg button:last-child {
+        border-right: 0;
+      }
+      .seg button[aria-pressed='true'] {
+        background: var(--accent);
+        color: var(--accent-text);
+      }
+      .seg-lbl {
+        font-size: 0.8rem;
+        color: var(--muted);
+      }
+      #clockWarn {
+        margin: 0.6rem 1rem 0;
+        border-left-width: 6px;
+      }
+      #phien {
+        margin: 0.8rem 1rem 0;
+      }
+      #phien .grid {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+        gap: 0.8rem;
+      }
+      .jr {
+        background: var(--panel-2);
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        padding: 0.6rem 0.7rem;
+        min-width: 0;
+      }
+      .jr .now {
+        font-size: 1.05rem;
+        font-weight: 700;
+        padding: 0.45rem 0.6rem;
+        border-radius: 8px;
+        background: var(--panel);
+        border-left: 6px solid var(--muted);
+        margin-bottom: 0.5rem;
+      }
+      .jr .now.ok {
+        border-color: var(--ok);
+      }
+      .jr .now.wait {
+        border-color: var(--warn);
+      }
+      .jr .now.bad {
+        border-color: var(--danger);
+      }
+      .jr .now small {
+        display: block;
+        font-weight: 400;
+        font-size: 0.82rem;
+        color: var(--muted);
+        margin-top: 0.15rem;
+      }
+      .jr .metrics {
+        grid-template-columns: repeat(5, minmax(0, 1fr));
+      }
+      .jr .metric .v {
+        font-size: 1.25rem;
+      }
+      .jr .chart {
+        display: block;
+        width: 100%;
+        height: 9rem;
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+      }
+      .jr .chart .ax {
+        stroke: var(--line);
+        stroke-width: 1;
+      }
+      .jr .chart .l-kwh {
+        fill: none;
+        stroke: var(--accent);
+        stroke-width: 2.5;
+      }
+      .jr .chart .l-kw {
+        fill: none;
+        stroke: var(--st-Charging);
+        stroke-width: 1.5;
+        stroke-dasharray: 5 3;
+      }
+      .jr .chart text {
+        font-size: 11px;
+        fill: var(--muted);
+      }
+      .jr .legend {
+        display: flex;
+        gap: 1rem;
+        font-size: 0.75rem;
+        color: var(--muted);
+        margin: 0.2rem 0 0.4rem;
+      }
+      .jr .legend b {
+        display: inline-block;
+        width: 1.2rem;
+        height: 3px;
+        vertical-align: middle;
+        margin-right: 0.3rem;
+      }
+      .jr ol {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+        font-size: 0.82rem;
+        max-height: 14rem;
+        overflow: auto;
+      }
+      .jr ol li {
+        padding: 0.2rem 0 0.2rem 0.5rem;
+        border-left: 3px solid var(--line);
+        margin-bottom: 0.15rem;
+      }
+      .jr ol li.ok {
+        border-color: var(--ok);
+      }
+      .jr ol li.bad {
+        border-color: var(--danger);
+      }
+      .jr ol li.wait {
+        border-color: var(--warn);
+      }
+      .jr ol .t {
+        color: var(--muted);
+        font-variant-numeric: tabular-nums;
+        margin-right: 0.3rem;
+      }
+      .jr .prev {
+        font-size: 0.8rem;
+        color: var(--muted);
+        margin-top: 0.4rem;
+        border-top: 1px dashed var(--line);
+        padding-top: 0.3rem;
+      }
+      .jr h3 {
+        font-size: 0.85rem;
+        margin: 0.5rem 0 0.25rem;
+        color: var(--muted);
+        font-weight: 600;
+      }
+      @media (max-width: 700px) {
+        #phien .grid {
+          grid-template-columns: minmax(0, 1fr);
+        }
+        .jr .metrics {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+      }
       .side {
         min-width: 0;
         display: grid;
@@ -408,32 +584,55 @@
   </head>
   <body>
     <header>
+      <a class="back" href="/">← Tất cả trụ</a>
       <div>
         <h1>Trụ sạc DC 120 kW — <span id="cpId">...</span></h1>
         <div class="sub">
-          CSMS <span id="csms">...</span> · đồng hồ mô phỏng <span id="simTime">...</span>
+          CSMS <span id="csms">...</span> · đồng hồ trụ (mô phỏng) <span id="simTime">...</span> ·
+          <span id="clockAhead">...</span>
         </div>
       </div>
       <span class="spacer"></span>
       <span id="netChip" class="chip">...</span>
+      <span class="seg-lbl" id="speedLbl">Tốc độ mô phỏng</span>
+      <div class="seg" role="group" aria-labelledby="speedLbl" id="speedSeg">
+        <button type="button" data-speed="1" aria-pressed="true">×1</button>
+        <button type="button" data-speed="10" aria-pressed="false">×10</button>
+        <button type="button" data-speed="20" aria-pressed="false">×20</button>
+      </div>
       <button
-        id="speedBtn"
-        title="Đồng hồ mô phỏng chạy nhanh ×10, timestamps vẫn theo giờ mô phỏng"
+        id="syncBtn"
+        type="button"
+        title="Đưa đồng hồ trụ về giờ thật (chỉ khi không súng nào đang sạc)"
       >
-        Tăng tốc ×10
+        Về giờ thật
       </button>
       <button id="bigBtn">Chữ lớn</button>
     </header>
+    <div class="banner" id="clockWarn" hidden></div>
+
+    <!-- QA-03: hành trình phiên cho người test app tài xế. Dựng bằng JS (buildJr). -->
+    <section class="card" id="phien" aria-label="Phiên sạc trên trụ này">
+      <h2>Phiên sạc trên trụ này — phiên từ app đã tới trụ chưa?</h2>
+      <div class="grid">
+        <div class="jr" id="jr1"></div>
+        <div class="jr" id="jr2"></div>
+      </div>
+    </section>
 
     <!-- Khối "Trụ sạc" minh hoạ (QA-02): SVG tự vẽ, kiểu dáng ở /static/tru-sac.css, logic ở
          /static/tru-sac.js. Dùng chung snapshot SSE với hai panel súng bên dưới. -->
     <section class="card" id="tru" aria-label="Hình minh hoạ trụ sạc">
       <div class="tru-head">
         <h2>Trụ sạc PowerMe</h2>
+        <button id="tru3dBtn" type="button" hidden>Hình 2D</button>
         <button id="truAnim" type="button">Tắt hoạt ảnh</button>
         <button id="truToggle" type="button" aria-expanded="true">Thu gọn</button>
       </div>
       <div class="tru-body">
+        <!-- Hình 3D (tru-3d.js, three.js). Ẩn khi không có WebGL / giảm chuyển động / tắt hoạt
+             ảnh — khi đó dùng hình SVG 2D bên dưới. -->
+        <div class="tru-3d" id="tru3d" hidden aria-label="Hình 3D trụ sạc, kéo chuột để xoay"></div>
         <svg
           class="tru-svg"
           viewBox="0 0 1000 362"
@@ -542,8 +741,18 @@
     <footer>Mô phỏng — hành vi chưa xác nhận bằng firmware Ruihua</footer>
 
     <script src="/static/tru-sac.js"></script>
+    <script type="module" src="/static/tru-3d.js"></script>
     <script>
       const $ = (id) => document.getElementById(id);
+      // cpId lấy từ đường dẫn /tru/<cpId>; mọi API của trang đều mang định danh trụ.
+      const CP = decodeURIComponent(location.pathname.split('/')[2] ?? '');
+      const API = '/api/' + encodeURIComponent(CP) + '/';
+      document.title = 'Trụ ' + CP;
+      const esc = (v) =>
+        String(v ?? '').replace(
+          /[&<>"']/g,
+          (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch],
+        );
       const q = new URLSearchParams(location.search);
       if (q.get('theme')) document.documentElement.dataset.theme = q.get('theme');
       if (q.get('big')) document.documentElement.classList.add('big');
@@ -600,7 +809,7 @@
         const root = $('gun' + id);
         const f = (n) => root.querySelector(`[data-f="${n}"]`);
         const call = async (path, body) => {
-          const r = await fetch('/api/' + path, {
+          const r = await fetch(API + path, {
             method: 'POST',
             body: JSON.stringify({ connector: id, ...body }),
           });
@@ -632,19 +841,300 @@
       const pad = (n) => String(n).padStart(2, '0');
       const mmss = (s) => `${pad(Math.floor(s / 60))}:${pad(s % 60)}`;
       const hms = (ms) => new Date(ms).toLocaleTimeString('vi-VN', { hour12: false });
+      // Thời lượng: "mm:ss" dưới 1 giờ, "h:mm:ss" từ 1 giờ (×20 sạc lâu trên đồng hồ mô phỏng)
+      const dur = (s) =>
+        s >= 3600
+          ? `${Math.floor(s / 3600)}:${pad(Math.floor(s / 60) % 60)}:${pad(s % 60)}`
+          : mmss(s);
+      const ahead = (sec) => {
+        const a = Math.abs(sec);
+        const txt =
+          a >= 3600
+            ? `${(a / 3600).toFixed(1)} giờ`
+            : a >= 60
+              ? `${Math.round(a / 60)} phút`
+              : `${a} s`;
+        return a < 2
+          ? 'khớp giờ thật'
+          : sec > 0
+            ? `đi TRƯỚC giờ thật ${txt}`
+            : `chậm hơn giờ thật ${txt}`;
+      };
+
+      // ── Hành trình phiên (QA-03) ───────────────────────────────────────────
+      const SOURCE = { rfid: 'thẻ RFID', password: 'mật khẩu HMI', remote: 'lệnh từ CSMS/app' };
+      const series = {}; // jid → [{ s, r, kwh, kw, soc }]
+      function buildJr(id, label) {
+        $('jr' + id).innerHTML = `
+          <div class="gun-head"><span class="name">Súng ${label}</span>
+            <span class="chip" data-f="status">—</span><span class="chip sm" data-f="tx" hidden></span></div>
+          <div class="now" data-f="now">—</div>
+          <div class="metrics">
+            <div class="metric"><div class="k" data-f="kwhK">Đã sạc cho xe</div><div class="v" data-f="kwh">0</div><span class="u">kWh</span></div>
+            <div class="metric"><div class="k">Công suất</div><div class="v" data-f="kw">0</div><span class="u">kW</span></div>
+            <div class="metric"><div class="k">SoC xe</div><div class="v" data-f="soc">—</div><span class="u">%</span></div>
+            <div class="metric"><div class="k">Thời gian sạc</div><div class="v" data-f="sim">00:00</div><span class="u">đồng hồ mô phỏng</span></div>
+            <div class="metric"><div class="k">Thời gian thật</div><div class="v" data-f="real">00:00</div><span class="u">đã trôi qua</span></div>
+          </div>
+          <svg class="chart" data-f="chart" viewBox="0 0 400 120" preserveAspectRatio="none" role="img" aria-label="Biểu đồ kWh và kW theo thời gian"></svg>
+          <div class="legend"><span><b style="background:var(--accent)"></b>kWh đã sạc</span>
+            <span><b style="background:var(--st-Charging)"></b>kW (nét đứt)</span>
+            <span data-f="chartNote"></span></div>
+          <h3>Dòng thời gian OCPP của phiên (giờ thật)</h3>
+          <ol data-f="steps"></ol>
+          <div class="prev" data-f="prev" hidden></div>`;
+        const root = $('jr' + id);
+        return (n) => root.querySelector(`[data-f="${n}"]`);
+      }
+      const jrF = { 1: buildJr(1, 'A'), 2: buildJr(2, 'B') };
+
+      // Một bước → [lớp màu, chữ HTML đã escape]
+      function stepText(st) {
+        const tag = st.idTag ? ` idTag <b>${esc(st.idTag)}</b>` : '';
+        switch (st.kind) {
+          case 'remoteStart':
+            return st.result === 'Accepted'
+              ? [
+                  'ok',
+                  `← Nhận <b>RemoteStartTransaction</b>${tag} → trụ trả <b>Accepted</b>${st.waitPlug ? ` · chưa cắm súng: chờ tối đa ${esc(st.timeoutSec)} s (ConnectionTimeOut)` : ''}`,
+                ]
+              : [
+                  'bad',
+                  `← Nhận <b>RemoteStartTransaction</b>${tag} → trụ trả <b>Rejected</b>${st.why ? ` (${esc(st.why)})` : ''}`,
+                ];
+          case 'remoteExpired':
+            return [
+              'bad',
+              `Hết ConnectionTimeOut ${esc(st.sec)} s mà chưa cắm súng — trụ bỏ lệnh, KHÔNG gửi StartTransaction`,
+            ];
+          case 'authorize':
+            if (st.offline)
+              return st.local
+                ? [
+                    'wait',
+                    `Quẹt thẻ khi OFFLINE —${tag} được nhận theo danh sách cục bộ (không có Authorize)`,
+                  ]
+                : ['bad', `Quẹt thẻ khi OFFLINE —${tag} không có trong danh sách cục bộ`];
+            return [
+              st.status === 'Accepted' ? 'ok' : 'bad',
+              `→ <b>Authorize</b>${tag} → CSMS trả <b>${esc(st.status ?? 'không trả lời')}</b>`,
+            ];
+          case 'startSent':
+            return [
+              st.queued ? 'wait' : 'ok',
+              `→ Gửi <b>StartTransaction</b>${tag}, meterStart ${esc(st.meterStart)} Wh, nguồn ${esc(SOURCE[st.source] ?? st.source)}${st.queued ? ' — trụ OFFLINE: vào hàng đợi, gửi khi nối lại' : ''}`,
+            ];
+          case 'queued':
+            return [
+              'wait',
+              `${esc(st.action)} gửi lỗi đường truyền — vào hàng đợi, gửi lại khi nối lại`,
+            ];
+          case 'startResult':
+            return [
+              st.status === 'Accepted' ? 'ok' : 'bad',
+              `← CSMS trả <b>transactionId ${esc(st.txId)}</b>, idTagInfo.status <b>${esc(st.status)}</b>${st.replay ? ' (sau phát bù)' : ''}${st.status === 'Accepted' ? '' : ' — trụ dừng phiên (DeAuthorized)'}`,
+            ];
+          case 'charging':
+            return ['ok', 'Súng chuyển <b>Charging</b> — đang sạc'];
+          case 'remoteStop':
+            return [
+              'ok',
+              `← Nhận <b>RemoteStopTransaction</b> (tx ${esc(st.txId)}) → trụ trả <b>Accepted</b>`,
+            ];
+          case 'stopSent':
+            return [
+              st.queued ? 'wait' : 'ok',
+              `→ Gửi <b>StopTransaction</b>: meterStart ${esc(st.meterStart)} → meterStop ${esc(st.meterStop)} Wh (= ${esc(((st.meterStop - st.meterStart) / 1000).toFixed(2))} kWh), reason <b>${esc(st.reason)}</b>${st.queued ? ' — vào hàng đợi, gửi khi nối lại / khi có transactionId' : ''}`,
+            ];
+          case 'stopResult':
+            return [
+              'ok',
+              `← CSMS xác nhận StopTransaction (idTagInfo ${esc(st.status ?? '—')})${st.replay ? ' (sau phát bù)' : ''}`,
+            ];
+          default:
+            return ['', esc(st.kind)];
+        }
+      }
+
+      // Trụ / súng đang chờ gì → [lớp màu, tiêu đề, dòng phụ] (chữ thường, chưa escape)
+      function nowLine(s, c) {
+        const n = s.net;
+        const q = s.queue.byAction;
+        if (n.state === 'offline')
+          return [
+            'bad',
+            'Trụ đang OFFLINE — lệnh từ app (RemoteStart/Stop) KHÔNG tới được trụ',
+            `Trụ thử nối lại ${n.nextRetrySec != null ? `sau ${n.nextRetrySec} s` : 'ngay'} (cố định mỗi ${n.retrySec} s).${c.txActive ? ' Phiên vẫn chạy tại trụ, bản tin vào hàng đợi.' : ''}`,
+          ];
+        if (n.state === 'connecting') return ['wait', 'Trụ đang nối lại CSMS...', ''];
+        if (n.halfOpen)
+          return [
+            'wait',
+            'Socket half-open: trụ tưởng vẫn online nhưng bản tin không tới CSMS',
+            'Chờ ping timeout để trụ phát hiện.',
+          ];
+        if (c.remoteWaitSec != null)
+          return [
+            'wait',
+            `Đã nhận RemoteStart — ĐANG CHỜ CẮM SÚNG ${c.label} (còn ${c.remoteWaitSec} s)`,
+            'Bấm "Cắm súng" ở bảng điều khiển súng bên dưới; quá hạn ConnectionTimeOut thì trụ bỏ lệnh.',
+          ];
+        if (c.txActive && c.txId == null)
+          return [
+            'wait',
+            'Đã gửi StartTransaction — chờ CSMS cấp transactionId',
+            q.StartTransaction ? 'StartTransaction đang trong hàng đợi.' : '',
+          ];
+        if (c.status === 'Charging')
+          return [
+            'ok',
+            `ĐANG SẠC — transactionId ${c.txId}`,
+            `idTag ${c.idTag} · nguồn ${SOURCE[c.source] ?? c.source}`,
+          ];
+        if (c.status === 'Finishing')
+          return [
+            'ok',
+            'Phiên đã kết thúc — chờ rút súng',
+            c.lastReason ? `reason ${c.lastReason}` : '',
+          ];
+        if (c.status === 'Faulted')
+          return [
+            'bad',
+            `Súng lỗi ${c.errorCode} — RemoteStart sẽ bị Rejected`,
+            'Xoá lỗi ở bảng điều khiển súng.',
+          ];
+        if (c.status === 'Unavailable')
+          return ['bad', 'Súng Unavailable — RemoteStart sẽ bị Rejected', ''];
+        if (c.plugged)
+          return [
+            '',
+            'Đã cắm súng — chờ RemoteStart từ app (hoặc quẹt thẻ)',
+            'Có lệnh là trụ gửi StartTransaction ngay.',
+          ];
+        return [
+          '',
+          'Chưa có phiên — chờ RemoteStart từ app',
+          'Trụ online nên nhận được lệnh; chưa cắm súng thì trụ trả Accepted rồi chờ cắm.',
+        ];
+      }
+
+      function drawChart(svg, pts) {
+        if (!pts || pts.length < 2) {
+          svg.innerHTML = '<text x="200" y="64" text-anchor="middle">chưa có dữ liệu phiên</text>';
+          return;
+        }
+        const W = 400,
+          H = 120,
+          L = 4,
+          R = 396,
+          T = 14,
+          B = 104;
+        const maxS = Math.max(1, pts.at(-1).s);
+        const maxE = Math.max(0.1, ...pts.map((p) => p.kwh));
+        const maxP = Math.max(1, ...pts.map((p) => p.kw));
+        const x = (p) => (L + ((R - L) * p.s) / maxS).toFixed(1);
+        const line = (f, m) =>
+          pts.map((p) => `${x(p)},${(B - ((B - T) * f(p)) / m).toFixed(1)}`).join(' ');
+        svg.innerHTML =
+          `<line class="ax" x1="${L}" y1="${B}" x2="${R}" y2="${B}"/>` +
+          `<polyline class="l-kw" points="${line((p) => p.kw, maxP)}"/>` +
+          `<polyline class="l-kwh" points="${line((p) => p.kwh, maxE)}"/>` +
+          `<text x="${L + 2}" y="11">${maxE.toFixed(2)} kWh</text>` +
+          `<text x="${R - 2}" y="11" text-anchor="end">${maxP.toFixed(0)} kW</text>` +
+          `<text x="${R - 2}" y="${H - 3}" text-anchor="end">${dur(maxS)} mô phỏng</text>` +
+          `<text x="${L + 2}" y="${H - 3}">0</text>`;
+      }
+
+      function renderJr(s, c) {
+        const f = jrF[c.id];
+        const st = f('status');
+        st.textContent = c.status + (c.errorCode !== 'NoError' ? ` · ${c.errorCode}` : '');
+        st.style.background = `var(--st-${c.status})`;
+        const txc = f('tx');
+        txc.hidden = !c.txActive;
+        txc.textContent = c.txActive ? `tx ${c.txId ?? 'chờ CSMS cấp'}` : '';
+        txc.style.background = 'var(--panel)';
+        txc.style.color = 'var(--text)';
+        const [cls, head, sub] = nowLine(s, c);
+        const now = f('now');
+        now.className = 'now ' + cls;
+        now.innerHTML = esc(head) + (sub ? `<small>${esc(sub)}</small>` : '');
+        const cur = c.journeys.at(-1);
+        // Số liệu: phiên đang chạy, hoặc phiên vừa xong (hành trình gần nhất có tổng kết)
+        const doneJ = [...c.journeys].reverse().find((j) => j.summary);
+        if (c.txActive) {
+          f('kwhK').textContent = 'Đã sạc cho xe';
+          f('kwh').textContent = c.kwh.toFixed(2);
+          f('kw').textContent = c.kw.toFixed(1);
+          f('sim').textContent = dur(c.elapsed);
+          f('real').textContent = dur(c.realElapsed);
+        } else if (doneJ) {
+          f('kwhK').textContent = 'Phiên vừa xong';
+          f('kwh').textContent = doneJ.summary.kwh.toFixed(2);
+          f('kw').textContent = '0.0';
+          f('sim').textContent = dur(doneJ.summary.simSec);
+          f('real').textContent = dur(doneJ.summary.realSec);
+        } else {
+          f('kwhK').textContent = 'Đã sạc cho xe';
+          for (const k of ['kwh', 'kw']) f(k).textContent = '0';
+          f('sim').textContent = f('real').textContent = '00:00';
+        }
+        f('soc').textContent = c.soc == null ? '—' : c.soc.toFixed(1);
+        // Biểu đồ: hành trình đang chạy, không thì phiên vừa xong
+        const chartJ = c.txActive ? cur : doneJ;
+        const pts = chartJ ? series[chartJ.id] : null;
+        drawChart(f('chart'), pts);
+        f('chartNote').textContent =
+          pts && pts.length > 1 ? `trục ngang: thời gian mô phỏng (×${s.speed} hiện tại)` : '';
+        // Dòng thời gian của hành trình gần nhất
+        const steps = cur ? cur.steps : [];
+        f('steps').innerHTML = steps.length
+          ? steps
+              .map((x) => {
+                const [k, html] = stepText(x);
+                return `<li class="${k}"><span class="t">${esc(hms(x.t))}</span>${html}</li>`;
+              })
+              .join('')
+          : '<li>Chưa có lệnh/phiên nào trên súng này kể từ khi trụ chạy.</li>';
+        const prevJ = c.journeys.length > 1 ? c.journeys[0] : null;
+        const pv = f('prev');
+        pv.hidden = !prevJ?.summary;
+        if (prevJ?.summary) {
+          const p = prevJ.summary;
+          pv.textContent = `Phiên trước: tx ${p.txId ?? '—'} · ${p.kwh.toFixed(2)} kWh (meter ${p.meterStart} → ${p.meterStop} Wh) · ${dur(p.simSec)} mô phỏng / ${dur(p.realSec)} thật · reason ${p.reason}`;
+        }
+      }
 
       function render(s) {
         state = s;
+        window.__truLast = s; // cho tru-3d.js (module nạp sau) vẽ ngay khung đầu
         try {
           window.renderTru?.(s); // hình trụ minh hoạ (tru-sac.js); lỗi hình không được làm hỏng HMI
+          window.renderTru3d?.(s); // hình 3D (tru-3d.js) nếu đang bật
         } catch (e) {
           console.error(e);
         }
         $('cpId').textContent = s.cpId;
         $('csms').textContent = s.csmsUrl;
         $('simTime').textContent = s.simTime.replace('T', ' ').slice(0, 19) + ' UTC';
-        $('speedBtn').textContent = s.speed === 1 ? 'Tăng tốc ×10' : 'Về tốc độ thực ×1';
-        $('speedBtn').classList.toggle('primary', s.speed !== 1);
+        $('clockAhead').textContent = ahead(s.clockAheadSec);
+        for (const b of $('speedSeg').querySelectorAll('button'))
+          b.setAttribute('aria-pressed', String(Number(b.dataset.speed) === s.speed));
+        $('syncBtn').disabled =
+          Math.abs(s.clockAheadSec) < 2 || s.connectors.some((c) => c.txActive);
+        // Cảnh báo thật thà về đồng hồ (xem README "Tốc độ mô phỏng và CSMS")
+        const cw = $('clockWarn');
+        const lead = s.clockAheadSec;
+        cw.hidden = s.speed === 1 && Math.abs(lead) < 60;
+        cw.classList.toggle('err', Math.abs(lead) > 300);
+        cw.textContent =
+          (s.speed > 1
+            ? `×${s.speed}: đồng hồ trụ chạy nhanh gấp ${s.speed} lần giờ thật, mọi timestamp OCPP (StartTransaction, MeterValues, StopTransaction) theo đồng hồ này. `
+            : '') +
+          `Đồng hồ trụ đang ${ahead(lead)}. ` +
+          (Math.abs(lead) > 300
+            ? 'Đã quá dung sai 300 s của CSMS: CSMS vẫn nhận bản tin và tính đúng kWh, nhưng khi quyết toán sẽ ghi tariff_clock_future_timestamp và tính CẢ phiên theo MỘT khung giá (khung lúc CSMS nhận StartTransaction, priced_clock = csms) — không chia giờ cao/thấp điểm. Kiểm tiền theo khung giờ thì dùng ×1 và bấm "Về giờ thật".'
+            : 'Lệch quá 300 s thì CSMS tính cả phiên theo một khung giá giờ server (tariff_clock_future_timestamp). Kiểm tiền theo khung giờ thì dùng ×1.');
         const n = s.net;
         const chip = $('netChip');
         const label = {
@@ -675,10 +1165,14 @@
           errFilled = true;
         }
         for (const c of s.connectors) renderGun(c);
+        for (const c of s.connectors) renderJr(s, c);
         $('timeline').innerHTML = s.timeline
           .slice()
           .reverse()
-          .map((e) => `<li class="${e.kind}"><span class="t">${hms(e.t)}</span> ${e.text}</li>`)
+          .map(
+            (e) =>
+              `<li class="${esc(e.kind)}"><span class="t">${hms(e.t)}</span> ${esc(e.text)}</li>`,
+          )
           .join('');
       }
 
@@ -743,7 +1237,7 @@
         const arrow = e.dir === 'out' ? '→' : '←';
         const kind = e.kind === 'CALL' ? '' : e.kind === 'RESULT' ? ' (kết quả)' : ' (LỖI)';
         d.className = e.dir + ' ' + e.kind;
-        d.innerHTML = `<span class="t">${hms(e.t)}</span> ${arrow} <b>${e.action}</b>${kind} ${(e.text === '{}' ? 'OK' : e.text).replace(/</g, '&lt;')}`;
+        d.innerHTML = `<span class="t">${hms(e.t)}</span> ${arrow} <b>${esc(e.action)}</b>${kind} ${esc(e.text === '{}' ? 'OK' : e.text)}`;
         d.title = e.text;
         const stick = logEl.scrollTop + logEl.clientHeight >= logEl.scrollHeight - 30;
         logEl.appendChild(d);
@@ -753,7 +1247,7 @@
 
       // ── Nút bên phải
       const post = (p, b) =>
-        fetch('/api/' + p, { method: 'POST', body: JSON.stringify(b ?? {}) }).then((r) => r.json());
+        fetch(API + p, { method: 'POST', body: JSON.stringify(b ?? {}) }).then((r) => r.json());
       const netMsg = (j) => {
         $('netMsg').textContent = j.message;
         $('netMsg').classList.toggle('bad', !j.ok);
@@ -766,19 +1260,30 @@
       $('hoBtn').onclick = async () =>
         netMsg(await post('halfopen', { seconds: Number($('dropSec').value) || 60 }));
       $('rebootBtn').onclick = async () => netMsg(await post('reboot'));
-      $('speedBtn').onclick = () => post('speed', { value: state.speed === 1 ? 10 : 1 });
+      for (const b of $('speedSeg').querySelectorAll('button'))
+        b.onclick = async () => netMsg(await post('speed', { value: Number(b.dataset.speed) }));
+      $('syncBtn').onclick = async () => netMsg(await post('syncclock'));
       $('bigBtn').onclick = () => document.documentElement.classList.toggle('big');
 
       // ── SSE
-      const es = new EventSource('/events');
+      const es = new EventSource('/events/' + encodeURIComponent(CP));
       es.addEventListener('hello', (ev) => {
         const d = JSON.parse(ev.data);
         logEl.innerHTML = '';
         d.log.forEach(addLog);
+        for (const k of Object.keys(series)) delete series[k];
+        Object.assign(series, d.series);
         render(d.state);
       });
       es.addEventListener('state', (ev) => render(JSON.parse(ev.data)));
       es.addEventListener('log', (ev) => addLog(JSON.parse(ev.data)));
+      es.addEventListener('point', (ev) => {
+        const { jid, p } = JSON.parse(ev.data);
+        let arr = (series[jid] ??= []);
+        arr.push(p);
+        if (arr.length > 400)
+          series[jid] = arr.filter((_, i) => i % 2 === 0 || i === arr.length - 1);
+      });
       es.onerror = () => {
         $('netChip').textContent = 'Mất kết nối tới server HMI';
       };
