@@ -456,7 +456,9 @@ describeDb('billing: quét top-up quá hạn + querydr (T32 Phần 8, SD-2d)', (
       expect(before['next_attempt_at']).not.toBeNull();
       g.open();
       await sweep;
-      expect(await topUpRow(t.topUpId)).toEqual(before);
+      // 8c: tx2 khoá được bằng lease và COMMIT → bộ đếm về 0; ngoài ra không ghi gì.
+      expect(before['unfinished_claims']).toBe(1);
+      expect(await topUpRow(t.topUpId)).toEqual({ ...before, unfinished_claims: 0 });
       expect(await creditRows(t.topUpId)).toBe(0);
       expect(logged(errorSpy, 'querydr_row_not_pending')).toEqual([
         {
@@ -535,6 +537,116 @@ describeDb('billing: quét top-up quá hạn + querydr (T32 Phần 8, SD-2d)', (
         late_amount_vnd: String(t.amountPaidVnd),
       });
       expect(await balance(t.driverId)).toBe(0);
+    });
+  });
+
+  // ---------------------------------------------------------------------------------------------
+  describe('hết lượt giữ chỗ: unfinished_claims (T32 Phần 8c, D7)', () => {
+    const due = (id: number) =>
+      q("UPDATE top_ups SET next_attempt_at = now() - interval '1 second' WHERE id = $1", [id]);
+    const claimsOf = async (id: number) => Number((await topUpRow(id))['unfinished_claims']);
+
+    /** tx2 ném mỗi lần (lỗi lặp sau querydr) cho tới khi vòng quét chuyển dòng sang expired. */
+    async function exhaust(t: Made): Promise<void> {
+      script.set(t.ref, TS('01'));
+      const spy = jest
+        .spyOn(service as unknown as { timeoutResult: () => Promise<unknown> }, 'timeoutResult')
+        .mockRejectedValue(new Error('lỗi lặp ở tx2'));
+      for (let i = 1; i <= 6; i++) {
+        expect(await run()).toBe(1);
+        if (i <= 5) {
+          expect(await claimsOf(t.topUpId)).toBe(i);
+          expect((await topUpRow(t.topUpId))['status']).toBe('pending');
+          await due(t.topUpId);
+        }
+      }
+      spy.mockRestore();
+    }
+
+    it('handle ném 6 lần liên tiếp → expired + retry_exhausted, next_attempt_at NULL, completed_at; querydr chỉ 5 lần; tài xế tạo được top-up mới', async () => {
+      const t = await dueTopUp(3);
+      await exhaust(t);
+      expect(calls).toHaveLength(5);
+      const row = await topUpRow(t.topUpId);
+      expect(row).toMatchObject({
+        status: 'expired',
+        exception_kind: 'retry_exhausted',
+        exception_reviewed_at: null,
+        next_attempt_at: null,
+        unfinished_claims: 6,
+      });
+      expect(row['completed_at']).not.toBeNull();
+      expect(await balance(t.driverId)).toBe(0);
+      expect(logged(warnSpy, 'top_up_retry_exhausted')).toEqual([
+        expect.objectContaining({ top_up_id: t.topUpId, unfinished_claims: 6 }),
+      ]);
+      expect(logged(errorSpy, 'leased_row_exhausted')).toEqual([
+        { event: 'leased_row_exhausted', table: 'top_ups', id: t.topUpId, unfinished_claims: 6 },
+      ]);
+      // Không còn pending → không chặn tài xế (pending_top_up_confirming).
+      const { topUp } = await service.create(
+        t.driverId,
+        `p8c-new-${++seq}`,
+        { amountVnd: 100_000 },
+        IP,
+      );
+      expect(topUp.status).toBe('pending');
+      // Không còn đến hạn: lượt quét sau không đụng.
+      calls = [];
+      expect(await run()).toBe(0);
+      expect(calls).toHaveLength(0);
+    });
+
+    it('log querydr_applied của đường hết lượt có reason retry_exhausted (không phải kết quả querydr)', async () => {
+      const logSpy = jest.spyOn(Logger.prototype, 'log').mockImplementation(() => undefined);
+      const t = await dueTopUp(3);
+      await exhaust(t);
+      expect(logged(logSpy, 'querydr_applied')).toEqual([
+        expect.objectContaining({
+          top_up_id: t.topUpId,
+          outcome: 'expired',
+          reason: 'retry_exhausted',
+          source: 'querydr',
+        }),
+      ]);
+    });
+
+    it('sau đó IPN thành công tới → khoản trễ, không cộng', async () => {
+      const t = await dueTopUp(3);
+      await exhaust(t);
+      const p = ipn(t);
+      expect((await service.applyPaymentResult(p)).RspCode).toBe('00');
+      expect(await topUpRow(t.topUpId)).toMatchObject({
+        status: 'expired',
+        exception_kind: 'retry_exhausted',
+        late_gateway_ref: p['vnp_TransactionNo'],
+        late_amount_vnd: String(t.amountPaidVnd),
+      });
+      expect(await balance(t.driverId)).toBe(0);
+    });
+
+    it('recheckTopUp nhận retry_exhausted: paid → late_payment_recorded, đánh dấu đã xem', async () => {
+      const t = await dueTopUp(3);
+      await exhaust(t);
+      script.set(t.ref, PAID);
+      expect(await service.recheckTopUp(t.topUpId)).toEqual({ result: 'late_payment_recorded' });
+      const row = await topUpRow(t.topUpId);
+      expect(row).toMatchObject({ status: 'expired', exception_kind: 'retry_exhausted' });
+      expect(row['late_gateway_ref']).not.toBeNull();
+      expect(row['exception_reviewed_at']).not.toBeNull();
+    });
+
+    it('querydr không ra được VNPay (như staging) nhiều lần → tx2 ghi lịch, bộ đếm về 0 mỗi lần, không hết lượt', async () => {
+      const t = await dueTopUp(3);
+      // Không có kịch bản → fetch ném → unresolved/network, tx2 hẹn mốc kế bình thường.
+      for (let i = 0; i < 7; i++) {
+        expect(await run()).toBe(1);
+        expect(await claimsOf(t.topUpId)).toBe(0);
+        expect((await topUpRow(t.topUpId))['status']).toBe('pending');
+        await due(t.topUpId);
+      }
+      expect(calls).toHaveLength(7);
+      expect(logged(warnSpy, 'top_up_retry_exhausted')).toHaveLength(0);
     });
   });
 

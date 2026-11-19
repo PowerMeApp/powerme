@@ -189,7 +189,10 @@ type LockedResult =
       amountVnd: number;
     }
   | { event: 'PAYMENT_FAILED' }
-  | { event: 'TIMEOUT_NOT_PAID'; exceptionKind?: 'unresolved_04' | 'unresolved_07' };
+  | {
+      event: 'TIMEOUT_NOT_PAID';
+      exceptionKind?: 'unresolved_04' | 'unresolved_07' | 'retry_exhausted';
+    };
 
 /** Trường log `ipn_applied` / `querydr_applied` / `payment_not_creditable` (ghi sau commit). */
 interface AppliedLog {
@@ -197,7 +200,11 @@ interface AppliedLog {
   gateway_reference: string;
   outcome: PaymentResultCommitted['outcome'];
   vnp_TransactionNo: string | null;
-  reason?: NotCreditableReason;
+  /**
+   * `not_creditable`: lý do không cộng được. `retry_exhausted` (Phần 8c): `expired` do hết lượt giữ
+   * chỗ, KHÔNG có querydr nào ra kết quả (log vẫn tên `querydr_applied`).
+   */
+  reason?: NotCreditableReason | 'retry_exhausted';
   amount_paid_vnd: number;
   late_amount_vnd?: number;
 }
@@ -240,7 +247,11 @@ type RecheckIneligible = Extract<RecheckResult, { result: 'not_eligible' }>['rea
 function recheckIneligible(row: RecheckTopUpRow | undefined): RecheckIneligible | null {
   if (!row) return 'not_found';
   if (row.status !== 'expired') return 'not_expired';
-  if (row.exception_kind !== 'unresolved_04' && row.exception_kind !== 'unresolved_07')
+  if (
+    row.exception_kind !== 'unresolved_04' &&
+    row.exception_kind !== 'unresolved_07' &&
+    row.exception_kind !== 'retry_exhausted'
+  )
     return 'no_unresolved_exception';
   if (row.exception_reviewed_at !== null) return 'already_reviewed';
   return null;
@@ -341,7 +352,13 @@ export class TopUpService implements BackgroundWork, OnModuleInit {
     }
     return runLeasedBatch(
       this.db.$client,
-      { table: 'top_ups', statuses: ['pending'], leaseMs: this.workConfig.leaseMs, limit },
+      {
+        table: 'top_ups',
+        statuses: ['pending'],
+        leaseMs: this.workConfig.leaseMs,
+        limit,
+        onExhausted: (locked, c) => this.onClaimsExhausted(c, locked as LockedTopUpRow),
+      },
       (row) => this.onPendingTimeout(row, signal),
       signal,
       this.logger,
@@ -392,8 +409,43 @@ export class TopUpService implements BackgroundWork, OnModuleInit {
   }
 
   /**
+   * Hết lượt giữ chỗ (T32 Phần 8c, D7): vòng quét giữ chỗ dòng quá `UNFINISHED_CLAIM_LIMIT` lần liên
+   * tiếp mà không ra kết quả (querydr / tx2 ném, sập). Chạy trong tx riêng của `runLeasedBatch`, dòng
+   * đã khoá bằng lease; KHÔNG querydr. `pending → expired` (STM-4 #4, `TIMEOUT_NOT_PAID`) +
+   * `exception_kind = 'retry_exhausted'` qua `applyLockedResult` (đặt `completed_at`,
+   * `next_attempt_at = NULL`). Không giữ `pending`: tài xế sẽ bị chặn tạo top-up mới tới khi có
+   * Admin. IPN thành công tới sau đó → khoản trễ; Admin "Kiểm tra lại" được (`recheckTopUp`).
+   * Trả việc sau commit (log + `afterPaymentCommitted`) cho `runLeasedBatch` chạy sau COMMIT.
+   */
+  private async onClaimsExhausted(
+    c: PoolClient,
+    locked: LockedTopUpRow & { unfinished_claims?: number },
+  ): Promise<(() => Promise<void>) | void> {
+    const account = await this.lockAccount(c, locked.credit_account_id);
+    const applied = await this.applyLockedResult(
+      c,
+      locked,
+      account,
+      { event: 'TIMEOUT_NOT_PAID', exceptionKind: 'retry_exhausted' },
+      'querydr',
+    );
+    return async () => {
+      this.log('warn', 'top_up_retry_exhausted', {
+        top_up_id: Number(locked.id),
+        gateway_reference: locked.gateway_reference,
+        unfinished_claims: locked.unfinished_claims ?? null,
+        outcome: applied.outcome,
+      });
+      if (applied.log) this.logApplied('querydr', applied.log);
+      if (applied.committed)
+        await this.afterCommit(applied.committed, 'top_up_timeout_after_commit_failed');
+    };
+  }
+
+  /**
    * "Kiểm tra lại" của Admin (chốt Khang 14/11; route, phân quyền, audit ở Phần 10). Chỉ cho top-up
-   * `expired` có `exception_kind` `unresolved_04` / `unresolved_07` chưa `exception_reviewed_at`.
+   * `expired` có `exception_kind` `unresolved_04` / `unresolved_07` / `retry_exhausted` (Phần 8c)
+   * chưa `exception_reviewed_at`.
    * querydr ngoài transaction, rồi khoá `top_ups` → `credit_accounts`, kiểm lại điều kiện dưới khoá.
    * Không đổi `status`, không ghi sổ cái.
    *
@@ -768,7 +820,10 @@ export class TopUpService implements BackgroundWork, OnModuleInit {
              updated_at = now() WHERE id = $1`,
           [topUpId, step.to, exceptionKind],
         );
-        return done({ topUpId, outcome: step.to === 'expired' ? 'expired' : 'failed' });
+        const left = done({ topUpId, outcome: step.to === 'expired' ? 'expired' : 'failed' });
+        // Phần 8c: hết lượt giữ chỗ, không có querydr nào ra kết quả → đánh dấu trên log.
+        if (exceptionKind === 'retry_exhausted') left.log!.reason = 'retry_exhausted';
+        return left;
       }
       case 'not_creditable': {
         const reason = step.reason;
