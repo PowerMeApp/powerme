@@ -5,6 +5,7 @@ import '../../../core/theme/powerme_theme.dart';
 import '../../../core/widgets/flow_page.dart';
 import '../domain/charge_session.dart';
 import 'charge_energy_label.dart';
+import 'charge_mode_widgets.dart';
 
 class ChargeStatementCard extends StatelessWidget {
   const ChargeStatementCard({
@@ -15,6 +16,7 @@ class ChargeStatementCard extends StatelessWidget {
     required this.retry,
     required this.sessionId,
     this.onClose,
+    this.progress,
   });
 
   final AppCopy copy;
@@ -23,6 +25,7 @@ class ChargeStatementCard extends StatelessWidget {
   final VoidCallback? retry;
   final String sessionId;
   final VoidCallback? onClose;
+  final ChargeProgress? progress;
 
   @override
   Widget build(BuildContext context) {
@@ -64,6 +67,20 @@ class ChargeStatementCard extends StatelessWidget {
             spacing: 0,
             children: [
               ValueLine(copy.text('Mã phiên sạc', 'Session ID'), sessionId),
+              if (progress != null) ...[
+                ValueLine(
+                  copy.text('Chế độ sạc', 'Charging mode'),
+                  chargeModeLabel(progress!.billingMode, copy),
+                ),
+                ValueLine(
+                  copy.text('Mục tiêu', 'Target'),
+                  chargeTargetLabel(
+                    progress!.billingMode,
+                    progress!.limitValue,
+                    copy,
+                  ),
+                ),
+              ],
               ValueLine(
                 copy.text('Ngày lập', 'Posted'),
                 ictDateTime(posted.createdAt),

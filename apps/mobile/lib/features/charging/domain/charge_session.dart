@@ -32,7 +32,13 @@ class ChargeProgress {
     required this.connection,
     required this.quality,
     required this.updatedAt,
-    required this.limitWh,
+    required this.limitValue,
+    this.billingMode,
+    this.billingModeMissing = false,
+    this.elapsedSeconds,
+    this.costEstimateVnd,
+    this.costQuality = ChargeCostQuality.unknown,
+    this.costClock,
     required this.consumedWh,
     required this.meterStopWh,
     required this.energyWh,
@@ -45,12 +51,40 @@ class ChargeProgress {
   final ConnectionState connection;
   final DataQuality quality;
   final DateTime updatedAt;
-  final int? limitWh;
+  final ChargingMode? billingMode;
+  final bool billingModeMissing;
+  final int? limitValue;
+  final int? elapsedSeconds;
+  final int? costEstimateVnd;
+  final ChargeCostQuality costQuality;
+  final ChargeCostClock? costClock;
   final int? consumedWh;
   final int? meterStopWh;
   final int? energyWh;
   final int? estimatedCostVnd;
   final bool billingReviewRequired;
+
+  ChargeProgress withStartContext(StartRequest? request) {
+    if (!billingModeMissing || request == null) return this;
+    return ChargeProgress(
+      status: status,
+      settlement: settlement,
+      connection: connection,
+      quality: quality,
+      updatedAt: updatedAt,
+      billingMode: request.mode,
+      limitValue: request.limitValue,
+      elapsedSeconds: elapsedSeconds,
+      costEstimateVnd: costEstimateVnd,
+      costQuality: costQuality,
+      costClock: costClock,
+      consumedWh: consumedWh,
+      meterStopWh: meterStopWh,
+      energyWh: energyWh,
+      estimatedCostVnd: estimatedCostVnd,
+      billingReviewRequired: billingReviewRequired,
+    );
+  }
 
   int? get measuredEnergyWh => meterStopWh != null
       ? energyWh
@@ -82,6 +116,10 @@ class ChargeProgress {
           (settlement == SettlementState.posted ||
               settlement == SettlementState.notApplicable));
 }
+
+enum ChargeCostQuality { exact, interpolated, unknown }
+
+enum ChargeCostClock { cp, cpOffset, csms }
 
 class PostedChargeStatement {
   const PostedChargeStatement({

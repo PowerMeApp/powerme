@@ -6,13 +6,16 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/l10n/app_copy.dart';
 import '../../../core/widgets/flow_page.dart';
 import '../../profile/domain/vehicle.dart';
+import '../../profile/presentation/vehicle_visuals.dart';
 import '../../stations/application/station_discovery_controller.dart';
 import '../../stations/domain/connector_lookup.dart';
 import '../../stations/domain/station.dart';
 import '../../stations/presentation/station_copy.dart';
 import '../application/charge_start_controller.dart';
 import '../domain/charge_start.dart';
+import '../domain/charging.dart';
 import 'charge_flow_visuals.dart';
+import 'charge_mode_widgets.dart';
 
 class ChargeConnectorPanel extends StatelessWidget {
   const ChargeConnectorPanel({
@@ -78,6 +81,15 @@ class ChargeConnectorPanel extends StatelessWidget {
             spacing: 8,
             children: [
               Text(copy.vehicle, style: theme.textTheme.labelMedium),
+              SizedBox(
+                width: 120,
+                child: VehiclePhoto(
+                  copy: copy,
+                  imageUrl: selected.imageUrl,
+                  imageCredit: selected.imageCredit,
+                  compact: true,
+                ),
+              ),
               ChargeDetail(
                 icon: Icons.directions_car_outlined,
                 title: [selected.label, ?selected.plateNumber].join(' · '),
@@ -137,6 +149,18 @@ class _ChargeStartForm extends ConsumerStatefulWidget {
 class _ChargeStartFormState extends ConsumerState<_ChargeStartForm> {
   final _form = GlobalKey<FormState>();
   final _energy = TextEditingController();
+  ChargingMode _mode = ChargingMode.energy;
+
+  @override
+  void initState() {
+    super.initState();
+    final draft = ref.read(chargeStartDraftProvider);
+    _mode = draft.mode;
+    _energy.text = draft.input;
+  }
+
+  void _saveDraft() =>
+      ref.read(chargeStartDraftProvider.notifier).update(_mode, _energy.text);
 
   @override
   void dispose() {
@@ -147,11 +171,47 @@ class _ChargeStartFormState extends ConsumerState<_ChargeStartForm> {
   @override
   Widget build(BuildContext context) {
     final copy = widget.copy;
+    final unit = switch (_mode) {
+      ChargingMode.autoFull => '',
+      ChargingMode.timed => copy.text('phút', 'min'),
+      ChargingMode.energy => 'kWh',
+      ChargingMode.cost => 'VND',
+    };
+    final presets = switch (_mode) {
+      ChargingMode.autoFull => <String>[],
+      ChargingMode.timed => ['20', '30', '45', '60'],
+      ChargingMode.energy => ['10', '20', '35', '50'],
+      ChargingMode.cost => ['50000', '100000', '200000'],
+    };
     return Form(
       key: _form,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
+          const SizedBox(height: 20),
+          Text(
+            copy.text('Chọn chế độ sạc', 'Choose charging mode'),
+            style: Theme.of(context).textTheme.titleLarge,
+          ),
+          const SizedBox(height: 8),
+          ChargeModeChoices(
+            copy: copy,
+            selected: _mode,
+            onChanged: (mode) {
+              setState(() {
+                _form.currentState?.reset();
+                _mode = mode;
+                _energy.text = switch (mode) {
+                  ChargingMode.autoFull => '',
+                  ChargingMode.timed => '30',
+                  ChargingMode.energy => '',
+                  ChargingMode.cost => '100000',
+                };
+                _saveDraft();
+              });
+            },
+          ),
+          const SizedBox(height: 20),
           Text(
             copy.text(
               'Cắm đầu sạc vào xe trước khi bắt đầu.',
@@ -160,30 +220,98 @@ class _ChargeStartFormState extends ConsumerState<_ChargeStartForm> {
             style: Theme.of(context).textTheme.bodyMedium,
           ),
           const SizedBox(height: 12),
-          Text(
-            copy.text('Hạn mức điện năng (kWh)', 'Energy limit (kWh)'),
-            style: Theme.of(context).textTheme.labelLarge,
-          ),
-          const SizedBox(height: 6),
-          Semantics(
-            label: copy.text('Hạn mức điện năng (kWh)', 'Energy limit (kWh)'),
-            child: TextFormField(
-              key: const Key('qr-charge-energy'),
-              controller: _energy,
-              keyboardType: const TextInputType.numberWithOptions(
-                decimal: true,
-              ),
-              decoration: const InputDecoration(
-                suffixText: 'kWh',
-                errorMaxLines: 6,
-              ),
-              validator: (input) => parseChargeEnergyWh(input ?? '') == null
-                  ? copy.text(
-                      'Nhập kWh lớn hơn 0, trong phạm vi cho phép và tối đa 3 chữ số thập phân.',
-                      'Enter a positive kWh amount within range, with up to 3 decimal places.',
-                    )
-                  : null,
+          if (_mode != ChargingMode.autoFull) ...[
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                for (final value in presets)
+                  OutlinedButton(
+                    key: Key('charge-preset-$value'),
+                    onPressed: () => setState(() {
+                      _energy.text = value;
+                      _saveDraft();
+                    }),
+                    child: Text(
+                      _mode == ChargingMode.cost
+                          ? vnd(int.parse(value))
+                          : '$value $unit',
+                    ),
+                  ),
+              ],
             ),
+            const SizedBox(height: 12),
+            Text(
+              _mode == ChargingMode.energy
+                  ? copy.text('Hạn mức điện năng (kWh)', 'Energy limit (kWh)')
+                  : copy.text('Mục tiêu ($unit)', 'Target ($unit)'),
+              style: Theme.of(context).textTheme.labelLarge,
+            ),
+            const SizedBox(height: 6),
+            Semantics(
+              label: _mode == ChargingMode.energy
+                  ? copy.text('Hạn mức điện năng (kWh)', 'Energy limit (kWh)')
+                  : copy.text('Mục tiêu ($unit)', 'Target ($unit)'),
+              child: TextFormField(
+                key: Key(
+                  _mode == ChargingMode.energy
+                      ? 'qr-charge-energy'
+                      : 'qr-charge-limit',
+                ),
+                controller: _energy,
+                keyboardType: TextInputType.numberWithOptions(
+                  decimal: _mode == ChargingMode.energy,
+                ),
+                decoration: InputDecoration(suffixText: unit, errorMaxLines: 6),
+                onChanged: (_) {
+                  _saveDraft();
+                  setState(() {});
+                },
+                validator: (input) =>
+                    parseChargeLimit(_mode, input ?? '') == null
+                    ? _mode == ChargingMode.energy
+                          ? copy.text(
+                              'Nhập kWh lớn hơn 0, trong phạm vi cho phép và tối đa 3 chữ số thập phân.',
+                              'Enter a positive kWh amount within range, with up to 3 decimal places.',
+                            )
+                          : copy.text(
+                              'Nhập số nguyên lớn hơn 0 trong phạm vi cho phép.',
+                              'Enter a positive whole number within range.',
+                            )
+                    : null,
+              ),
+            ),
+          ],
+          const SizedBox(height: 16),
+          InfoCard(
+            spacing: 4,
+            children: [
+              Text(
+                copy.text('Tóm tắt phiên sạc', 'Charging summary'),
+                style: Theme.of(context).textTheme.titleMedium,
+              ),
+              ValueLine(
+                copy.text('Chế độ đã chọn', 'Selected mode'),
+                chargeModeLabel(_mode, copy),
+              ),
+              ValueLine(
+                copy.text('Mục tiêu', 'Target'),
+                chargeTargetLabel(
+                  _mode,
+                  parseChargeLimit(_mode, _energy.text),
+                  copy,
+                ),
+                showDivider: false,
+              ),
+              if (_mode != ChargingMode.autoFull)
+                Text(
+                  copy.text(
+                    'Kết quả thực tế có thể vượt mục tiêu trong thời gian trụ nhận lệnh dừng.',
+                    'Actual usage may exceed the target while the charger processes the stop request.',
+                  ),
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+            ],
           ),
           const SizedBox(height: 16),
           FilledButton.icon(
@@ -198,7 +326,8 @@ class _ChargeStartFormState extends ConsumerState<_ChargeStartForm> {
                     .start(
                       widget.selection,
                       widget.connector,
-                      parseChargeEnergyWh(_energy.text)!,
+                      parseChargeLimit(_mode, _energy.text),
+                      mode: _mode,
                     ),
               );
             },

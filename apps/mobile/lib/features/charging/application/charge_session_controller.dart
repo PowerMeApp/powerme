@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/api/idempotency_key.dart';
 import '../../auth/application/auth_controller.dart';
 import '../domain/charge_session.dart';
+import '../domain/charging.dart';
 import 'charge_start_controller.dart';
 
 final chargeSessionRepositoryProvider = Provider<ChargeSessionRepository>(
@@ -85,12 +86,14 @@ class ChargeSessionController extends ChangeNotifier {
     this._target, {
     required this.recordProgress,
     this.completionOnly = false,
+    this.startContext,
   });
 
   final ChargeSessionRepository _repository;
   final ChargeSessionTarget _target;
   final bool Function(ChargeSessionTarget, ChargeProgress) recordProgress;
   final bool completionOnly;
+  final StartRequest? startContext;
   Timer? _poll;
   void Function()? _cancel;
   bool _visible = false;
@@ -193,7 +196,7 @@ class ChargeSessionController extends ChangeNotifier {
         _progressIssue = ChargeSessionIssue.retry;
         return;
       }
-      _progress = next;
+      _progress = next.withStartContext(startContext);
       _progressIssue = null;
     },
     fail: (issue) {
