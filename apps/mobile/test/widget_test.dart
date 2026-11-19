@@ -6,10 +6,10 @@ import 'package:driver_app/features/auth/domain/auth_scope.dart';
 import 'package:driver_app/features/auth/application/auth_controller.dart';
 import 'test_helpers.dart';
 import 'package:driver_app/demo/charging_store.dart';
-import 'package:driver_app/demo/payment_store.dart';
+import 'support/payment_store.dart';
 import 'package:driver_app/demo/station_actions_store.dart';
 import 'package:driver_app/features/payments/application/payments_controller.dart';
-import 'package:driver_app/features/payments/data/mock_payments_repository.dart';
+import 'support/mock_payments_repository.dart';
 import 'package:driver_app/features/profile/application/profile_controller.dart';
 import 'package:driver_app/features/profile/data/mock_profile_repository.dart';
 import 'package:driver_app/features/profile/domain/driver_profile.dart';
@@ -18,6 +18,7 @@ import 'package:driver_app/features/stations/data/mock_station_repository.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'support/preview_routes.dart';
 
 void main() {
   WidgetController.hitTestWarningShouldBeFatal = true;
@@ -177,6 +178,7 @@ void main() {
         );
         final container = ProviderContainer.test(
           overrides: [
+            previewRoutesProvider.overrideWith((ref) => buildPreviewRoutes()),
             paymentsRepositoryProvider.overrideWithValue(
               MockPaymentsRepository(
                 store,

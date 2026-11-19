@@ -13,6 +13,7 @@ class FlowPage extends StatelessWidget {
     required this.children,
     this.showBack = true,
     this.backTooltip = 'Quay lại',
+    this.onBack,
     this.backLocation = '/',
   });
   final String title;
@@ -20,6 +21,7 @@ class FlowPage extends StatelessWidget {
   final bool showBack;
   final String backTooltip;
   final String backLocation;
+  final VoidCallback? onBack;
   @override
   Widget build(BuildContext context) => Scaffold(
     appBar: AppBar(
@@ -28,8 +30,11 @@ class FlowPage extends StatelessWidget {
       leading: showBack
           ? IconButton(
               tooltip: backTooltip,
-              onPressed: () =>
-                  context.canPop() ? context.pop() : context.go(backLocation),
+              onPressed:
+                  onBack ??
+                  () => context.canPop()
+                      ? context.pop()
+                      : context.go(backLocation),
               icon: const Icon(Icons.arrow_back_rounded),
             )
           : null,

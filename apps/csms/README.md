@@ -85,10 +85,16 @@ Callers must obtain principal IDs from authenticated server context before invok
 - Pricing temporarily follows BR-P45 from Ân's `wp1/t71-br-p45-rounding` at `7e91f34` as authorized:
   exact milli-VND portions are summed, then rounded half up once per session. Points use the rounded
   debit. Repeated daily tariff segments are distinguished by segment start. No policy branch is merged.
-  CSMS receipt timestamps define tariff portions. Each boundary needs an exact aggregate meter sample
-  at that receipt time, or audited `recordTariffBoundary` evidence from the owning active operator.
-  Missing evidence, tariff gaps/overlaps, reconciliation review, promotions and offline-delivered sessions
-  remain observable pending with their credit liability retained; they are not silently priced.
+  Charge-point timestamps define tariff portions (T101); a clock that is off by more than
+  `TARIFF_CLOCK_TOLERANCE_S` is corrected by the offset measured on live frames of the same connection
+  epoch, and a session whose clock cannot be explained is priced whole at the band in force when the
+  CSMS received StartTransaction (T134, see `docs/T101-TARIFF-CLOCK.md`). The meter reading at a
+  boundary inside a charge-point-clock session is, in order: audited `recordTariffBoundary` evidence
+  from the owning active operator, an exact aggregate meter sample, or a linear interpolation between
+  the two readings around the boundary (recorded as `tariff_boundary_interpolated`). Tariff
+  gaps/overlaps, reconciliation review and promotions remain observable pending with their credit
+  liability retained; they are not silently priced. Neither a wrong clock nor a missing boundary
+  sample holds a session.
 - `findStations(driverId, vehicleId, input)` returns `{items,total,page,pageSize}` grouped by site,
   with compatible connectors and string resource IDs. Input supports literal accent-insensitive Vietnamese
   name/code/address search, availability, optional coordinates/radius, name/distance sort, page/pageSize

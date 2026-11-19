@@ -1,12 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import '../../../core/l10n/app_copy.dart';
-import '../../../core/theme/powerme_theme.dart';
-import '../../../core/widgets/flow_page.dart';
-import '../../profile/application/profile_controller.dart';
-import '../../profile/domain/driver_profile.dart';
-import '../application/support_controller.dart';
+import 'package:driver_app/core/l10n/app_copy.dart';
+import 'package:driver_app/core/theme/powerme_theme.dart';
+import 'package:driver_app/core/widgets/flow_page.dart';
+import 'package:driver_app/features/profile/application/profile_controller.dart';
+import 'package:driver_app/features/profile/domain/driver_profile.dart';
+import 'preview_support_controller.dart';
 
 class ReportScreen extends ConsumerStatefulWidget {
   const ReportScreen({super.key, required this.connector});

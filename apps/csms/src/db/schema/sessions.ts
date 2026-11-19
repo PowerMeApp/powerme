@@ -188,7 +188,8 @@ export const sessions = pgTable(
     energyWh: bigint('energy_wh', { mode: 'number' }),
     /** Dẫn xuất = SUM(session_tariff_segments.amount_vnd) trừ khuyến mãi; cập nhật cùng transaction với ledger. */
     totalCostVnd: bigint('total_cost_vnd', { mode: 'number' }),
-    pricedClock: text('priced_clock', { enum: ['cp', 'csms'] }),
+    /** T134: `cp` giờ trụ · `cp_offset` giờ trụ + độ lệch đo được · `csms` giờ CSMS, một khung giá. */
+    pricedClock: text('priced_clock', { enum: ['cp', 'cp_offset', 'csms'] }),
     pricedEndedAt: timestamp('priced_ended_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
@@ -223,7 +224,7 @@ export const sessions = pgTable(
     check(
       'sessions_priced_clock_check',
       sql`(${t.pricedClock} IS NULL AND ${t.pricedEndedAt} IS NULL)
-        OR (${t.pricedClock} IS NOT NULL AND ${t.pricedClock} IN ('cp', 'csms') AND ${t.pricedEndedAt} IS NOT NULL)`,
+        OR (${t.pricedClock} IS NOT NULL AND ${t.pricedClock} IN ('cp', 'cp_offset', 'csms') AND ${t.pricedEndedAt} IS NOT NULL)`,
     ),
   ],
 );

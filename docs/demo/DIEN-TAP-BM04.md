@@ -6,14 +6,14 @@ Cách chạy từng kịch bản đã cam kết trong BM04 bằng công cụ có
 
 | Kịch bản | Người trình bày | Công cụ diễn tập | Đã kiểm ở đâu |
 |---|---|---|---|
-| **DS-01** sạc từ app tới hạn mức 10 kWh | Sơn | `scripted-station.mjs app` + `rehearse-app.mjs ds-01` | Local 14/11: 11/11 kiểm tra đạt. **Chưa chạy trên staging**; app Flutter chưa nối màn sạc |
-| **DS-02** số dư 30.000 → từ chối, gợi ý nạp | Sơn | `rehearse-app.mjs ds-02` | Local 14/11: 4/4 đạt. Chưa chạy trên staging |
-| **DS-03** nạp 200.000, đổi 500 điểm, trả VNPay | Khang | `rehearse-topup.mjs ds-03` | Local 17/11 với VNPay giả (`--simulate-vnpay`): 9/9 kiểm tra đạt (giảm 5.000 ₫, trả 195.000 ₫, số dư 100.000 → 300.000, điểm 600 → 100). **Chưa chạy với sandbox thật trên staging** (chưa đặt mã VNPay); hoá đơn điện tử (Phần 7) chưa có nên chưa kiểm |
-| **DS-04** huỷ ở VNPay, gửi lại IPN | Khang | `rehearse-topup.mjs ds-04` | Local 17/11 với VNPay giả: 8/8 đạt (`failed`, IPN lặp → RspCode 02, số dư không đổi, tạo được top-up mới). Chưa chạy với sandbox thật |
+| **DS-01** sạc từ app tới hạn mức 10 kWh | Sơn | `scripted-station.mjs app` + `rehearse-app.mjs ds-01` | **Staging 17/11 (`review-22`): 11/11 kiểm tra đạt** trên trạm Metro Làng Đại học (`PM-DC120-HCM-1101`, trụ luôn nối): 10.230 Wh, CSMS tự dừng khi chạm hạn mức, 38.874 ₫, +38 điểm, số dư 200.000 → 161.126. Chạy bằng script; app Flutter chưa được kiểm trên luồng này |
+| **DS-02** số dư 30.000 → từ chối, gợi ý nạp | Sơn | `rehearse-app.mjs ds-02` | **Staging 17/11: 4/4 đạt** (`topuprequired`, không có phiên, số dư 30.000 không đổi) |
+| **DS-03** nạp 200.000, đổi 500 điểm, trả VNPay | Khang | `rehearse-topup.mjs ds-03` | Local 17/11 với VNPay giả (`--simulate-vnpay`): 9/9 kiểm tra đạt (giảm 5.000 ₫, trả 195.000 ₫, số dư 100.000 → 300.000, điểm 600 → 100). Staging đã có mã VNPay và mở hai đường `/billing/vnpay/*` (17/11), tạo top-up trả `payment_url`; **chưa có lần thanh toán thật nào** (cần người trả bằng thẻ thử). Hoá đơn điện tử (Phần 7) chưa có nên chưa kiểm |
+| **DS-04** huỷ ở VNPay, gửi lại IPN | Khang | `rehearse-topup.mjs ds-04` | Local 17/11 với VNPay giả: 8/8 đạt (`failed`, IPN lặp → RspCode 02, số dư không đổi, tạo được top-up mới). Chưa chạy với sandbox thật. Lưu ý staging: VM không gọi ra được VNPay nên top-up bỏ dở kẹt khoảng 1 giờ — phải bấm Huỷ ở trang VNPay, đừng đóng tab (`infra/staging/README.md` mục VNPay) |
 | **DS-05** đứt 2 phút, nối lại, phát bù | Trí | `scripted-station.mjs ds-03d --offline-s 150` | Staging 09/11: đạt |
 | **DS-06** phát lại `meterStop` cũ → `review` | Trí | `scripted-station.mjs ds-03a` | Staging 09/11: đạt; RQ1 13/11: 30/30 trên staging |
-| **DS-07** súng lỗi → xác nhận → reset từ xa → hết lỗi | Nghĩa | `scripted-station.mjs fault --reset accept` + console / dashboard | Local 14/11: đạt (`raised → acknowledged → resetting → resolved`). Chưa chạy trên staging |
-| **DS-08** reset bị từ chối → cảnh báo vẫn mở | Nghĩa | `scripted-station.mjs fault --reset reject` | Local 14/11: đạt (sự cố giữ `acknowledged`, lệnh `rejected`). Chưa chạy trên staging |
+| **DS-07** súng lỗi → xác nhận → reset từ xa → hết lỗi | Nghĩa | `scripted-station.mjs fault --reset accept` + console / dashboard | **Staging 17/11: đạt** trên `RH24D1-00001` qua `wss://` (`raised → acknowledged → resetting → resolved`, Reset `Accepted`). Qua console, chưa qua dashboard |
+| **DS-08** reset bị từ chối → cảnh báo vẫn mở | Nghĩa | `scripted-station.mjs fault --reset reject` | **Staging 17/11: đạt** (Reset `Rejected`, sự cố giữ `acknowledged`); sau đó đã đóng sự cố bằng console để súng hiện lại |
 | **DS-09** onboard một serial đã đăng ký | Ân | `onboard-sim.mjs --serial <serial mới> --register` | Staging 16/11 (`review-20`): đạt với `SIM-0006` (Admin đăng ký → 201, onboard → 201 `awaiting_connection`, Boot → `in_service`, 2 súng Available). `SIM-0005` và `SIM-0006` đã `in_service`: mỗi lần tập lại dùng một serial mới, hoặc `./seed.sh --reset` |
 | **DS-10** sai mật khẩu trụ → 401; serial chưa đăng ký → 409 | Ân | cùng lệnh `onboard-sim.mjs` | Staging 16/11: đạt (`SIM-9999` → 409 `serial_not_registered`; `SIM-0006` sai mật khẩu → 401) |
 

@@ -38,5 +38,24 @@ import UIKit
         MKLaunchOptionsDirectionsModeKey: MKLaunchOptionsDirectionsModeDriving
       ]))
     }
+    let checkout = FlutterMethodChannel(
+      name: "powerme/vnpay_checkout",
+      binaryMessenger: engineBridge.applicationRegistrar.messenger())
+    checkout.setMethodCallHandler { call, result in
+      guard call.method == "openCheckout" else {
+        result(FlutterMethodNotImplemented)
+        return
+      }
+      guard let raw = call.arguments as? String, let url = URL(string: raw),
+        url.scheme == "https", url.host == "sandbox.vnpayment.vn",
+        url.user == nil, url.password == nil, url.port == nil || url.port == 443,
+        url.path == "/paymentv2/vpcpay.html", let query = url.query, !query.isEmpty,
+        url.fragment == nil
+      else {
+        result(false)
+        return
+      }
+      UIApplication.shared.open(url, options: [:]) { opened in result(opened) }
+    }
   }
 }

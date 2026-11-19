@@ -22,6 +22,7 @@ typedef ResolvedConnector = ({
   String stationName,
   StationStatus status,
   bool reportedIssue,
+  bool canRequestStart,
 });
 
 abstract interface class ConnectorLookupRepository {
