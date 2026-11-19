@@ -35,8 +35,14 @@
  * {@link FaultService.resolveOffline}, do OfflineAlertService gọi theo nhịp quét — sự cố cả trụ
  * (connector 0) với error_code `Offline`.
  *
- * Chưa làm (docs/ITERATION-1-WF04.md mục 7): báo lỗi từ app tài xế (chưa có API), phiếu bảo trì
- * (Should), ẩn súng + huỷ đặt chỗ (Should), sự kiện realtime `alert.*`.
+ * Bố cục module (`stations/faults/`): `fault.types.ts` (kiểu, hằng, lỗi — re-export ở đây),
+ * `fault-store.ts` (hàm giao dịch dùng chung, thứ tự khoá), `fault-queries.ts` (phía đọc),
+ * `driver-report.ts` (tài xế báo lỗi, t8), `fault-state-machine.ts` (STM-6), `error-code-guide.ts`,
+ * `offline-alert.service.ts` (quét trụ im lặng). File này giữ API công khai, tín hiệu OCPP, Offline,
+ * hành động của Operator và hẹn giờ Reset.
+ *
+ * Chưa làm (docs/ITERATION-1-WF04.md mục 7): phiếu bảo trì (Should), huỷ đặt chỗ (Should), sự kiện
+ * realtime `alert.*`.
  */
 import {
   Inject,
@@ -46,205 +52,46 @@ import {
   OnApplicationShutdown,
   Optional,
 } from '@nestjs/common';
-import { and, desc, eq, isNull, ne, SQL, sql, SQLWrapper } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import { ScheduledTask, Scheduler, TimeoutScheduler } from '../../common/scheduler.js';
-import {
-  CONFIG,
-  CsmsConfig,
-  DEFAULT_FAULT_RESET_TIMEOUT_S,
-  DEFAULT_OFFLINE_ALERT_S,
-  DEFAULT_TARIFF_CLOCK_TOLERANCE_S,
-} from '../../config.js';
-import { DB, Db, DbExecutor } from '../../db/db.module.js';
-import { resolveTariffClock } from '../../reconciliation/tariff-clock.js';
-import {
-  chargePoints,
-  connectors,
-  faultEvents,
-  faultReports,
-  remoteCommands,
-  sites,
-} from '../../db/schema/index.js';
-import {
-  CHARGE_POINT_ERROR_CODES,
-  ERROR_CODE_GUIDE,
-  FaultSeverity,
-  guideFor,
-  OFFLINE_ERROR_CODE,
-  OFFLINE_GUIDE,
-  severityRank,
-} from './error-code-guide.js';
+import { CONFIG, CsmsConfig, DEFAULT_FAULT_RESET_TIMEOUT_S } from '../../config.js';
+import { DB, Db } from '../../db/db.module.js';
+import { faultEvents, remoteCommands } from '../../db/schema/index.js';
+import { reportFromDriver, sessionCompleted, type DriverReportDeps } from './driver-report.js';
+import { OFFLINE_ERROR_CODE } from './error-code-guide.js';
 import {
   FaultStateMachine,
   FaultStatus,
   FaultTrigger,
   InvalidFaultTransitionError,
 } from './fault-state-machine.js';
+import { countFaults, getFault, listFaults, reportsOf } from './fault-queries.js';
+import {
+  attachWaitingReports,
+  clearReports,
+  findOpenForUpdate,
+  handOverReports,
+  lastResolvedAt,
+  lockConnectors,
+  lockFault,
+  resolveConnectorId,
+  type HandOver,
+} from './fault-store.js';
+import {
+  eventTime,
+  FAULT_RESET_SCHEDULER,
+  RECOVERED_STATUSES,
+  type BeginResetResult,
+  type ConnectorStatusInput,
+  type DriverReportResult,
+  type FaultListFilter,
+  type FaultListItem,
+  type ResetOutcome,
+  type ResetType,
+  type StatusOutcome,
+} from './fault.types.js';
 
-export const FAULT_RESET_SCHEDULER = Symbol('FAULT_RESET_SCHEDULER');
-
-export type ResetType = 'Soft' | 'Hard';
-
-/** Không có sự cố với id này. */
-export class FaultNotFoundError extends Error {
-  constructor(readonly faultId: number) {
-    super(`Không có sự cố id=${faultId}`);
-    this.name = 'FaultNotFoundError';
-  }
-}
-
-/** Việc FaultService đã làm với một StatusNotification. */
-export type StatusOutcome =
-  | { kind: 'raised'; faultId: number }
-  /** `errorCode`: mã Faulted vừa ghi vào sự cố tài xế báo chưa có mã (T131). */
-  | { kind: 'attached'; faultId: number; errorCode?: string }
-  | {
-      kind: 'resolved';
-      faultId: number;
-      from: FaultStatus;
-      /** T141: driver reports moved to an open fault of their connector (label kept). */
-      handedOver?: { toFaultId: number; reports: number; created: boolean }[];
-    }
-  /** Bản phát lại cũ hơn trạng thái hiện tại của sự cố: không đổi gì (xem {@link eventTime}). */
-  | { kind: 'stale'; faultId: number | null }
-  | { kind: 'none' };
-
-/** FE-17 (UC-CHG-05): lỗi nghiệp vụ của báo lỗi từ tài xế; route HTTP đổi sang mã lỗi. */
-export class DriverReportError extends Error {
-  constructor(readonly code: 'invalid_description' | 'not_found' | 'duplicate_report') {
-    super(code);
-    this.name = 'DriverReportError';
-  }
-}
-
-export interface DriverReportResult {
-  reportId: number;
-  reportNo: number;
-  connectorId: number;
-  reportedAt: Date;
-  /** Sự cố mà báo cáo được gắn vào (mới tạo hoặc đang mở); null = chờ gộp sau (AD-7). */
-  faultEventId: number | null;
-  /** Súng đang mang nhãn "reported issue" (BR-P42) sau báo cáo này. */
-  reportedIssue: boolean;
-}
-
-/** BR-P42: cửa sổ 2 giờ — đếm tài xế khác nhau, và gộp báo cáo chờ khi một sự cố mở (Q79). */
-export const REPORT_WINDOW_MS = 2 * 3600 * 1000;
-/** Q80: cùng tài xế, cùng súng trong 60 s → trùng (bấm hai lần). */
-export const DUPLICATE_REPORT_MS = 60 * 1000;
-/** Q78: trạng thái súng "bất thường" — một báo cáo là đủ. Trụ Offline cũng tính. */
-const ABNORMAL_STATUSES = ['Faulted', 'Unavailable'];
-/** Q77: phiên dừng vì các lý do này không phải "hoàn tất bình thường" (BR-P42). */
-export const FAULT_STOP_REASONS: ReadonlySet<string> = new Set([
-  'EmergencyStop',
-  'PowerLoss',
-  'Other',
-]);
-const CONTROL = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/;
-
-export interface ConnectorStatusInput {
-  chargePointId: number;
-  /** connectorId của OCPP: 0 = cả trụ. */
-  connectorNo: number;
-  status: string;
-  errorCode: string | null;
-  receivedAt: Date;
-  /**
-   * Lúc sự việc xảy ra: đồng hồ trụ (`timestamp` trong payload) nếu frame là bản phát lại, ngược
-   * lại `receivedAt` (ADR-0009: received_at là đồng hồ tin cậy cho frame live). Ghi raised_at /
-   * resolved_at. Bỏ trống = `receivedAt`.
-   */
-  occurredAt?: Date;
-}
-
-/**
- * Trạng thái súng coi là ĐÃ HỒI PHỤC (trigger CONNECTOR_AVAILABLE của STM-6). OCPP 1.6 cho súng
- * thoát Faulted sang bất kỳ trạng thái nào (bảng I1…I8, `valid-transitions.ts`): lỗi tự hết rồi tài
- * xế cắm sạc luôn thì súng đi Faulted → Preparing → Charging, không qua Available. `Unavailable`
- * KHÔNG nằm đây: đó là bước giữa lúc trụ khởi động lại (T13 2.3 #14), lỗi có thể vẫn còn.
- */
-export const RECOVERED_STATUSES: ReadonlySet<string> = new Set([
-  'Available',
-  'Preparing',
-  'Charging',
-  'SuspendedEV',
-  'SuspendedEVSE',
-  'Finishing',
-  'Reserved',
-]);
-
-export interface BeginResetResult {
-  faultId: number;
-  commandId: number;
-  serial: string;
-}
-
-/** Kết quả CALL Reset do người gọi báo lại. */
-export type ResetOutcome =
-  { status: 'Accepted' | 'Rejected'; response?: unknown } | { error: string };
-
-/** List filter: `open` = not resolved, `all`, or exactly one STM-6 status (screen 21). */
-export type FaultListFilter = 'open' | 'all' | FaultStatus;
-
-/** Một dòng của danh sách cảnh báo (console, sau này dashboard FE-04). */
-export interface FaultListItem {
-  id: number;
-  eventNo: number;
-  chargePointId: number;
-  serial: string;
-  connectorNo: number | null;
-  source: string;
-  errorCode: string | null;
-  severity: FaultSeverity;
-  hint: string;
-  status: FaultStatus;
-  raisedAt: Date;
-  acknowledgedAt: Date | null;
-  resolvedAt: Date | null;
-  resetCommandId: number | null;
-  resetCommandStatus: string | null;
-  /** When the pending Reset was requested; its wait ends `resetTimeoutS` later. */
-  resetRequestedAt: Date | null;
-  isOnline: boolean;
-  /** Số báo cáo của tài xế gắn vào sự cố (F-05: Operator thấy báo cáo). */
-  reportCount: number;
-  /** Charging Station name (`sites.site_name`); null for a charge point not yet on a site. */
-  siteName: string | null;
-}
-
-/**
- * `CASE error_code WHEN 'GroundFailure' THEN 0 … ELSE <hạng của OtherError> END` — hạng nặng nhẹ của
- * ErrorCodeGuide đưa vào ORDER BY để sắp trước LIMIT. Mã và số đều là hằng của bảng tĩnh (không
- * phải dữ liệu người dùng) nên ghép thẳng vào SQL.
- */
-function severityRankSql(column: SQLWrapper): SQL {
-  const whens = CHARGE_POINT_ERROR_CODES.map((code) =>
-    sql.raw(`WHEN '${code}' THEN ${severityRank(ERROR_CODE_GUIDE[code].severity)}`),
-  );
-  whens.push(sql.raw(`WHEN '${OFFLINE_ERROR_CODE}' THEN ${severityRank(OFFLINE_GUIDE.severity)}`));
-  return sql`CASE ${column} ${sql.join(whens, sql` `)} ELSE ${sql.raw(String(severityRank(guideFor(null).severity)))} END`;
-}
-
-/**
- * Bản phát lại cũ hơn mức này coi là đồng hồ trụ sai (pin RTC hết → 1970…), không phải hàng đợi
- * offline thật. Hàng đợi của trụ không giữ lâu hơn vài ngày; 30 ngày để dư.
- */
-export const MAX_REPLAY_AGE_MS = 30 * 24 * 3600 * 1000;
-
-/**
- * Thời điểm ghi cho sự cố: `occurredAt` (giờ trụ của bản phát lại) nhưng KHÔNG muộn hơn lúc CSMS
- * nhận (đồng hồ trụ chạy nhanh) và không cũ hơn {@link MAX_REPLAY_AGE_MS} (đồng hồ trụ hỏng) —
- * hai trường hợp đó dùng `receivedAt` (ADR-0009: received_at là đồng hồ tin cậy).
- */
-export function eventTime(input: Pick<ConnectorStatusInput, 'occurredAt' | 'receivedAt'>): Date {
-  const occurred = input.occurredAt;
-  if (!occurred || Number.isNaN(occurred.getTime())) return input.receivedAt;
-  const rx = input.receivedAt.getTime();
-  if (occurred.getTime() > rx || rx - occurred.getTime() > MAX_REPLAY_AGE_MS) {
-    return input.receivedAt;
-  }
-  return occurred;
-}
+export * from './fault.types.js';
 
 /** Trạng thái lệnh `remote_commands` còn chưa có kết quả. */
 const IN_FLIGHT = ['pending', 'sent'] as const;
@@ -263,6 +110,11 @@ export class FaultService implements OnApplicationBootstrap, OnApplicationShutdo
     @Optional() @Inject(FAULT_RESET_SCHEDULER) scheduler?: Scheduler,
   ) {
     this.scheduler = scheduler ?? new TimeoutScheduler();
+  }
+
+  /** Phụ thuộc truyền cho driver-report.ts. */
+  private get deps(): DriverReportDeps {
+    return { db: this.db, config: this.config, logger: this.logger };
   }
 
   /** Hạn chờ Reset hiệu lực (giây). */
@@ -316,12 +168,12 @@ export class FaultService implements OnApplicationBootstrap, OnApplicationShutdo
       return { kind: 'none' };
     }
     const at = eventTime(input);
-    const connectorId = await this.resolveConnectorId(input.chargePointId, input.connectorNo);
+    const connectorId = await resolveConnectorId(this.db, input.chargePointId, input.connectorNo);
     if (connectorId === undefined) return { kind: 'none' };
 
     const outcome = await this.db.transaction(async (tx) => {
-      await this.lockConnectors(tx, input.chargePointId, connectorId);
-      const open = await this.findOpenForUpdate(tx, input.chargePointId, connectorId);
+      await lockConnectors(tx, input.chargePointId, connectorId);
+      const open = await findOpenForUpdate(tx, input.chargePointId, connectorId);
       if (input.status === 'Faulted') {
         if (open) {
           this.sm.apply(open.status, 'SIGNAL'); // no-op, ném nếu bảng đổi
@@ -341,7 +193,7 @@ export class FaultService implements OnApplicationBootstrap, OnApplicationShutdo
           }
           return { kind: 'attached', faultId: open.id } as const;
         }
-        const lastResolved = await this.lastResolvedAt(tx, input.chargePointId, connectorId);
+        const lastResolved = await lastResolvedAt(tx, input.chargePointId, connectorId);
         if (lastResolved && at < lastResolved) return { kind: 'stale', faultId: null } as const;
         const [row] = await tx
           .insert(faultEvents)
@@ -355,7 +207,7 @@ export class FaultService implements OnApplicationBootstrap, OnApplicationShutdo
           })
           .returning({ id: faultEvents.id });
         if (!row) throw new Error('INSERT fault_events không trả id');
-        await this.attachWaitingReports(tx, input.chargePointId, connectorId, row.id, at);
+        await attachWaitingReports(tx, input.chargePointId, connectorId, row.id, at);
         return { kind: 'raised', faultId: row.id } as const;
       }
       if (!open) return { kind: 'none' } as const;
@@ -368,7 +220,7 @@ export class FaultService implements OnApplicationBootstrap, OnApplicationShutdo
         .update(faultEvents)
         .set({ status: step.to, resolvedAt: at })
         .where(eq(faultEvents.id, open.id));
-      const handedOver = await this.handOverReports(tx, open.id, input.chargePointId, at);
+      const handedOver = await handOverReports(tx, open.id, input.chargePointId, at);
       return {
         kind: 'resolved',
         faultId: open.id,
@@ -414,8 +266,8 @@ export class FaultService implements OnApplicationBootstrap, OnApplicationShutdo
    */
   async raiseOffline(chargePointId: number, at: Date = new Date()): Promise<StatusOutcome> {
     const outcome = await this.db.transaction(async (tx) => {
-      await this.lockConnectors(tx, chargePointId, null);
-      const open = await this.findOpenForUpdate(tx, chargePointId, null);
+      await lockConnectors(tx, chargePointId, null);
+      const open = await findOpenForUpdate(tx, chargePointId, null);
       if (open) {
         this.sm.apply(open.status, 'SIGNAL'); // no-op, ném nếu bảng đổi
         return { kind: 'attached', faultId: open.id } as const;
@@ -432,7 +284,7 @@ export class FaultService implements OnApplicationBootstrap, OnApplicationShutdo
         })
         .returning({ id: faultEvents.id });
       if (!row) throw new Error('INSERT fault_events không trả id');
-      await this.attachWaitingReports(tx, chargePointId, null, row.id, at);
+      await attachWaitingReports(tx, chargePointId, null, row.id, at);
       return { kind: 'raised', faultId: row.id } as const;
     });
     if (outcome.kind === 'raised') {
@@ -453,7 +305,7 @@ export class FaultService implements OnApplicationBootstrap, OnApplicationShutdo
         .where(eq(faultEvents.id, faultId));
       if (!target) return { kind: 'noop' } as const;
       // T141: khoá connector trước rồi mới tới sự cố — cùng thứ tự với báo cáo tài xế (T131).
-      await this.lockConnectors(tx, target.chargePointId, null);
+      await lockConnectors(tx, target.chargePointId, null);
       const [fault] = await tx
         .select({ status: faultEvents.status, errorCode: faultEvents.errorCode })
         .from(faultEvents)
@@ -467,7 +319,7 @@ export class FaultService implements OnApplicationBootstrap, OnApplicationShutdo
         .update(faultEvents)
         .set({ status: step.to, resolvedAt: at })
         .where(eq(faultEvents.id, faultId));
-      const handedOver = await this.handOverReports(tx, faultId, target.chargePointId, at);
+      const handedOver = await handOverReports(tx, faultId, target.chargePointId, at);
       return { kind: 'resolved', handedOver } as const;
     });
     if (res.kind === 'resolved') {
@@ -479,234 +331,37 @@ export class FaultService implements OnApplicationBootstrap, OnApplicationShutdo
   }
 
   // ---------------------------------------------------------------------------------------------
-  // Hành động của operator
-  // ---------------------------------------------------------------------------------------------
-
-  // ---------------------------------------------------------------------------------------------
   // Tài xế báo lỗi (FE-17: UC-CHG-05, BR-P42, Q75–Q81)
   // ---------------------------------------------------------------------------------------------
 
-  /**
-   * Ghi một báo lỗi của tài xế cho một súng và áp BR-P42:
-   * - súng (hoặc cả trụ) đang có sự cố mở → gắn vào đó, không tạo sự cố mới (Q81, STM-6);
-   * - 2 tài xế khác nhau trong 2 giờ, hoặc 1 tài xế khi súng Faulted / Unavailable / trụ Offline
-   *   (Q78) → tạo sự cố `driver_report` (t1) và gộp mọi báo cáo chờ của súng trong 2 giờ (Q79);
-   * - chưa đủ → chỉ lưu, chờ gộp sau (AD-7).
-   * Cùng tài xế + cùng súng trong 60 s → `duplicate_report`, không ghi gì (Q80).
-   */
+  /** FE-17 / BR-P42 (Q75–Q81, T131): xem {@link reportFromDriver} trong driver-report.ts. */
   async reportFromDriver(
     driverId: number,
     connectorId: number,
     description: string,
     at: Date = new Date(),
   ): Promise<DriverReportResult> {
-    const text = typeof description === 'string' ? description.trim() : '';
-    const length = [...text].length;
-    if (length < 5 || length > 500 || CONTROL.test(text))
-      throw new DriverReportError('invalid_description');
-    const offlineMs = (this.config.offlineAlertS ?? DEFAULT_OFFLINE_ALERT_S) * 1000;
-
-    const result = await this.db.transaction(async (tx) => {
-      // Khoá dòng súng (cùng thứ tự và cùng kiểu khoá với đường OCPP, T131): báo cáo và
-      // StatusNotification Faulted cho một súng đi tuần tự (đếm tài xế không lệch, không deadlock).
-      const target = (
-        await tx.execute<{
-          charge_point_id: string;
-          status: string | null;
-          offline: boolean;
-        }>(sql`SELECT c.charge_point_id::text AS charge_point_id, c.status,
-            (NOT cp.is_online OR cp.last_message_at IS NULL
-              OR cp.last_message_at < ${at}::timestamptz - (${offlineMs}::bigint * interval '1 millisecond')) AS offline
-          FROM connectors c JOIN charge_points cp ON cp.id = c.charge_point_id
-          JOIN sites st ON st.id = cp.site_id JOIN operators o ON o.id = st.operator_id
-          WHERE c.id = ${connectorId} AND cp.lifecycle = 'in_service' AND o.status = 'active'
-          FOR NO KEY UPDATE OF c`)
-      ).rows[0];
-      if (!target) throw new DriverReportError('not_found');
-      const chargePointId = Number(target.charge_point_id);
-
-      const duplicate = await tx.execute(sql`SELECT 1 FROM fault_reports
-        WHERE driver_id = ${driverId} AND connector_id = ${connectorId}
-          AND reported_at > ${at}::timestamptz - (${DUPLICATE_REPORT_MS}::bigint * interval '1 millisecond')`);
-      if (duplicate.rows.length) throw new DriverReportError('duplicate_report');
-
-      const open =
-        (await this.findOpenForUpdate(tx, chargePointId, connectorId)) ??
-        (await this.findOpenForUpdate(tx, chargePointId, null));
-      if (open) this.sm.apply(open.status, 'SIGNAL'); // no-op: gắn vào sự cố đang mở
-
-      const [report] = await tx
-        .insert(faultReports)
-        .values({
-          driverId,
-          connectorId,
-          description: text,
-          reportedAt: at,
-          faultEventId: open?.id ?? null,
-        })
-        .returning({ id: faultReports.id, reportNo: faultReports.reportNo });
-      if (!report) throw new Error('INSERT fault_reports không trả id');
-      if (open) return { report, faultEventId: open.id, raised: false };
-
-      const drivers = (
-        await tx.execute<{ n: number }>(sql`SELECT count(DISTINCT driver_id)::int AS n
-          FROM fault_reports WHERE connector_id = ${connectorId} AND fault_event_id IS NULL
-            AND cleared_at IS NULL
-            AND reported_at > ${at}::timestamptz - (${REPORT_WINDOW_MS}::bigint * interval '1 millisecond')`)
-      ).rows[0]!.n;
-      const abnormal = target.offline || ABNORMAL_STATUSES.includes(target.status ?? '');
-      if (drivers < 2 && !abnormal) return { report, faultEventId: null, raised: false };
-      // T131: "cùng tài xế chỉ tính một" (Q80) áp cho cả trụ ở đường một tài xế — trong 2 giờ, một
-      // tài xế tự mình chỉ mở được một sự cố trên một trụ (trụ Offline không bị ẩn hết súng bởi một
-      // người). Báo cáo vẫn lưu và chờ luật hai tài xế (AD-7).
-      if (drivers < 2) {
-        const alone = await tx.execute(sql`SELECT 1 FROM fault_events f
-          WHERE f.charge_point_id = ${chargePointId} AND f.source = 'driver_report'
-            AND f.raised_at > ${at}::timestamptz - (${REPORT_WINDOW_MS}::bigint * interval '1 millisecond')
-            AND EXISTS (SELECT 1 FROM fault_reports r WHERE r.fault_event_id = f.id)
-            AND NOT EXISTS (SELECT 1 FROM fault_reports r
-              WHERE r.fault_event_id = f.id AND r.driver_id <> ${driverId})
-          LIMIT 1`);
-        if (alone.rows.length) return { report, faultEventId: null, raised: false };
-      }
-
-      const [event] = await tx
-        .insert(faultEvents)
-        .values({
-          chargePointId,
-          connectorId,
-          source: 'driver_report',
-          errorCode: null,
-          status: this.sm.initial(),
-          raisedAt: at,
-        })
-        .returning({ id: faultEvents.id });
-      if (!event) throw new Error('INSERT fault_events không trả id');
-      await this.attachWaitingReports(tx, chargePointId, connectorId, event.id, at);
-      return { report, faultEventId: event.id, raised: true };
-    });
-
-    if (result.raised)
-      this.logger.warn(
-        `sự cố #${result.faultEventId} raised: tài xế báo lỗi súng ${connectorId} (BR-P42)`,
-      );
-    return {
-      reportId: result.report.id,
-      reportNo: result.report.reportNo,
-      connectorId,
-      reportedAt: at,
-      faultEventId: result.faultEventId,
-      reportedIssue: result.faultEventId !== null,
-    };
+    return reportFromDriver(this.deps, driverId, connectorId, description, at);
   }
 
-  /**
-   * t8 (BR-P42, Q77): một phiên trên súng hoàn tất bình thường — bắt đầu SAU khi sự cố
-   * `driver_report` được tạo, đã dừng, có điện năng > 0 Wh, lý do dừng không phải
-   * EmergencyStop / PowerLoss / Other — thì đóng sự cố và xoá nhãn. Gọi sau StopTransaction.
-   *
-   * "Bắt đầu sau" so theo giờ trụ đã đối soát (T131, review #139): `cp_started_at` khi đồng hồ trụ
-   * qua đúng phép kiểm của BR-P02 (`resolveTariffClock`; từ T134 cộng thêm độ lệch đo được nếu đồng
-   * hồ lệch quá dung sai); không qua thì giờ CSMS nhận, nhưng chỉ khi phiên không phải bản gửi bù
-   * (`delivered_offline`). Phiên gửi bù mà đồng hồ trụ không kiểm được thì không biết nó bắt đầu lúc
-   * nào → không đóng; Operator đóng.
-   *
-   * Tìm sự cố `driver_report` đang mở TRƯỚC (một truy vấn không khoá): hầu hết StopTransaction không
-   * có sự cố nào để đóng và không phải trả giá ba truy vấn log của bước kiểm đồng hồ. Kết quả được
-   * kiểm lại dưới khoá trong transaction bên dưới.
-   */
+  /** t8 (BR-P42, Q77, ADR-0019): xem {@link sessionCompleted} trong driver-report.ts. */
   async onSessionCompleted(transactionNo: number): Promise<'resolved' | 'none'> {
-    const session = (
-      await this.db.execute<{
-        id: string;
-        charge_point_id: string;
-        connector_id: string;
-        connector_no: number;
-        id_tag: string;
-        transaction_no: number;
-        meter_start_wh: string;
-        meter_stop_wh: string;
-        cp_started_at: Date;
-        cp_stopped_at: Date | null;
-        received_started_at: Date;
-        received_stopped_at: Date | null;
-        delivered_offline: boolean;
-        energy_wh: string | null;
-        stop_reason: string | null;
-      }>(sql`SELECT s.id::text, s.charge_point_id::text, s.connector_id::text, c.connector_no,
-          s.id_tag, s.transaction_no, s.meter_start_wh::text, s.meter_stop_wh::text,
-          s.cp_started_at, s.cp_stopped_at, s.received_started_at, s.received_stopped_at,
-          s.delivered_offline, (s.meter_stop_wh - s.meter_start_wh)::text AS energy_wh, s.stop_reason
-        FROM sessions s JOIN connectors c ON c.id = s.connector_id
-        WHERE s.transaction_no = ${transactionNo}`)
-    ).rows[0];
-    if (
-      !session?.received_stopped_at ||
-      !(Number(session.energy_wh) > 0) ||
-      FAULT_STOP_REASONS.has(session.stop_reason ?? 'Local')
-    )
-      return 'none';
-    const [candidate] = await this.db
-      .select({ id: faultEvents.id })
-      .from(faultEvents)
-      .where(
-        and(
-          eq(faultEvents.chargePointId, Number(session.charge_point_id)),
-          eq(faultEvents.connectorId, Number(session.connector_id)),
-          eq(faultEvents.source, 'driver_report'),
-          ne(faultEvents.status, 'resolved'),
-        ),
-      )
-      .limit(1);
-    if (!candidate) return 'none';
-    const startedAt = await this.reconciledStart(session);
-    if (startedAt === null) return 'none';
-    const at = new Date(session.received_stopped_at);
-    const resolvedId = await this.db.transaction(async (tx) => {
-      const open = await this.findOpenForUpdate(
-        tx,
-        Number(session.charge_point_id),
-        Number(session.connector_id),
-      );
-      if (
-        !open ||
-        open.source !== 'driver_report' ||
-        !(startedAt > open.raisedAt) ||
-        !this.sm.canApply(open.status, 'SESSION_COMPLETED')
-      )
-        return null;
-      const step = this.sm.apply(open.status, 'SESSION_COMPLETED');
-      await tx
-        .update(faultEvents)
-        .set({ status: step.to, resolvedAt: at })
-        .where(eq(faultEvents.id, open.id));
-      await this.clearReports(tx, open.id, at, null);
-      return open.id;
-    });
-    if (resolvedId === null) return 'none';
-    this.logger.log(`sự cố #${resolvedId} resolved: phiên ${transactionNo} hoàn tất bình thường`);
-    return 'resolved';
+    return sessionCompleted(this.deps, transactionNo);
   }
 
   /** Báo cáo của tài xế gắn vào một sự cố (F-05: Operator thấy nội dung). */
   async reportsOf(faultId: number) {
-    return this.db
-      .select({
-        reportNo: faultReports.reportNo,
-        connectorId: faultReports.connectorId,
-        description: faultReports.description,
-        reportedAt: faultReports.reportedAt,
-        clearedAt: faultReports.clearedAt,
-      })
-      .from(faultReports)
-      .where(eq(faultReports.faultEventId, faultId))
-      .orderBy(faultReports.reportedAt);
+    return reportsOf(this.db, faultId);
   }
+
+  // ---------------------------------------------------------------------------------------------
+  // Hành động của operator
+  // ---------------------------------------------------------------------------------------------
 
   /** t2 raised → acknowledged. `operatorId` = operator_staff.user_id; null khi chưa có đăng nhập. */
   async acknowledge(faultId: number, operatorId: number | null, at: Date = new Date()) {
     return this.db.transaction(async (tx) => {
-      const fault = await this.lockFault(tx, faultId);
+      const fault = await lockFault(tx, faultId);
       const step = this.sm.apply(fault.status, 'ACKNOWLEDGE');
       await tx
         .update(faultEvents)
@@ -726,7 +381,7 @@ export class FaultService implements OnApplicationBootstrap, OnApplicationShutdo
   ): Promise<BeginResetResult> {
     const at = opts.at ?? new Date();
     const result = await this.db.transaction(async (tx) => {
-      const fault = await this.lockFault(tx, faultId);
+      const fault = await lockFault(tx, faultId);
       const step = this.sm.apply(fault.status, 'RESET_SENT');
       const [cmd] = await tx
         .insert(remoteCommands)
@@ -844,13 +499,13 @@ export class FaultService implements OnApplicationBootstrap, OnApplicationShutdo
   /** t7 acknowledged → resolved bằng OPERATOR_CLOSE (sau khi kiểm tra tại chỗ). */
   async close(faultId: number, operatorId: number | null, at: Date = new Date()) {
     const res = await this.db.transaction(async (tx) => {
-      const fault = await this.lockFault(tx, faultId);
+      const fault = await lockFault(tx, faultId);
       const step = this.sm.apply(fault.status, 'OPERATOR_CLOSE');
       await tx
         .update(faultEvents)
         .set({ status: step.to, resolvedAt: at })
         .where(eq(faultEvents.id, faultId));
-      await this.clearReports(tx, faultId, at, operatorId);
+      await clearReports(tx, faultId, at, operatorId);
       return { id: faultId, status: step.to };
     });
     // fault_events chưa có cột "ai đóng" — chỉ vào log (ITERATION-1-WF04 câu hỏi mở).
@@ -863,62 +518,15 @@ export class FaultService implements OnApplicationBootstrap, OnApplicationShutdo
   // Đọc
   // ---------------------------------------------------------------------------------------------
 
-  /**
-   * Danh sách cảnh báo: sự cố mở trước, nặng trước, mới trước — sắp XẾP TRONG SQL rồi mới LIMIT, để
-   * 25 lỗi nhẹ mới hơn không đẩy một lỗi nghiêm trọng cũ ra khỏi trang (review #61).
-   */
+  /** Danh sách cảnh báo theo thứ tự D39 — xem {@link listFaults} trong fault-queries.ts. */
   async list(
     filter: FaultListFilter,
     limit: number,
-    /** Only this Operator's charge points (BR-P16); omitted = all (dev console). */
     operatorId?: number,
     offset = 0,
-    /** FE-05: only this charge point (screen 20 fault history). */
     chargePointId?: number,
   ): Promise<FaultListItem[]> {
-    const rows = await this.db
-      .select({
-        id: faultEvents.id,
-        eventNo: faultEvents.eventNo,
-        chargePointId: faultEvents.chargePointId,
-        serial: chargePoints.serialNumber,
-        connectorNo: connectors.connectorNo,
-        source: faultEvents.source,
-        errorCode: faultEvents.errorCode,
-        status: faultEvents.status,
-        raisedAt: faultEvents.raisedAt,
-        acknowledgedAt: faultEvents.acknowledgedAt,
-        resolvedAt: faultEvents.resolvedAt,
-        resetCommandId: faultEvents.resetCommandId,
-        resetCommandStatus: remoteCommands.status,
-        resetRequestedAt: remoteCommands.requestedAt,
-        isOnline: chargePoints.isOnline,
-        reportCount: sql<number>`(SELECT count(*)::int FROM fault_reports r WHERE r.fault_event_id = ${faultEvents.id})`,
-        siteName: sites.siteName,
-      })
-      .from(faultEvents)
-      .innerJoin(chargePoints, eq(chargePoints.id, faultEvents.chargePointId))
-      .leftJoin(sites, eq(sites.id, chargePoints.siteId))
-      .leftJoin(connectors, eq(connectors.id, faultEvents.connectorId))
-      .leftJoin(remoteCommands, eq(remoteCommands.id, faultEvents.resetCommandId))
-      .where(this.listWhere(filter, operatorId, chargePointId))
-      .orderBy(
-        sql`(${faultEvents.status} = 'resolved')`,
-        severityRankSql(faultEvents.errorCode),
-        desc(faultEvents.raisedAt),
-        desc(faultEvents.id),
-      )
-      .limit(limit)
-      .offset(offset);
-    return rows.map((r) => {
-      const g = guideFor(r.errorCode);
-      return {
-        ...r,
-        connectorNo: r.connectorNo ?? (r.source === 'ocpp' ? 0 : null),
-        severity: g.severity,
-        hint: g.hint,
-      };
-    });
+    return listFaults(this.db, filter, limit, operatorId, offset, chargePointId);
   }
 
   /** Rows `list` would page through (same filter and Operator scope), for the pager's total. */
@@ -927,50 +535,12 @@ export class FaultService implements OnApplicationBootstrap, OnApplicationShutdo
     operatorId?: number,
     chargePointId?: number,
   ): Promise<number> {
-    const [row] = await this.db
-      .select({ n: sql<number>`count(*)::int` })
-      .from(faultEvents)
-      .innerJoin(chargePoints, eq(chargePoints.id, faultEvents.chargePointId))
-      .leftJoin(sites, eq(sites.id, chargePoints.siteId))
-      .where(this.listWhere(filter, operatorId, chargePointId));
-    return row?.n ?? 0;
+    return countFaults(this.db, filter, operatorId, chargePointId);
   }
 
-  private listWhere(filter: FaultListFilter, operatorId?: number, chargePointId?: number) {
-    return and(
-      filter === 'open'
-        ? ne(faultEvents.status, 'resolved')
-        : filter === 'all'
-          ? undefined
-          : eq(faultEvents.status, filter),
-      operatorId === undefined ? undefined : eq(sites.operatorId, operatorId),
-      chargePointId === undefined ? undefined : eq(faultEvents.chargePointId, chargePointId),
-    );
-  }
-
-  /**
-   * Một sự cố (không khoá) — để người gọi kiểm trước khi gửi lệnh. With `operatorId`, a FaultEvent of
-   * another Operator's charge point is "not found" (404, never 403: no hint that it exists).
-   */
+  /** Một sự cố (không khoá); sự cố của Operator khác → FaultNotFoundError (404). */
   async get(faultId: number, operatorId?: number) {
-    const [row] = await this.db
-      .select({
-        id: faultEvents.id,
-        status: faultEvents.status,
-        chargePointId: faultEvents.chargePointId,
-        serial: chargePoints.serialNumber,
-      })
-      .from(faultEvents)
-      .innerJoin(chargePoints, eq(chargePoints.id, faultEvents.chargePointId))
-      .leftJoin(sites, eq(sites.id, chargePoints.siteId))
-      .where(
-        and(
-          eq(faultEvents.id, faultId),
-          operatorId === undefined ? undefined : eq(sites.operatorId, operatorId),
-        ),
-      );
-    if (!row) throw new FaultNotFoundError(faultId);
-    return row;
+    return getFault(this.db, faultId, operatorId);
   }
 
   /** Trigger có áp được cho trạng thái hiện tại không (để trả 409 trước khi đụng tới trụ). */
@@ -1042,228 +612,11 @@ export class FaultService implements OnApplicationBootstrap, OnApplicationShutdo
     this.timers.delete(faultId);
   }
 
-  /** connectors.id; null cho connector 0 (cả trụ); undefined khi trụ không có súng số này. */
-  private async resolveConnectorId(
-    chargePointId: number,
-    connectorNo: number,
-  ): Promise<number | null | undefined> {
-    if (connectorNo === 0) return null;
-    const [row] = await this.db
-      .select({ id: connectors.id })
-      .from(connectors)
-      .where(
-        and(eq(connectors.chargePointId, chargePointId), eq(connectors.connectorNo, connectorNo)),
-      );
-    return row?.id;
-  }
-
-  /**
-   * T131: khoá dòng connector `FOR NO KEY UPDATE` (không chặn FK `KEY SHARE` của phiên / báo cáo)
-   * trước khi tìm hay tạo sự cố. Sự cố cả trụ (`connectorId` null) khoá mọi connector của trụ theo
-   * id — cùng thứ tự ở mọi đường nên không deadlock.
-   */
-  private async lockConnectors(tx: DbExecutor, chargePointId: number, connectorId: number | null) {
-    await tx.execute(
-      connectorId === null
-        ? sql`SELECT id FROM connectors WHERE charge_point_id = ${chargePointId} ORDER BY id FOR NO KEY UPDATE`
-        : sql`SELECT id FROM connectors WHERE id = ${connectorId} FOR NO KEY UPDATE`,
-    );
-  }
-
-  /** Lúc phiên bắt đầu theo giờ đã đối soát (t8); null = không xác định được. */
-  private async reconciledStart(session: {
-    id: string;
-    charge_point_id: string;
-    connector_no: number;
-    id_tag: string;
-    transaction_no: number;
-    meter_start_wh: string;
-    meter_stop_wh: string;
-    cp_started_at: Date;
-    cp_stopped_at: Date | null;
-    received_started_at: Date;
-    received_stopped_at: Date | null;
-    delivered_offline: boolean;
-  }): Promise<Date | null> {
-    const client = await this.db.$client.connect();
-    try {
-      const clock = await resolveTariffClock(
-        client,
-        {
-          ...session,
-          cp_started_at: new Date(session.cp_started_at),
-          cp_stopped_at: session.cp_stopped_at ? new Date(session.cp_stopped_at) : null,
-          received_started_at: new Date(session.received_started_at),
-          received_stopped_at: new Date(session.received_stopped_at!),
-        },
-        (this.config.tariffClockToleranceS ?? DEFAULT_TARIFF_CLOCK_TOLERANCE_S) * 1000,
-        this.config.replaySkewThresholdS * 1000,
-      );
-      if (!('issue' in clock))
-        return new Date(new Date(session.cp_started_at).getTime() + clock.offsetMs);
-    } finally {
-      client.release();
-    }
-    return session.delivered_offline ? null : new Date(session.received_started_at);
-  }
-
-  private async findOpenForUpdate(
-    tx: DbExecutor,
-    chargePointId: number,
-    connectorId: number | null,
-  ) {
-    const [row] = await tx
-      .select({
-        id: faultEvents.id,
-        status: faultEvents.status,
-        raisedAt: faultEvents.raisedAt,
-        source: faultEvents.source,
-        errorCode: faultEvents.errorCode,
-      })
-      .from(faultEvents)
-      .where(
-        and(
-          eq(faultEvents.chargePointId, chargePointId),
-          connectorId === null
-            ? isNull(faultEvents.connectorId)
-            : eq(faultEvents.connectorId, connectorId),
-          ne(faultEvents.status, 'resolved'),
-        ),
-      )
-      .for('update');
-    return row;
-  }
-
-  /** Lúc sự cố gần nhất của súng (connector 0: cả trụ) được đóng; null nếu chưa có. */
-  private async lastResolvedAt(
-    tx: DbExecutor,
-    chargePointId: number,
-    connectorId: number | null,
-  ): Promise<Date | null> {
-    const [row] = await tx
-      .select({ resolvedAt: faultEvents.resolvedAt })
-      .from(faultEvents)
-      .where(
-        and(
-          eq(faultEvents.chargePointId, chargePointId),
-          connectorId === null
-            ? isNull(faultEvents.connectorId)
-            : eq(faultEvents.connectorId, connectorId),
-          eq(faultEvents.status, 'resolved'),
-        ),
-      )
-      .orderBy(desc(faultEvents.resolvedAt))
-      .limit(1);
-    return row?.resolvedAt ?? null;
-  }
-
-  /**
-   * Q79 / AD-7: gắn các báo cáo chờ (chưa gộp, chưa xoá, trong 2 giờ) vào sự cố vừa mở —
-   * của một súng, hoặc của mọi súng trên trụ khi sự cố là cả trụ (`connectorId` null).
-   */
-  private async attachWaitingReports(
-    tx: DbExecutor,
-    chargePointId: number,
-    connectorId: number | null,
-    faultId: number,
-    at: Date,
-  ): Promise<void> {
-    await tx.execute(sql`UPDATE fault_reports SET fault_event_id = ${faultId}, updated_at = now()
-      WHERE fault_event_id IS NULL AND cleared_at IS NULL
-        AND reported_at > ${at}::timestamptz - (${REPORT_WINDOW_MS}::bigint * interval '1 millisecond')
-        AND ${
-          connectorId === null
-            ? sql`connector_id IN (SELECT id FROM connectors WHERE charge_point_id = ${chargePointId})`
-            : sql`connector_id = ${connectorId}`
-        }`);
-  }
-
-  /**
-   * T141 (BR-P42, quyết định D-X 17/11): một sự cố OCPP / Offline tự đóng (súng hồi phục, trụ nối
-   * lại) KHÔNG xoá nhãn "reported issue" của các báo cáo tài xế gắn vào nó — đổi trạng thái không
-   * chứng minh súng hết lỗi tài xế thấy. Các báo cáo chưa xoá được chuyển, theo từng súng, sang sự cố
-   * đang mở của súng đó, hoặc một sự cố `driver_report` mới (t1). Từ đó chỉ Operator đóng (t7) hoặc
-   * t8 mới xoá nhãn. Người gọi đã khoá connector (thứ tự khoá của T131) và đã đóng sự cố cũ.
-   */
-  private async handOverReports(
-    tx: DbExecutor,
-    closedFaultId: number,
-    chargePointId: number,
-    at: Date,
-  ): Promise<{ toFaultId: number; reports: number; created: boolean }[]> {
-    const groups = (
-      await tx.execute<{ connector_id: string; n: number }>(sql`SELECT connector_id::text,
-          count(*)::int AS n FROM fault_reports
-        WHERE fault_event_id = ${closedFaultId} AND cleared_at IS NULL
-        GROUP BY connector_id ORDER BY connector_id`)
-    ).rows;
-    const moved: { toFaultId: number; reports: number; created: boolean }[] = [];
-    for (const g of groups) {
-      const connectorId = Number(g.connector_id);
-      const open = await this.findOpenForUpdate(tx, chargePointId, connectorId);
-      let toFaultId = open?.id;
-      if (open)
-        this.sm.apply(open.status, 'SIGNAL'); // no-op: gắn vào sự cố đang mở
-      else {
-        const [row] = await tx
-          .insert(faultEvents)
-          .values({
-            chargePointId,
-            connectorId,
-            source: 'driver_report',
-            errorCode: null,
-            status: this.sm.initial(),
-            raisedAt: at,
-          })
-          .returning({ id: faultEvents.id });
-        if (!row) throw new Error('INSERT fault_events không trả id');
-        toFaultId = row.id;
-      }
-      await tx.execute(sql`UPDATE fault_reports SET fault_event_id = ${toFaultId!}, updated_at = now()
-        WHERE fault_event_id = ${closedFaultId} AND cleared_at IS NULL
-          AND connector_id = ${connectorId}`);
-      moved.push({ toFaultId: toFaultId!, reports: g.n, created: !open });
-    }
-    return moved;
-  }
-
-  private logHandOver(
-    faultId: number,
-    moved: { toFaultId: number; reports: number; created: boolean }[],
-  ): void {
+  private logHandOver(faultId: number, moved: HandOver[]): void {
     for (const m of moved)
       this.logger.warn(
         `sự cố #${faultId} đóng, ${m.reports} báo cáo tài xế chuyển sang sự cố #${m.toFaultId}${m.created ? ' (driver_report mới)' : ''} (BR-P42)`,
       );
-  }
-
-  /** BR-P42: sự cố đóng → xoá nhãn "reported issue" của các báo cáo gắn vào nó. */
-  private async clearReports(
-    tx: DbExecutor,
-    faultId: number,
-    at: Date,
-    staffId: number | null,
-  ): Promise<void> {
-    await tx
-      .update(faultReports)
-      .set({ clearedAt: at, clearedBy: staffId })
-      .where(and(eq(faultReports.faultEventId, faultId), isNull(faultReports.clearedAt)));
-  }
-
-  private async lockFault(tx: DbExecutor, faultId: number) {
-    const [row] = await tx
-      .select({
-        id: faultEvents.id,
-        status: faultEvents.status,
-        chargePointId: faultEvents.chargePointId,
-        serial: chargePoints.serialNumber,
-      })
-      .from(faultEvents)
-      .innerJoin(chargePoints, eq(chargePoints.id, faultEvents.chargePointId))
-      .where(eq(faultEvents.id, faultId))
-      .for('update', { of: faultEvents });
-    if (!row) throw new FaultNotFoundError(faultId);
-    return row;
   }
 }
 
