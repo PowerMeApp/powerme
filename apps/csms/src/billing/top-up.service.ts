@@ -65,13 +65,28 @@ export const PENDING_TIMEOUT_MS = 15 * 60 * 1000;
  */
 export const QUERYDR_FIRST_DELAY_MS = 2 * 60 * 1000;
 /**
- * Lịch querydr (T117 / D4 ⊕ ĐIỀU KIỆN, T127; T32 Phần 8): các mốc tính **từ `expires_at`**, phút.
- * Kết quả chưa ngã ngũ → mốc kế = mốc nhỏ nhất có `expires_at + mốc > now()` (đồng hồ DB). Không suy
- * "lần thứ mấy" từ `next_attempt_at` vì lease ghi đè cột này. Không còn mốc → hết lịch → `expired`.
+ * Lịch querydr (T117 / D4 ⊕ ĐIỀU KIỆN, T127; T32 Phần 8, đổi ở 8c 19/11): các mốc tính **từ
+ * `expires_at`**, phút. Kết quả chưa ngã ngũ → mốc kế = mốc nhỏ nhất có `expires_at + mốc > now()`
+ * (đồng hồ DB). Không suy "lần thứ mấy" từ `next_attempt_at` vì lease ghi đè cột này. Không còn mốc
+ * → hết lịch → `expired`.
+ *
+ * Bỏ +5 của lịch cũ `[2, 5, 10, 20, 40, 60]`: sandbox VNPay trả RC `94` (yêu cầu trùng) khi hỏi lại
+ * cùng giao dịch trong khoảng ≤ 4,5 phút; cách 11 phút trở lên thì không bị chặn (thử 16/11). Các mốc
+ * sau cách nhau ≥ 13 phút.
  */
-export const QUERYDR_SCHEDULE_MIN: readonly number[] = [2, 5, 10, 20, 40, 60];
+export const QUERYDR_SCHEDULE_MIN: readonly number[] = [2, 15, 30, 45, 60];
+/**
+ * Mốc thêm (phút từ `expires_at`), CHỈ khi lần hỏi ở mốc +60 (`now() >= expires_at + 60 phút`) trả
+ * RC `94`: lần đó bị VNPay chặn vì trùng, chưa phải câu trả lời. Ở +75 mà vẫn chưa ngã ngũ thì hết
+ * lịch theo luật thường (TS 04 / 07 → `unresolved_*`), không có +90. RC `94` chưa xác thực chữ ký
+ * cũng được nhận, chỉ để hẹn thêm lần này (D4, T32 Phần 8c).
+ */
+export const QUERYDR_RC94_EXTRA_MIN = 75;
 if (QUERYDR_SCHEDULE_MIN[0]! * 60_000 !== QUERYDR_FIRST_DELAY_MS) {
   throw new Error('top-up: mốc querydr đầu phải bằng QUERYDR_FIRST_DELAY_MS');
+}
+if (QUERYDR_RC94_EXTRA_MIN <= QUERYDR_SCHEDULE_MIN[QUERYDR_SCHEDULE_MIN.length - 1]!) {
+  throw new Error('top-up: mốc RC 94 phải sau mốc querydr cuối');
 }
 /** Tên `BackgroundWork` của vòng quét top-up quá hạn (D7). */
 export const TOP_UP_TIMEOUT_WORK = 'top-up-timeout';
@@ -923,17 +938,27 @@ export class TopUpService implements BackgroundWork, OnModuleInit {
       case 'not_found':
         return { event: 'TIMEOUT_NOT_PAID' };
       case 'unresolved': {
+        // RC 94 (yêu cầu trùng): thêm mốc +75 vào lịch. Chỉ đổi lịch hỏi, không đổi phân loại hay
+        // ghi gì. RC chưa xác thực chỉ để log, ngoại lệ duy nhất: 94 ở mốc +60 để hẹn thêm một lần
+        // querydr (D4, T32 Phần 8c). Ở mốc +45 trở về trước, mốc +60 vẫn nhỏ hơn nên 94 không đổi gì.
+        const rc94 = q.responseCode === '94' || q.unverified?.responseCode === '94';
+        const schedule = rc94
+          ? [...QUERYDR_SCHEDULE_MIN, QUERYDR_RC94_EXTRA_MIN]
+          : QUERYDR_SCHEDULE_MIN;
         // Đọc trạng thái + mốc kế (dòng đã khoá ở tx2), không suy "hết lịch" từ việc UPDATE không
         // trả dòng nào.
         const sched = (
-          await c.query<{ status: TopUpStatus; next_at: string | null }>(
-            `SELECT t.status,
-                    (SELECT (t.expires_at + make_interval(mins => m))::text
-                     FROM unnest($2::int[]) AS m
-                     WHERE t.expires_at + make_interval(mins => m) > now()
-                     ORDER BY m LIMIT 1) AS next_at
-             FROM top_ups t WHERE t.id = $1`,
-            [Number(top.id), QUERYDR_SCHEDULE_MIN],
+          await c.query<{ status: TopUpStatus; next_at: string | null; next_min: number | null }>(
+            `SELECT t.status, n.next_at, n.m AS next_min
+             FROM top_ups t
+             LEFT JOIN LATERAL (
+               SELECT m, (t.expires_at + make_interval(mins => m))::text AS next_at
+               FROM unnest($2::int[]) AS m
+               WHERE t.expires_at + make_interval(mins => m) > now()
+               ORDER BY m LIMIT 1
+             ) n ON true
+             WHERE t.id = $1`,
+            [Number(top.id), schedule],
           )
         ).rows[0]!;
         if (sched.status !== 'pending') {
@@ -963,10 +988,12 @@ export class TopUpService implements BackgroundWork, OnModuleInit {
             response_code: q.responseCode ?? null,
             transaction_status: q.transactionStatus ?? null,
             next_attempt_at: next.next_attempt_at,
+            ...(sched.next_min === QUERYDR_RC94_EXTRA_MIN && { rc94_extension: true }),
           });
           return null;
         }
-        // Hết lịch (đã qua expires_at + 60 phút): expired; TS 04 / 07 → Billing Exceptions.
+        // Hết lịch (đã qua expires_at + 60 phút, hoặc + 75 khi lần +60 trả RC 94): expired;
+        // TS 04 / 07 → Billing Exceptions.
         const ts = q.responseCode === '00' ? q.transactionStatus : undefined;
         const exceptionKind =
           ts === '04' ? 'unresolved_04' : ts === '07' ? 'unresolved_07' : undefined;

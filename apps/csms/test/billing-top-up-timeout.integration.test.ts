@@ -409,12 +409,12 @@ describeDb('billing: quét top-up quá hạn + querydr (T32 Phần 8, SD-2d)', (
 
   // ---------------------------------------------------------------------------------------------
   describe('chưa ngã ngũ: giữ pending, hẹn mốc kế tính từ expires_at (T117 / T127)', () => {
+    // Lịch T32 Phần 8c: 2 / 15 / 30 / 45 / 60 (bỏ +5 vì RC 94 khi hỏi lại ≤ 4,5 phút).
     it.each([
-      [2.5, 5],
-      [6, 10],
-      [12, 20],
-      [25, 40],
-      [45, 60],
+      [2.5, 15],
+      [16, 30],
+      [31, 45],
+      [46, 60],
     ])('lúc expires_at + %s phút → next_attempt_at = expires_at + %s phút', async (past, next) => {
       const t = await dueTopUp(past);
       script.set(t.ref, TS('01'));
@@ -436,7 +436,7 @@ describeDb('billing: quét top-up quá hạn + querydr (T32 Phần 8, SD-2d)', (
       if (h) script.set(t.ref, h);
       await run();
       expect((await topUpRow(t.topUpId))['status']).toBe('pending');
-      expect(await nextAt(t.topUpId)).toEqual({ m: 5, exact: true });
+      expect(await nextAt(t.topUpId)).toEqual({ m: 15, exact: true });
       expect(await balance(t.driverId)).toBe(0);
     });
 
@@ -477,7 +477,7 @@ describeDb('billing: quét top-up quá hạn + querydr (T32 Phần 8, SD-2d)', (
       script.set(t.ref, TS('07'));
       await run();
       expect(calls).toHaveLength(1);
-      expect(await nextAt(t.topUpId)).toEqual({ m: 40, exact: true });
+      expect(await nextAt(t.topUpId)).toEqual({ m: 45, exact: true });
       // Chạy lại ngay: chưa tới hạn → không hỏi thêm.
       await run();
       expect(calls).toHaveLength(1);
@@ -537,6 +537,108 @@ describeDb('billing: quét top-up quá hạn + querydr (T32 Phần 8, SD-2d)', (
         late_amount_vnd: String(t.amountPaidVnd),
       });
       expect(await balance(t.driverId)).toBe(0);
+    });
+  });
+
+  // ---------------------------------------------------------------------------------------------
+  describe('mốc +75 khi lần hỏi ở +60 trả RC 94 (T32 Phần 8c, D4)', () => {
+    /** RC 94 có chữ ký hợp lệ (RC ≠ 00 → unresolved/response_code, responseCode = '94'). */
+    const SIGNED = (rc: string) => reply({ vnp_ResponseCode: rc });
+    /** Response không chữ ký: unresolved/signature, RC chỉ có trong `unverified`. */
+    const UNSIGNED =
+      (rc: string): Handler =>
+      async () =>
+        new Response(
+          JSON.stringify({ vnp_ResponseCode: rc, vnp_Message: 'Request is duplicated' }),
+          {
+            status: 200,
+          },
+        );
+
+    it.each([
+      ['94 có chữ ký', SIGNED('94')],
+      ['94 không chữ ký', UNSIGNED('94')],
+    ])('%s ở +60 → hẹn +75, vẫn pending, log rc94_extension', async (_n, h) => {
+      const logSpy = jest.spyOn(Logger.prototype, 'log').mockImplementation(() => undefined);
+      const t = await dueTopUp(61);
+      script.set(t.ref, h);
+      await run();
+      expect(await topUpRow(t.topUpId)).toMatchObject({
+        status: 'pending',
+        exception_kind: null,
+        completed_at: null,
+      });
+      expect(await nextAt(t.topUpId)).toEqual({ m: 75, exact: true });
+      expect(logged(logSpy, 'querydr_rescheduled')).toEqual([
+        expect.objectContaining({ top_up_id: t.topUpId, rc94_extension: true }),
+      ]);
+      expect(logged(warnSpy, 'querydr_schedule_exhausted')).toHaveLength(0);
+    });
+
+    it.each([
+      ['94 có chữ ký', SIGNED('94')],
+      ['94 không chữ ký', UNSIGNED('94')],
+    ])('%s ở +45 → vẫn hẹn +60 như thường', async (_n, h) => {
+      const t = await dueTopUp(46);
+      script.set(t.ref, h);
+      await run();
+      expect((await topUpRow(t.topUpId))['status']).toBe('pending');
+      expect(await nextAt(t.topUpId)).toEqual({ m: 60, exact: true });
+    });
+
+    it.each([
+      ['99 có chữ ký', SIGNED('99')],
+      ['99 không chữ ký', UNSIGNED('99')],
+    ])('%s ở +60 → expired, không exception_kind', async (_n, h) => {
+      const t = await dueTopUp(61);
+      script.set(t.ref, h);
+      await run();
+      expect(await topUpRow(t.topUpId)).toMatchObject({
+        status: 'expired',
+        exception_kind: null,
+        next_attempt_at: null,
+      });
+    });
+
+    it.each([
+      ['94 không chữ ký', UNSIGNED('94'), null],
+      ['94 có chữ ký (không có +90)', SIGNED('94'), null],
+      ['TS 04', TS('04'), 'unresolved_04'],
+      ['TS 07', TS('07'), 'unresolved_07'],
+      ['TS 01', TS('01'), null],
+    ])('ở +75 còn chưa ngã ngũ (%s) → expired, exception_kind %s', async (_n, h, kind) => {
+      const t = await dueTopUp(76);
+      script.set(t.ref, h);
+      await run();
+      expect(await topUpRow(t.topUpId)).toMatchObject({
+        status: 'expired',
+        exception_kind: kind,
+        next_attempt_at: null,
+      });
+      expect(logged(warnSpy, 'querydr_schedule_exhausted')).toEqual([
+        expect.objectContaining({ top_up_id: t.topUpId, exception_kind: kind }),
+      ]);
+    });
+
+    it('trọn đường: +60 trả 94 → +75 trả TS 04 → expired + unresolved_04 (querydr hai lần)', async () => {
+      const t = await dueTopUp(61);
+      script.set(t.ref, UNSIGNED('94'));
+      await run();
+      expect(await nextAt(t.topUpId)).toEqual({ m: 75, exact: true });
+      // Dời mốc: expires_at lùi thêm 15 phút, dòng đến hạn.
+      await q(
+        `UPDATE top_ups SET created_at = created_at - interval '15 minutes',
+           expires_at = expires_at - interval '15 minutes',
+           next_attempt_at = now() - interval '1 second' WHERE id = $1`,
+        [t.topUpId],
+      );
+      script.set(t.ref, TS('04'));
+      await run();
+      expect(calls).toHaveLength(2);
+      expect(await topUpRow(t.topUpId)).toMatchObject({
+        status: 'expired',
+        exception_kind: 'unresolved_04',
+      });
     });
   });
 
