@@ -25,8 +25,10 @@ export interface ChargePointMapProps {
   sites: MapSite[];
   selectedId: string | null;
   onSelect: (siteId: string) => void;
-  onError: () => void;
+  /** `webgl`: the browser cannot create a WebGL context; `load`: style / tiles failed (key, quota, network). */
+  onError: (reason: MapFailure) => void;
 }
+export type MapFailure = 'webgl' | 'load';
 
 export default function ChargePointMap({
   tileKey,
@@ -44,18 +46,26 @@ export default function ChargePointMap({
 
   useEffect(() => {
     if (!container.current) return;
-    const m = new vietmapgl.Map({
-      container: container.current,
-      style: styleUrl(tileKey),
-      center: START,
-      zoom: 11,
-    });
+    let m: vietmapNs.Map;
+    try {
+      m = new vietmapgl.Map({
+        container: container.current,
+        style: styleUrl(tileKey),
+        center: START,
+        zoom: 11,
+      });
+    } catch {
+      // The constructor throws when no WebGL context can be created (e.g. a VM with software
+      // rendering and WebGL blocked). Report it instead of letting it escape as an uncaught error.
+      callbacks.current.onError('webgl');
+      return;
+    }
     m.addControl(new vietmapgl.NavigationControl({ showCompass: false }), 'top-right');
     let failed = false;
     m.on('error', () => {
       if (failed) return;
       failed = true;
-      callbacks.current.onError();
+      callbacks.current.onError('load');
     });
     map.current = m;
     const placed = markers.current;
