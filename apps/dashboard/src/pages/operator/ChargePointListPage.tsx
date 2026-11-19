@@ -29,6 +29,7 @@ import {
 } from '../../features/chargePoints/mapModel';
 
 const ChargePointMap = lazy(() => import('../../features/chargePoints/ChargePointMap'));
+type MapFailure = import('../../features/chargePoints/ChargePointMap').MapFailure;
 
 export const LIST_POLL_MS = 5000;
 
@@ -180,7 +181,7 @@ function MapView({
 }) {
   const tileKey = vietmapTileKey();
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [mapFailed, setMapFailed] = useState(false);
+  const [mapFailed, setMapFailed] = useState<MapFailure | null>(null);
   const { sites, unplaced } = groupBySite(items);
   const selected = sites.find((s) => s.id === selectedId) ?? null;
   return (
@@ -204,7 +205,9 @@ function MapView({
             </p>
           ) : mapFailed ? (
             <p className="map-message" role="alert">
-              Không tải được bản đồ Vietmap (key sai, hết hạn mức hoặc mất mạng).
+              {mapFailed === 'webgl'
+                ? 'Trình duyệt không bật được WebGL nên không vẽ được bản đồ (thường gặp trên máy ảo). Bật tăng tốc phần cứng hoặc dùng trình duyệt khác; danh sách trạm vẫn xem được bên cạnh.'
+                : 'Không tải được bản đồ Vietmap (key sai, hết hạn mức hoặc mất mạng).'}
             </p>
           ) : (
             <Suspense fallback={<p className="map-message muted">Đang tải bản đồ…</p>}>
@@ -213,7 +216,7 @@ function MapView({
                 sites={sites}
                 selectedId={selectedId}
                 onSelect={setSelectedId}
-                onError={() => setMapFailed(true)}
+                onError={setMapFailed}
               />
             </Suspense>
           )}

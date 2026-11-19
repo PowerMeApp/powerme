@@ -20,8 +20,11 @@ vi.mock('../src/features/chargePoints/ChargePointMap', () => ({
           ghim {s.site_name}
         </button>
       ))}
-      <button type="button" onClick={onError}>
+      <button type="button" onClick={() => onError('load')}>
         lỗi tile
+      </button>
+      <button type="button" onClick={() => onError('webgl')}>
+        không có webgl
       </button>
     </div>
   ),
@@ -119,6 +122,8 @@ describe('mapModel.groupBySite', () => {
 
 describe('Bản đồ Charge Point (màn 18, FE-03c)', () => {
   it('"Bản đồ" asks for up to 100 with the same filters; without a key the station list still works', async () => {
+    // Independent of a developer's apps/dashboard/.env.local, which Vitest also reads.
+    vi.stubEnv('VITE_VIETMAP_TILE_KEY', '');
     const seen = fakeCsms({ [LIST_URL]: page([cp('1'), faulted, thuDuc, noCoords]) });
     const { user } = renderApp('/operator/charge-points', session(STAFF));
     await screen.findByRole('row', { name: 'Charge Point PM-1' });
@@ -172,5 +177,18 @@ describe('Bản đồ Charge Point (màn 18, FE-03c)', () => {
     );
     await user.click(map.getByRole('button', { name: 'lỗi tile' }));
     expect(await screen.findByRole('alert')).toHaveTextContent(/Không tải được bản đồ Vietmap/);
+  });
+
+  it('no WebGL (e.g. a VM): a clear message, the station panel still works', async () => {
+    vi.stubEnv('VITE_VIETMAP_TILE_KEY', 'test-tile-key');
+    fakeCsms({ [LIST_URL]: page([cp('1'), thuDuc]) });
+    const { user } = renderApp('/operator/charge-points?view=map', session(STAFF));
+    await user.click(await screen.findByRole('button', { name: 'không có webgl' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent(/không bật được WebGL/);
+    const panel = within(
+      screen.getByRole('complementary', { name: 'Charging Station trên bản đồ' }),
+    );
+    await user.click(panel.getByRole('button', { name: /Trạm Thủ Đức/ }));
+    expect(screen.getByRole('link', { name: 'PM-3' })).toBeInTheDocument();
   });
 });
