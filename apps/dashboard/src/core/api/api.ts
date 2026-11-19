@@ -26,6 +26,12 @@ import type {
   RefreshResponse,
   ResetRequest,
   ResetResponse,
+  AssignSessionRequest,
+  CloseSessionRequest,
+  ResolveSessionRequest,
+  SessionDecisionResponse,
+  SessionQueue,
+  SessionQueuePage,
   SessionsActiveError,
 } from '@powerme/shared';
 import { loggedOut, tokenRefreshed, type AuthState } from '../auth/authSlice';
@@ -33,6 +39,8 @@ import { env } from '../config/env';
 
 /** Rows per page on screen 21. */
 export const FAULT_PAGE_SIZE = 20;
+/** Rows per page on screen 23. */
+export const SESSION_PAGE_SIZE = 20;
 /** Rows per page on screen 18. */
 export const CHARGE_POINT_PAGE_SIZE = 20;
 
@@ -125,7 +133,7 @@ const baseQuery: BaseQueryFn<string | FetchArgs, unknown, ApiError> = async (arg
 export const api = createApi({
   reducerPath: 'api',
   baseQuery,
-  tagTypes: ['Fault', 'Summary', 'ChargePoint'],
+  tagTypes: ['Fault', 'Summary', 'ChargePoint', 'Session'],
   endpoints: (b) => ({
     login: b.mutation<LoginResponse, LoginRequest>({
       query: (body) => ({ url: 'auth/v1/login', method: 'POST', body }),
@@ -177,6 +185,37 @@ export const api = createApi({
       query: (id) => `operator/v1/charge-points/${id}`,
       providesTags: ['ChargePoint', 'Fault'],
     }),
+    // Screen 23 (FE-12, UC-OPS-05): unattributed / review queues and the Operator's decisions.
+    // A decision also changes the queue counts on screen 17.
+    operatorSessions: b.query<SessionQueuePage, { queue: SessionQueue; page: number }>({
+      query: ({ queue, page }) =>
+        `operator/v1/sessions?queue=${queue}&page=${page}&page_size=${SESSION_PAGE_SIZE}`,
+      providesTags: ['Session'],
+    }),
+    assignSession: b.mutation<SessionDecisionResponse, { id: string } & AssignSessionRequest>({
+      query: ({ id, ...body }) => ({
+        url: `operator/v1/sessions/${id}/assign`,
+        method: 'POST',
+        body,
+      }),
+      invalidatesTags: ['Session', 'Summary'],
+    }),
+    closeSession: b.mutation<SessionDecisionResponse, { id: string } & CloseSessionRequest>({
+      query: ({ id, ...body }) => ({
+        url: `operator/v1/sessions/${id}/close`,
+        method: 'POST',
+        body,
+      }),
+      invalidatesTags: ['Session', 'Summary'],
+    }),
+    resolveSession: b.mutation<SessionDecisionResponse, { id: string } & ResolveSessionRequest>({
+      query: ({ id, ...body }) => ({
+        url: `operator/v1/sessions/${id}/resolve`,
+        method: 'POST',
+        body,
+      }),
+      invalidatesTags: ['Session', 'Summary'],
+    }),
   }),
 });
 
@@ -191,6 +230,10 @@ export const {
   useOperatorSummaryQuery,
   useOperatorChargePointsQuery,
   useOperatorChargePointQuery,
+  useOperatorSessionsQuery,
+  useAssignSessionMutation,
+  useCloseSessionMutation,
+  useResolveSessionMutation,
 } = api;
 
 /** Vietnamese text for any error of this API. */

@@ -95,7 +95,10 @@ describe('Tổng quan vận hành (màn 17)', () => {
       '/operator/faults',
     );
     const queue = screen.getByRole('region', { name: 'Việc cần xử lý' });
-    expect(within(queue).getByText(/phiên cần xem lại/)).toBeInTheDocument();
+    expect(within(queue).getByRole('link', { name: /phiên cần xem lại/ })).toHaveAttribute(
+      'href',
+      '/operator/sessions?queue=review',
+    );
     expect(within(queue).queryByText(/chưa gắn tài xế/)).toBeNull();
   });
 

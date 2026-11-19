@@ -357,11 +357,11 @@ tách theo bề mặt — refresh token không mang `role`, role đọc lại t�
 
 | Endpoint | Role | UC / FR / BR | Trạng thái · người làm | Ghi chú |
 |---|---|---|---|---|
-| `GET /operator/v1/sessions` | operator_staff | UC-OPS-05, FR-13, BR-P08 | **console** `sessions` · Trí | `queue=review\|unattributed` (giữ tên tham số của mock dashboard), lọc status/payment_mode/trụ/thời gian |
+| `GET /operator/v1/sessions` | operator_staff | UC-OPS-05, FR-13, BR-P08 | **partial** FE-12 · `operator-sessions.ts` · Nghĩa (route) / Trí (service) | đã làm: `queue=unattributed\|review` (mặc định unattributed) + page/page_size, lọc theo operator của token (màn 23); chưa làm: lọc status/payment_mode/trụ/thời gian |
 | `GET /operator/v1/sessions/{id}` | operator_staff | UC-OPS-05, FR-16 | **console** `session` · Trí | meter, tạm dừng, bản ghi đối soát |
-| `POST /operator/v1/sessions/{id}/resolve` | operator_staff | UC-OPS-05, STM-1 #17 | **service** `SessionReviewService.resolveReview` · Trí | body `{resolution, note}`; mock dashboard chỉ gửi `note` |
-| `POST /operator/v1/sessions/{id}/assign` | operator_staff | UC-OPS-05, BR-P06/P08 | **in progress** · Trí (T102) | giữ chỗ; body chốt ở T102 |
-| `POST /operator/v1/sessions/{id}/close` | operator_staff | UC-OPS-05 | **in progress** · Trí (T102) | |
+| `POST /operator/v1/sessions/{id}/resolve` | operator_staff | UC-OPS-05, STM-1 #17 | **done** FE-12 · bọc `SessionReviewService.resolveReview` · Nghĩa (route) / Trí (service) | body `{resolution, note}`; actor = staff của token |
+| `POST /operator/v1/sessions/{id}/assign` | operator_staff | UC-OPS-05, BR-P06/P08 | **done** FE-12 · bọc `UnattributedSessionService.assign` · Nghĩa (route) / Trí (service, T102) | body `{driver_id, note}`; 409 BR-P08 / đã quyết định, 422 `driver_not_eligible` |
+| `POST /operator/v1/sessions/{id}/close` | operator_staff | UC-OPS-05 | **done** FE-12 · bọc `UnattributedSessionService.close` · Nghĩa (route) / Trí (service, T102) | body `{reason, note}` (`reason` a-z0-9_, ≤ 40) |
 | `GET /operator/v1/reconciliation-records` | operator_staff | UC-OPS-05, FR-16, Table 7 #6–7 | **console** `reconciliation` · Trí | |
 | `GET /operator/v1/charge-intents` | operator_staff | UC-OPS-04, T72 | planned · Trí | hàng việc start không rõ; chưa có hàm liệt kê |
 | `GET /operator/v1/charge-intents/{id}/recovery` | operator_staff | T72 | **service** `startRecovery` · Trí | |

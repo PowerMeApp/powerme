@@ -923,15 +923,21 @@ paths:
       tags: [sessions]
       operationId: listOperatorSessions
       x-roles: [operator_staff]
-      x-status: console
-      x-source: 'GET /api/admin/sessions?limit → ConsoleQueries.sessions (không lọc, không phân trang)'
-      x-owner: Trí
+      x-status: partial
+      x-source: 'operator-api/operator-sessions.ts (FE-12, màn 23) → UnattributedSessionService.listPending / SessionReviewService.listInReview, lọc theo operator của token'
+      x-owner: 'Nghĩa (route, FE-12) · Trí (service)'
       x-refs: [UC-OPS-05, FR-13, FR-16, BR-P08, 'Table 5 #22']
       summary: Phiên trên trụ của operator; `queue` lọc hàng việc cần xử lý
       description: |
         `queue=review`: phiên `status = review` (đối soát kết luận conflict/gap hoặc hard cap,
         STM-1 #16a). `queue=unattributed`: phiên `payment_mode = unattributed` chưa giải quyết
         (thẻ lạ, free vend, BR-P06). Không có `queue`: mọi phiên, mới nhất trước.
+
+        **Đã làm (FE-12, 20/11):** chỉ `queue` (mặc định `unattributed`) + `page`/`page_size`;
+        phản hồi `SessionQueuePage`. Phân trang cắt từ tối đa 500 phiên mới nhất mỗi hàng đợi.
+        Một phiên unattributed còn ở `review` có mặt ở cả hai hàng đợi. Các bộ lọc
+        `status`/`payment_mode`/`charge_point_id`/`from`/`to` và chế độ "mọi phiên" chưa làm
+        (`invalid_input`).
       parameters:
         - name: queue
           in: query
@@ -986,9 +992,9 @@ paths:
       tags: [sessions]
       operationId: resolveReviewSession
       x-roles: [operator_staff]
-      x-status: service
-      x-source: 'SessionReviewService.resolveReview (BE-18)'
-      x-owner: Trí
+      x-status: done
+      x-source: 'operator-sessions.ts (FE-12) → SessionReviewService.resolveReview (BE-18); actor = staff của token'
+      x-owner: 'Nghĩa (route, FE-12) · Trí (service)'
       x-refs: [UC-OPS-05, FR-13, 'STM-1 #17']
       summary: Giải quyết phiên review (review → reconciled), quyết toán nếu đã có StopTransaction
       description: |
@@ -1022,14 +1028,16 @@ paths:
       tags: [sessions]
       operationId: assignUnattributedSession
       x-roles: [operator_staff]
-      x-status: in_progress
-      x-owner: Trí (T102)
+      x-status: done
+      x-source: 'operator-sessions.ts (FE-12) → UnattributedSessionService.assign (BE-24, T102); actor = staff của token'
+      x-owner: 'Nghĩa (route, FE-12) · Trí (service, T102)'
       x-refs: [UC-OPS-05, FR-13, BR-P06, BR-P08]
-      summary: Gán phiên unattributed cho một tài xế (T102 — hình dạng body do T102 chốt)
+      summary: Gán phiên unattributed cho một tài xế rồi quyết toán (BE-24)
       description: |
-        Đang làm ở T102 trên console; hợp đồng giữ chỗ đường dẫn và role. Body dưới đây là tối
-        thiểu (`note` bắt buộc, giống resolve); trường xác định tài xế và có trừ credit hay không
-        theo bản chốt của T102.
+        Đổi `payment_mode` sang `csms_billed`, ghi `UNATTRIBUTED_ASSIGNED` vào lịch sử, rồi
+        quyết toán (settle). Lỗi: 409 `free_vend_not_billable` / `wallet_card_not_billable`
+        (BR-P08, chỉ đóng được), `already_resolved`, `not_unattributed`, `session_not_stopped`;
+        422 `driver_not_eligible`. Gọi lại cùng tài xế → `already_resolved: true`.
       parameters:
         - $ref: '#/components/parameters/sessionId'
       requestBody:
@@ -1039,38 +1047,48 @@ paths:
             schema: { $ref: '#/components/schemas/AssignSessionRequest' }
       responses:
         '200':
-          description: Phiên sau khi gán
+          description: Đã gán
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/SessionListItem' }
+              schema: { $ref: '#/components/schemas/SessionDecisionResult' }
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
-        '409': { $ref: '#/components/responses/InvalidTransition' }
+        '409':
+          description: Quy tắc trạng thái / BR-P08
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '422':
+          description: '`driver_not_eligible`'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
 
   /operator/v1/sessions/{sessionId}/close:
     post:
       tags: [sessions]
       operationId: closeUnattributedSession
       x-roles: [operator_staff]
-      x-status: in_progress
-      x-owner: Trí (T102)
+      x-status: done
+      x-source: 'operator-sessions.ts (FE-12) → UnattributedSessionService.close (BE-24, T102); actor = staff của token'
+      x-owner: 'Nghĩa (route, FE-12) · Trí (service, T102)'
       x-refs: [UC-OPS-05, FR-13]
-      summary: Đóng phiên unattributed không gán ai, ghi kết luận (T102)
+      summary: Đóng phiên unattributed không tính tiền, ghi lý do (BE-24)
       parameters:
         - $ref: '#/components/parameters/sessionId'
       requestBody:
         required: true
         content:
           application/json:
-            schema: { $ref: '#/components/schemas/NoteRequest' }
+            schema: { $ref: '#/components/schemas/CloseSessionRequest' }
       responses:
         '200':
-          description: Phiên sau khi đóng
+          description: Đã đóng
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/SessionListItem' }
+              schema: { $ref: '#/components/schemas/SessionDecisionResult' }
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
@@ -3316,10 +3334,42 @@ components:
         settlement: { type: [string, 'null'], enum: [posted, already_posted, pending, ineligible, null] }
     AssignSessionRequest:
       type: object
-      required: [note]
-      description: Giữ chỗ — trường xác định tài xế theo bản chốt của T102
+      required: [driver_id, note]
       properties:
+        driver_id: { $ref: '#/components/schemas/Id' }
         note: { type: string, minLength: 1, maxLength: 500 }
+    CloseSessionRequest:
+      type: object
+      required: [reason, note]
+      properties:
+        reason:
+          type: string
+          pattern: '^[a-z0-9_]{1,40}$'
+          examples: [owner_unknown, test_session, free_vend_ok]
+        note: { type: string, minLength: 1, maxLength: 500 }
+    SessionDecisionResult:
+      type: object
+      required: [session_id, decision, payment_mode, already_resolved, records_reviewed]
+      description: 'FE-12: kết quả assign / close (BE-24)'
+      properties:
+        session_id: { $ref: '#/components/schemas/Id' }
+        decision: { type: string, enum: [assigned, closed] }
+        driver_id: { $ref: '#/components/schemas/Id' }
+        reason: { type: string }
+        payment_mode: { type: string, enum: [csms_billed, unattributed] }
+        already_resolved: { type: boolean }
+        records_reviewed: { type: integer, minimum: 0 }
+        settlement: { type: string, enum: [posted, already_posted, pending, ineligible] }
+    SessionQueuePage:
+      type: object
+      required: [queue, items, total, page, page_size]
+      description: 'FE-12: một trang hàng đợi màn 23 (packages/shared/src/api/sessions.ts)'
+      properties:
+        queue: { type: string, enum: [unattributed, review] }
+        items: { type: array, items: { type: object } }
+        total: { type: integer, minimum: 0, maximum: 500 }
+        page: { type: integer, minimum: 1 }
+        page_size: { type: integer, minimum: 1, maximum: 100 }
     ChargeIntent:
       type: object
       required: [id, charge_point_id, serial_number, connector_no, requested_at, state]

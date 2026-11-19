@@ -279,12 +279,18 @@ export class UnattributedSessionService {
   }
 
   /**
-   * Hàng đợi cho console: phiên unattributed đã đóng, chưa có quyết định (mới nhất trước). Chưa lọc
-   * theo operator — console chưa có đăng nhập (cùng mức GET /api/admin/sessions); mỗi dòng mang
-   * `operator_id`. Quyền chỉ kiểm khi GHI (assign/close).
+   * Hàng đợi: phiên unattributed đã đóng, chưa có quyết định (mới nhất trước). Console (chưa đăng
+   * nhập) gọi không có `operatorId` → mọi operator, mỗi dòng mang `operator_id`. FE-12 (màn 23,
+   * operator API có đăng nhập) truyền `operatorId` của token → chỉ phiên trên trụ của operator đó.
+   * Quyền GHI vẫn kiểm ở assign/close.
    */
-  async listPending(limit: number): Promise<UnattributedQueueItem[]> {
-    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 500)
+  async listPending(limit: number, operatorId?: number): Promise<UnattributedQueueItem[]> {
+    if (
+      !Number.isSafeInteger(limit) ||
+      limit < 1 ||
+      limit > 500 ||
+      (operatorId !== undefined && !(Number.isSafeInteger(operatorId) && operatorId > 0))
+    )
       throw new UnattributedSessionError('invalid_input');
     const { rows } = await this.db.$client.query<{
       id: string;
@@ -313,8 +319,9 @@ export class UnattributedSessionService {
          AND s.status = ANY($2::session_status[])
          AND NOT EXISTS (SELECT 1 FROM session_status_history h
            WHERE h.session_id=s.id AND h.event = ANY($3::text[]))
+         AND ($4::bigint IS NULL OR st.operator_id=$4)
        ORDER BY s.received_stopped_at DESC,s.id DESC LIMIT $1`,
-      [limit, STOPPED_STATUSES, DECISION_EVENTS],
+      [limit, STOPPED_STATUSES, DECISION_EVENTS, operatorId ?? null],
     );
     return rows.map((r) => ({
       session_id: Number(r.id),

@@ -12,6 +12,7 @@ import { ChargePointDetailPage } from '../pages/operator/ChargePointDetailPage';
 import { ChargePointListPage } from '../pages/operator/ChargePointListPage';
 import { FaultAlertsPage } from '../pages/operator/FaultAlertsPage';
 import { OperatorHomePage } from '../pages/operator/OperatorHomePage';
+import { SessionQueuePage } from '../pages/operator/SessionQueuePage';
 import { RequireRole } from './RequireRole';
 
 function RootRedirect() {
@@ -35,6 +36,7 @@ export const routes: RouteObject[] = [
       { path: 'charge-points', element: <ChargePointListPage /> }, // 18
       { path: 'charge-points/:id', element: <ChargePointDetailPage /> }, // 20
       { path: 'faults', element: <FaultAlertsPage /> }, // 21
+      { path: 'sessions', element: <SessionQueuePage /> }, // 23
       { path: '*', element: <Navigate to="/operator" replace /> },
     ],
   },

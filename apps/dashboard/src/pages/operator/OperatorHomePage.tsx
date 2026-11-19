@@ -48,9 +48,9 @@ export function OperatorHomePage() {
   const queues = s
     ? (
         [
-          [s.sessions_to_review, 'phiên cần xem lại (đối soát)'],
-          [s.unattributed_sessions, 'phiên chưa gắn tài xế'],
-          [s.uncertain_starts, 'lệnh bắt đầu chưa rõ kết quả'],
+          [s.sessions_to_review, 'phiên cần xem lại (đối soát)', '/operator/sessions?queue=review'],
+          [s.unattributed_sessions, 'phiên chưa gắn tài xế', '/operator/sessions'],
+          [s.uncertain_starts, 'lệnh bắt đầu chưa rõ kết quả', null],
         ] as const
       ).filter(([n]) => n > 0)
     : [];
@@ -119,9 +119,15 @@ export function OperatorHomePage() {
           {queues.length > 0 && (
             <Tile title="Việc cần xử lý">
               <ul className="tile-list">
-                {queues.map(([n, label]) => (
+                {queues.map(([n, label, to]) => (
                   <li key={label}>
-                    <b>{n}</b> {label}
+                    <b>{n}</b>{' '}
+                    {to ? (
+                      // FE-12: screen 23 handles both queues.
+                      <Link to={to}>{label}</Link>
+                    ) : (
+                      label
+                    )}
                   </li>
                 ))}
               </ul>

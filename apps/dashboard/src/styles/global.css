@@ -517,3 +517,22 @@ table.data-table tr.sev-minor td.num {
   display: grid;
   gap: 6px;
 }
+
+/* FE-12 — screen 23: queue switch and decision feedback. */
+.queue-switch {
+  display: flex;
+  gap: 6px;
+}
+.queue-note {
+  margin: 0 0 12px;
+  padding: 10px 14px;
+  border-radius: var(--radius-input);
+}
+.queue-note.ok {
+  background: var(--teal-soft);
+  color: var(--teal);
+}
+.queue-note.error {
+  background: var(--danger-soft);
+  color: var(--danger);
+}

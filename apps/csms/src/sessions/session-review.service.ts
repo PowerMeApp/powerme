@@ -116,12 +116,18 @@ export class SessionReviewService {
   }
 
   /**
-   * BE-24: hàng đợi phiên `review` cho console (mới nhất trước), kèm các bản ghi kết luận chưa duyệt.
-   * Chưa lọc theo operator — console chưa có đăng nhập (cùng mức với GET /api/admin/sessions);
-   * mỗi dòng mang `operator_id` để màn hình lọc. Quyền chỉ kiểm khi GHI (resolveReview).
+   * BE-24: hàng đợi phiên `review` (mới nhất trước), kèm các bản ghi kết luận chưa duyệt. Console
+   * (chưa đăng nhập) gọi không có `operatorId` → mọi operator, mỗi dòng mang `operator_id`. FE-12
+   * (màn 23, operator API có đăng nhập) truyền `operatorId` của token. Quyền GHI vẫn kiểm ở
+   * resolveReview.
    */
-  async listInReview(limit: number): Promise<ReviewQueueItem[]> {
-    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 500)
+  async listInReview(limit: number, operatorId?: number): Promise<ReviewQueueItem[]> {
+    if (
+      !Number.isSafeInteger(limit) ||
+      limit < 1 ||
+      limit > 500 ||
+      (operatorId !== undefined && !(Number.isSafeInteger(operatorId) && operatorId > 0))
+    )
       throw new SessionReviewError('invalid_input');
     const { rows } = await this.db.$client.query<ReviewQueueRow>(
       `SELECT s.id,s.transaction_no,cp.serial_number,s.connector_no,s.id_tag,s.origin,s.payment_mode,
@@ -130,8 +136,9 @@ export class SessionReviewService {
            WHERE r.session_id=s.id AND r.reviewed_at IS NULL
              AND r.record_type = ANY($2::reconciliation_record_type[])),'{}') AS open_records
        FROM sessions s JOIN charge_points cp ON cp.id=s.charge_point_id JOIN sites st ON st.id=cp.site_id
-       WHERE s.status='review' ORDER BY s.updated_at DESC,s.id DESC LIMIT $1`,
-      [limit, VERDICT_TYPES],
+       WHERE s.status='review' AND ($3::bigint IS NULL OR st.operator_id=$3)
+       ORDER BY s.updated_at DESC,s.id DESC LIMIT $1`,
+      [limit, VERDICT_TYPES, operatorId ?? null],
     );
     return rows.map((r) => ({
       session_id: Number(r.id),

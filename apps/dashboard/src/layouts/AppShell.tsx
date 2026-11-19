@@ -58,6 +58,15 @@ export function AppShell() {
               <span>Cảnh báo sự cố</span>
             </NavLink>
           )}
+          {!admin && (
+            <NavLink
+              to="/operator/sessions"
+              className={({ isActive }) => `nav-link${isActive ? ' active' : ''}`}
+            >
+              <Icon name="sessions" />
+              <span>Phiên cần xử lý</span>
+            </NavLink>
+          )}
         </nav>
         <div className="rail-foot">
           <button

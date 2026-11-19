@@ -6,6 +6,8 @@
  *   GET  /api/operator/v1/faults, POST …/faults/{id}/acknowledge|reset|close  (FE-04a, operator-faults.ts)
  *   GET  /api/operator/v1/charge-points, GET /api/operator/v1/summary  (FE-03, operator-monitoring.ts)
  *   GET  /api/operator/v1/charge-points/{id}  (FE-05, screen 20)
+ *   GET  /api/operator/v1/sessions?queue=, POST …/sessions/{id}/assign|close|resolve  (FE-12, screen 23,
+ *        operator-sessions.ts; logic in Trí's SessionReviewService / UnattributedSessionService)
  *   GET  /api/admin/v1/me     admin
  * RolesGuard runs before route matching, so an unknown path without a valid token is 401, not 404.
  * CORS: localhost origins only (Vite dev server). JSON: snake_case, string ids, `{ error, detail }`.
@@ -18,6 +20,7 @@ import { AuthError, StaffAccounts, type DashboardAuthConfig } from '../users/aut
 import { rolesGuard, type Principal } from '../users/roles-guard.js';
 import type { ConnectionRegistry } from '../ocpp-gateway/connection-registry.js';
 import { matchFaultRoute, runFaultRoute } from './operator-faults.js';
+import { matchSessionRoute, runSessionRoute, type SessionQueueDeps } from './operator-sessions.js';
 import {
   matchMonitoringRoute,
   runMonitoringRoute,
@@ -51,6 +54,8 @@ export function createOperatorApiListener(
   /** FE-04a. Missing → fault routes answer 503 `faults_unavailable`. */
   faults?: FaultActions,
   monitoring: MonitoringDeps = { thresholds: DEFAULT_THRESHOLDS },
+  /** FE-12. Missing services → session routes answer 503 `sessions_unavailable`. */
+  sessions: SessionQueueDeps = {},
 ): RequestListener {
   return (req, res) => {
     void handle(req, res).catch((error: unknown) => {
@@ -83,8 +88,8 @@ export function createOperatorApiListener(
     }
     const url = new URL(req.url ?? '', 'http://operator-api.local');
     const [, surface, rest] = /^\/api\/(auth|operator|admin)\/v1(\/.*)?$/.exec(url.pathname) ?? [];
-    // Only the fault and charge point lists take a query; everywhere else a query is 400.
-    if (url.search && !/^\/api\/operator\/v1\/(faults|charge-points)$/.test(url.pathname))
+    // Only the fault, charge point and session lists take a query; everywhere else a query is 400.
+    if (url.search && !/^\/api\/operator\/v1\/(faults|charge-points|sessions)$/.test(url.pathname))
       throw new AuthError(400, 'invalid_input');
 
     if (surface === 'auth') {
@@ -114,6 +119,14 @@ export function createOperatorApiListener(
           ? await readJsonObject(req, res)
           : undefined;
       send(res, 200, await runFaultRoute(faultRoute, principal, faults, body));
+      return;
+    }
+    const sessionRoute =
+      surface === 'operator' ? matchSessionRoute(rest ?? '', url.searchParams) : null;
+    if (sessionRoute) {
+      allow(req, res, sessionRoute.kind === 'list' ? 'GET' : 'POST');
+      const body = sessionRoute.kind === 'action' ? await readJsonObject(req, res) : undefined;
+      send(res, 200, await runSessionRoute(sessionRoute, principal, sessions, body));
       return;
     }
     const monitoringRoute =
