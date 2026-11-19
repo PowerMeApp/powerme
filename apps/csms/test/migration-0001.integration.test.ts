@@ -240,6 +240,8 @@ describeDb('migration 0001 — nâng cấp DB đã có 0000 và ràng buộc m�
         'conflict',
         'late_sample',
         'tariff_clock_fallback',
+        'tariff_clock_offset',
+        'tariff_boundary_interpolated',
       ]);
       expect(await vals('remote_command_status')).toEqual([
         'pending',

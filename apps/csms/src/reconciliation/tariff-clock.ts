@@ -1,7 +1,64 @@
+/**
+ * Đồng hồ dùng để chia phiên theo khung giá (BR-P02; T101, sửa ở T134 theo quyết định D-I 14/11 và
+ * các quyết định của Trí ngày 17/11 sau review #154).
+ *
+ * Quy tắc, theo thứ tự:
+ *  1. Đo độ lệch đồng hồ trụ trong TỪNG connection epoch: độ lệch của một bản tin = giờ CSMS nhận −
+ *     giờ trụ ghi trong bản tin. Chỉ bản tin gửi LIVE mới đo được; bản tin phát bù từ hàng đợi
+ *     offline mang thêm thời gian nằm chờ. OCPP 1.6 không có cờ live / phát bù, và cờ `replayed` của
+ *     ReplayDetector tự nó dựa vào đồng hồ trụ (trụ chậm 10 phút thì mọi bản tin live đều bị coi là
+ *     phát lại), nên ở đây nhận diện live KHÔNG dùng đồng hồ trụ mà dùng NHỊP: một cụm live là các
+ *     bản tin của epoch có độ lệch cách nhau không quá `REPLAY_SKEW_THRESHOLD_S` (tức khoảng nhận
+ *     giữa hai bản tin bất kỳ xấp xỉ khoảng giờ trụ của chúng) và đủ dài để không thể là một loạt
+ *     phát bù tới dồn: trải ít nhất 60 giây trên đồng hồ trụ, hoặc có từ ba bản tin trải quá hai lần
+ *     ngưỡng. Số đo của cụm là TRUNG VỊ độ lệch. Trong một epoch có hai cụm live lệch nhau quá dung
+ *     sai nghĩa là đồng hồ bị chỉnh giữa chừng (Heartbeat.conf đồng bộ giờ) → không ổn định (bước 4).
+ *     Nhiều cụm trong dung sai: lấy cụm lệch nhỏ nhất (thời gian chờ chỉ làm độ lệch lớn lên).
+ *  2. Đồng hồ SAI khi có epoch đo được |độ lệch| > `TARIFF_CLOCK_TOLERANCE_S`. Khi đó MỌI epoch có
+ *     bản tin của phiên phải đo được và khớp nhau trong dung sai; có epoch không đo được hoặc lệch
+ *     nhau → `tariff_clock_offset_unstable` (bước 4). Mọi số đo trong dung sai, hoặc không epoch nào
+ *     đo được → dùng nguyên giờ trụ, không cần điều kiện này.
+ *  3. Đồng hồ sai và ổn định → cộng độ lệch (làm tròn tới giây) vào MỌI mốc giờ trụ của phiên (bắt
+ *     đầu, dừng, từng mẫu công tơ). Sau đó các mốc (đã chỉnh hoặc giữ nguyên) phải qua các kiểm tra
+ *     của T101 (log gốc, epoch, không ở tương lai, mẫu nằm trong phiên, mẫu live không lùi). Đến trễ
+ *     không còn là lý do loại: mẫu phát bù tới trễ hơn dung sai vẫn là giờ trụ hợp lệ.
+ *  4. Không ổn định hoặc kiểm tra không qua → không có độ lệch nào giải thích được phiên: tính cả
+ *     phiên theo khung giá lúc CSMS nhận StartTransaction (`tariff_clock_fallback`). Phiên không bao
+ *     giờ bị giữ vì đồng hồ.
+ */
 import type { PoolClient } from 'pg';
 
 export const TARIFF_CLOCK_FALLBACK_PREFIX = 'tariff_clock=csms_fallback reason=';
+export const TARIFF_CLOCK_OFFSET_PREFIX = 'tariff_clock=cp_offset offset_s=';
 export const TARIFF_CLOCK_UNTRUSTED = 'TARIFF_CLOCK_UNTRUSTED';
+export const TARIFF_BOUNDARY_INTERPOLATED_PREFIX = 'tariff_boundary=interpolated boundaries=';
+
+/** Một số đo công tơ tích luỹ trên trục giờ tính giá (ms). */
+export interface MeterPoint {
+  at: number;
+  wh: number;
+}
+
+/**
+ * Số Wh tại thời điểm `at` trên chuỗi số đo đã sắp theo thời gian (mốc bắt đầu với meterStart, các
+ * mẫu công tơ, mốc dừng với meterStop). Có số đo đúng `at` thì dùng trực tiếp (`gapMs = 0`); không
+ * thì nội suy tuyến tính giữa hai số đo kề trước và kề sau, `gapMs` = khoảng cách giữa hai số đo đó.
+ * Sai số của phần nội suy bị chặn bởi điện năng của đúng khoảng mẫu ấy. Hàm thuần.
+ */
+export function meterAt(points: MeterPoint[], at: number): { wh: number; gapMs: number } | null {
+  let before: MeterPoint | undefined;
+  let after: MeterPoint | undefined;
+  for (const point of points) {
+    if (point.at === at) return { wh: point.wh, gapMs: 0 };
+    if (point.at < at) before = point;
+    else after ??= point;
+  }
+  if (!before || !after) return null;
+  return {
+    wh: before.wh + ((after.wh - before.wh) * (at - before.at)) / (after.at - before.at),
+    gapMs: after.at - before.at,
+  };
+}
 
 interface Receipt {
   receivedAt: Date;
@@ -11,21 +68,110 @@ interface Receipt {
   epoch: number | null;
 }
 
-export function parseChargePointTime(raw: unknown): Date | null {
+/**
+ * Đọc timestamp của trụ. `exact` = đúng dạng dùng được cho khung giá (có múi giờ, phần lẻ không quá
+ * mili giây). Phần lẻ dài hơn mili giây thì cắt bớt. `zoned = false` = chuỗi không ghi múi giờ: `at`
+ * khi đó đọc như UTC nhưng KHÔNG đáng tin (trụ ghi giờ địa phương thì lệch 7 giờ) — người gọi không
+ * được dùng làm mốc của mẫu công tơ. Bước kiểm schema của ocpp-rpc (strictMode) cho cả hai dạng này
+ * đi qua (đã kiểm bằng test qua gateway thật). Ngày giờ không tồn tại (30/02, giờ 24) → null.
+ */
+export function readChargePointTime(
+  raw: unknown,
+): { at: Date; exact: boolean; zoned: boolean } | null {
   if (typeof raw !== 'string') return null;
-  const date = new Date(raw);
   const parts =
-    /^(\d{4})-(\d{2})-(\d{2})T\d{2}:\d{2}:\d{2}(?:\.(\d{1,3}0*))?(?:Z|[+-]\d{2}:\d{2})$/i.exec(raw);
-  if (!parts || !Number.isFinite(date.getTime()) || raw.slice(11, 13) === '24') return null;
-  const year = Number(parts[1]);
-  const month = Number(parts[2]);
-  const day = Number(parts[3]);
-  const leap = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+    /^(\d{4})-(\d{2})-(\d{2})T(\d{2}:\d{2}:\d{2})(?:\.(\d+))?(Z|[+-]\d{2}:\d{2})?$/i.exec(raw);
+  if (!parts || parts[4]!.startsWith('24')) return null;
+  const [, year, month, day, time, fraction = '', zone] = parts;
+  const at = new Date(
+    `${year}-${month}-${day}T${time}.${fraction.slice(0, 3).padEnd(3, '0')}${zone?.toUpperCase() ?? 'Z'}`,
+  );
+  if (!Number.isFinite(at.getTime())) return null;
+  const y = Number(year);
+  const leap = y % 4 === 0 && (y % 100 !== 0 || y % 400 === 0);
   const days = [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
-  return day > 0 && day <= (days[month - 1] ?? 0) ? date : null;
+  if (Number(day) < 1 || Number(day) > (days[Number(month) - 1] ?? 0)) return null;
+  const zoned = zone !== undefined;
+  return { at, exact: zoned && /^0*$/.test(fraction.slice(3)), zoned };
 }
 
-export function checkTariffTime(cp: Date, receipt: Receipt, toleranceMs: number, batch = false) {
+/** Timestamp dùng được cho khung giá, hoặc null (xem `readChargePointTime`). */
+export function parseChargePointTime(raw: unknown): Date | null {
+  const time = readChargePointTime(raw);
+  return time?.exact ? time.at : null;
+}
+
+/** Một bản tin có thể đã gửi live: StartTransaction, MeterValues hoặc StopTransaction của phiên. */
+export interface ClockFrame {
+  epoch: number;
+  receivedAt: Date;
+  cp: Date;
+}
+
+export interface ClockOffset {
+  /** Giờ CSMS nhận − giờ trụ (ms): dương = đồng hồ trụ chậm. */
+  offsetMs: number;
+  epoch: number;
+  liveFrames: number;
+}
+
+/** Cụm live ngắn hơn mức này trên đồng hồ trụ phải có từ ba bản tin (xem bước 1 ở đầu file). */
+const LIVE_CLUSTER_SPAN_MS = 60_000;
+
+/**
+ * Đo độ lệch đồng hồ trụ của một phiên (bước 1–2 ở đầu file). Hàm thuần.
+ * Trả `undefined` khi không epoch nào đo được; `'tariff_clock_offset_unstable'` khi đồng hồ đổi
+ * trong một epoch, hoặc đồng hồ sai mà có epoch không đo được / lệch với epoch khác quá dung sai.
+ */
+export function measureClockOffset(
+  frames: ClockFrame[],
+  toleranceMs: number,
+  liveWindowMs: number,
+): ClockOffset | 'tariff_clock_offset_unstable' | undefined {
+  const epochs = [...new Set(frames.map((f) => f.epoch))].sort((a, b) => a - b);
+  const measured: ClockOffset[] = [];
+  for (const epoch of epochs) {
+    const inEpoch = frames
+      .filter((f) => f.epoch === epoch)
+      .map((f) => ({ cp: f.cp.getTime(), offset: f.receivedAt.getTime() - f.cp.getTime() }))
+      .filter((f) => Number.isFinite(f.offset))
+      .sort((a, b) => a.offset - b.offset);
+    let best: ClockOffset | undefined;
+    for (let from = 0; from < inEpoch.length;) {
+      // Cụm = các bản tin lệch không quá ngưỡng live so với bản tin lệch nhỏ nhất của cụm, nên
+      // khoảng nhận giữa bản tin đầu và cuối cụm chênh khoảng giờ trụ của chúng không quá ngưỡng.
+      let to = from;
+      while (to < inEpoch.length && inEpoch[to]!.offset - inEpoch[from]!.offset <= liveWindowMs)
+        to++;
+      const cluster = inEpoch.slice(from, to);
+      from = to;
+      const cps = cluster.map((f) => f.cp);
+      const span = Math.max(...cps) - Math.min(...cps);
+      if (span < LIVE_CLUSTER_SPAN_MS && !(cluster.length >= 3 && span > 2 * liveWindowMs))
+        continue;
+      const middle = cluster.length >> 1;
+      const offsetMs =
+        cluster.length % 2
+          ? cluster[middle]!.offset
+          : (cluster[middle - 1]!.offset + cluster[middle]!.offset) / 2;
+      if (!best) best = { offsetMs, epoch, liveFrames: cluster.length };
+      else if (Math.abs(offsetMs - best.offsetMs) > toleranceMs)
+        return 'tariff_clock_offset_unstable';
+    }
+    if (best) measured.push(best);
+  }
+  const first = measured[0];
+  if (!first || measured.every((m) => Math.abs(m.offsetMs) <= toleranceMs)) return first;
+  if (
+    measured.length !== epochs.length ||
+    measured.some((m) => Math.abs(m.offsetMs - first.offsetMs) > toleranceMs)
+  )
+    return 'tariff_clock_offset_unstable';
+  return first;
+}
+
+/** Kiểm một mốc giờ trụ (đã cộng độ lệch nếu có) với thời điểm nhận và epoch của bản tin mang nó. */
+export function checkTariffTime(cp: Date, receipt: Receipt, toleranceMs: number) {
   const { receivedAt, openedAt, closedAt, firstOpenedAt, epoch } = receipt;
   if (!Number.isFinite(cp.getTime())) return 'tariff_clock_invalid_timestamp';
   if (
@@ -42,13 +188,13 @@ export function checkTariffTime(cp: Date, receipt: Receipt, toleranceMs: number,
   )
     return 'tariff_clock_epoch_unverified';
   if (cp.getTime() - receivedAt.getTime() > toleranceMs) return 'tariff_clock_future_timestamp';
-  if (receivedAt.getTime() - cp.getTime() <= toleranceMs) return undefined;
-  if (openedAt.getTime() - cp.getTime() > toleranceMs) {
-    if (epoch > 1 && firstOpenedAt && firstOpenedAt.getTime() - cp.getTime() <= toleranceMs)
-      return undefined;
+  // Mốc đứng trước epoch nhận (phát bù sau khi nối lại) phải nằm trong lịch sử kết nối của trụ.
+  if (
+    openedAt.getTime() - cp.getTime() > toleranceMs &&
+    !(epoch > 1 && firstOpenedAt && firstOpenedAt.getTime() - cp.getTime() <= toleranceMs)
+  )
     return 'tariff_clock_epoch_unverified';
-  }
-  return batch ? undefined : 'tariff_clock_ambiguous_delay';
+  return undefined;
 }
 
 interface SessionClock {
@@ -95,26 +241,29 @@ async function readEndpoint(c: PoolClient, s: SessionClock, stop: boolean) {
   return rows.length === 1 ? rows[0] : undefined;
 }
 
-export async function checkTariffTimeline(c: PoolClient, s: SessionClock, toleranceMs: number) {
-  if (!s.cp_stopped_at) return 'tariff_clock_invalid_timestamp';
+export type TariffClock =
+  { issue: string } | { offsetMs: number; epoch: number | null; liveFrames: number };
+
+/**
+ * Đồng hồ tính giá của một phiên đã dừng: `offsetMs` phải cộng vào mọi mốc giờ trụ (0 = dùng nguyên
+ * giờ trụ), hoặc `issue` = lý do phải dùng giờ CSMS.
+ */
+export async function resolveTariffClock(
+  c: PoolClient,
+  s: SessionClock,
+  toleranceMs: number,
+  liveWindowMs: number,
+): Promise<TariffClock> {
+  if (!s.cp_stopped_at) return { issue: 'tariff_clock_invalid_timestamp' };
+  const cpStoppedAt = s.cp_stopped_at;
   const start = await readEndpoint(c, s, false);
   const stop = await readEndpoint(c, s, true);
-  if (!start || !stop) return 'tariff_clock_frame_unverified';
-  for (const [cp, frame] of [
-    [s.cp_started_at, start],
-    [s.cp_stopped_at, stop],
-  ] as const) {
-    if (parseChargePointTime(frame.rawTimestamp)?.getTime() !== cp.getTime())
-      return 'tariff_clock_invalid_timestamp';
-    const issue = checkTariffTime(cp, frame, toleranceMs);
-    if (issue) return issue;
-  }
+  if (!start || !stop) return { issue: 'tariff_clock_frame_unverified' };
   if (
-    s.cp_stopped_at < s.cp_started_at ||
-    stop.receivedAt < start.receivedAt ||
-    stop.epoch! < start.epoch!
+    parseChargePointTime(start.rawTimestamp)?.getTime() !== s.cp_started_at.getTime() ||
+    parseChargePointTime(stop.rawTimestamp)?.getTime() !== cpStoppedAt.getTime()
   )
-    return 'tariff_clock_reversed_session';
+    return { issue: 'tariff_clock_invalid_timestamp' };
 
   const { rows } = await c.query<
     Receipt & {
@@ -157,34 +306,68 @@ export async function checkTariffTimeline(c: PoolClient, s: SessionClock, tolera
       s.charge_point_id,
       String(s.transaction_no),
       String(s.connector_no),
-      s.cp_stopped_at,
+      cpStoppedAt,
       s.meter_stop_wh,
     ],
   );
+  const samples = rows.map((receipt) => ({
+    ...receipt,
+    meterTimes: new Set(receipt.meterClocks?.map((raw) => parseChargePointTime(raw)?.getTime())),
+    stopTimes: new Set(receipt.stopBatchClocks?.map((raw) => parseChargePointTime(raw)?.getTime())),
+  }));
+
+  // Bước 1–2: một MeterValues.req là một bản tin, gửi lúc mẫu mới nhất của nó được lấy.
+  const frames: ClockFrame[] = [];
+  for (const [cp, frame] of [
+    [s.cp_started_at, start],
+    [cpStoppedAt, stop],
+  ] as const)
+    if (frame.epoch !== null) frames.push({ epoch: frame.epoch, receivedAt: frame.receivedAt, cp });
+  for (const receipt of samples) {
+    const sent = receipt.cpTimestamps.filter((cp) => receipt.meterTimes.has(cp.getTime())).pop();
+    if (sent && receipt.epoch !== null)
+      frames.push({ epoch: receipt.epoch, receivedAt: receipt.receivedAt, cp: sent });
+  }
+  const measured = measureClockOffset(frames, toleranceMs, liveWindowMs);
+  if (measured === 'tariff_clock_offset_unstable') return { issue: measured };
+  const offsetMs =
+    measured && Math.abs(measured.offsetMs) > toleranceMs
+      ? Math.round(measured.offsetMs / 1000) * 1000
+      : 0;
+  const corrected = (cp: Date) => new Date(cp.getTime() + offsetMs);
+
+  // Bước 3: các mốc đã chỉnh phải khớp log, epoch và thứ tự của phiên.
+  for (const [cp, frame] of [
+    [s.cp_started_at, start],
+    [cpStoppedAt, stop],
+  ] as const) {
+    const issue = checkTariffTime(corrected(cp), frame, toleranceMs);
+    if (issue) return { issue };
+  }
+  if (
+    cpStoppedAt < s.cp_started_at ||
+    stop.receivedAt < start.receivedAt ||
+    stop.epoch! < start.epoch!
+  )
+    return { issue: 'tariff_clock_reversed_session' };
   const lastLive = new Map<number | null, Date>();
-  for (const sample of rows) {
-    const meterTimes = new Set(
-      sample.meterClocks?.map((raw) => parseChargePointTime(raw)?.getTime()),
-    );
-    const stopTimes = new Set(
-      sample.stopBatchClocks?.map((raw) => parseChargePointTime(raw)?.getTime()),
-    );
+  for (const sample of samples) {
     const previous = lastLive.get(sample.epoch);
     for (const cp of sample.cpTimestamps) {
-      if (cp < s.cp_started_at || cp > s.cp_stopped_at || sample.receivedAt < start.receivedAt)
-        return 'tariff_clock_sample_outside_session';
-      const meterFrame = meterTimes.has(cp.getTime());
-      const stopBatch = stopTimes.has(cp.getTime());
-      if (meterFrame === stopBatch) return 'tariff_clock_sample_frame_unverified';
-      const issue = checkTariffTime(cp, sample, toleranceMs, stopBatch);
-      if (issue) return issue;
-      if (sample.epoch! < start.epoch!) return 'tariff_clock_epoch_unverified';
+      if (cp < s.cp_started_at || cp > cpStoppedAt || sample.receivedAt < start.receivedAt)
+        return { issue: 'tariff_clock_sample_outside_session' };
+      const meterFrame = sample.meterTimes.has(cp.getTime());
+      if (meterFrame === sample.stopTimes.has(cp.getTime()))
+        return { issue: 'tariff_clock_sample_frame_unverified' };
+      const issue = checkTariffTime(corrected(cp), sample, toleranceMs);
+      if (issue) return { issue };
+      if (sample.epoch! < start.epoch!) return { issue: 'tariff_clock_epoch_unverified' };
       // Within a receipt, a MeterValues frame can list samples in any order.
-      if (meterFrame && sample.receivedAt.getTime() - cp.getTime() <= toleranceMs) {
-        if (previous && cp < previous) return 'tariff_clock_sample_out_of_order';
+      if (meterFrame && sample.receivedAt.getTime() - corrected(cp).getTime() <= toleranceMs) {
+        if (previous && cp < previous) return { issue: 'tariff_clock_sample_out_of_order' };
         lastLive.set(sample.epoch, cp);
       }
     }
   }
-  return undefined;
+  return { offsetMs, epoch: measured?.epoch ?? null, liveFrames: measured?.liveFrames ?? 0 };
 }

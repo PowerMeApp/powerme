@@ -449,6 +449,20 @@ describeDb('Bảng điều khiển vận hành — dữ liệu thật từ trace
     const tx1 = list.find((s) => s.transaction_no === 1);
     expect(tx1?.has_conflict).toBe(false);
     const before = (await get<{ reconciliation_conflicts: number }>('/api/admin/summary')).body;
+    // T134: bản tin lặp mang số đo khác bản đã lưu dùng record_type = conflict nhưng không được đếm.
+    await db.$client.query(
+      `INSERT INTO reconciliation_records (session_id, record_no, record_type, resolution)
+       VALUES ($1, 98, 'conflict', 'meter_evidence_conflict reason=conflicting_sample message_log_id=1')`,
+      [tx1?.id],
+    );
+    expect(
+      (await get<{ reconciliation_conflicts: number }>('/api/admin/summary')).body
+        .reconciliation_conflicts,
+    ).toBe(before.reconciliation_conflicts);
+    expect(
+      (await get<SessionJson[]>('/api/admin/sessions')).body.find((s) => s.transaction_no === 1)
+        ?.has_conflict,
+    ).toBe(false);
     await db.$client.query(
       `INSERT INTO reconciliation_records (session_id, record_no, record_type, energy_difference_wh, resolution)
        VALUES ($1, 99, 'meter_gap', 5, 'conflict: meter_stop_minus_start=601 series_last=606 diff=5 samples=3 monotonic=true gaps=0 trigger=stop replayed=false')`,
