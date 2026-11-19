@@ -6,13 +6,20 @@
 //   file .ts, nên phải bỏ đuôi .js lúc resolve.
 // - `lab/rq1/**/*.spec.mjs`: unit test của harness RQ1 (ESM thuần, không qua ts-jest; chạy được nhờ
 //   cờ --experimental-vm-modules trong scripts/run-jest.cjs).
+// - `lab/rq2/**/*.spec.mjs`: unit test của harness RQ2 (kịch bản, chấm điểm, tổng hợp; T142).
 // - `lab/nfr03/**/*.spec.mjs`: unit test của dụng cụ đo NFR-03 (phân vị, ghép cặp CALL–CALLRESULT).
 
 /** @type {import('jest').Config} */
 module.exports = {
   preset: 'ts-jest',
   testEnvironment: 'node',
-  roots: ['<rootDir>/src', '<rootDir>/test', '<rootDir>/lab/rq1', '<rootDir>/lab/nfr03'],
+  roots: [
+    '<rootDir>/src',
+    '<rootDir>/test',
+    '<rootDir>/lab/rq1',
+    '<rootDir>/lab/rq2',
+    '<rootDir>/lab/nfr03',
+  ],
   testMatch: ['**/*.spec.ts', '**/*.test.ts', '**/*.spec.mjs'],
   moduleNameMapper: { '^(\\.{1,2}/.*)\\.js$': '$1' },
   transform: {
