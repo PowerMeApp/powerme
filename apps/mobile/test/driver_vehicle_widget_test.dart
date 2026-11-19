@@ -64,6 +64,13 @@ Future<void> _confirmDefault(WidgetTester tester, String id) async {
 bool _canSave(WidgetTester tester) =>
     tester.widget<FilledButton>(find.byKey(const Key(_save))).onPressed != null;
 
+const _creditSummary = {
+  'balance_vnd': 125000,
+  'held_vnd': 0,
+  'available_vnd': 125000,
+  'status': 'active',
+};
+
 void main() {
   testWidgets('Commons photo and credit stay separate from the signed API', (
     tester,
@@ -90,6 +97,7 @@ void main() {
             ),
           ),
           'stations' => reply(200, page([])),
+          'credit' => reply(200, _creditSummary),
           'vehicle-models' => reply(200, {
             'items': [picturedLeaf, vf8],
           }),
@@ -97,6 +105,7 @@ void main() {
         };
       });
       await _open(tester, fixture);
+      expect(find.text('125.000 đ'), findsOneWidget);
       expect(find.text(leafPhotoCredit), findsOneWidget);
       expect(find.text('Ảnh minh họa'), findsOneWidget);
       expect(imageClient.urls, [Uri.parse(leafPhotoUrl)]);
@@ -134,6 +143,7 @@ void main() {
         'auth/login',
         'me',
         'stations',
+        'credit',
         'vehicle-models',
       ]);
     } finally {
@@ -292,6 +302,7 @@ void main() {
         'auth/login' => reply(200, tokens(accessA)),
         'me' => reply(200, account()),
         'stations' => reply(200, page([])),
+        'credit' => reply(200, _creditSummary),
         'vehicle-models' => reply(200, {
           'items': [leaf, vf8],
         }),
@@ -359,6 +370,7 @@ void main() {
       'auth/login',
       'me',
       'stations',
+      'credit',
       'vehicle-models',
       'vehicles',
       'me',

@@ -6,6 +6,8 @@ import 'package:dio/dio.dart';
 import 'api_config.dart';
 import 'driver_account_response.dart';
 import 'driver_api_exception.dart';
+import 'driver_api_values.dart';
+import 'vnpay_checkout_url.dart';
 
 enum DriverSessionEnd { expired, forbidden }
 
@@ -109,6 +111,206 @@ class DriverApiSession {
         await _protectedRead(_activeSession(), 'vehicle-models'),
       );
 
+  Future<Map<String, dynamic>> startCharge({
+    required String principalId,
+    required String key,
+    required String connectorId,
+    required String vehicleId,
+    required int energyLimitWh,
+  }) async {
+    final session = _ownedSession(principalId);
+    final body = <String, Object?>{
+      'connector_id': connectorId,
+      'vehicle_id': vehicleId,
+      'mode': 'energy_kwh',
+      'energy_limit_wh': energyLimitWh,
+    };
+    return _withProtectedSession(
+      session,
+      (token) => _request(
+        session,
+        'charges',
+        method: 'POST',
+        expectedStatus: 202,
+        body: body,
+        accessToken: token,
+        idempotencyKey: key,
+      ),
+    );
+  }
+
+  Future<Map<String, dynamic>> readCharge(
+    String principalId,
+    String key,
+  ) async => _protectedRead(
+    _ownedSession(principalId),
+    'charges/${Uri.encodeComponent(key)}',
+  );
+
+  Future<Map<String, dynamic>> readCredit(
+    String principalId,
+    CancelToken cancel,
+  ) => _readForPrincipal(principalId, 'credit', cancel);
+
+  Future<Map<String, dynamic>> readCreditTransactions(
+    String principalId,
+    int page,
+    int pageSize,
+    CancelToken cancel,
+  ) => _readForPrincipal(principalId, 'credit/transactions', cancel, {
+    'page': page,
+    'page_size': pageSize,
+  });
+
+  Future<Map<String, dynamic>> quoteTopUp(
+    String principalId,
+    int amountVnd,
+    CancelToken cancel,
+  ) => _readForPrincipal(principalId, 'billing/top-ups/quote', cancel, {
+    'amount_vnd': amountVnd,
+  });
+
+  Future<Map<String, dynamic>> readTopUp(
+    String principalId,
+    String id,
+    CancelToken cancel,
+  ) async {
+    if (!isDriverApiId(id)) throw _malformed;
+    return _readForPrincipal(principalId, 'billing/top-ups/$id', cancel);
+  }
+
+  Future<({Map<String, dynamic> json, bool created})> createTopUp(
+    String principalId,
+    String key,
+    int amountVnd,
+    int points,
+  ) async {
+    final session = _ownedSession(principalId);
+    return _withProtectedSession(session, (token) async {
+      final response = await _send(
+        session,
+        'billing/top-ups',
+        method: 'POST',
+        expectedStatus: 201,
+        replayStatus: 200,
+        accessToken: token,
+        idempotencyKey: key,
+        body: {'amount_vnd': amountVnd, 'points_to_redeem': points},
+      );
+      return (
+        json: _decodeObject(response.data) ?? (throw _malformed),
+        created: response.statusCode == 201,
+      );
+    });
+  }
+
+  Future<Map<String, dynamic>> reportConnectorFault(
+    String principalId,
+    String connectorId,
+    String description,
+    CancelToken cancel,
+  ) async {
+    if (!isDriverApiId(connectorId)) throw _malformed;
+    final session = _ownedSession(principalId);
+    session.reads.add(cancel);
+    try {
+      return await _withProtectedSession(
+        session,
+        (token) => _request(
+          session,
+          'connectors/$connectorId/fault-reports',
+          method: 'POST',
+          expectedStatus: 201,
+          accessToken: token,
+          body: {'description': description},
+          cancel: cancel,
+        ),
+        cancel: cancel,
+      );
+    } finally {
+      session.reads.remove(cancel);
+    }
+  }
+
+  Future<Map<String, dynamic>> stopCharge(
+    String principalId,
+    String sessionId,
+    String key,
+  ) async {
+    _validateSessionId(sessionId);
+    final session = _ownedSession(principalId);
+    return _withProtectedSession(
+      session,
+      (token) => _request(
+        session,
+        'sessions/$sessionId/stop',
+        method: 'POST',
+        expectedStatus: 202,
+        accessToken: token,
+        idempotencyKey: key,
+      ),
+    );
+  }
+
+  Future<Map<String, dynamic>> readChargeProgress(
+    String principalId,
+    String sessionId,
+    CancelToken cancel,
+  ) async {
+    _validateSessionId(sessionId);
+    return _readForPrincipal(
+      principalId,
+      'sessions/$sessionId/progress',
+      cancel,
+    );
+  }
+
+  Future<Map<String, dynamic>> readChargeStatement(
+    String principalId,
+    String sessionId,
+    CancelToken cancel,
+  ) async {
+    // The ledger returns PostgreSQL bigint IDs as strings.
+    if (!_statementSessionId.hasMatch(sessionId) ||
+        (sessionId.length == 19 &&
+            sessionId.compareTo('9223372036854775807') > 0)) {
+      throw _malformed;
+    }
+    return _readForPrincipal(
+      principalId,
+      'sessions/$sessionId/statement',
+      cancel,
+    );
+  }
+
+  void _validateSessionId(String sessionId) {
+    if (!_chargeSessionId.hasMatch(sessionId) ||
+        int.parse(sessionId) > 9007199254740991) {
+      throw _malformed;
+    }
+  }
+
+  Future<Map<String, dynamic>> _readForPrincipal(
+    String principalId,
+    String path,
+    CancelToken cancel, [
+    Map<String, Object?>? query,
+  ]) async {
+    final session = _ownedSession(principalId);
+    session.reads.add(cancel);
+    try {
+      return await _protectedRead(session, path, query, cancel);
+    } finally {
+      session.reads.remove(cancel);
+    }
+  }
+
+  _Session _ownedSession(String principalId) {
+    final session = _activeSession();
+    if (session.account!.id != principalId) throw _sessionEnded;
+    return session;
+  }
+
   Future<Map<String, dynamic>> readForVehicle(
     String path,
     String vehicleId,
@@ -192,17 +394,29 @@ class DriverApiSession {
     String path, [
     Map<String, Object?>? query,
     CancelToken? cancel,
-  ]) async {
+  ]) => _withProtectedSession(
+    session,
+    (token) => _get(session, path, token, query, cancel),
+    cancel: cancel,
+  );
+
+  Future<T> _withProtectedSession<T>(
+    _Session session,
+    Future<T> Function(String token) request, {
+    CancelToken? cancel,
+  }) async {
     _requireCurrent(session);
     final accessToken = session.accessToken;
     try {
       try {
-        return await _get(session, path, accessToken, query, cancel);
+        return await request(accessToken);
       } on DriverApiException catch (error) {
         if (error.status != 401) rethrow;
+        if (cancel?.isCancelled == true) throw _sessionEnded;
       }
       await _renewAccessToken(session, accessToken);
-      return await _get(session, path, session.accessToken, query, cancel);
+      if (cancel?.isCancelled == true) throw _sessionEnded;
+      return await request(session.accessToken);
     } on DriverApiException catch (error) {
       _endOnAuthFailure(session, error);
       rethrow;
@@ -263,6 +477,7 @@ class DriverApiSession {
     Map<String, Object?>? body,
     Map<String, Object?>? query,
     String? accessToken,
+    String? idempotencyKey,
     CancelToken? cancel,
   }) async {
     final response = await _send(
@@ -273,6 +488,7 @@ class DriverApiSession {
       body: body,
       query: query,
       accessToken: accessToken,
+      idempotencyKey: idempotencyKey,
       cancel: cancel,
     );
     return _decodeObject(response.data) ?? (throw _malformed);
@@ -283,9 +499,11 @@ class DriverApiSession {
     String path, {
     required String method,
     required int expectedStatus,
+    int? replayStatus,
     Map<String, Object?>? body,
     Map<String, Object?>? query,
     String? accessToken,
+    String? idempotencyKey,
     CancelToken? cancel,
   }) async {
     _requireCurrent(session);
@@ -299,15 +517,19 @@ class DriverApiSession {
         options: Options(
           method: method,
           contentType: body == null ? null : Headers.jsonContentType,
-          headers: accessToken == null
-              ? null
-              : {'Authorization': 'Bearer $accessToken'},
+          headers: {
+            if (accessToken != null) 'Authorization': 'Bearer $accessToken',
+            'Idempotency-Key': ?idempotencyKey,
+          },
         ),
       );
     } on DioException catch (error) {
       _requireCurrent(session);
       final status = error.response?.statusCode;
       final json = _decodeObject(error.response?.data);
+      final conflict = path == 'billing/top-ups' && status == 409
+          ? _topUpConflict(json)
+          : null;
       throw DriverApiException(
         status == null ? DriverApiProblem.connection : DriverApiProblem.http,
         status: status,
@@ -329,8 +551,26 @@ class DriverApiSession {
           'invalid_search' => 'invalid_search',
           'provider_unavailable' => 'provider_unavailable',
           'station_location_unavailable' => 'station_location_unavailable',
+          'idempotency_conflict' => 'idempotency_conflict',
+          'account_closed' => 'account_closed',
+          'payment_unconfigured' => 'payment_unconfigured',
+          'balance_limit_exceeded' => 'balance_limit_exceeded',
+          'invalid_description' => 'invalid_description',
+          'duplicate_report' => 'duplicate_report',
+          'stop_pending_or_unknown' => 'stop_pending_or_unknown',
+          'session_not_stoppable' => 'session_not_stoppable',
+          'invalid_idempotency_key' => 'invalid_idempotency_key',
+          'reserved_idempotency_key' => 'reserved_idempotency_key',
+          'credit_unavailable' => 'credit_unavailable',
+          'connector_unavailable' => 'connector_unavailable',
+          'connector_busy_or_unknown' => 'connector_busy_or_unknown',
+          'tariff_unavailable' => 'tariff_unavailable',
+          'vehicle_not_owned_or_incompatible' =>
+            'vehicle_not_owned_or_incompatible',
+          'unsupported_mode' => 'unsupported_mode',
           _ => null,
         },
+        topUpConflict: conflict,
         mapAvailability: switch ((status, json?['error'], json?['detail'])) {
           (503, 'provider_unavailable', 'unconfigured') =>
             DriverMapAvailability.unconfigured,
@@ -341,7 +581,10 @@ class DriverApiSession {
       );
     }
     _requireCurrent(session);
-    if (response.statusCode != expectedStatus) throw _malformed;
+    if (response.statusCode != expectedStatus &&
+        (replayStatus == null || response.statusCode != replayStatus)) {
+      throw _malformed;
+    }
     return response;
   }
 
@@ -387,6 +630,24 @@ class _Session {
 
 const _malformed = DriverApiException(DriverApiProblem.malformed);
 const _sessionEnded = DriverApiException(DriverApiProblem.ended);
+
+DriverTopUpConflict? _topUpConflict(Map<String, dynamic>? json) {
+  final id = json?['top_up_id'];
+  final url = json?['payment_url'];
+  if (!isDriverApiId(id)) return null;
+  final code = json?['error'];
+  final paymentUrl = validatedVnpayCheckoutUrl(url);
+  if (code == 'top_up_pending' && paymentUrl != null) {
+    return (id: id as String, confirming: false, paymentUrl: paymentUrl);
+  }
+  if (code == 'pending_top_up_confirming' && url == null) {
+    return (id: id as String, confirming: true, paymentUrl: null);
+  }
+  return null;
+}
+
+final _chargeSessionId = RegExp(r'^[1-9][0-9]{0,15}$');
+final _statementSessionId = RegExp(r'^[1-9][0-9]{0,18}$');
 
 Map<String, dynamic>? _decodeObject(Object? body) {
   if (body is! String || body.isEmpty) return null;

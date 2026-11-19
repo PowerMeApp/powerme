@@ -1,8 +1,8 @@
-import '../../../demo/demo_store.dart';
-import '../../../demo/station_actions_store.dart';
-import '../../auth/domain/auth_scope.dart';
-import '../../stations/domain/station_actions.dart';
-import '../domain/support_repository.dart';
+import 'package:driver_app/demo/demo_store.dart';
+import 'package:driver_app/demo/station_actions_store.dart';
+import 'package:driver_app/features/auth/domain/auth_scope.dart';
+import 'package:driver_app/features/stations/domain/station_actions.dart';
+import 'package:driver_app/features/support/domain/support_repository.dart';
 
 class MockSupportRepository implements SupportRepository {
   MockSupportRepository(this.store, this.actions, this.scope, this.stations);

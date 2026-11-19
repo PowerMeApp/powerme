@@ -1,4 +1,4 @@
-import '../features/payments/domain/payments.dart';
+import 'package:driver_app/features/payments/domain/payments.dart';
 
 enum PaymentScript {
   normal,

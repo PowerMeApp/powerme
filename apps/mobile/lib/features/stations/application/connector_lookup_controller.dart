@@ -35,6 +35,24 @@ class ConnectorLookupController extends Notifier<ConnectorLookupState> {
 
   void clear() => state = const ConnectorLookupState();
 
+  void markReportedIssue(String id) {
+    final connector = state.connector;
+    if (connector == null || connector.id != id || connector.reportedIssue) {
+      return;
+    }
+    state = ConnectorLookupState(
+      connector: (
+        id: connector.id,
+        displayCode: connector.displayCode,
+        number: connector.number,
+        stationName: connector.stationName,
+        status: connector.status,
+        reportedIssue: true,
+        canRequestStart: connector.canRequestStart,
+      ),
+    );
+  }
+
   Future<void> resolve(String raw) async {
     final session = ref.read(discoverySessionProvider);
     if (state.busy || session.vehicleId.isEmpty) return;

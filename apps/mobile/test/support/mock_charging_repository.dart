@@ -1,13 +1,13 @@
 import 'dart:async';
-import '../../../demo/demo_store.dart';
-import '../../../demo/charging_store.dart';
-import '../../../demo/station_actions_store.dart';
-import '../../auth/domain/auth_scope.dart';
-import '../../stations/domain/station.dart';
-import '../../stations/domain/station_actions.dart';
-import '../domain/charging.dart';
+import 'package:driver_app/demo/demo_store.dart';
+import 'package:driver_app/demo/charging_store.dart';
+import 'package:driver_app/demo/station_actions_store.dart';
+import 'package:driver_app/features/auth/domain/auth_scope.dart';
+import 'package:driver_app/features/stations/domain/station.dart';
+import 'package:driver_app/features/stations/domain/station_actions.dart';
+import 'package:driver_app/features/charging/domain/charging.dart';
 
-export '../../../demo/charging_engine.dart' show aggregateVnd;
+export 'package:driver_app/demo/charging_engine.dart' show aggregateVnd;
 
 class MockChargingRepository
     implements ChargingRepository, ChargingPreparation {

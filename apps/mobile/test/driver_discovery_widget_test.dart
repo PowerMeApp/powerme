@@ -620,6 +620,11 @@ void main() {
         find.textContaining('Chưa lấy được dữ liệu bản đồ'),
         findsOneWidget,
       );
+      tester
+          .state<ScrollableState>(find.byType(Scrollable).first)
+          .position
+          .jumpTo(0);
+      await tester.pumpAndSettle();
       expect(_key('open-station-maps'), findsOneWidget);
       await _tap(tester, find.text('Thử lại'));
       expect(find.text('Chưa có dữ liệu'), findsOneWidget);
@@ -638,6 +643,7 @@ void main() {
         'include_vinfast_only': 'true',
       });
     },
+    variant: const TargetPlatformVariant({TargetPlatform.android}),
   );
 
   testWidgets(
