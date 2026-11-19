@@ -1,7 +1,7 @@
 import 'package:driver_app/demo/demo_store.dart';
 import 'package:driver_app/demo/charging_store.dart';
-import 'package:driver_app/demo/payment_store.dart';
-import 'package:driver_app/demo/payment_engine.dart';
+import 'payment_store.dart';
+import 'payment_engine.dart';
 import 'package:driver_app/features/auth/domain/auth_scope.dart';
 import 'package:driver_app/features/charging/domain/charging.dart';
 import 'mock_charging_repository.dart';

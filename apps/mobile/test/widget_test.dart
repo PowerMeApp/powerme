@@ -6,7 +6,7 @@ import 'package:driver_app/features/auth/domain/auth_scope.dart';
 import 'package:driver_app/features/auth/application/auth_controller.dart';
 import 'test_helpers.dart';
 import 'package:driver_app/demo/charging_store.dart';
-import 'package:driver_app/demo/payment_store.dart';
+import 'support/payment_store.dart';
 import 'package:driver_app/demo/station_actions_store.dart';
 import 'package:driver_app/features/payments/application/payments_controller.dart';
 import 'support/mock_payments_repository.dart';

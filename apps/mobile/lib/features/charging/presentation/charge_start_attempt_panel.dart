@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../../core/l10n/app_copy.dart';
 import '../../../core/theme/powerme_theme.dart';
@@ -159,6 +160,16 @@ class _ChargeStartAttemptPanelState
           ),
         ),
         if (showPending) _startMilestones(view, copy),
+        if (snapshot?.outcome == ChargeStartOutcome.topUpRequired &&
+            view.issue == null)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 12),
+            child: FilledButton(
+              key: const Key('charge-start-top-up'),
+              onPressed: () => context.push('/credit/top-up'),
+              child: Text(copy.text('Nạp tín dụng', 'Top up credit')),
+            ),
+          ),
         if (widget.onFollow != null)
           Padding(
             padding: const EdgeInsets.only(bottom: 12),

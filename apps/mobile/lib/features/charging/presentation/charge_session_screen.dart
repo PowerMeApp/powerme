@@ -361,6 +361,7 @@ class _ChargeSessionViewState extends ConsumerState<_ChargeSessionView>
             if (progress?.statementEligible == true)
               ChargeStatementCard(
                 copy: copy,
+                sessionId: widget.target.id,
                 statement: _controller.statement,
                 issue: _controller.statementIssue,
                 retry: _controller.reading ? null : _controller.retryStatement,

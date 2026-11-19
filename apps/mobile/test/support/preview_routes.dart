@@ -5,9 +5,9 @@ import 'package:driver_app/features/stations/presentation/discovery_screen.dart'
 import 'package:driver_app/features/stations/domain/station_actions.dart';
 import 'package:driver_app/features/stations/presentation/station_detail_screen.dart';
 import 'package:driver_app/features/stations/presentation/station_actions_screens.dart';
-import 'package:driver_app/features/support/presentation/report_screen.dart';
+import 'preview_report_screen.dart';
 import 'package:driver_app/features/charging/presentation/charging_screens.dart';
-import 'package:driver_app/features/payments/presentation/payment_screens.dart';
+import 'preview_payment_screens.dart';
 import 'package:driver_app/features/history/presentation/history_screens.dart';
 import 'package:driver_app/features/loyalty/presentation/loyalty_screen.dart';
 import 'package:driver_app/features/charging/presentation/qr_connect_screen.dart';

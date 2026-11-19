@@ -8,7 +8,7 @@ import 'package:driver_app/features/profile/domain/driver_profile.dart';
 import 'package:driver_app/features/stations/application/station_actions_controller.dart';
 import 'package:driver_app/features/stations/domain/station.dart';
 import 'package:driver_app/features/stations/presentation/station_actions_screens.dart';
-import 'package:driver_app/features/support/application/support_controller.dart';
+import 'support/preview_support_controller.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';

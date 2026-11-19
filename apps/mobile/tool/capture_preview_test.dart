@@ -20,7 +20,7 @@ import 'package:driver_app/features/stations/domain/station_actions.dart';
 import 'package:driver_app/features/stations/application/station_route_controller.dart';
 import 'package:driver_app/features/charging/application/charging_controller.dart';
 import 'package:driver_app/features/payments/application/payments_controller.dart';
-import 'package:driver_app/features/support/application/support_controller.dart';
+import '../test/support/preview_support_controller.dart';
 
 void main() {
   const fonts = String.fromEnvironment('POWERME_PREVIEW_FONTS');

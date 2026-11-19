@@ -3,7 +3,7 @@ import 'package:driver_app/app/router.dart';
 import 'package:driver_app/demo/charging_engine.dart';
 import 'package:driver_app/demo/charging_store.dart';
 import 'package:driver_app/demo/demo_store.dart';
-import 'package:driver_app/demo/payment_store.dart';
+import 'support/payment_store.dart';
 import 'package:driver_app/demo/station_actions_store.dart';
 import 'package:driver_app/features/auth/application/auth_controller.dart';
 import 'support/fake_auth_repository.dart';

@@ -8,6 +8,13 @@ String ict(DateTime at) {
   return '${d.hour.toString().padLeft(2, '0')}:${d.minute.toString().padLeft(2, '0')} · ${d.day}/${d.month}';
 }
 
+String ictDateTime(DateTime at) {
+  final d = at.toUtc().add(const Duration(hours: 7));
+  String twoDigits(int value) => value.toString().padLeft(2, '0');
+  return '${twoDigits(d.hour)}:${twoDigits(d.minute)} · '
+      '${twoDigits(d.day)}/${twoDigits(d.month)}/${d.year} ICT';
+}
+
 String failureText(Object error) => error is StateError
     ? error.message.toString()
     : 'Chưa tải được. Vui lòng thử lại.';

@@ -18,6 +18,9 @@ import '../features/charging/application/charge_session_controller.dart';
 import '../features/charging/presentation/charge_session_screen.dart';
 import '../features/charging/presentation/qr_connect_screen.dart';
 import '../features/payments/presentation/charging_credit_screen.dart';
+import '../features/payments/presentation/credit_top_up_screen.dart';
+import '../features/support/application/connector_fault_report_controller.dart';
+import '../features/support/presentation/connector_fault_report_screen.dart';
 
 final apiRouterProvider = Provider<bool>((ref) => false);
 
@@ -50,8 +53,17 @@ final routerProvider = Provider<GoRouter>((ref) {
               ? '/scan'
               : null;
         }
+        if (path == '/connector-report') {
+          final target = state.extra;
+          return !state.uri.hasQuery &&
+                  target is FaultReportTarget &&
+                  target.session.scope == auth.scope
+              ? null
+              : '/discover';
+        }
         return path == '/profile' ||
                 path == '/credit' ||
+                path == '/credit/top-up' ||
                 path == '/history' ||
                 path == '/vehicles' ||
                 path == '/vehicles/new' ||
@@ -135,6 +147,19 @@ final routerProvider = Provider<GoRouter>((ref) {
               builder: (context, state) => const ChargeSessionScreen(),
             ),
           ],
+        ),
+        GoRoute(
+          path: '/connector-report',
+          builder: (context, state) => DriverPrivatePage(
+            child: ConnectorFaultReportScreen(
+              target: state.extra! as FaultReportTarget,
+            ),
+          ),
+        ),
+        GoRoute(
+          path: '/credit/top-up',
+          builder: (context, state) =>
+              const DriverPrivatePage(child: CreditTopUpScreen()),
         ),
         GoRoute(
           path: '/vehicles/new',

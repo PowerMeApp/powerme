@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../../core/l10n/app_copy.dart';
+import '../../../core/theme/powerme_theme.dart';
 import '../../../core/widgets/flow_page.dart';
 import '../domain/charge_session.dart';
 import 'charge_energy_label.dart';
@@ -12,39 +13,102 @@ class ChargeStatementCard extends StatelessWidget {
     required this.statement,
     required this.issue,
     required this.retry,
+    required this.sessionId,
+    this.onClose,
   });
 
   final AppCopy copy;
   final PostedChargeStatement? statement;
   final ChargeSessionIssue? issue;
   final VoidCallback? retry;
+  final String sessionId;
+  final VoidCallback? onClose;
 
   @override
   Widget build(BuildContext context) {
     final posted = statement;
-    return InfoCard(
+    final type = Theme.of(context).textTheme;
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Text(
-          copy.text('Bảng kê phiên sạc', 'Charging statement'),
-          style: Theme.of(context).textTheme.titleLarge,
+        Row(
+          children: [
+            Expanded(
+              child: Semantics(
+                header: true,
+                child: Text(
+                  copy.text('Bảng kê phiên sạc', 'Charging statement'),
+                  style: type.headlineSmall?.copyWith(
+                    color: PowerMeColors.gold,
+                  ),
+                ),
+              ),
+            ),
+            if (onClose != null)
+              IconButton.filledTonal(
+                tooltip: copy.text('Đóng bảng kê', 'Close statement'),
+                onPressed: onClose,
+                icon: const Icon(Icons.close),
+              ),
+          ],
         ),
+        const SizedBox(height: 12),
         if (posted != null) ...[
-          ValueLine(
-            copy.text('Điện năng quyết toán', 'Settled energy'),
-            chargeEnergyLabel(posted.energyWh, copy),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: StatusBadge(copy.text('Đã quyết toán', 'Settled')),
           ),
-          ValueLine(
-            copy.text('Tín dụng đã trừ', 'Credit debited'),
-            vnd(posted.amountVnd),
+          const SizedBox(height: 12),
+          InfoCard(
+            spacing: 0,
+            children: [
+              ValueLine(copy.text('Mã phiên sạc', 'Session ID'), sessionId),
+              ValueLine(
+                copy.text('Ngày lập', 'Posted'),
+                ictDateTime(posted.createdAt),
+                showDivider: false,
+              ),
+            ],
           ),
-          ValueLine(
-            copy.text('Điểm nhận được', 'Points earned'),
-            '${posted.earnedPoints}',
+          HeroCard(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  copy.text('Điện năng quyết toán', 'Settled energy'),
+                  style: type.labelLarge,
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  chargeEnergyLabel(posted.energyWh, copy),
+                  style: type.headlineLarge?.copyWith(
+                    color: PowerMeColors.teal,
+                  ),
+                ),
+              ],
+            ),
           ),
-          ValueLine(
-            copy.text('Ngày lập (ICT)', 'Posted (ICT)'),
-            ict(posted.createdAt),
-            showDivider: false,
+          const SizedBox(height: 12),
+          InfoCard(
+            spacing: 0,
+            children: [
+              Text(
+                copy.text('Tín dụng đã trừ', 'Credit debited'),
+                style: type.labelLarge,
+              ),
+              const SizedBox(height: 4),
+              Text(
+                vnd(posted.amountVnd),
+                style: type.headlineSmall?.copyWith(color: PowerMeColors.gold),
+              ),
+              const Divider(height: 24),
+              ValueLine(
+                copy.text('Điểm nhận được', 'Points earned'),
+                '${posted.earnedPoints}',
+                showDivider: false,
+              ),
+            ],
           ),
         ] else if (issue != null) ...[
           FailureNotice(switch (issue!) {
@@ -61,8 +125,13 @@ class ChargeStatementCard extends StatelessWidget {
             onPressed: retry,
             child: Text(copy.text('Tải lại bảng kê', 'Retry statement')),
           ),
-        ] else
-          Text(copy.text('Đang tải bảng kê…', 'Loading statement…')),
+        ] else ...[
+          Semantics(
+            liveRegion: true,
+            child: Text(copy.text('Đang tải bảng kê…', 'Loading statement…')),
+          ),
+          const SizedBox(height: 16),
+        ],
       ],
     );
   }

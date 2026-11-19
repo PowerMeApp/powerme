@@ -21,6 +21,14 @@ Slice tín dụng sạc và dừng thủ công T96 đã kiểm local bằng Flut
 
 Bản tích hợp T96 ghép lên mốc `3866840` kiểm local bằng Flutter 3.44.2 và Dart 3.12.2. Format kiểm 155 file, analyzer sạch, toàn bộ 175 ca fixture pass và công cụ chụp luồng sạc pass với font SDK. Chờ kiểm trên thiết bị và staging.
 
+Driver API đã nối báo giá, tạo và kiểm tra giao dịch nạp VNPay (T32) cùng báo lỗi cổng từ chi tiết trạm và QR (FE-17). Trên Flutter 3.44.2, format 39 file Dart (0 thay đổi), `flutter analyze --no-pub` sạch, 22 ca tập trung và toàn bộ 182 ca fixture pass. Các fixture thanh toán và báo lỗi cũ nằm trong `test/support`. Smoke VNPay cần cấu hình merchant sandbox, URL IPN công khai và các phần T32 xử lý IPN/querydr trên staging. [Hợp đồng Driver API §14–15](../../docs/api/DRIVER-API-HOP-DONG.md#14-top-up-wf-02--nạp-charging-credit-qua-vnpay-t32-phần-5).
+
+Sau cập nhật nút **Thanh toán qua VNPay**, format 6 file Dart đã sửa (0 thay đổi khi kiểm tra lại), analyzer sạch, 14 ca trong `driver_top_up_fault_test.dart` và toàn bộ 189 ca fixture đạt. Kiểm tra mở trình duyệt qua MethodChannel giả lập. Smoke VNPay trên thiết bị và staging vẫn đang chờ.
+
+Android `:app:compileDebugKotlin` chạy offline thành công với Gradle 9.1.0, cache SDK sẵn có và incremental Kotlin tắt để tránh lỗi khác ổ đĩa. Kiểm thử thiết bị và build iOS còn chờ.
+
+Bản đóng gói T96 ngày 19/11 kiểm lại: `dart format --output=none --set-exit-if-changed lib test tool` sạch (169 file), `flutter analyze --no-pub` sạch, `flutter test --no-pub test/driver_top_up_fault_test.dart` đạt 14 ca và `flutter test --no-pub` đạt toàn bộ 189 ca. Sáu ca chụp/review fixture đạt, gồm 390 × 844 và 320 px/200%; hai contact sheet đã kiểm font, logo và nhãn thanh toán hiện tại: [nạp VNPay và báo lỗi](docs/images/t96-topup-report-stitch.png), [năm màn tài xế](docs/images/t96-driver-screens-stitch.png). `gradlew.bat --offline --no-daemon "-Pkotlin.incremental=false" :app:compileDebugKotlin` thành công (47 giây). Chưa kiểm iOS, thiết bị hoặc thanh toán/staging thật.
+
 Đọc [screen/function reference](docs/screens.md) và [architecture reference](docs/architecture.md) trước khi code. Đây là hai tài liệu chuẩn của mobile; [AGENTS.md](AGENTS.md) bắt buộc đọc chúng. SRS/registration và sơ đồ hiện hành dẫn từ đó thay thế các bản tóm tắt MB cũ.
 
 ## Phạm vi

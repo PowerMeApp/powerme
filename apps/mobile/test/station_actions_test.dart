@@ -5,7 +5,7 @@ import 'package:driver_app/features/auth/domain/auth_scope.dart';
 import 'package:driver_app/features/stations/data/mock_station_actions_repository.dart';
 import 'package:driver_app/features/stations/domain/station_actions.dart';
 import 'package:driver_app/features/stations/domain/station.dart';
-import 'package:driver_app/features/support/data/mock_support_repository.dart';
+import 'support/mock_support_repository.dart';
 
 void main() {
   const connector = 'station-powerme-center/1';

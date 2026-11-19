@@ -1,11 +1,11 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../../auth/application/auth_controller.dart';
-import '../../../core/format.dart';
-import '../../../core/l10n/app_copy.dart';
-import '../../profile/application/profile_controller.dart';
-import '../../profile/domain/driver_profile.dart';
-import '../domain/support_repository.dart';
-import '../../stations/application/stations_controller.dart';
+import 'package:driver_app/features/auth/application/auth_controller.dart';
+import 'package:driver_app/core/format.dart';
+import 'package:driver_app/core/l10n/app_copy.dart';
+import 'package:driver_app/features/profile/application/profile_controller.dart';
+import 'package:driver_app/features/profile/domain/driver_profile.dart';
+import 'package:driver_app/features/support/domain/support_repository.dart';
+import 'package:driver_app/features/stations/application/stations_controller.dart';
 
 final reportConnectorLabelProvider = Provider.family<String, String>((ref, id) {
   AppCopy copy;

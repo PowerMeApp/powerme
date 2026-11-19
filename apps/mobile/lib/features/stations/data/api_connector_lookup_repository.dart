@@ -2,6 +2,7 @@ import 'package:dio/dio.dart';
 
 import '../../../core/api/driver_api_exception.dart';
 import '../../../core/api/driver_api_session.dart';
+import '../../../core/api/driver_api_values.dart';
 import '../domain/connector_lookup.dart';
 import '../domain/station.dart';
 
@@ -27,13 +28,14 @@ class ApiConnectorLookupRepository implements ConnectorLookupRepository {
     final online = json['is_online'];
     final rawStatus = json['status'];
     final issue = json['reported_issue'];
-    if (id is! String ||
-        !RegExp(r'^[1-9][0-9]{0,18}$').hasMatch(id) ||
+    final blocked = json['blocked'];
+    if (!isDriverApiId(id) ||
         name is! String ||
         name.trim().isEmpty ||
         online is! bool ||
         rawStatus is! String ||
         (issue != null && issue is! bool) ||
+        (blocked != null && blocked is! bool) ||
         (json['display_code'] != null &&
             json['display_code'] != code.displayCode) ||
         json['connector_no'] != code.number) {
@@ -54,14 +56,16 @@ class ApiConnectorLookupRepository implements ConnectorLookupRepository {
           }
         : StationStatus.offline;
     return (
-      id: id,
+      id: id as String,
       displayCode: code.displayCode,
       number: code.number,
       stationName: name,
       status: status,
       reportedIssue: issue == true,
       canRequestStart:
-          online && (rawStatus == 'Available' || rawStatus == 'Preparing'),
+          online &&
+          blocked != true &&
+          (rawStatus == 'Available' || rawStatus == 'Preparing'),
     );
   }
 

@@ -470,6 +470,7 @@ Future<void> _submitConnector(WidgetTester tester, String code) async {
   final field = find.byKey(const Key('qr-manual-reference'));
   await tester.ensureVisible(field);
   await tester.enterText(field, code);
+  await tester.pump();
   final submit = find.byKey(const Key('qr-connect'));
   await tester.ensureVisible(submit);
   await tester.tap(submit);

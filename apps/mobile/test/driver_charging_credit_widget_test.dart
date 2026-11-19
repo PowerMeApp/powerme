@@ -149,6 +149,18 @@ void main() {
       expect(find.text('Điểm nhận được'), findsNothing);
       await _tap(tester, find.text('Tải lại bảng kê'));
       expect(reads, 2);
+      final sheet = find.byType(BottomSheet);
+      expect(
+        find.descendant(of: sheet, matching: find.text('9223372036854775807')),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(
+          of: sheet,
+          matching: find.text('07:00 · 17/11/2026 ICT'),
+        ),
+        findsOneWidget,
+      );
       expect(find.text('Điểm nhận được'), findsOneWidget);
       expect(find.text('45'), findsOneWidget);
       expect(
@@ -160,8 +172,8 @@ void main() {
         ['auth/login'],
       );
 
-      await tester.binding.handlePopRoute();
-      await tester.pumpAndSettle();
+      await _tap(tester, find.byTooltip('Đóng bảng kê'));
+      expect(sheet, findsNothing);
       await _tap(tester, find.byKey(const Key('nav-credit')));
       expect(find.text('Giao dịch tín dụng'), findsOneWidget);
       expect(find.text('Nạp tín dụng'), findsWidgets);
@@ -209,7 +221,7 @@ void main() {
 
     await _signIn(tester, fixture);
     await _openCredit(tester, settle: false);
-    expect(find.text('999.999 đ'), findsNWidgets(2));
+    expect(find.text('999.999 đ'), findsNWidgets(3));
     await _tap(tester, find.text('Cập nhật số dư'), settle: false);
     expect(firstSummaryReads, 3);
     expect(find.text('999.999 đ'), findsNothing);
