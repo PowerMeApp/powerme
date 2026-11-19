@@ -69,7 +69,14 @@ export interface OperatorChargePoint {
   connected: boolean;
   is_online: boolean;
   last_message_at: string | null;
-  site: { id: string; site_code: string; site_name: string };
+  site: {
+    id: string;
+    site_code: string;
+    site_name: string;
+    /** FE-03c: Charging Station coordinates for the map on screen 18; null when not set. */
+    latitude: number | null;
+    longitude: number | null;
+  };
   connectors: ConnectorLive[];
   /** T150 / BR-P52: offline authorisation not confirmed off — a blocked/unknown card may charge offline. */
   offline_card_risk: boolean;

@@ -177,6 +177,7 @@ export const OFFLINE_SQL = `(NOT cp.is_online OR cp.last_message_at IS NULL
  */
 const FILTERED_CTE = `WITH cps AS (
   SELECT cp.*,st.site_code,st.site_name,op.id AS operator_id,op.legal_name AS operator_name,
+    st.latitude AS site_latitude,st.longitude AS site_longitude,
     ${OFFLINE_SQL} AS offline
   FROM charge_points cp JOIN sites st ON st.id=cp.site_id JOIN operators op ON op.id=st.operator_id
   WHERE ($1::bigint IS NULL AND op.tax_code<>'${TEST_OPERATOR_TAX_CODE}' OR st.operator_id=$1)
@@ -315,6 +316,8 @@ export async function chargePoints(
     operator_id: string;
     operator_name: string;
     open_fault_codes: (string | null)[];
+    site_latitude: number | null;
+    site_longitude: number | null;
     connectors: Record<string, unknown>[];
     firmware_version: string | null;
     rated_power_kw: number | null;
@@ -336,6 +339,7 @@ export async function chargePoints(
        f.operator_id::text,f.operator_name,
        coalesce((SELECT jsonb_agg(fe.error_code) FROM fault_events fe
          WHERE fe.charge_point_id=f.id AND fe.status<>'resolved'),'[]'::jsonb) AS open_fault_codes,
+       f.site_latitude::float8,f.site_longitude::float8,
        f.firmware_version,f.rated_power_kw::float8,f.reports_soc,f.supports_reservation,
        oa.id::text AS oa_id,oa.epoch AS oa_epoch,oa.completed_at AS oa_completed_at,
        oa.offline_card_risk AS oa_risk,oa.risk_reason AS oa_reason,oa.config_values AS oa_values,
@@ -382,7 +386,14 @@ export async function chargePoints(
       connected: registry?.get(r.serial_number) !== undefined,
       is_online: r.is_online,
       last_message_at: r.last_message_at?.toISOString() ?? null,
-      site: { id: r.site_id, site_code: r.site_code, site_name: r.site_name },
+      site: {
+        id: r.site_id,
+        site_code: r.site_code,
+        site_name: r.site_name,
+        // FE-03c: one map pin per Charging Station (screen 18); null when the site has no coordinates.
+        latitude: r.site_latitude,
+        longitude: r.site_longitude,
+      },
       connectors: r.connectors.map((c) => ({
         ...c,
         status_updated_at: c['status_updated_at']
