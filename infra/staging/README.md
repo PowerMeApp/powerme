@@ -216,6 +216,21 @@ docker compose --profile demo-station stop demo-station        # tắt (trạm v
 
 Giới hạn: đây không phải firmware thật và không thay simulator. Trụ rớt khi CSMS khởi động lại (deploy) rồi tự nối lại sau vài giây; phiên đang sạc lúc đó thành `orphaned` và được đối soát khi trụ nối lại. Sau `./seed.sh --reset` phải chạy lại hai lệnh đầu. Mọi trụ `PMAPP-*` khác, kể cả `PMAPP-TD-03A` ở Nhà Văn hoá Sinh viên, vẫn mất kết nối.
 
+## VNPay sandbox trên staging (T32, BE-43)
+
+**Trạng thái 17/11/2026:** `VNPAY_TMN_CODE`, `VNPAY_HASH_SECRET` và `VNPAY_RETURN_URL` đã đặt trong `.env` trên VM (không có trong repo). Caddy mở đúng hai đường: `https://<DOMAIN>/billing/vnpay/ipn` (khai trên cổng merchant VNPay) và `/billing/vnpay/return`. Đã kiểm từ internet: IPN không có chữ ký trả `{"RspCode":"97"}`, trang return trả HTML, `/billing/<khác>` và mọi `/api/*` vẫn rơi về dòng chữ mặc định. Tạo top-up qua Driver API trả 201 kèm `payment_url` của sandbox.
+
+**Giới hạn đã đo: VM không gọi ra được máy chủ VNPay sandbox.** Từ VM (Azure Japan East), kết nối TCP tới `sandbox.vnpayment.vn:443` bị treo tới hết giờ, cả từ máy chủ lẫn từ container `csms` (`UND_ERR_CONNECT_TIMEOUT`); cùng lúc đó VM vẫn vào được Google và Vietmap, và máy dev ở Việt Nam gọi cùng URL nhận 200 sau 0,7 s. Hệ quả:
+
+- **querydr (vòng quét top-up quá hạn) không hoạt động trên staging.** Top-up thử #254 (17/11): 6 lần hỏi đều `reason=timeout`, tới hết lịch mới `expired` (06:16, tức 60 phút sau `expires_at` thay vì 2 phút).
+- Tài xế bỏ dở một lần nạp sẽ bị chặn tạo top-up mới (`pending_top_up_confirming`) trong khoảng 1 giờ. Khi demo: đừng bỏ dở giữa chừng; muốn trình bày ca huỷ thì bấm Huỷ ở trang VNPay để IPN báo về.
+- Chiều VNPay → staging (IPN) là kết nối vào, không bị ảnh hưởng bởi việc này; **chưa kiểm bằng một lần thanh toán thật** (cần người mở `payment_url` và trả bằng thẻ thử).
+- Đường hỏi lại VNPay vì vậy chỉ được kiểm ở test tự động và ở lần thử sandbox của Khang từ máy ở Việt Nam (16/11), không phải trên staging.
+
+Cách gỡ (chưa làm): cho CSMS gọi VNPay qua một proxy đặt ở Việt Nam, hoặc hỏi VNPay có chặn dải IP nước ngoài không.
+
+**Khi `Caddyfile` đổi:** `deploy.sh` so mã băm của file và tự tạo lại container Caddy (trụ đang nối rớt vài giây). Trước BE-43, container giữ bản Caddyfile cũ qua mọi lần deploy vì file được bind mount riêng lẻ.
+
 ## Đăng nhập dashboard (T128, FE-01a)
 
 Màn 16 (staff Operator) và 26 (Admin) gọi `POST /api/auth/v1/login`, rồi `GET /api/operator/v1/me` hoặc `GET /api/admin/v1/me` với `Authorization: Bearer <token>` (access 900 s, làm mới bằng `POST /api/auth/v1/refresh` tới 12 giờ sau đăng nhập — T125; hợp đồng: [`docs/api/OPERATOR-ADMIN-API-HOP-DONG.md`](../../docs/api/OPERATOR-ADMIN-API-HOP-DONG.md)). Các route này nằm trên **cùng listener cổng 3000 với console chưa xác thực**, nên chỉ vào bằng SSH tunnel như console và Driver API. **Không thêm `/api/*` vào Caddyfile**: proxy `/api` ra internet là mở luôn `/api/admin/*` của console (ngắt kết nối trụ, RemoteStop, onboarding) cho mọi người — chờ tới khi console có xác thực hoặc tách listener.

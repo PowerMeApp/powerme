@@ -42,6 +42,8 @@ export const RECONCILIATION_TYPES = [
   'conflict',
   'late_sample',
   'tariff_clock_fallback',
+  'tariff_clock_offset',
+  'tariff_boundary_interpolated',
 ] as const;
 
 export function iso(d: Date | null | undefined): string | null {
@@ -92,7 +94,10 @@ export function mapStation(row: StationInput, connected: boolean) {
 
 export type ReconciliationKind =
   | 'conflict'
+  | 'meter_evidence_conflict'
   | 'tariff_clock_fallback'
+  | 'tariff_clock_offset'
+  | 'tariff_boundary_interpolated'
   | 'gap_detected'
   | 'gap_closed'
   | 'replay'
@@ -104,7 +109,8 @@ export type ReconciliationKind =
 
 /**
  * "Loại hiển thị" của bản ghi đối soát.
- *  - `conflict` → conflict.
+ *  - `conflict` → conflict; riêng resolution mở đầu "meter_evidence_conflict" (bản tin lặp mang số đo
+ *    khác bản đã lưu) → meter_evidence_conflict, không tính là conflict của đối soát (T134).
  *  - `late_sample` → kết luận nằm ở tiền tố resolution ("conflict (late_sample): …" → conflict,
  *    "gap_detected (late_sample): …" → gap_detected, "gap_closed (late_sample): …" → gap_closed:
  *    mẫu muộn đã lấp kín một khe hở ghi trước đó, T132); không đọc được thì giữ nguyên late_sample.
@@ -115,7 +121,10 @@ export function reconciliationKind(
   recordType: string,
   resolution: string | null,
 ): ReconciliationKind {
-  if (recordType === 'conflict') return 'conflict';
+  if (recordType === 'conflict')
+    return resolution?.startsWith('meter_evidence_conflict')
+      ? 'meter_evidence_conflict'
+      : 'conflict';
   if (recordType === 'late_sample') {
     if (resolution?.startsWith('conflict')) return 'conflict';
     if (resolution?.startsWith('gap_detected')) return 'gap_detected';
@@ -132,7 +141,9 @@ export function reconciliationKind(
     recordType === 'duplicate' ||
     recordType === 'orphan_stop' ||
     recordType === 'unknown_id_tag' ||
-    recordType === 'tariff_clock_fallback'
+    recordType === 'tariff_clock_fallback' ||
+    recordType === 'tariff_clock_offset' ||
+    recordType === 'tariff_boundary_interpolated'
   ) {
     return recordType;
   }

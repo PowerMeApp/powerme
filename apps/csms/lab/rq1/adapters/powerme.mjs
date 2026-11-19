@@ -166,9 +166,14 @@ export function createPowermeAdapter({
       );
       const sessions = [];
       for (const s of rows) {
+        // T134: bản ghi `meter_evidence_conflict` (bản tin lặp mang số đo khác bản đã lưu) dùng
+        // record_type = conflict nhưng không phải xung đột điện năng của đối soát → đếm riêng, không
+        // cộng vào `conflict` (cột `conflict_records` của báo cáo).
         const rec = await db.query(
-          `SELECT record_type::text AS t, count(*)::int AS n FROM reconciliation_records
-           WHERE session_id = $1 GROUP BY 1`,
+          `SELECT CASE WHEN record_type = 'conflict' AND resolution LIKE 'meter_evidence_conflict%'
+                       THEN 'meter_evidence_conflict' ELSE record_type::text END AS t,
+                  count(*)::int AS n
+           FROM reconciliation_records WHERE session_id = $1 GROUP BY 1`,
           [s.id],
         );
         const records = Object.fromEntries(rec.rows.map((r) => [r.t, r.n]));
