@@ -211,11 +211,20 @@ interface SessionClock {
   cp_stopped_at: Date | null;
 }
 
+export type ActiveSessionClock = Omit<
+  SessionClock,
+  'meter_stop_wh' | 'received_stopped_at' | 'cp_stopped_at'
+>;
+
 interface Endpoint extends Receipt {
   rawTimestamp: string;
 }
 
-async function readEndpoint(c: PoolClient, s: SessionClock, stop: boolean) {
+async function readEndpoint(
+  c: PoolClient,
+  s: ActiveSessionClock & Partial<SessionClock>,
+  stop: boolean,
+) {
   const { rows } = await c.query<Endpoint>(
     `SELECT DISTINCT l.raw->3->>'timestamp' AS "rawTimestamp", l.epoch, l.received_at AS "receivedAt",
        e.opened_at AS "openedAt",e.closed_at AS "closedAt",first_epoch.opened_at AS "firstOpenedAt"
@@ -265,6 +274,75 @@ export async function resolveTariffClock(
   )
     return { issue: 'tariff_clock_invalid_timestamp' };
 
+  return resolveClockEvidence(
+    c,
+    s,
+    start,
+    stop,
+    cpStoppedAt,
+    s.meter_stop_wh,
+    toleranceMs,
+    liveWindowMs,
+  );
+}
+
+// WP3: a running session resolves its clock from actual start and meter frames, without stop evidence.
+export async function resolveActiveTariffClock(
+  c: PoolClient,
+  s: ActiveSessionClock,
+  latest: { at: Date; receivedAt: Date; epoch: number; wh: string },
+  toleranceMs: number,
+  liveWindowMs: number,
+): Promise<TariffClock> {
+  const start = await readEndpoint(c, s, false);
+  const rows = (
+    await c.query<Endpoint>(
+      `SELECT DISTINCT v->>'timestamp' AS "rawTimestamp",l.epoch,l.received_at AS "receivedAt",
+       e.opened_at AS "openedAt",e.closed_at AS "closedAt",f.opened_at AS "firstOpenedAt"
+     FROM ocpp_message_log l
+     JOIN charge_point_connections e ON e.charge_point_id=l.charge_point_id AND e.epoch=l.epoch
+     LEFT JOIN charge_point_connections f ON f.charge_point_id=l.charge_point_id AND f.epoch=1
+     CROSS JOIN LATERAL jsonb_array_elements(l.raw->3->'meterValue') v
+     WHERE l.charge_point_id=$1 AND l.received_at=$2 AND l.epoch=$3
+       AND l.action='MeterValues' AND l.direction='in' AND l.message_type=2 AND l.validation_error IS NULL
+       AND l.raw->3->>'transactionId'=$4 AND l.raw->3->>'connectorId'=$5`,
+      [
+        s.charge_point_id,
+        latest.receivedAt,
+        latest.epoch,
+        String(s.transaction_no),
+        String(s.connector_no),
+      ],
+    )
+  ).rows.filter((r) => parseChargePointTime(r.rawTimestamp)?.getTime() === latest.at.getTime());
+  const end = rows[0];
+  if (!start || !end || rows.length !== 1) return { issue: 'tariff_clock_frame_unverified' };
+  if (parseChargePointTime(start.rawTimestamp)?.getTime() !== s.cp_started_at.getTime())
+    return { issue: 'tariff_clock_invalid_timestamp' };
+  return resolveClockEvidence(
+    c,
+    s,
+    start,
+    end,
+    latest.at,
+    latest.wh,
+    toleranceMs,
+    liveWindowMs,
+    true,
+  );
+}
+
+async function resolveClockEvidence(
+  c: PoolClient,
+  s: ActiveSessionClock,
+  start: Endpoint,
+  stop: Endpoint,
+  cpStoppedAt: Date,
+  endMeterWh: string,
+  toleranceMs: number,
+  liveWindowMs: number,
+  active = false,
+): Promise<TariffClock> {
   const { rows } = await c.query<
     Receipt & {
       cpTimestamps: Date[];
@@ -307,7 +385,7 @@ export async function resolveTariffClock(
       String(s.transaction_no),
       String(s.connector_no),
       cpStoppedAt,
-      s.meter_stop_wh,
+      endMeterWh,
     ],
   );
   const samples = rows.map((receipt) => ({
@@ -325,7 +403,16 @@ export async function resolveTariffClock(
     if (frame.epoch !== null) frames.push({ epoch: frame.epoch, receivedAt: frame.receivedAt, cp });
   for (const receipt of samples) {
     const sent = receipt.cpTimestamps.filter((cp) => receipt.meterTimes.has(cp.getTime())).pop();
-    if (sent && receipt.epoch !== null)
+    if (
+      sent &&
+      receipt.epoch !== null &&
+      !(
+        active &&
+        receipt.epoch === stop.epoch &&
+        receipt.receivedAt.getTime() === stop.receivedAt.getTime() &&
+        sent.getTime() === cpStoppedAt.getTime()
+      )
+    )
       frames.push({ epoch: receipt.epoch, receivedAt: receipt.receivedAt, cp: sent });
   }
   const measured = measureClockOffset(frames, toleranceMs, liveWindowMs);

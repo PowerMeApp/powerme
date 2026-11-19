@@ -30,6 +30,11 @@ export class ChargeRecoveryService implements OnApplicationBootstrap, OnApplicat
     if (this.running) return;
     this.running = true;
     try {
+      await this.driverCharging.sweepDueModes();
+    } catch {
+      this.logger.error('WP3 due-mode sweep unavailable; durable sessions will retry');
+    }
+    try {
       await this.settlement.retryPending();
     } catch {
       this.logger.error('WP3/T72 settlement recovery unavailable; retained jobs will retry');
