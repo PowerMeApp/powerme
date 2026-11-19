@@ -21,6 +21,8 @@
  *     động lại thì chưa (WF-04 câu hỏi 6, T13: Faulted → Unavailable → Available). Sự cố
  *     `driver_report` KHÔNG đóng theo trạng thái nào (BR-P42, quyết định D-G 14/11): chỉ Operator
  *     đóng hoặc t8.
+ *     Sự cố OCPP / Offline có báo cáo tài xế gắn kèm tự đóng thì báo cáo chuyển sang sự cố đang mở
+ *     của súng (hoặc một `driver_report` mới), nhãn còn nguyên (T141, D-X 17/11).
  *   - Hai đường mở sự cố (OCPP và tài xế báo) khoá dòng connector `FOR NO KEY UPDATE` trước, theo
  *     thứ tự id (T131): đi tuần tự, không deadlock, không rơi sự cố OCPP vì trùng chỉ mục UNIQUE.
  *   - Thời điểm sự cố lấy theo đồng hồ trụ khi frame là bản PHÁT LẠI (`occurredAt`, do gateway
@@ -96,7 +98,13 @@ export type StatusOutcome =
   | { kind: 'raised'; faultId: number }
   /** `errorCode`: mã Faulted vừa ghi vào sự cố tài xế báo chưa có mã (T131). */
   | { kind: 'attached'; faultId: number; errorCode?: string }
-  | { kind: 'resolved'; faultId: number; from: FaultStatus }
+  | {
+      kind: 'resolved';
+      faultId: number;
+      from: FaultStatus;
+      /** T141: driver reports moved to an open fault of their connector (label kept). */
+      handedOver?: { toFaultId: number; reports: number; created: boolean }[];
+    }
   /** Bản phát lại cũ hơn trạng thái hiện tại của sự cố: không đổi gì (xem {@link eventTime}). */
   | { kind: 'stale'; faultId: number | null }
   | { kind: 'none' };
@@ -360,11 +368,19 @@ export class FaultService implements OnApplicationBootstrap, OnApplicationShutdo
         .update(faultEvents)
         .set({ status: step.to, resolvedAt: at })
         .where(eq(faultEvents.id, open.id));
-      await this.clearReports(tx, open.id, at, null);
-      return { kind: 'resolved', faultId: open.id, from: open.status } as const;
+      const handedOver = await this.handOverReports(tx, open.id, input.chargePointId, at);
+      return {
+        kind: 'resolved',
+        faultId: open.id,
+        from: open.status,
+        ...(handedOver.length ? { handedOver } : {}),
+      } as const;
     });
 
-    if (outcome.kind === 'resolved') this.clearTimer(outcome.faultId);
+    if (outcome.kind === 'resolved') {
+      this.clearTimer(outcome.faultId);
+      if (outcome.handedOver) this.logHandOver(outcome.faultId, outcome.handedOver);
+    }
     if (outcome.kind === 'attached' && 'errorCode' in outcome) {
       this.logger.warn(
         `sự cố #${outcome.faultId} (tài xế báo): trụ ${input.chargePointId} c${input.connectorNo} báo thêm Faulted ${outcome.errorCode}`,
@@ -431,27 +447,35 @@ export class FaultService implements OnApplicationBootstrap, OnApplicationShutdo
    */
   async resolveOffline(faultId: number, at: Date = new Date()): Promise<'resolved' | 'noop'> {
     const res = await this.db.transaction(async (tx) => {
+      const [target] = await tx
+        .select({ chargePointId: faultEvents.chargePointId })
+        .from(faultEvents)
+        .where(eq(faultEvents.id, faultId));
+      if (!target) return { kind: 'noop' } as const;
+      // T141: khoá connector trước rồi mới tới sự cố — cùng thứ tự với báo cáo tài xế (T131).
+      await this.lockConnectors(tx, target.chargePointId, null);
       const [fault] = await tx
         .select({ status: faultEvents.status, errorCode: faultEvents.errorCode })
         .from(faultEvents)
         .where(eq(faultEvents.id, faultId))
         .for('update');
       if (!fault || fault.status === 'resolved' || fault.errorCode !== OFFLINE_ERROR_CODE) {
-        return 'noop' as const;
+        return { kind: 'noop' } as const;
       }
       const step = this.sm.apply(fault.status, 'CONNECTOR_AVAILABLE');
       await tx
         .update(faultEvents)
         .set({ status: step.to, resolvedAt: at })
         .where(eq(faultEvents.id, faultId));
-      await this.clearReports(tx, faultId, at, null);
-      return 'resolved' as const;
+      const handedOver = await this.handOverReports(tx, faultId, target.chargePointId, at);
+      return { kind: 'resolved', handedOver } as const;
     });
-    if (res === 'resolved') {
+    if (res.kind === 'resolved') {
       this.clearTimer(faultId);
       this.logger.log(`sự cố #${faultId} resolved: trụ đã kết nối lại`);
+      this.logHandOver(faultId, res.handedOver);
     }
-    return res;
+    return res.kind;
   }
 
   // ---------------------------------------------------------------------------------------------
@@ -1152,6 +1176,65 @@ export class FaultService implements OnApplicationBootstrap, OnApplicationShutdo
             ? sql`connector_id IN (SELECT id FROM connectors WHERE charge_point_id = ${chargePointId})`
             : sql`connector_id = ${connectorId}`
         }`);
+  }
+
+  /**
+   * T141 (BR-P42, quyết định D-X 17/11): một sự cố OCPP / Offline tự đóng (súng hồi phục, trụ nối
+   * lại) KHÔNG xoá nhãn "reported issue" của các báo cáo tài xế gắn vào nó — đổi trạng thái không
+   * chứng minh súng hết lỗi tài xế thấy. Các báo cáo chưa xoá được chuyển, theo từng súng, sang sự cố
+   * đang mở của súng đó, hoặc một sự cố `driver_report` mới (t1). Từ đó chỉ Operator đóng (t7) hoặc
+   * t8 mới xoá nhãn. Người gọi đã khoá connector (thứ tự khoá của T131) và đã đóng sự cố cũ.
+   */
+  private async handOverReports(
+    tx: DbExecutor,
+    closedFaultId: number,
+    chargePointId: number,
+    at: Date,
+  ): Promise<{ toFaultId: number; reports: number; created: boolean }[]> {
+    const groups = (
+      await tx.execute<{ connector_id: string; n: number }>(sql`SELECT connector_id::text,
+          count(*)::int AS n FROM fault_reports
+        WHERE fault_event_id = ${closedFaultId} AND cleared_at IS NULL
+        GROUP BY connector_id ORDER BY connector_id`)
+    ).rows;
+    const moved: { toFaultId: number; reports: number; created: boolean }[] = [];
+    for (const g of groups) {
+      const connectorId = Number(g.connector_id);
+      const open = await this.findOpenForUpdate(tx, chargePointId, connectorId);
+      let toFaultId = open?.id;
+      if (open)
+        this.sm.apply(open.status, 'SIGNAL'); // no-op: gắn vào sự cố đang mở
+      else {
+        const [row] = await tx
+          .insert(faultEvents)
+          .values({
+            chargePointId,
+            connectorId,
+            source: 'driver_report',
+            errorCode: null,
+            status: this.sm.initial(),
+            raisedAt: at,
+          })
+          .returning({ id: faultEvents.id });
+        if (!row) throw new Error('INSERT fault_events không trả id');
+        toFaultId = row.id;
+      }
+      await tx.execute(sql`UPDATE fault_reports SET fault_event_id = ${toFaultId!}, updated_at = now()
+        WHERE fault_event_id = ${closedFaultId} AND cleared_at IS NULL
+          AND connector_id = ${connectorId}`);
+      moved.push({ toFaultId: toFaultId!, reports: g.n, created: !open });
+    }
+    return moved;
+  }
+
+  private logHandOver(
+    faultId: number,
+    moved: { toFaultId: number; reports: number; created: boolean }[],
+  ): void {
+    for (const m of moved)
+      this.logger.warn(
+        `sự cố #${faultId} đóng, ${m.reports} báo cáo tài xế chuyển sang sự cố #${m.toFaultId}${m.created ? ' (driver_report mới)' : ''} (BR-P42)`,
+      );
   }
 
   /** BR-P42: sự cố đóng → xoá nhãn "reported issue" của các báo cáo gắn vào nó. */
