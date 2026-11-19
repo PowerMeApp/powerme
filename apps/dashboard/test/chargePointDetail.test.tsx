@@ -33,7 +33,13 @@ const DETAIL: OperatorChargePointDetail = {
   connected: true,
   is_online: true,
   last_message_at: recent,
-  site: { id: '1', site_code: 'HCM-DEMO-01', site_name: 'Trạm sạc demo Quận 1' },
+  site: {
+    id: '1',
+    site_code: 'HCM-DEMO-01',
+    site_name: 'Trạm sạc demo Quận 1',
+    latitude: 10.776889,
+    longitude: 106.700806,
+  },
   connectors: [
     {
       connector_id: '11',

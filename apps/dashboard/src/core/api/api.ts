@@ -36,11 +36,16 @@ export const FAULT_PAGE_SIZE = 20;
 /** Rows per page on screen 18. */
 export const CHARGE_POINT_PAGE_SIZE = 20;
 
+/** Screen 18 map (FE-03c): one request of up to the contract maximum, no pager. */
+export const CHARGE_POINT_MAP_SIZE = 100;
+
 /** Screen 18 filters; omitted = all (decommissioned hidden by the server, D24). */
 export interface ChargePointFilter {
   lifecycle?: ChargePointLifecycle;
   online?: boolean;
   page: number;
+  /** Default CHARGE_POINT_PAGE_SIZE (list); the map asks for CHARGE_POINT_MAP_SIZE. */
+  pageSize?: number;
 }
 
 export interface ApiError {
@@ -162,12 +167,12 @@ export const api = createApi({
       providesTags: ['Summary'],
     }),
     operatorChargePoints: b.query<ChargePointPage, ChargePointFilter>({
-      query: ({ lifecycle, online, page }) => {
+      query: ({ lifecycle, online, page, pageSize = CHARGE_POINT_PAGE_SIZE }) => {
         const q = new URLSearchParams();
         if (lifecycle) q.set('lifecycle', lifecycle);
         if (online !== undefined) q.set('online', String(online));
         q.set('page', String(page));
-        q.set('page_size', String(CHARGE_POINT_PAGE_SIZE));
+        q.set('page_size', String(pageSize));
         return `operator/v1/charge-points?${q}`;
       },
       providesTags: ['ChargePoint'],

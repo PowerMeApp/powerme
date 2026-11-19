@@ -2765,6 +2765,10 @@ components:
         id: { $ref: '#/components/schemas/Id' }
         site_code: { type: string }
         site_name: { type: string }
+        latitude:
+          type: [number, 'null']
+          description: 'FE-03c: toạ độ Charging Station cho bản đồ màn 18; có trên ChargePoint của /operator/v1/charge-points'
+        longitude: { type: [number, 'null'] }
 
     # ---- auth -----------------------------------------------------------------------------------
     LoginRequest:

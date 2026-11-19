@@ -112,7 +112,8 @@ const OFFLINE_SQL = `(NOT cp.is_online OR cp.last_message_at IS NULL
  * one charge point is asked for by id (screen 20).
  */
 const FILTERED_CTE = `WITH cps AS (
-  SELECT cp.*,st.site_code,st.site_name,${OFFLINE_SQL} AS offline
+  SELECT cp.*,st.site_code,st.site_name,st.latitude AS site_latitude,st.longitude AS site_longitude,
+    ${OFFLINE_SQL} AS offline
   FROM charge_points cp JOIN sites st ON st.id=cp.site_id
   WHERE st.operator_id=$1
     AND (($3::text IS NULL AND ($6::bigint IS NOT NULL OR cp.lifecycle<>'decommissioned'))
@@ -234,6 +235,8 @@ async function chargePoints(
     site_id: string;
     site_code: string;
     site_name: string;
+    site_latitude: number | null;
+    site_longitude: number | null;
     connectors: Record<string, unknown>[];
     firmware_version: string | null;
     rated_power_kw: number | null;
@@ -243,6 +246,7 @@ async function chargePoints(
     `${FILTERED_CTE}
      SELECT count(*) OVER()::int AS total,f.id::text,f.serial_number,f.display_code,f.model,
        f.lifecycle,f.is_online,f.last_message_at,f.site_id::text,f.site_code,f.site_name,
+       f.site_latitude::float8,f.site_longitude::float8,
        f.firmware_version,f.rated_power_kw::float8,f.reports_soc,f.supports_reservation,
        coalesce((SELECT jsonb_agg(jsonb_build_object(
          'connector_id',c.id::text,'connector_no',c.connector_no,'connector_type',c.connector_type,
@@ -281,7 +285,14 @@ async function chargePoints(
       connected: registry?.get(r.serial_number) !== undefined,
       is_online: r.is_online,
       last_message_at: r.last_message_at?.toISOString() ?? null,
-      site: { id: r.site_id, site_code: r.site_code, site_name: r.site_name },
+      site: {
+        id: r.site_id,
+        site_code: r.site_code,
+        site_name: r.site_name,
+        // FE-03c: one map pin per Charging Station (screen 18); null when the site has no coordinates.
+        latitude: r.site_latitude,
+        longitude: r.site_longitude,
+      },
       connectors: r.connectors.map((c) => ({
         ...c,
         status_updated_at: c['status_updated_at']
