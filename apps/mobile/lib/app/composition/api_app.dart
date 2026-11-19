@@ -6,6 +6,15 @@ import '../../core/api/api_config.dart';
 import '../../core/api/driver_api_session.dart';
 import '../../features/auth/application/auth_controller.dart';
 import '../../features/auth/data/api_auth_repository.dart';
+import '../../features/charging/application/charge_session_controller.dart';
+import '../../features/charging/application/charge_start_controller.dart';
+import '../../features/charging/data/api_charge_session_repository.dart';
+import '../../features/charging/data/api_charge_start_repository.dart';
+import '../../features/payments/application/charging_credit_controller.dart';
+import '../../features/payments/application/credit_top_up_controller.dart';
+import '../../features/payments/data/api_charging_credit_repository.dart';
+import '../../features/payments/data/api_credit_top_up_repository.dart';
+import '../../features/payments/data/vnpay_checkout_launcher.dart';
 import '../../features/profile/application/profile_controller.dart';
 import '../../features/profile/data/api_profile_repository.dart';
 import '../../features/stations/application/connector_lookup_controller.dart';
@@ -16,6 +25,8 @@ import '../../features/stations/data/api_connector_lookup_repository.dart';
 import '../../features/stations/data/api_station_repository.dart';
 import '../../features/stations/data/device_location_repository.dart';
 import '../../features/stations/domain/map_location.dart';
+import '../../features/support/application/connector_fault_report_controller.dart';
+import '../../features/support/data/api_connector_fault_report_repository.dart';
 import '../powerme_app.dart';
 import '../router.dart';
 import 'vietmap_config.dart';
@@ -59,6 +70,23 @@ class ApiApp extends StatelessWidget {
       ),
       profileRepositoryProvider.overrideWith(
         (ref) => ApiProfileRepository(ref.watch(_apiSessionProvider)),
+      ),
+      chargingCreditRepositoryProvider.overrideWith(
+        (ref) => ApiChargingCreditRepository(ref.watch(_apiSessionProvider)),
+      ),
+      creditTopUpRepositoryProvider.overrideWith(
+        (ref) => ApiCreditTopUpRepository(ref.watch(_apiSessionProvider)),
+      ),
+      openVnpayCheckoutProvider.overrideWithValue(openVnpayCheckout),
+      connectorFaultReportRepositoryProvider.overrideWith(
+        (ref) =>
+            ApiConnectorFaultReportRepository(ref.watch(_apiSessionProvider)),
+      ),
+      chargeStartRepositoryProvider.overrideWith(
+        (ref) => ApiChargeStartRepository(ref.watch(_apiSessionProvider)),
+      ),
+      chargeSessionRepositoryProvider.overrideWith(
+        (ref) => ApiChargeSessionRepository(ref.watch(_apiSessionProvider)),
       ),
       connectorLookupRepositoryProvider.overrideWith((ref) {
         ref.watch(discoverySessionProvider);

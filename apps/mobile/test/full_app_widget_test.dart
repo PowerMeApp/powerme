@@ -8,7 +8,7 @@ import 'package:driver_app/features/charging/application/charging_controller.dar
 import 'package:driver_app/features/charging/domain/charging.dart';
 import 'package:driver_app/features/payments/application/payments_controller.dart';
 import 'package:driver_app/features/payments/domain/payments.dart';
-import 'package:driver_app/features/payments/data/mock_payments_repository.dart';
+import 'support/mock_payments_repository.dart';
 import 'package:driver_app/features/stations/application/station_actions_controller.dart';
 import 'test_helpers.dart';
 

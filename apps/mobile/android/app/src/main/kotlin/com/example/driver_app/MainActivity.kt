@@ -10,6 +10,7 @@ import java.math.BigDecimal
 
 class MainActivity : FlutterActivity() {
     private var stationMapsChannel: MethodChannel? = null
+    private var vnpayCheckoutChannel: MethodChannel? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -28,12 +29,45 @@ class MainActivity : FlutterActivity() {
                 }
             }
         }
+        vnpayCheckoutChannel = MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            "powerme/vnpay_checkout",
+        ).also { channel ->
+            channel.setMethodCallHandler { call, result ->
+                if (call.method == "openCheckout") {
+                    result.success(openVnpayCheckout(call.arguments as? String))
+                } else {
+                    result.notImplemented()
+                }
+            }
+        }
     }
 
     override fun cleanUpFlutterEngine(flutterEngine: FlutterEngine) {
         stationMapsChannel?.setMethodCallHandler(null)
         stationMapsChannel = null
+        vnpayCheckoutChannel?.setMethodCallHandler(null)
+        vnpayCheckoutChannel = null
         super.cleanUpFlutterEngine(flutterEngine)
+    }
+
+    private fun openVnpayCheckout(url: String?): Boolean {
+        if (url == null) return false
+        val uri = Uri.parse(url)
+        if (uri.scheme != "https" || uri.host != "sandbox.vnpayment.vn" ||
+            uri.userInfo != null || uri.port !in listOf(-1, 443) ||
+            uri.encodedPath != "/paymentv2/vpcpay.html" || uri.query.isNullOrEmpty() ||
+            uri.fragment != null
+        ) return false
+
+        return try {
+            startActivity(Intent(Intent.ACTION_VIEW, uri).addCategory(Intent.CATEGORY_BROWSABLE))
+            true
+        } catch (_: ActivityNotFoundException) {
+            false
+        } catch (_: SecurityException) {
+            false
+        }
     }
 
     private fun openStationMap(latitude: Double?, longitude: Double?): Boolean {

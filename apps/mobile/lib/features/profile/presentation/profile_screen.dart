@@ -10,7 +10,9 @@ import '../application/profile_controller.dart';
 import '../domain/driver_profile.dart';
 import 'api_vehicle_screens.dart';
 import '../../auth/application/auth_controller.dart';
+import '../../payments/application/charging_credit_controller.dart';
 import '../../payments/application/payments_controller.dart';
+import '../../payments/domain/charging_credit.dart';
 
 class ProfileScreen extends ConsumerWidget {
   const ProfileScreen({super.key, this.apiMode = false});
@@ -22,31 +24,89 @@ class ProfileScreen extends ConsumerWidget {
     final copy = AppCopy(profile.language);
     final text = Theme.of(context).textTheme;
     if (apiMode) {
+      final credit = ref.watch(chargingCreditProvider);
       return AppPage(
         children: [
-          const Align(alignment: Alignment.centerLeft, child: BrandMark()),
-          const SizedBox(height: 8),
-          Text(copy.profile, style: text.headlineSmall),
-          ListTile(
-            contentPadding: EdgeInsets.zero,
-            leading: const CircleAvatar(
-              backgroundColor: PowerMeColors.gold,
-              foregroundColor: PowerMeColors.black,
-              child: Icon(Icons.person_outline_rounded),
-            ),
-            title: Text(profile.displayName, style: text.titleMedium),
-            subtitle: Text(copy.text('Tài xế', 'Driver')),
+          Wrap(
+            spacing: 8,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            alignment: WrapAlignment.spaceBetween,
+            children: [
+              Semantics(
+                header: true,
+                child: Text(copy.profile, style: text.headlineSmall),
+              ),
+              const BrandMark(),
+            ],
           ),
-          const SizedBox(height: 12),
-          OutlinedButton.icon(
-            key: const Key('open-discovery'),
-            onPressed: () => context.push('/discover'),
-            icon: const Icon(Icons.explore_outlined),
-            label: Text(copy.text('Khám phá trạm sạc', 'Explore stations')),
+          const SizedBox(height: 8),
+          HeroCard(
+            accent: PowerMeColors.gold,
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const CircleAvatar(
+                  radius: 24,
+                  backgroundColor: PowerMeColors.gold,
+                  foregroundColor: PowerMeColors.black,
+                  child: Icon(Icons.person_outline_rounded),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(profile.displayName, style: text.titleLarge),
+                      if (profile.email.isNotEmpty) ...[
+                        const SizedBox(height: 4),
+                        Text(
+                          profile.email,
+                          style: text.bodyMedium?.copyWith(
+                            color: PowerMeColors.muted,
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ],
+            ),
           ),
           const SizedBox(height: 20),
+          Semantics(
+            header: true,
+            child: Text(
+              copy.text('Tài chính và lịch sử', 'Finance and history'),
+              style: text.titleMedium,
+            ),
+          ),
+          const SizedBox(height: 8),
+          InfoCard(
+            spacing: 0,
+            children: [
+              _AccountCredit(copy: copy, credit: credit),
+              const Divider(height: 1),
+              MenuRow(
+                label: copy.text('Lịch sử sạc', 'Charging history'),
+                icon: Icons.history_rounded,
+                onTap: () => context.push('/history'),
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
           const VehicleDashboard(),
           const SizedBox(height: 8),
+          InfoCard(
+            spacing: 0,
+            children: [
+              MenuRow(
+                key: const Key('open-discovery'),
+                label: copy.text('Khám phá trạm sạc', 'Explore stations'),
+                icon: Icons.explore_outlined,
+                onTap: () => context.push('/discover'),
+              ),
+            ],
+          ),
           _SignOutButton(copy: copy),
         ],
       );
@@ -428,6 +488,62 @@ class ProfileScreen extends ConsumerWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+class _AccountCredit extends StatelessWidget {
+  const _AccountCredit({required this.copy, required this.credit});
+
+  final AppCopy copy;
+  final AsyncValue<ChargingCredit> credit;
+
+  @override
+  Widget build(BuildContext context) {
+    final type = Theme.of(context).textTheme;
+    return ListTile(
+      contentPadding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
+      minTileHeight: 56,
+      leading: const Icon(
+        Icons.account_balance_wallet_outlined,
+        color: PowerMeColors.gold,
+      ),
+      title: Text(
+        copy.text('Tín dụng sạc', 'Charging credit'),
+        style: type.titleMedium,
+      ),
+      subtitle: credit.when(
+        skipLoadingOnRefresh: false,
+        loading: () => Text(copy.text('Đang tải số dư…', 'Loading balance…')),
+        error: (_, _) =>
+            Text(copy.text('Chưa tải được số dư', 'Balance unavailable')),
+        data: (summary) => summary.status == CreditStatus.none
+            ? Text(
+                copy.text(
+                  'Chưa có tài khoản tín dụng',
+                  'No credit account yet',
+                ),
+              )
+            : Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const SizedBox(height: 4),
+                  Text(
+                    copy.text('Khả dụng', 'Available'),
+                    style: type.bodySmall,
+                  ),
+                  Text(
+                    vnd(summary.availableVnd),
+                    style: type.titleLarge?.copyWith(color: PowerMeColors.gold),
+                  ),
+                ],
+              ),
+      ),
+      trailing: const Icon(
+        Icons.chevron_right_rounded,
+        color: PowerMeColors.muted,
+      ),
+      onTap: () => context.push('/credit'),
     );
   }
 }

@@ -5,8 +5,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../core/l10n/app_copy.dart';
+import '../../../core/api/driver_api_values.dart';
 import '../../../core/theme/powerme_theme.dart';
 import '../../../core/widgets/flow_page.dart';
+import '../../support/application/connector_fault_report_controller.dart';
 import '../application/station_discovery_controller.dart';
 import '../domain/map_location.dart';
 import '../domain/station_discovery.dart';
@@ -29,6 +31,8 @@ class ApiStationDetailScreen extends ConsumerWidget {
     final station = ref.watch(selectedDiscoveryStationProvider);
     final selected = station?.id == id ? station : null;
     final destination = selected?.location;
+    final session = ref.watch(discoverySessionProvider);
+    final reported = ref.watch(reportedSelectedConnectorsProvider);
     return DiscoveryPage(
       title: copy.text('Chi tiết trạm', 'Station details'),
       copy: copy,
@@ -139,6 +143,28 @@ class ApiStationDetailScreen extends ConsumerWidget {
                   updatedLabel(connector.updatedAt, copy),
                   style: Theme.of(context).textTheme.bodySmall,
                 ),
+                if (reported.contains(connector.id))
+                  Text(copy.text('Cổng đã được báo lỗi', 'Reported issue')),
+                if (isDriverApiId(connector.id))
+                  OutlinedButton(
+                    key: ValueKey(('report-connector', connector.id)),
+                    onPressed: () => context.push(
+                      '/connector-report',
+                      extra: FaultReportTarget(
+                        session: session,
+                        connectorId: connector.id!,
+                        label: [
+                          selected.name,
+                          connectorLabel(connector, copy),
+                        ].join(' · '),
+                        stationId: selected.id,
+                      ),
+                    ),
+                    child: Text(
+                      copy.text('Báo lỗi cổng sạc', 'Report connector issue'),
+                      textAlign: TextAlign.center,
+                    ),
+                  ),
               ],
             ),
         ],

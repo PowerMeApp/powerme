@@ -1,14 +1,14 @@
-import '../../../demo/demo_store.dart';
-import '../../../demo/charging_store.dart';
-import '../../../demo/payment_store.dart';
-import '../../../demo/payment_engine.dart';
-import '../../auth/domain/auth_scope.dart';
-import '../../charging/domain/charging.dart';
-import '../../charging/data/mock_charging_repository.dart';
-import '../../../demo/station_actions_store.dart';
-import '../../history/domain/history.dart';
-import '../../loyalty/domain/loyalty.dart';
-import '../domain/payments.dart';
+import 'package:driver_app/demo/demo_store.dart';
+import 'package:driver_app/demo/charging_store.dart';
+import 'payment_store.dart';
+import 'payment_engine.dart';
+import 'package:driver_app/features/auth/domain/auth_scope.dart';
+import 'package:driver_app/features/charging/domain/charging.dart';
+import 'mock_charging_repository.dart';
+import 'package:driver_app/demo/station_actions_store.dart';
+import 'package:driver_app/features/history/domain/history.dart';
+import 'package:driver_app/features/loyalty/domain/loyalty.dart';
+import 'package:driver_app/features/payments/domain/payments.dart';
 
 class MockPaymentsRepository
     implements PaymentsRepository, HistoryRepository, LoyaltyRepository {
