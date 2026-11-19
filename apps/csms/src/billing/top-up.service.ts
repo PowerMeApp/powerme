@@ -15,6 +15,8 @@
  * khoản trễ luôn ghi số VNPay thực trừ; log `ipn_applied` / `querydr_applied` sau commit.
  * Phần 8b bổ sung (Ân chốt 16/11, migration 0024): lần trả thành công mâu thuẫn ghi một dòng
  * `top_up_payment_conflicts` (không đụng `top_ups`), log `${source}_conflicting_result` sau commit.
+ * Phần 7 (SD-2c, Khang chốt 17/11): nhánh `credited` của `applyLockedResult` tạo dòng `e_invoices`
+ * (`EInvoiceService.requestForTopUp`) trong CÙNG transaction cộng tiền; sau commit chỉ `kickIssue`.
  *
  * Ba lớp chống trùng (nguyên tắc 2 của billing):
  *   1. Idempotency-Key theo tài khoản + `request_hash` (migration 0019);
@@ -33,6 +35,7 @@ import { BACKGROUND_WORK_CONFIG, BackgroundWorkConfig } from './background-work.
 import { LoyaltyLedgerCorrupt, RedemptionRejected, TopUpRejected } from './billing-errors.js';
 import { CreditAccountStatus, CreditLedgerService, LedgerClient } from './credit-ledger.service.js';
 import { LeasedRow, lockLeased, runLeasedBatch } from './due-rows.js';
+import { EInvoiceService } from './e-invoice.service.js';
 import { computeQuote } from './loyalty-lots.js';
 import { LoyaltyService } from './loyalty.service.js';
 import {
@@ -136,9 +139,10 @@ export function ipnReply(code: IpnRspCode): IpnReply {
 }
 
 /**
- * Kết quả đã commit của IPN / querydr / recheck; truyền cho `afterPaymentCommitted` (Phần 7 gắn
- * e-invoice một chỗ, **chỉ** khi `credited`). `expired` từ Phần 8 (vòng quét). `not_creditable`
- * (Phần 8b, STM-4 #8): đã trả nhưng không cộng được → `failed` + khoản trễ; không hoá đơn.
+ * Kết quả đã commit của IPN / querydr / recheck; truyền cho `afterPaymentCommitted` (Phần 7: chỉ
+ * `credited` mới có hoá đơn, dòng tạo trong transaction; sau commit chỉ đánh thức việc xuất hoá đơn).
+ * `expired` từ Phần 8 (vòng quét). `not_creditable` (Phần 8b, STM-4 #8): đã trả nhưng không cộng
+ * được → `failed` + khoản trễ; không hoá đơn.
  */
 export interface PaymentResultCommitted {
   topUpId: number;
@@ -309,6 +313,9 @@ export class TopUpService implements BackgroundWork, OnModuleInit {
     @Optional()
     @Inject(BACKGROUND_WORK_CONFIG)
     private readonly workConfig?: BackgroundWorkConfig,
+    // Phần 7. Tuỳ chọn để test Phần 5–8b dựng service như cũ (không tạo hoá đơn); BillingModule luôn
+    // tiêm (test đăng ký `e-invoice-issue` kiểm việc này).
+    @Optional() private readonly eInvoices?: EInvoiceService,
   ) {}
 
   /** Luôn đăng ký, kể cả khi `BILLING_WORKER_ENABLED=false` (billing/CLAUDE.md). */
@@ -560,11 +567,15 @@ export class TopUpService implements BackgroundWork, OnModuleInit {
   }
 
   /**
-   * Điểm gọi sau commit (Phần 6 chưa làm gì). Phần 7: `EInvoiceService.requestForTopUp` **chỉ** khi
-   * `outcome = 'credited'` (không cho `late_payment` / `not_creditable`). Realtime số dư mới, MSG26:
-   * repo chưa có kênh realtime cho tài xế (chờ module `realtime`).
+   * Điểm gọi sau commit. Phần 7 (Khang chốt 17/11): `outcome = 'credited'` → chỉ đánh thức việc
+   * `e-invoice-issue` (`kickIssue`); dòng `e_invoices` đã tạo trong transaction cộng tiền, nên lỗi
+   * hay sập ở đây không làm mất hoá đơn (vòng quét bắt lại). `late_payment` / `not_creditable` /
+   * `failed` / `expired`: không hoá đơn. Realtime số dư mới, MSG26: repo chưa có kênh realtime cho tài
+   * xế (chờ module `realtime`).
    */
-  protected async afterPaymentCommitted(_result: PaymentResultCommitted): Promise<void> {}
+  protected async afterPaymentCommitted(result: PaymentResultCommitted): Promise<void> {
+    if (result.outcome === 'credited') this.eInvoices?.kickIssue();
+  }
 
   private async applyPaymentResultOrThrow(p: Record<string, string>): Promise<IpnReply> {
     if (!this.vnpay.configured) {
@@ -608,7 +619,7 @@ export class TopUpService implements BackgroundWork, OnModuleInit {
     if (result.conflictLog) this.logConflict('ipn', result.conflictLog);
     if (result.committed) {
       // Đã commit: lỗi việc sau commit không được đổi RspCode (trả 99 sẽ làm VNPay gọi lại một IPN
-      // đã áp dụng). Phần 7 (e-invoice) có vòng quét DB bắt lại.
+      // đã áp dụng). Hoá đơn đã nằm trong DB (Phần 7), vòng quét `e-invoice-issue` bắt lại.
       await this.afterCommit(result.committed, 'ipn_after_commit_failed');
     }
     return ipnReply(result.code);
@@ -743,6 +754,9 @@ export class TopUpService implements BackgroundWork, OnModuleInit {
             r.transactionNo,
             source,
           );
+          // Phần 7: hoá đơn `requested` trong CÙNG transaction cộng tiền (sau credit() và bước điểm).
+          // Chỉ ở nhánh này; khoản trễ / #8 / thất bại / hết hạn / mâu thuẫn không có hoá đơn.
+          await this.eInvoices?.requestForTopUp(c, topUpId);
           return done({ topUpId, outcome: 'credited' });
         }
         // #3 failed / #4 expired: rời pending (completed_at, next_attempt_at NULL như Phần 6).

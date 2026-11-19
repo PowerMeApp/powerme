@@ -101,9 +101,9 @@ describeDb('billing: worker quét DB dùng chung — lease, SKIP LOCKED, runner 
     return Number(
       (
         await one(
-          `INSERT INTO e_invoices(top_up_id,status,amount_vnd,vat_amount_vnd,invoice_no,issued_at,
-           next_attempt_at)
-         VALUES($1,$2,100000,9091,$3,$4,${dueSql}) RETURNING id`,
+          `INSERT INTO e_invoices(top_up_id,status,amount_vnd,vat_rate,vat_amount_vnd,invoice_no,
+           issued_at,next_attempt_at)
+         VALUES($1,$2,100000,10,9091,$3,$4,${dueSql}) RETURNING id`,
           [topUp, status, issued ? `SEED-${seq}` : null, issued ? new Date() : null],
         )
       )['id'],

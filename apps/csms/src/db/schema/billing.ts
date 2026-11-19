@@ -268,8 +268,16 @@ export const eInvoices = pgTable(
       .notNull()
       .references(() => topUps.id),
     status: eInvoiceStatusEnum('status').notNull().default('requested'),
+    /** Số thực thu (`top_ups.amount_paid_vnd`), ĐÃ GỒM VAT; phần giảm bằng điểm không lên hoá đơn. */
     amountVnd: bigint('amount_vnd', { mode: 'number' }).notNull(),
+    /** Phần thuế nằm trong `amount_vnd`: round(amount × vat_rate / (100 + vat_rate)), làm tròn nửa lên. */
     vatAmountVnd: bigint('vat_amount_vnd', { mode: 'number' }).notNull(),
+    /**
+     * Thuế suất GTGT đã dùng, phần trăm (0025, T32 Phần 7): theo thời điểm thu tiền
+     * (`top_ups.completed_at`, `vatRateAt`), không theo lúc gọi nhà cung cấp. Không DEFAULT.
+     * Hoá đơn điều chỉnh (Phần 9) dùng cột này, không suy ngược từ `vat_amount_vnd`.
+     */
+    vatRate: smallint('vat_rate').notNull(),
     issuedAt: timestamp('issued_at', { withTimezone: true }),
     attemptCount: integer('attempt_count').notNull().default(0),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
@@ -300,6 +308,7 @@ export const eInvoices = pgTable(
       'e_invoices_next_attempt_check',
       sql`${t.status} NOT IN ('requested', 'failed') OR ${t.nextAttemptAt} IS NOT NULL`,
     ),
+    check('e_invoices_vat_rate_check', sql`${t.vatRate} IN (0, 5, 8, 10)`),
   ],
 );
 

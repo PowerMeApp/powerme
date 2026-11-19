@@ -149,3 +149,14 @@ export class LedgerEntryExists extends Error {
     this.name = 'LedgerEntryExists';
   }
 }
+
+/**
+ * Admin retry một hoá đơn không có (T32 Phần 7, `EInvoiceService.adminRetry`). Route Phần 10 map sang
+ * 404; sai trạng thái thì STM-7 ném `InvalidTransition` (→ 409).
+ */
+export class EInvoiceNotFound extends Error {
+  constructor(readonly eInvoiceId: number) {
+    super(`e_invoice_not_found: ${eInvoiceId}`);
+    this.name = 'EInvoiceNotFound';
+  }
+}

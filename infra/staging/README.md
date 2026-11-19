@@ -46,7 +46,7 @@ VPS 127.0.0.1:5432 ──▶ postgres     (BE-27; chỉ loopback, dev vào bằn
 | Dịch vụ `dashboard`, route mặc định proxy tới nó | **Bỏ**. Caddy trả một dòng chữ nêu địa chỉ wss | `apps/dashboard` chưa có mã build. **Thêm lại khi WP4 có build** (Dockerfile, compose, Caddyfile, matrix workflow) |
 | `handle /api/*`, `/realtime*` proxy tới csms | **Bỏ** | Console (`/api/admin/*`, gồm POST ngắt kết nối và RemoteStop) chưa có xác thực — proxy ra là mở bảng điều khiển cho cả internet. Không có REST/realtime cho app trong repo. Thêm route khi `users` + `RolesGuard` có |
 | Redis | **Bỏ** | `apps/csms` không dùng Redis |
-| `JWT_SECRET`, `VNPAY_*`, `EINVOICE_*`, `ROUTING_API_KEY`, `HTTP_PORT`, `REDIS_URL` | **Bỏ** (chỉ còn ghi chú "chưa dùng" trong `.env.example`) | Code không đọc các biến này |
+| `JWT_SECRET`, `VNPAY_*`, `EINVOICE_*`, `ROUTING_API_KEY`, `HTTP_PORT`, `REDIS_URL` | **Bỏ** (chỉ còn ghi chú "chưa dùng" trong `.env.example`) | Code không đọc các biến này. Về sau: `VNPAY_*` đã vào compose (T32 Phần 6); `EINVOICE_STUB_MODE` / `EINVOICE_STUB_DELAY_MS` code có đọc từ T32 Phần 7 (stub hoá đơn), compose không truyền nên dùng mặc định `success` / `0` |
 | `env_file: .env` | `environment:` tường minh cho từng dịch vụ | `env_file` đưa mọi secret vào mọi container |
 | `pnpm db:migrate`, `pnpm db:seed:demo` | `node scripts/migrate.mjs`, `node scripts/seed-demo.mjs` | Repo dùng npm; hai script này là mới |
 | `HEALTH_PATH=/api/v1/health` | `GET /health` (mới) trên console, kiểm trong container; thêm kiểm công khai `/ocpp/HEALTHCHECK` | Endpoint cũ không tồn tại |

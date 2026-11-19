@@ -590,7 +590,7 @@ describeDb('migration 0010–0012 — ERD alignment (Physical ERD v1.0)', () => 
           [w.accountId],
         );
         const inv = await id(
-          'INSERT INTO e_invoices (top_up_id, amount_vnd, vat_amount_vnd) VALUES ($1,1000,100) RETURNING id',
+          'INSERT INTO e_invoices (top_up_id, amount_vnd, vat_rate, vat_amount_vnd) VALUES ($1,1000,10,100) RETURNING id',
           [topUp],
         );
         await q(
