@@ -328,6 +328,13 @@ paths:
         - name: online
           in: query
           schema: { type: boolean }
+        - name: q
+          in: query
+          description: |
+            FE-07 (màn 18, trang trạm): tìm không phân biệt hoa thường và dấu (cùng cách
+            `powerme_search_text`) trong mã trụ / serial và mã / tên trạm, hoặc đúng ID trụ / ID
+            trạm. Rỗng = không tìm. Kết hợp được với các bộ lọc khác; vẫn chỉ trong operator người gọi
+          schema: { type: string, maxLength: 100 }
         - $ref: '#/components/parameters/page'
         - $ref: '#/components/parameters/pageSize'
       responses:

@@ -249,6 +249,30 @@ describeDb('FE-03 operator monitoring (screens 17, 18; BR-P16, D19–D25)', () =
     });
   });
 
+  it('q searches charge point code / serial and station code / name, case- and accent-insensitive, or an id (FE-07)', async () => {
+    const t = tokens['a'];
+    const names = async (q: string, more = '') =>
+      (await get(`/charge-points?q=${encodeURIComponent(q)}${more}`, t)).body.items.map(
+        (c: any) => c.serial_number,
+      );
+    expect(await names('a-fresh')).toEqual(['A-FRESH']);
+    expect(await names('  A-STALE  ')).toEqual(['A-STALE']);
+    // Station code and name (site A: FE03-A / "Tram A"); "Trạm" matches without the accent.
+    const all = ['A-FRESH', 'A-NEW', 'A-OFF', 'A-STALE'];
+    expect(await names('fe03-a')).toEqual(all);
+    expect(await names('Trạm A')).toEqual(all);
+    // Exact ids (a digit query may also match codes that contain it).
+    expect(await names(ids['A-OFF']!)).toContain('A-OFF');
+    expect(await names(ids['siteA']!)).toEqual(expect.arrayContaining(all));
+    // Combined with the other filters, and scoped to the token's Operator.
+    expect(await names('fe03-a', '&online=false')).toEqual(['A-NEW', 'A-OFF']);
+    expect(await names('b-fresh')).toEqual([]);
+    expect(await names('khong-co')).toEqual([]);
+    expect(await names('', '')).toEqual(all); // blank q = no search
+    for (const q of ['x'.repeat(101), 'a\u0001b'])
+      expect((await get(`/charge-points?q=${encodeURIComponent(q)}`, t)).status).toBe(400);
+  });
+
   it('summarises the Operator: charge points, BR-P38 connector groups, open faults by severity, queues', async () => {
     expect((await get('/summary', tokens['a'])).body).toEqual({
       charge_points: {

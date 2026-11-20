@@ -212,9 +212,38 @@ describe('Doanh thu (màn 25, Operator)', () => {
     expect(total()).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Sau ›' }));
     expect(screen.getByText('Hiển thị 41–45 / 45')).toBeInTheDocument();
+    // Search covers every row of the period, not just the page shown (FE-07).
+    const box = () => screen.getByRole('searchbox', { name: 'Tìm kiếm' });
+    await user.type(box(), 'rh-2');
+    expect(screen.getByText(/Hiển thị 1–10 \/ 10/)).toHaveTextContent('(lọc từ 45)');
+    expect(screen.getByRole('row', { name: 'RH-29' })).toBeInTheDocument();
+    expect(screen.queryByRole('row', { name: 'RH-01' })).toBeNull();
+    expect(total()).toBeInTheDocument(); // still the period total
+    await user.clear(box());
+    await user.type(box(), 'không có');
+    expect(screen.getByText('Không có dòng nào khớp "không có".')).toBeInTheDocument();
+    await user.clear(box());
     // Changing the period (or the grouping) goes back to page 1.
     fireEvent.change(screen.getByLabelText('Từ ngày'), { target: { value: '2026-11-02' } });
     await waitFor(() => expect(screen.getByText('Hiển thị 1–20 / 45')).toBeInTheDocument());
+  });
+
+  it('search ignores case and accents: "tram q1" finds "Trạm Q1"; the query stays in the URL', async () => {
+    fakeCsms({
+      [OP]: ok(
+        report({
+          group_by: 'site',
+          rows: [
+            row({ key: '5', site_id: '5', site_name: 'Trạm Q1' }),
+            row({ key: '6', site_id: '6', site_name: 'Trạm Thủ Đức' }),
+          ],
+        }),
+      ),
+    });
+    renderApp(`/operator/revenue${PERIOD}&group_by=site&search=tram%20q1`, session(STAFF));
+    expect(await screen.findByRole('row', { name: 'Trạm Q1' })).toBeInTheDocument();
+    expect(screen.queryByRole('row', { name: 'Trạm Thủ Đức' })).toBeNull();
+    expect(screen.getByRole('searchbox', { name: 'Tìm kiếm' })).toHaveValue('tram q1');
   });
 
   it('an invalid period is caught before asking; the server’s invalid_period is shown too', async () => {

@@ -580,3 +580,10 @@ table.revenue-table tfoot td {
 .breadcrumbs [aria-current='page'] {
   color: var(--text);
 }
+
+/* FE-07 — search boxes (screen 18, station page, revenue). */
+.filters .search-field,
+.revenue-filters .search-field {
+  min-width: 280px;
+  flex: 1 1 280px;
+}

@@ -1,7 +1,10 @@
 /**
  * Operator charge point monitoring (FE-03, UC-OPS-02, screens 17 and 18; OPERATOR-DASHBOARD-PLAN
  * D19–D25, D36) behind RolesGuard `operator_staff`:
- *   GET /api/operator/v1/charge-points?site_id=&lifecycle=&online=&page=&page_size=
+ *   GET /api/operator/v1/charge-points?site_id=&lifecycle=&online=&q=&page=&page_size=
+ *       `q` (FE-07, screens 18 and the station page): text search, case- and accent-insensitive,
+ *       in the charge point code / serial and the station code / name, or an exact charge point
+ *       or station id
  *       → { items: ChargePoint[], total, page, page_size }            (contract §2.4, §3.3)
  *   GET /api/operator/v1/charge-points/{id} → ChargePointDetail (FE-05, screen 20): the row above
  *       plus firmware / rated power / capabilities, open faults (same DTO as screen 21) and the
@@ -44,6 +47,8 @@ type Lifecycle = (typeof LIFECYCLES)[number];
 const DEFAULT_PAGE_SIZE = 50;
 const MAX_PAGE_SIZE = 100;
 const MAX_PAGE = 10_000;
+/** Longest `q`, after trimming. */
+const MAX_QUERY = 100;
 
 export type MonitoringRoute =
   | {
@@ -51,6 +56,8 @@ export type MonitoringRoute =
       siteId: string | null;
       lifecycle: Lifecycle | null;
       online: boolean | null;
+      /** Normalised search text (see `searchText`); null = no search. */
+      q: string | null;
       page: number;
       pageSize: number;
     }
@@ -71,18 +78,22 @@ export function matchMonitoringRoute(rest: string, query: URLSearchParams): Moni
     return { kind: 'detail', id: detail[1]! };
   }
   if (rest !== '/charge-points') return null;
-  const allowed = ['site_id', 'lifecycle', 'online', 'page', 'page_size'];
+  const allowed = ['site_id', 'lifecycle', 'online', 'q', 'page', 'page_size'];
   if (keys.some((k) => !allowed.includes(k)) || new Set(keys).size !== keys.length)
     throw new AuthError(400, 'invalid_input');
   const siteId = query.get('site_id');
   const lifecycle = query.get('lifecycle');
   const online = query.get('online');
+  const rawQ = query.get('q');
+  const q = rawQ === null ? '' : rawQ.trim();
   const page = intParam(query.get('page'), 1);
   const pageSize = intParam(query.get('page_size'), DEFAULT_PAGE_SIZE);
   if (
     (siteId !== null && !/^[1-9][0-9]{0,18}$/.test(siteId)) ||
     (lifecycle !== null && !(LIFECYCLES as readonly string[]).includes(lifecycle)) ||
     (online !== null && online !== 'true' && online !== 'false') ||
+    q.length > MAX_QUERY ||
+    /[\x00-\x1f\x7f]/.test(q) ||
     !(page >= 1 && page <= MAX_PAGE) ||
     !(pageSize >= 1 && pageSize <= MAX_PAGE_SIZE)
   )
@@ -92,9 +103,22 @@ export function matchMonitoringRoute(rest: string, query: URLSearchParams): Moni
     siteId,
     lifecycle: lifecycle as Lifecycle | null,
     online: online === null ? null : online === 'true',
+    q: q ? searchText(q) : null,
     page,
     pageSize,
   };
+}
+
+/**
+ * Same normalisation as the SQL function `powerme_search_text` (migration 0006, used by the
+ * driver's station search): NFD, drop combining marks, đ → d, lower case.
+ */
+function searchText(text: string): string {
+  return text
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[đĐ]/g, 'd')
+    .toLowerCase();
 }
 
 function intParam(raw: string | null, fallback: number): number {
@@ -108,8 +132,9 @@ const OFFLINE_SQL = `(NOT cp.is_online OR cp.last_message_at IS NULL
 
 /**
  * The Operator's charge points after the list filters ($1 operator, $2 offline ms, $3 lifecycle,
- * $4 site, $5 online, $6 one charge point id). `decommissioned` only when asked for (D24) or when
- * one charge point is asked for by id (screen 20).
+ * $4 site, $5 online, $6 one charge point id, $7 normalised search text). `decommissioned` only
+ * when asked for (D24) or when one charge point is asked for by id (screen 20). The search matches
+ * a substring of the charge point code / serial or the station code / name, or an exact id.
  */
 const FILTERED_CTE = `WITH cps AS (
   SELECT cp.*,st.site_code,st.site_name,${OFFLINE_SQL} AS offline
@@ -119,6 +144,9 @@ const FILTERED_CTE = `WITH cps AS (
       OR cp.lifecycle::text=$3)
     AND ($4::bigint IS NULL OR st.id=$4)
     AND ($6::bigint IS NULL OR cp.id=$6)
+    AND ($7::text IS NULL
+      OR strpos(powerme_search_text(concat_ws(' ',cp.serial_number,cp.display_code,st.site_code,st.site_name)),$7)>0
+      OR cp.id::text=$7 OR st.id::text=$7)
 ), filtered AS (
   SELECT * FROM cps WHERE $5::boolean IS NULL OR offline = NOT $5
 )`;
@@ -144,6 +172,7 @@ const DETAIL_PAGE = {
   siteId: null,
   lifecycle: null,
   online: null,
+  q: null,
   page: 1,
   pageSize: 1,
 } as const;
@@ -221,6 +250,7 @@ async function chargePoints(
     route.siteId,
     route.online,
     chargePointId,
+    route.q,
   ];
   const { rows } = await db.$client.query<{
     total: number;
@@ -249,7 +279,7 @@ async function chargePoints(
          'max_power_kw',c.max_power_kw::float8,'status',c.status,'status_updated_at',c.status_changed_at,
          'status_quality',CASE WHEN f.offline THEN 'offline'
            WHEN c.status_changed_at IS NULL OR f.last_message_at>now() OR c.status_changed_at>now()
-             OR f.last_message_at < now()-($7::bigint*interval '1 millisecond')
+             OR f.last_message_at < now()-($8::bigint*interval '1 millisecond')
              OR c.status_changed_at < f.online_changed_at THEN 'stale' ELSE 'fresh' END,
          'error_code',CASE WHEN c.status='Faulted' THEN (SELECT e.error_code FROM connector_status_events e
            WHERE e.connector_id=c.id ORDER BY e.id DESC LIMIT 1) END,
@@ -257,7 +287,7 @@ async function chargePoints(
            AND s.received_stopped_at IS NULL AND s.status IN ('pending','active','paused','stopping')
            ORDER BY s.id DESC LIMIT 1)
        ) ORDER BY c.connector_no) FROM connectors c WHERE c.charge_point_id=f.id),'[]'::jsonb) AS connectors
-     FROM filtered f ORDER BY f.site_code,f.serial_number LIMIT $8 OFFSET $9`,
+     FROM filtered f ORDER BY f.site_code,f.serial_number LIMIT $9 OFFSET $10`,
     [...filters, staleAfterMs, route.pageSize, (route.page - 1) * route.pageSize],
   );
   // A page past the end has no rows to carry count(*) OVER(), so count separately only then.

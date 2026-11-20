@@ -127,6 +127,25 @@ describe('Trang trạm sạc', () => {
     ).toEqual(['Trụ sạc', 'Ngày']);
   });
 
+  it('searching the station’s charge points asks the API with q; the header stays', async () => {
+    const seen = fakeCsms({
+      [CPS]: page([cp('11')]),
+      [REV]: { status: 200, body: revenue },
+    });
+    const { user } = renderApp('/operator/stations/5', session(STAFF));
+    await screen.findByRole('heading', { level: 1, name: 'Trạm Q1' });
+    await user.type(screen.getByRole('searchbox', { name: 'Tìm trụ sạc' }), 'PM-11');
+    await waitFor(() =>
+      expect(seen.some((r) => r.search === '?site_id=5&q=PM-11&page=1&page_size=100')).toBe(true),
+    );
+    expect(
+      await within(screen.getByRole('region', { name: 'Trụ sạc của trạm' })).findByRole('row', {
+        name: 'Trụ sạc PM-11',
+      }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('heading', { level: 1, name: 'Trạm Q1' })).toBeInTheDocument();
+  });
+
   it('a station of another Operator (empty list) is not found', async () => {
     fakeCsms({ [CPS]: page([]) });
     renderApp('/operator/stations/99', session(STAFF));

@@ -21,6 +21,7 @@ import {
   useRevenueQuery,
   type RevenueScope,
 } from '../../core/api/api';
+import { matchesSearch, MAX_SEARCH } from '../../core/search/search';
 import {
   defaultPeriod,
   fillDays,
@@ -33,6 +34,13 @@ import {
 } from './revenueModel';
 
 export const REVENUE_PAGE_SIZE = 20;
+
+const SEARCH_HINT: Record<RevenueGroupBy, string> = {
+  charge_point: 'Mã, serial, ID trụ hoặc tên, ID trạm',
+  site: 'Tên hoặc ID trạm',
+  operator: 'Tên hoặc ID Operator',
+  day: 'Ngày, ví dụ 05/11',
+};
 
 /** CSV keeps its UTF-8 BOM so Excel reads Vietnamese (fetch's text() drops it). */
 function saveCsv(text: string, filename: string) {
@@ -135,6 +143,8 @@ export function RevenueReportView({
   const groupParam = params.get('group_by') as RevenueGroupBy | null;
   const groupBy = groupParam && groups.includes(groupParam) ? groupParam : groups[0]!;
   const valid = periodDays(from, to) !== null;
+  /** Client-side search over every row of the period (the API returns all groups at once). */
+  const search = params.get('search') ?? '';
   const query: RevenueQuery = {
     from,
     to,
@@ -170,11 +180,24 @@ export function RevenueReportView({
 
   // Rows of the report actually shown (a stale response for other parameters is not shown).
   const current = report && report.group_by === groupBy ? report : undefined;
-  const rows: RevenueRow[] = current
+  const allRows: RevenueRow[] = current
     ? groupBy === 'day'
       ? fillDays(current.rows, current.from, current.to)
       : current.rows
     : [];
+  const rows = allRows.filter((r) =>
+    matchesSearch(search, [
+      rowLabel(r, groupBy),
+      r.key,
+      r.serial_number,
+      r.site_name,
+      r.operator_name,
+      r.charge_point_id,
+      r.site_id,
+      r.operator_id,
+      r.day,
+    ]),
+  );
   const pages = Math.max(1, Math.ceil(rows.length / REVENUE_PAGE_SIZE));
   const shownPage = Math.min(page, pages);
   const first = (shownPage - 1) * REVENUE_PAGE_SIZE;
@@ -217,6 +240,17 @@ export function RevenueReportView({
             ))}
           </select>
         </label>
+        <label className="field search-field">
+          Tìm kiếm
+          <input
+            className="input"
+            type="search"
+            value={search}
+            maxLength={MAX_SEARCH}
+            placeholder={SEARCH_HINT[groupBy]}
+            onChange={(e) => update({ search: e.target.value })}
+          />
+        </label>
         <button
           type="button"
           className="btn small revenue-export"
@@ -240,7 +274,11 @@ export function RevenueReportView({
           <Totals report={current} />
           {rows.length === 0 ? (
             <div className="card">
-              <p className="muted">Không có phiên nào trong kỳ.</p>
+              <p className="muted">
+                {allRows.length > 0
+                  ? `Không có dòng nào khớp "${search.trim()}".`
+                  : 'Không có phiên nào trong kỳ.'}
+              </p>
             </div>
           ) : (
             <div className="card table-card">
@@ -315,6 +353,7 @@ export function RevenueReportView({
               <nav className="pager" aria-label="Phân trang">
                 <span className="muted">
                   Hiển thị {first + 1}–{first + pageRows.length} / {rows.length}
+                  {rows.length < allRows.length && ` (lọc từ ${allRows.length})`}
                 </span>
                 <div className="btn-row">
                   <button

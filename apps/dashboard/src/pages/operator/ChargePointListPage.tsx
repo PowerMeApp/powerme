@@ -16,6 +16,7 @@ import {
 } from '../../core/api/api';
 import { ConnectorList, isOffline } from '../../features/chargePoints/ConnectorList';
 import { ago, LIFECYCLE, useNow } from '../../features/chargePoints/format';
+import { MAX_SEARCH, useDebounced } from '../../core/search/search';
 
 export const LIST_POLL_MS = 5000;
 
@@ -61,10 +62,13 @@ export function ChargePointListPage() {
   const [online, setOnline] = useState<OnlineFilter>('all');
   const [lifecycle, setLifecycle] = useState<ChargePointLifecycle | ''>('');
   const [page, setPage] = useState(1);
+  const [search, setSearch] = useState('');
+  const q = useDebounced(search.trim());
   const now = useNow();
   const { data, error, isLoading } = useOperatorChargePointsQuery(
     {
       page,
+      ...(q ? { q } : {}),
       ...(lifecycle ? { lifecycle } : {}),
       ...(online === 'all' ? {} : { online: online === 'online' }),
     },
@@ -84,6 +88,20 @@ export function ChargePointListPage() {
         <p>Trạng thái từng súng theo bản tin OCPP mới nhất · cập nhật mỗi 5 giây</p>
       </div>
       <div className="filters">
+        <label className="field search-field">
+          Tìm kiếm
+          <input
+            className="input"
+            type="search"
+            value={search}
+            maxLength={MAX_SEARCH}
+            placeholder="Mã, serial, ID trụ hoặc mã, tên, ID trạm"
+            onChange={(e) => {
+              setSearch(e.target.value);
+              setPage(1);
+            }}
+          />
+        </label>
         <label className="field">
           Kết nối
           <select
@@ -126,7 +144,9 @@ export function ChargePointListPage() {
         <p role="alert">{errorMessage(error)}</p>
       ) : items.length === 0 ? (
         <div className="card">
-          <p className="muted">Không có trụ sạc nào khớp bộ lọc.</p>
+          <p className="muted">
+            {q ? `Không có trụ sạc nào khớp "${q}".` : 'Không có trụ sạc nào khớp bộ lọc.'}
+          </p>
         </div>
       ) : (
         <div className="card table-card">

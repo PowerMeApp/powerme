@@ -169,6 +169,19 @@ describe('Danh sách trụ sạc (màn 18)', () => {
     );
   });
 
+  it('search sends q (debounced) from page 1 and says what found nothing (FE-07)', async () => {
+    const seen = fakeCsms({ [LIST_URL]: page([]) });
+    const { user } = renderApp('/operator/charge-points', session(STAFF));
+    await screen.findByText('Không có trụ sạc nào khớp bộ lọc.');
+    await user.type(screen.getByRole('searchbox', { name: 'Tìm kiếm' }), 'Trạm Q1');
+    await waitFor(() =>
+      expect(seen.some((r) => r.search === '?q=Tr%E1%BA%A1m+Q1&page=1&page_size=20')).toBe(true),
+    );
+    // One request for the whole word, not one per key.
+    expect(seen.filter((r) => r.search.includes('q=')).length).toBe(1);
+    expect(await screen.findByText('Không có trụ sạc nào khớp "Trạm Q1".')).toBeInTheDocument();
+  });
+
   it('empty result shows the empty state', async () => {
     fakeCsms({ [LIST_URL]: page([]) });
     renderApp('/operator/charge-points', session(STAFF));
