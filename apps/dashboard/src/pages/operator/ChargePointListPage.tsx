@@ -5,6 +5,7 @@
  * online / offline and lifecycle; decommissioned is hidden unless chosen (D24). The site filter
  * waits for GET /operator/v1/sites (Ân). Polled every 5 s (D5); the map is FE-03c (D23).
  */
+import { Breadcrumbs } from '../../components/Breadcrumbs';
 import { useState } from 'react';
 import { Link } from 'react-router';
 import type { ChargePointLifecycle, OperatorChargePoint } from '@powerme/shared';
@@ -13,7 +14,9 @@ import {
   errorMessage,
   useOperatorChargePointsQuery,
 } from '../../core/api/api';
-import { ago, connectorTone, LIFECYCLE, useNow } from '../../features/chargePoints/format';
+import { ConnectorList, isOffline } from '../../features/chargePoints/ConnectorList';
+import { ago, LIFECYCLE, useNow } from '../../features/chargePoints/format';
+import { MAX_SEARCH, useDebounced } from '../../core/search/search';
 
 export const LIST_POLL_MS = 5000;
 
@@ -25,9 +28,9 @@ const ONLINE_FILTERS = [
 type OnlineFilter = (typeof ONLINE_FILTERS)[number][0];
 
 function Row({ cp, now }: { cp: OperatorChargePoint; now: number }) {
-  const offline = cp.connectors.some((c) => c.status_quality === 'offline') || !cp.is_online;
+  const offline = isOffline(cp);
   return (
-    <tr aria-label={`Charge Point ${cp.display_code ?? cp.serial_number}`}>
+    <tr aria-label={`Trụ sạc ${cp.display_code ?? cp.serial_number}`}>
       <td>
         <Link className="cell-title" to={`/operator/charge-points/${cp.id}`}>
           {cp.display_code ?? cp.serial_number}
@@ -38,7 +41,7 @@ function Row({ cp, now }: { cp: OperatorChargePoint; now: number }) {
         </div>
       </td>
       <td>
-        <div>{cp.site.site_name}</div>
+        <Link to={`/operator/stations/${cp.site.id}`}>{cp.site.site_name}</Link>
         <div className="muted small">{cp.site.site_code}</div>
       </td>
       <td>
@@ -49,30 +52,7 @@ function Row({ cp, now }: { cp: OperatorChargePoint; now: number }) {
         <div className="muted small">{ago(cp.last_message_at, now)}</div>
       </td>
       <td>
-        {cp.connectors.length === 0 ? (
-          <span className="muted">—</span>
-        ) : (
-          <ul className="connector-list">
-            {cp.connectors.map((c) => (
-              <li key={c.connector_id}>
-                <span className="muted small">Connector {c.connector_no}</span>{' '}
-                <span className={`pill ${connectorTone(c)}`}>
-                  {c.status_quality === 'offline' ? 'Offline' : c.status}
-                  {c.status === 'Faulted' && c.error_code ? ` · ${c.error_code}` : ''}
-                </span>
-                {c.status_quality === 'stale' && (
-                  <span className="muted small" title="Không có bản tin quá 2 nhịp Heartbeat">
-                    {' '}
-                    · có thể đã cũ
-                  </span>
-                )}
-                {c.active_session_id && (
-                  <span className="muted small"> · phiên {c.active_session_id}</span>
-                )}
-              </li>
-            ))}
-          </ul>
-        )}
+        <ConnectorList cp={cp} />
       </td>
     </tr>
   );
@@ -82,10 +62,17 @@ export function ChargePointListPage() {
   const [online, setOnline] = useState<OnlineFilter>('all');
   const [lifecycle, setLifecycle] = useState<ChargePointLifecycle | ''>('');
   const [page, setPage] = useState(1);
+  const [cpSearch, setCpSearch] = useState('');
+  const [siteSearch, setSiteSearch] = useState('');
+  const chargePointQ = useDebounced(cpSearch.trim());
+  const siteQ = useDebounced(siteSearch.trim());
+  const searching = chargePointQ || siteQ;
   const now = useNow();
   const { data, error, isLoading } = useOperatorChargePointsQuery(
     {
       page,
+      ...(chargePointQ ? { chargePointQ } : {}),
+      ...(siteQ ? { siteQ } : {}),
       ...(lifecycle ? { lifecycle } : {}),
       ...(online === 'all' ? {} : { online: online === 'online' }),
     },
@@ -99,11 +86,40 @@ export function ChargePointListPage() {
 
   return (
     <>
+      <Breadcrumbs items={[{ label: 'Trụ sạc' }]} />
       <div className="page-head">
-        <h1>Charge Point</h1>
-        <p>Trạng thái từng Connector theo bản tin OCPP mới nhất · cập nhật mỗi 5 giây</p>
+        <h1>Trụ sạc</h1>
+        <p>Trạng thái từng súng theo bản tin OCPP mới nhất · cập nhật mỗi 5 giây</p>
       </div>
       <div className="filters">
+        <label className="field search-field">
+          Tìm trụ sạc
+          <input
+            className="input"
+            type="search"
+            value={cpSearch}
+            maxLength={MAX_SEARCH}
+            placeholder="Mã, serial hoặc ID trụ"
+            onChange={(e) => {
+              setCpSearch(e.target.value);
+              setPage(1);
+            }}
+          />
+        </label>
+        <label className="field search-field">
+          Tìm trạm sạc
+          <input
+            className="input"
+            type="search"
+            value={siteSearch}
+            maxLength={MAX_SEARCH}
+            placeholder="Mã, tên hoặc ID trạm"
+            onChange={(e) => {
+              setSiteSearch(e.target.value);
+              setPage(1);
+            }}
+          />
+        </label>
         <label className="field">
           Kết nối
           <select
@@ -146,7 +162,11 @@ export function ChargePointListPage() {
         <p role="alert">{errorMessage(error)}</p>
       ) : items.length === 0 ? (
         <div className="card">
-          <p className="muted">Không có Charge Point nào khớp bộ lọc.</p>
+          <p className="muted">
+            {searching
+              ? 'Không có trụ sạc nào khớp ô tìm kiếm và bộ lọc.'
+              : 'Không có trụ sạc nào khớp bộ lọc.'}
+          </p>
         </div>
       ) : (
         <div className="card table-card">
@@ -154,11 +174,11 @@ export function ChargePointListPage() {
             <table className="data-table">
               <thead>
                 <tr>
-                  <th scope="col">Charge Point</th>
-                  <th scope="col">Charging Station</th>
+                  <th scope="col">Trụ sạc</th>
+                  <th scope="col">Trạm sạc</th>
                   <th scope="col">Vòng đời</th>
                   <th scope="col">Kết nối</th>
-                  <th scope="col">Connector</th>
+                  <th scope="col">Súng</th>
                 </tr>
               </thead>
               <tbody>

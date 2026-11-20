@@ -6,8 +6,11 @@
  *   GET  /api/operator/v1/faults, POST …/faults/{id}/acknowledge|reset|close  (FE-04a, operator-faults.ts)
  *   GET  /api/operator/v1/charge-points, GET /api/operator/v1/summary  (FE-03, operator-monitoring.ts)
  *   GET  /api/operator/v1/charge-points/{id}  (FE-05, screen 20)
+ *   GET  /api/operator/v1/sessions?queue=, POST …/sessions/{id}/assign|close|resolve  (FE-12, screen 23,
+ *        operator-sessions.ts; logic in Trí's SessionReviewService / UnattributedSessionService)
  *   GET  /api/operator/v1/revenue[.csv], GET /api/admin/v1/revenue[.csv]  (T108a, revenue-report.ts)
  *   GET  /api/admin/v1/me     admin
+ *   GET  /api/admin/v1/summary  admin  (FE-14, screen 27, admin-platform.ts)
  * RolesGuard runs before route matching, so an unknown path without a valid token is 401, not 404.
  * CORS: localhost origins only (Vite dev server). JSON: snake_case, string ids, `{ error, detail }`.
  */
@@ -18,7 +21,9 @@ import { FaultActionError, type FaultActions } from '../console/fault-actions.js
 import { AuthError, StaffAccounts, type DashboardAuthConfig } from '../users/auth.js';
 import { rolesGuard, type Principal } from '../users/roles-guard.js';
 import type { ConnectionRegistry } from '../ocpp-gateway/connection-registry.js';
+import { matchAdminRoute, runAdminSummary } from './admin-platform.js';
 import { matchFaultRoute, runFaultRoute } from './operator-faults.js';
+import { matchSessionRoute, runSessionRoute, type SessionQueueDeps } from './operator-sessions.js';
 import {
   matchMonitoringRoute,
   runMonitoringRoute,
@@ -45,7 +50,7 @@ export const OPERATOR_API_PATH = /^\/api\/(auth|operator|admin)\/v1(?:\/|\?|$)/;
 
 /** Paths that take a query string (contract §2.2a: RolesGuard runs first, then the parameters). */
 const QUERY_PATHS =
-  /^\/api\/(?:operator\/v1\/(?:faults|charge-points|revenue(?:\.csv)?)|admin\/v1\/revenue(?:\.csv)?)$/;
+  /^\/api\/(?:operator\/v1\/(?:faults|charge-points|sessions|revenue(?:\.csv)?)|admin\/v1\/revenue(?:\.csv)?)$/;
 const LOCAL_ORIGIN = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/;
 const BODY_LIMIT = 16 * 1024;
 
@@ -57,6 +62,8 @@ export function createOperatorApiListener(
   /** FE-04a. Missing → fault routes answer 503 `faults_unavailable`. */
   faults?: FaultActions,
   monitoring: MonitoringDeps = { thresholds: DEFAULT_THRESHOLDS },
+  /** FE-12. Missing services → session routes answer 503 `sessions_unavailable`. */
+  sessions: SessionQueueDeps = {},
 ): RequestListener {
   return (req, res) => {
     void handle(req, res).catch((error: unknown) => {
@@ -89,7 +96,7 @@ export function createOperatorApiListener(
     }
     const url = new URL(req.url ?? '', 'http://operator-api.local');
     const [, surface, rest] = /^\/api\/(auth|operator|admin)\/v1(\/.*)?$/.exec(url.pathname) ?? [];
-    // Only the fault, charge point and revenue routes take a query; everywhere else a query is 400.
+    // Only the fault, charge point, session and revenue routes take a query; everywhere else a query is 400.
     if (url.search && !QUERY_PATHS.test(url.pathname)) throw new AuthError(400, 'invalid_input');
 
     if (surface === 'auth') {
@@ -119,6 +126,14 @@ export function createOperatorApiListener(
           ? await readJsonObject(req, res)
           : undefined;
       send(res, 200, await runFaultRoute(faultRoute, principal, faults, body));
+      return;
+    }
+    const sessionRoute =
+      surface === 'operator' ? matchSessionRoute(rest ?? '', url.searchParams) : null;
+    if (sessionRoute) {
+      allow(req, res, sessionRoute.kind === 'list' ? 'GET' : 'POST');
+      const body = sessionRoute.kind === 'action' ? await readJsonObject(req, res) : undefined;
+      send(res, 200, await runSessionRoute(sessionRoute, principal, sessions, body));
       return;
     }
     const monitoringRoute =
@@ -153,6 +168,12 @@ export function createOperatorApiListener(
         `revenue_${revenueRoute.from}_${revenueRoute.to}.csv`,
         toRevenueCsv(report),
       );
+    }
+    const adminRoute = surface === 'admin' ? matchAdminRoute(rest ?? '', url.searchParams) : null;
+    if (adminRoute) {
+      allow(req, res, 'GET');
+      send(res, 200, await runAdminSummary(db, monitoring.thresholds));
+      return;
     }
     if (rest !== '/me') throw new AuthError(404, 'not_found');
     allow(req, res, 'GET');

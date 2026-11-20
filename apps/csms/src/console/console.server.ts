@@ -159,6 +159,8 @@ export class ConsoleServer implements OnModuleInit, OnModuleDestroy {
             },
             registry: this.queries.registry,
           },
+          // FE-12 (screen 23): the same service instances the console uses.
+          { review: this.commands.review, unattributed: this.commands.unattributed },
         )
       : null;
     // T32 Phần 6: /billing/vnpay/{ipn,return} công khai (chỉ dựa chữ ký VNPay). Mọi URL /billing…

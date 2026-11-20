@@ -510,10 +510,159 @@ table.data-table tr.sev-minor td.num {
 }
 .dialog {
   width: min(480px, 100%);
+  /* Room between title, text, each labelled field and the buttons (popup spacing, 20/11). */
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 24px;
+}
+.dialog > h2,
+.dialog > p,
+.dialog > ul {
+  margin: 0;
+}
+.dialog .field {
+  gap: 8px;
+}
+.dialog .field + .field {
+  margin-top: 4px;
+}
+.dialog textarea.input {
+  min-height: 88px;
+}
+.dialog > .btn-row {
+  margin-top: 8px;
+  justify-content: flex-end;
 }
 .dialog fieldset {
   border: 0;
   padding: 0;
   display: grid;
   gap: 6px;
+}
+
+/* FE-12 — screen 23: queue switch and decision feedback. */
+.queue-switch {
+  display: flex;
+  gap: 6px;
+}
+.queue-note {
+  margin: 0 0 12px;
+  padding: 10px 14px;
+  border-radius: var(--radius-input);
+}
+.queue-note.ok {
+  background: var(--teal-soft);
+  color: var(--teal);
+}
+.queue-note.error {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+/* FE-07 — screens 25 / 35 revenue report. */
+.revenue-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.revenue-filters .field {
+  min-width: 170px;
+}
+.station-revenue {
+  margin-top: 24px;
+}
+.revenue-tiles {
+  margin: 0 0 16px;
+}
+table.revenue-table td:nth-child(2) {
+  min-width: 0;
+}
+table.revenue-table .revenue-num {
+  text-align: right;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+table.revenue-table tr.muted td {
+  color: var(--muted);
+}
+table.revenue-table tfoot th,
+table.revenue-table tfoot td {
+  font-weight: 700;
+  border-top: 1px solid var(--line);
+}
+.revenue-later {
+  margin-top: 16px;
+}
+
+/* Breadcrumb trail above page titles (FE-07). */
+.breadcrumbs ol {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0 0 8px;
+  padding: 0;
+  list-style: none;
+  font-size: 13px;
+  color: var(--muted);
+}
+.breadcrumbs li + li::before {
+  content: '›';
+  margin-right: 6px;
+  color: var(--muted);
+}
+.breadcrumbs a {
+  color: var(--muted);
+}
+.breadcrumbs a:hover {
+  color: var(--teal);
+}
+.breadcrumbs [aria-current='page'] {
+  color: var(--text);
+}
+
+/* FE-07 — search boxes (screen 18, station page, revenue). */
+.filters .search-field,
+.revenue-filters .search-field {
+  min-width: 280px;
+  flex: 1 1 280px;
+}
+
+/* Readable reconciliation records on the session queue (raw detail in the tooltip). */
+.record-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.record-list li + li {
+  margin-top: 2px;
+}
+
+/* Pending-work badge: red circle, white text (menu, queue tabs, home tile). */
+.count-badge {
+  display: inline-grid;
+  place-items: center;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 6px;
+  margin-left: 8px;
+  border-radius: 11px;
+  background: var(--danger);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+  vertical-align: middle;
+}
+.nav-link .count-badge {
+  margin-left: auto;
+}
+.tile-list .count-badge {
+  margin-left: 0;
+}
+.tile-urgent {
+  border: 1px solid var(--danger);
+  box-shadow: 0 0 0 1px var(--danger-soft);
 }

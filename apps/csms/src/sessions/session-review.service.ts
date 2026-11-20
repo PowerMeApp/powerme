@@ -116,27 +116,38 @@ export class SessionReviewService {
   }
 
   /**
-   * BE-24: hàng đợi phiên `review` cho console (mới nhất trước), kèm các bản ghi kết luận chưa duyệt.
-   * Chưa lọc theo operator — console chưa có đăng nhập (cùng mức với GET /api/admin/sessions);
-   * mỗi dòng mang `operator_id` để màn hình lọc. Quyền chỉ kiểm khi GHI (resolveReview).
+   * BE-24: hàng đợi phiên `review` (mới nhất trước), kèm các bản ghi kết luận chưa duyệt. Console
+   * (chưa đăng nhập) gọi không có `operatorId` → mọi operator, mỗi dòng mang `operator_id`. FE-12
+   * (màn 23, operator API có đăng nhập) truyền `operatorId` của token. Quyền GHI vẫn kiểm ở
+   * resolveReview.
    */
-  async listInReview(limit: number): Promise<ReviewQueueItem[]> {
-    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 500)
+  async listInReview(limit: number, operatorId?: number): Promise<ReviewQueueItem[]> {
+    if (
+      !Number.isSafeInteger(limit) ||
+      limit < 1 ||
+      limit > 500 ||
+      (operatorId !== undefined && !(Number.isSafeInteger(operatorId) && operatorId > 0))
+    )
       throw new SessionReviewError('invalid_input');
     const { rows } = await this.db.$client.query<ReviewQueueRow>(
-      `SELECT s.id,s.transaction_no,cp.serial_number,s.connector_no,s.id_tag,s.origin,s.payment_mode,
+      `SELECT s.id,s.transaction_no,cp.serial_number,cp.id::text AS charge_point_id,
+         st.id::text AS site_id,st.site_name,s.connector_no,s.id_tag,s.origin,s.payment_mode,
          s.energy_wh,s.received_stopped_at,s.updated_at,st.operator_id,
          coalesce((SELECT array_agg(r.resolution ORDER BY r.record_no) FROM reconciliation_records r
            WHERE r.session_id=s.id AND r.reviewed_at IS NULL
              AND r.record_type = ANY($2::reconciliation_record_type[])),'{}') AS open_records
        FROM sessions s JOIN charge_points cp ON cp.id=s.charge_point_id JOIN sites st ON st.id=cp.site_id
-       WHERE s.status='review' ORDER BY s.updated_at DESC,s.id DESC LIMIT $1`,
-      [limit, VERDICT_TYPES],
+       WHERE s.status='review' AND ($3::bigint IS NULL OR st.operator_id=$3)
+       ORDER BY s.updated_at DESC,s.id DESC LIMIT $1`,
+      [limit, VERDICT_TYPES, operatorId ?? null],
     );
     return rows.map((r) => ({
       session_id: Number(r.id),
       transaction_no: r.transaction_no,
       station: r.serial_number,
+      charge_point_id: r.charge_point_id,
+      site_id: r.site_id,
+      site_name: r.site_name,
       connector_no: r.connector_no,
       id_tag: r.id_tag,
       origin: r.origin,
@@ -153,6 +164,9 @@ interface ReviewQueueRow {
   id: string;
   transaction_no: number;
   serial_number: string;
+  charge_point_id: string;
+  site_id: string;
+  site_name: string;
   connector_no: number;
   id_tag: string;
   origin: string;
@@ -168,6 +182,10 @@ export interface ReviewQueueItem {
   session_id: number;
   transaction_no: number;
   station: string;
+  /** FE-12: ids and name for links to the charge point / station pages. */
+  charge_point_id: string;
+  site_id: string;
+  site_name: string;
   connector_no: number;
   id_tag: string;
   origin: string;

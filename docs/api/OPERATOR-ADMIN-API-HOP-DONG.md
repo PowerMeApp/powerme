@@ -341,7 +341,7 @@ tách theo bề mặt — refresh token không mang `role`, role đọc lại t�
 | Endpoint | Role | UC / FR / BR | Trạng thái · người làm | Ghi chú |
 |---|---|---|---|---|
 | `GET /operator/v1/summary` | operator_staff | UC-OPS-02/03, Table 5 #17 | **done** FE-03 · `operator-monitoring.ts` · Nghĩa | số trụ theo trạng thái, súng theo nhóm BR-P38, sự cố mở theo mức, hàng việc review / unattributed (cùng luật `listPending`) / T72 (`driver_charge_intents.state='unknown'` chưa gắn phiên) |
-| `GET /operator/v1/charge-points` | operator_staff | UC-OPS-02, FR-10, BR-P10, BR-P38/39 | **done** FE-03 · `operator-monitoring.ts` · Nghĩa | lọc `site_id`, `lifecycle` (mặc định ẩn `decommissioned`), `online`; page/page_size; trạng thái OCPP nguyên văn từng súng + `status_quality` (offline 900 s / stale 2 × heartbeat, cùng ngưỡng Driver API) |
+| `GET /operator/v1/charge-points` | operator_staff | UC-OPS-02, FR-10, BR-P10, BR-P38/39 | **done** FE-03 · `operator-monitoring.ts` · Nghĩa | lọc `site_id`, `lifecycle` (mặc định ẩn `decommissioned`), `online`, tìm riêng `charge_point_q` (mã / serial / ID trụ) và `site_q` (mã / tên / ID trạm) — FE-07, không phân biệt hoa thường và dấu, ≤ 100 ký tự, cả hai thì phải khớp cả hai; page/page_size; trạng thái OCPP nguyên văn từng súng + `status_quality` (offline 900 s / stale 2 × heartbeat, cùng ngưỡng Driver API) |
 | `GET /operator/v1/charge-points/{id}` | operator_staff | UC-OPS-02/04, Table 5 #20 | **done** FE-05 · `operator-monitoring.ts` · Nghĩa | súng, sự cố mở (cùng DTO màn 21, có `allowed_actions`), 20 lệnh gần nhất; trụ của Operator khác hoặc không có → 404; trụ `decommissioned` vẫn xem được theo id |
 | `GET /operator/v1/charge-points/{id}/metrics` | operator_staff | UC-OPS-02, FR-10, BR-P43 | planned · Trí | `window=7d\|30d`; từ `connector_status_events` |
 | `POST /operator/v1/charge-points/{id}/commands` | operator_staff | UC-OPS-04, FR-11, BR-P01/P06/P07 | **console** (chỉ remote_stop) · Trí | `action` ∈ `remote_start`, `remote_stop`, `reset`; 202; Idempotency-Key |
@@ -361,11 +361,11 @@ tách theo bề mặt — refresh token không mang `role`, role đọc lại t�
 
 | Endpoint | Role | UC / FR / BR | Trạng thái · người làm | Ghi chú |
 |---|---|---|---|---|
-| `GET /operator/v1/sessions` | operator_staff | UC-OPS-05, FR-13, BR-P08 | **console** `sessions` · Trí | `queue=review\|unattributed` (giữ tên tham số của mock dashboard), lọc status/payment_mode/trụ/thời gian |
+| `GET /operator/v1/sessions` | operator_staff | UC-OPS-05, FR-13, BR-P08 | **partial** FE-12 · `operator-sessions.ts` · Nghĩa (route) / Trí (service) | đã làm: `queue=unattributed\|review` (mặc định unattributed) + page/page_size, lọc theo operator của token (màn 23); mỗi dòng có `charge_point_serial`, `charge_point_id`, `site_id`, `site_name` (link trang trụ / trạm); chưa làm: lọc status/payment_mode/trụ/thời gian |
 | `GET /operator/v1/sessions/{id}` | operator_staff | UC-OPS-05, FR-16 | **console** `session` · Trí | meter, tạm dừng, bản ghi đối soát |
-| `POST /operator/v1/sessions/{id}/resolve` | operator_staff | UC-OPS-05, STM-1 #17 | **service** `SessionReviewService.resolveReview` · Trí | body `{resolution, note}`; mock dashboard chỉ gửi `note` |
-| `POST /operator/v1/sessions/{id}/assign` | operator_staff | UC-OPS-05, BR-P06/P08 | **in progress** · Trí (T102) | giữ chỗ; body chốt ở T102 |
-| `POST /operator/v1/sessions/{id}/close` | operator_staff | UC-OPS-05 | **in progress** · Trí (T102) | |
+| `POST /operator/v1/sessions/{id}/resolve` | operator_staff | UC-OPS-05, STM-1 #17 | **done** FE-12 · bọc `SessionReviewService.resolveReview` · Nghĩa (route) / Trí (service) | body `{resolution, note}`; actor = staff của token |
+| `POST /operator/v1/sessions/{id}/assign` | operator_staff | UC-OPS-05, BR-P06/P08 | **done** FE-12 · bọc `UnattributedSessionService.assign` · Nghĩa (route) / Trí (service, T102) | body `{driver_id, note}`; 409 BR-P08 / đã quyết định, 422 `driver_not_eligible` |
+| `POST /operator/v1/sessions/{id}/close` | operator_staff | UC-OPS-05 | **done** FE-12 · bọc `UnattributedSessionService.close` · Nghĩa (route) / Trí (service, T102) | body `{reason, note}` (`reason` a-z0-9_, ≤ 40) |
 | `GET /operator/v1/reconciliation-records` | operator_staff | UC-OPS-05, FR-16, Table 7 #6–7 | **console** `reconciliation` · Trí | |
 | `GET /operator/v1/charge-intents` | operator_staff | UC-OPS-04, T72 | planned · Trí | hàng việc start không rõ; chưa có hàm liệt kê |
 | `GET /operator/v1/charge-intents/{id}/recovery` | operator_staff | T72 | **service** `startRecovery` · Trí | |
@@ -422,7 +422,7 @@ thuộc Platform Administration; Operator xem doanh thu trạm mình qua `/opera
 
 | Endpoint | Role | UC / FR / BR | Trạng thái · người làm | Ghi chú |
 |---|---|---|---|---|
-| `GET /admin/v1/summary` | admin | UC-ADM-07, Table 5 #27 | **console** (một phần) · Nghĩa (T97) | console có trụ/phiên/đối soát/bản tin; thiếu user, thẻ, ngoại lệ |
+| `GET /admin/v1/summary` | admin | UC-ADM-07, Table 5 #27 | **done** FE-14 · `admin-platform.ts` · Nghĩa | thống kê chung (20/11): số Operator (đang hoạt động), số trạm, mạng lưới (trụ đang hoạt động online / offline, súng theo nhóm BR-P38, sự cố đang mở theo mức); user theo vai trò (+ bị khoá), trụ theo vòng đời + online (luật offline như operator API), thẻ theo trạng thái, ngoại lệ thanh toán mở theo UC-ADM-08 (khoản trễ chưa hoàn, hoá đơn `needs_review`, refund `failed`) |
 | `GET /admin/v1/sessions` | admin | UC-ADM-07, FR-19 | **console** · Trí | chỉ đọc, lọc `operator_id` |
 | `GET /admin/v1/sessions/{id}` | admin | UC-ADM-07 | **console** · Trí | admin không giải quyết phiên của operator |
 | `GET /admin/v1/reconciliation-records` | admin | UC-ADM-07, FR-16 | **console** · Trí | |
@@ -809,7 +809,7 @@ trạng thái (2xx/4xx nghiệp vụ khác với 401/403). Ba điều kiện c�
 | 61 | `GET /api/admin/v1/rfid-cards` | 401 | 403 | 403 | ✓ | planned |
 | 62 | `POST /api/admin/v1/rfid-cards` | 401 | 403 | 403 | ✓ | planned |
 | 63 | `PATCH /api/admin/v1/rfid-cards/{cardId}` | 401 | 403 | 403 | ✓ | planned |
-| 64 | `GET /api/admin/v1/summary` | 401 | 403 | 403 | ✓ | console |
+| 64 | `GET /api/admin/v1/summary` | 401 | 403 | 403 | ✓ | implemented (FE-14) |
 | 65 | `GET /api/admin/v1/sessions` | 401 | 403 | 403 | ✓ | console |
 | 66 | `GET /api/admin/v1/sessions/{sessionId}` | 401 | 403 | 403 | ✓ | console |
 | 67 | `GET /api/admin/v1/reconciliation-records` | 401 | 403 | 403 | ✓ | console |
