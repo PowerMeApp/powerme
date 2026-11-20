@@ -13,3 +13,7 @@
 # File sinh tự động — gập lại trong diff của PR
 package-lock.json linguist-generated=true -diff
 packages/shared/src/api/generated/** linguist-generated=true -diff
+
+# T139: dữ liệu đo xuất tự động, vẫn giữ diff để kiểm tra.
+apps/csms/lab/nfr-res-01/evidence/t139-20261120-b71120/*.json linguist-generated=true
+apps/csms/lab/nfr-res-01/evidence/t139-20261120-b71120/*.jsonl linguist-generated=true
