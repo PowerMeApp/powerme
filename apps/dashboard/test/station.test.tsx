@@ -57,6 +57,7 @@ const revenue: RevenueReport = {
   from: '2026-11-01',
   to: '2026-11-05',
   group_by: 'charge_point',
+  operator_id: '1',
   currency: 'VND',
   rows: [],
   totals: {
@@ -67,6 +68,7 @@ const revenue: RevenueReport = {
     unattributed_energy_wh: 0,
   },
   pending_reconciliation: { session_count: 0 },
+  unsettled: { session_count: 0, by_reason: {} },
   generated_at: '2026-11-20T02:15:00Z',
 };
 

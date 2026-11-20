@@ -19,11 +19,24 @@ afterEach(() => vi.restoreAllMocks());
 const OP = 'GET /api/operator/v1/revenue';
 const OP_CSV = 'GET /api/operator/v1/revenue.csv';
 const AD = 'GET /api/admin/v1/revenue';
-const row = (over: Partial<RevenueRow>): RevenueRow => ({ key: '1', ...EMPTY_BUCKET, ...over });
+/** As the real API returns it (#197): every group field present, null when not in the grouping. */
+const row = (over: Partial<RevenueRow>): RevenueRow => ({
+  key: '1',
+  operator_id: null,
+  operator_name: null,
+  site_id: null,
+  site_name: null,
+  charge_point_id: null,
+  serial_number: null,
+  day: null,
+  ...EMPTY_BUCKET,
+  ...over,
+});
 const report = (over: Partial<RevenueReport> = {}): RevenueReport => ({
   from: '2026-11-01',
   to: '2026-11-05',
   group_by: 'charge_point',
+  operator_id: '1',
   currency: 'VND',
   rows: [
     row({
@@ -47,7 +60,7 @@ const report = (over: Partial<RevenueReport> = {}): RevenueReport => ({
     unattributed_energy_wh: 2_000,
   },
   pending_reconciliation: { session_count: 2 },
-  unsettled: { session_count: 3, by_reason: { promotion: 2, rfid_card: 1 } },
+  unsettled: { session_count: 3, by_reason: { promotion_unsupported: 2, ineligible: 1 } },
   generated_at: '2026-11-20T02:15:00Z',
   ...over,
 });
@@ -90,7 +103,8 @@ describe('revenueModel', () => {
   it('formats money, energy, reasons and the generated time', () => {
     expect(formatVnd(1_250_000)).toBe('1.250.000 ₫');
     expect(formatKwh(45_500)).toBe('45,5 kWh');
-    expect(reasonLabel('promotion')).toBe('Có khuyến mãi');
+    expect(reasonLabel('promotion_unsupported')).toBe('Có khuyến mãi (chưa áp vào quyết toán)');
+    expect(reasonLabel('ineligible')).toMatch(/T115/);
     expect(reasonLabel('new_code')).toBe('new_code');
     expect(formatGenerated('2026-11-20T02:15:00Z')).toBe('20/11/2026 09:15');
   });

@@ -17,11 +17,18 @@ export const GROUP_LABEL: Record<RevenueGroupBy, string> = {
   day: 'Ngày',
 };
 
-/** Reasons a reconciled session was not debited (T108 `unsettled.by_reason`); unknown codes show as is. */
+/**
+ * Reasons a reconciled session was not debited (T108 `unsettled.by_reason`, contract §4); unknown
+ * codes show as is. Not shown on the screen for now (Nghĩa 20/11 removed the notes).
+ */
 export const REASON_LABEL: Record<string, string> = {
-  promotion: 'Có khuyến mãi',
-  rfid_card: 'Thẻ RFID chờ T115',
-  rfid_pending: 'Thẻ RFID chờ T115',
+  promotion_unsupported: 'Có khuyến mãi (chưa áp vào quyết toán)',
+  ineligible: 'Chưa đủ điều kiện trừ tiền (gồm thẻ RFID chờ T115)',
+  posted_without_debit: 'Lệch sổ: đã quyết toán nhưng không có khoản trừ',
+  late_start_operator_review: 'Bắt đầu muộn, chờ Operator duyệt',
+  missing_meter: 'Thiếu số đo',
+  invalid_energy: 'Năng lượng không hợp lệ',
+  policy_unconfigured: 'Chưa cấu hình chính sách giá',
 };
 export const reasonLabel = (code: string) => REASON_LABEL[code] ?? code;
 
@@ -65,7 +72,19 @@ export function fillDays(rows: readonly RevenueRow[], from: string, to: string):
   const out: RevenueRow[] = [];
   for (let i = 0; i < n; i++) {
     const day = new Date(dayMs(from) + i * DAY_MS).toISOString().slice(0, 10);
-    out.push(byDay.get(day) ?? { key: day, day, ...EMPTY_BUCKET });
+    out.push(
+      byDay.get(day) ?? {
+        key: day,
+        operator_id: null,
+        operator_name: null,
+        site_id: null,
+        site_name: null,
+        charge_point_id: null,
+        serial_number: null,
+        day,
+        ...EMPTY_BUCKET,
+      },
+    );
   }
   // Rows outside the period (should not happen) are kept at the end rather than dropped.
   for (const r of rows) if (!out.includes(r)) out.push(r);
