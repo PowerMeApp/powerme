@@ -1524,22 +1524,27 @@ paths:
       tags: [revenue]
       operationId: getOperatorRevenue
       x-roles: [operator_staff]
-      x-status: planned
-      x-owner: Khang (T108)
+      x-status: implemented
+      x-owner: Khang (T108a)
       x-refs: [UC-OPS-09, FR-18, BR-P46, BR-P45, BR-P08, 'Table 5 #25']
       summary: Doanh thu của operator theo trụ, site hoặc ngày (BR-P46)
       description: |
-        `revenue_vnd` = tổng `session_debit` của phiên `payment_mode = csms_billed` và
-        `status = reconciled`, mỗi phiên tính đúng một lần (unique index
-        `credit_transactions_one_debit_per_session`), chỉ trụ của operator người gọi. Phiên
-        `unattributed` là dòng riêng, chỉ đếm phiên và Wh, không có tiền. Không tính phí nền tảng,
-        không chia doanh thu (K1 đóng). Xếp kỳ (K3, Trí chốt 12/11): phiên `reconciled` xếp theo
-        **đúng mốc giờ quyết toán đã dùng để tính giá** (giờ trụ đã kiểm, hoặc giờ CSMS khi rơi về
-        — cách lưu mốc chờ #120 / T101); khi chưa có mốc lưu thì dùng
-        `COALESCE(cp_stopped_at, received_stopped_at)`. Phiên `closed` / `review` xếp theo
+        `csms_billed_revenue_vnd` = Σ |`amount_vnd`| của dòng `session_debit` của phiên
+        `payment_mode = csms_billed`, `status = reconciled` **và có dòng `session_debit`** (T108
+        20/11), mỗi phiên tính đúng một lần (unique index
+        `credit_transactions_one_debit_per_session`), chỉ trụ của operator người gọi (lấy từ DB,
+        không nhận `operator_id` — gửi lên là 400 `invalid_input`). Không cộng `adjustment` (K2,
+        T108 v1). Phiên csms_billed `reconciled` chưa có debit (thẻ RFID chưa trừ tiền, quyết toán
+        treo — kể cả phiên có khuyến mãi, K6) không vào doanh thu, đếm ở `unsettled` theo lý do.
+        Phiên `unattributed` (gồm cả free vend) là nhóm riêng, chỉ đếm phiên và Wh, không có tiền.
+        Không tính phí nền tảng, không chia doanh thu (K1 đóng). Xếp kỳ (K3): phiên `reconciled`
+        theo `COALESCE(priced_ended_at, cp_stopped_at, received_stopped_at)` — `priced_ended_at`
+        là mốc đã dùng để tính giá (#120 / T134); phiên `closed` / `review` theo
         `received_stopped_at`. Ngày chia theo UTC+7 (Asia/Ho_Chi_Minh). Phiên csms_billed đã dừng
         nhưng chưa reconciled được đếm ở `pending_reconciliation`; số của kỳ cũ có thể đổi khi
-        một phiên đối soát muộn, nên màn hình và CSV ghi "tính đến lúc `generated_at`".
+        một phiên đối soát muộn, nên màn hình và CSV ghi "tính đến lúc `generated_at`". Chỉ trả
+        nhóm có phiên; giao diện tự điền ngày trống. `site_id` của operator khác → báo cáo rỗng
+        như site không tồn tại.
       parameters:
         - $ref: '#/components/parameters/fromDate'
         - $ref: '#/components/parameters/toDate'
@@ -1562,14 +1567,17 @@ paths:
       tags: [revenue]
       operationId: exportOperatorRevenueCsv
       x-roles: [operator_staff]
-      x-status: planned
-      x-owner: Khang (T108)
+      x-status: implemented
+      x-owner: Khang (T108a)
       x-refs: [UC-OPS-09, BR-P46]
       summary: Cùng báo cáo, dạng CSV — khớp từng dòng và dòng tổng với màn hình
       description: |
         Cùng tham số và cùng truy vấn với `GET /revenue`; CSV UTF-8 có BOM (Excel đọc đúng tiếng
-        Việt), dấu phẩy, số nguyên không định dạng nghìn, dòng cuối `TOTAL`. Cột theo thứ tự các
-        trường của `RevenueRow` rồi `RevenueBucket` (csms_billed_*, unattributed_*).
+        Việt), dấu phẩy, CRLF, RFC 4180, số nguyên không định dạng nghìn, ô trống cho `null`. Cột
+        theo thứ tự các trường của `RevenueRow` rồi `RevenueBucket` (csms_billed_*,
+        unattributed_*), cuối cùng `generated_at`. Dòng cuối `TOTAL` bằng `totals` và là dòng duy
+        nhất có `generated_at` ("tính đến lúc", UTC+7 có offset, K9). Chống CSV injection: ô chuỗi
+        bắt đầu bằng `=`, `+`, `-`, `@`, tab hoặc CR được thêm `'` ở đầu.
       parameters:
         - $ref: '#/components/parameters/fromDate'
         - $ref: '#/components/parameters/toDate'
@@ -1595,11 +1603,14 @@ paths:
       tags: [revenue]
       operationId: getPlatformRevenue
       x-roles: [admin]
-      x-status: planned
-      x-owner: Khang (T108)
+      x-status: implemented
+      x-owner: Khang (T108a)
       x-refs: [UC-ADM-10, BR-P46]
       summary: Doanh thu toàn nền tảng, lọc hoặc nhóm theo operator
-      description: Cùng định nghĩa với báo cáo operator; thêm `group_by = operator` và lọc `operator_id`.
+      description: >-
+        Cùng định nghĩa và cùng truy vấn với báo cáo operator; thêm `group_by = operator` (mặc định)
+        và lọc `operator_id`. Không nhận `site_id`. `operator_id = A` cho đúng `totals` mà nhân viên
+        của A thấy ở `GET /operator/v1/revenue`.
       parameters:
         - $ref: '#/components/parameters/fromDate'
         - $ref: '#/components/parameters/toDate'
@@ -1624,10 +1635,11 @@ paths:
       tags: [revenue]
       operationId: exportPlatformRevenueCsv
       x-roles: [admin]
-      x-status: planned
-      x-owner: Khang (T108)
+      x-status: implemented
+      x-owner: Khang (T108a)
       x-refs: [UC-ADM-10, BR-P46]
       summary: Báo cáo doanh thu nền tảng dạng CSV
+      description: Cùng truy vấn với `GET /admin/v1/revenue`, cùng định dạng với `/operator/v1/revenue.csv`.
       parameters:
         - $ref: '#/components/parameters/fromDate'
         - $ref: '#/components/parameters/toDate'
@@ -1640,6 +1652,9 @@ paths:
       responses:
         '200':
           description: Tệp CSV
+          headers:
+            Content-Disposition:
+              schema: { type: string, examples: ['attachment; filename="revenue_2026-11-01_2026-11-30.csv"'] }
           content:
             text/csv:
               schema: { type: string }
@@ -2709,7 +2724,10 @@ components:
         application/json:
           schema: { $ref: '#/components/schemas/Error' }
     RevenueBadRequest:
-      description: '`invalid_input`, `invalid_period` (from > to hoặc dài hơn 366 ngày)'
+      description: |
+        `invalid_input` (thiếu `from` / `to`, ngày sai định dạng hoặc không có thật, `group_by` lạ,
+        tham số lạ hoặc trùng — kể cả `operator_id` trên route operator, `site_id` trên route
+        admin), `invalid_period` (from > to hoặc dài hơn 366 ngày tính cả hai đầu)
       content:
         application/json:
           schema: { $ref: '#/components/schemas/Error' }
@@ -3458,7 +3476,7 @@ components:
         csms_billed_session_count: { type: integer, minimum: 0 }
         csms_billed_energy_wh: { type: integer, minimum: 0 }
         csms_billed_revenue_vnd: { type: integer, minimum: 0, description: 'Σ session_debit, mỗi phiên một lần' }
-        unattributed_session_count: { type: integer, minimum: 0 }
+        unattributed_session_count: { type: integer, minimum: 0, description: 'Phiên payment_mode = unattributed đã dừng, gồm cả free vend' }
         unattributed_energy_wh: { type: integer, minimum: 0, description: 'Không quy ra tiền' }
     RevenueRow:
       allOf:
@@ -3476,14 +3494,22 @@ components:
         - $ref: '#/components/schemas/RevenueBucket'
     RevenueReport:
       type: object
-      required: [from, to, group_by, currency, rows, totals, pending_reconciliation, generated_at]
+      required: [from, to, group_by, currency, rows, totals, pending_reconciliation, unsettled, generated_at]
       properties:
         from: { type: string, format: date }
         to: { type: string, format: date }
         group_by: { type: string, enum: [operator, site, charge_point, day] }
-        operator_id: { oneOf: [{ $ref: '#/components/schemas/Id' }, { type: 'null' }] }
+        operator_id:
+          oneOf: [{ $ref: '#/components/schemas/Id' }, { type: 'null' }]
+          description: Route operator — operator của người gọi; route admin — bộ lọc, null nếu không lọc
         currency: { type: string, const: VND }
-        rows: { type: array, items: { $ref: '#/components/schemas/RevenueRow' } }
+        rows:
+          type: array
+          items: { $ref: '#/components/schemas/RevenueRow' }
+          description: |
+            Chỉ nhóm có phiên được tính (csms_billed hoặc unattributed); giao diện tự điền ngày trống.
+            Thứ tự cố định — `day` tăng dần; nhóm khác theo tên operator → tên site → serial → id.
+            Trường không thuộc nhóm là `null`. Σ rows = totals
         totals: { $ref: '#/components/schemas/RevenueBucket' }
         pending_reconciliation:
           type: object
@@ -3491,6 +3517,23 @@ components:
           required: [session_count]
           properties:
             session_count: { type: integer, minimum: 0 }
+        unsettled:
+          type: object
+          description: |
+            T108 20/11: phiên csms_billed đã `reconciled` trong kỳ nhưng **chưa có** `session_debit`
+            (thẻ RFID chưa trừ tiền — T115, quyết toán treo, phiên có khuyến mãi — K6). Không vào
+            doanh thu và không vào `csms_billed_session_count`. `by_reason`: lý do →
+            số phiên; lý do = `charge_settlement_jobs.reason` khi job `pending` (vd
+            `promotion_unsupported`, `late_start_operator_review`, `missing_meter`,
+            `invalid_energy`, `policy_unconfigured`), `ineligible` khi không có job hoặc job
+            `ineligible`, `posted_without_debit` khi job `posted` mà không có debit (lệch sổ).
+          required: [session_count, by_reason]
+          properties:
+            session_count: { type: integer, minimum: 0 }
+            by_reason:
+              type: object
+              additionalProperties: { type: integer, minimum: 1 }
+              examples: [{ promotion_unsupported: 1, ineligible: 2 }]
         generated_at:
           allOf: [{ $ref: '#/components/schemas/Timestamp' }]
           description: 'Lúc chạy truy vấn; hiển thị "tính đến lúc …" vì kỳ cũ còn đổi khi có phiên đối soát muộn (K3)'
@@ -3501,7 +3544,9 @@ components:
       enum: [csms_billed, pending_reconciliation, unattributed]
       description: |
         `csms_billed` = csms_billed + reconciled (vào doanh thu) · `pending_reconciliation` =
-        csms_billed đã dừng, chưa reconciled · `unattributed` = không có người trả
+        csms_billed đã dừng, chưa reconciled · `unattributed` = không có người trả.
+        Ghi chú cho T108b (20/11): doanh thu nay đòi có `session_debit`, nên `csms_billed` cần thêm
+        điều kiện đó và cần thêm kind `unsettled` (như `RevenueReport.unsettled`). Chưa sửa ở đây.
     TransactionRow:
       type: object
       description: |
