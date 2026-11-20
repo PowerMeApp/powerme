@@ -418,7 +418,7 @@ thuộc Platform Administration; Operator xem doanh thu trạm mình qua `/opera
 
 | Endpoint | Role | UC / FR / BR | Trạng thái · người làm | Ghi chú |
 |---|---|---|---|---|
-| `GET /admin/v1/summary` | admin | UC-ADM-07, Table 5 #27 | **console** (một phần) · Nghĩa (T97) | console có trụ/phiên/đối soát/bản tin; thiếu user, thẻ, ngoại lệ |
+| `GET /admin/v1/summary` | admin | UC-ADM-07, Table 5 #27 | **done** FE-14 · `admin-platform.ts` · Nghĩa | user theo vai trò (+ bị khoá), trụ theo vòng đời + online (luật offline như operator API), thẻ theo trạng thái, ngoại lệ thanh toán mở theo UC-ADM-08 (khoản trễ chưa hoàn, hoá đơn `needs_review`, refund `failed`) |
 | `GET /admin/v1/sessions` | admin | UC-ADM-07, FR-19 | **console** · Trí | chỉ đọc, lọc `operator_id` |
 | `GET /admin/v1/sessions/{id}` | admin | UC-ADM-07 | **console** · Trí | admin không giải quyết phiên của operator |
 | `GET /admin/v1/reconciliation-records` | admin | UC-ADM-07, FR-16 | **console** · Trí | |
@@ -788,7 +788,7 @@ trạng thái (2xx/4xx nghiệp vụ khác với 401/403). Ba điều kiện c�
 | 61 | `GET /api/admin/v1/rfid-cards` | 401 | 403 | 403 | ✓ | planned |
 | 62 | `POST /api/admin/v1/rfid-cards` | 401 | 403 | 403 | ✓ | planned |
 | 63 | `PATCH /api/admin/v1/rfid-cards/{cardId}` | 401 | 403 | 403 | ✓ | planned |
-| 64 | `GET /api/admin/v1/summary` | 401 | 403 | 403 | ✓ | console |
+| 64 | `GET /api/admin/v1/summary` | 401 | 403 | 403 | ✓ | implemented (FE-14) |
 | 65 | `GET /api/admin/v1/sessions` | 401 | 403 | 403 | ✓ | console |
 | 66 | `GET /api/admin/v1/sessions/{sessionId}` | 401 | 403 | 403 | ✓ | console |
 | 67 | `GET /api/admin/v1/reconciliation-records` | 401 | 403 | 403 | ✓ | console |

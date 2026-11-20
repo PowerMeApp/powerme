@@ -103,7 +103,7 @@ function intParam(raw: string | null, fallback: number): number {
 }
 
 /** `offline` for a charge point row aliased `cp` ($2 = offline threshold in ms). */
-const OFFLINE_SQL = `(NOT cp.is_online OR cp.last_message_at IS NULL
+export const OFFLINE_SQL = `(NOT cp.is_online OR cp.last_message_at IS NULL
   OR cp.last_message_at < now()-($2::bigint*interval '1 millisecond'))`;
 
 /**
