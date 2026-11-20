@@ -116,14 +116,15 @@ class DriverApiSession {
     required String key,
     required String connectorId,
     required String vehicleId,
-    required int energyLimitWh,
+    required String mode,
+    required Map<String, int> limit,
   }) async {
     final session = _ownedSession(principalId);
     final body = <String, Object?>{
       'connector_id': connectorId,
       'vehicle_id': vehicleId,
-      'mode': 'energy_kwh',
-      'energy_limit_wh': energyLimitWh,
+      'mode': mode,
+      ...limit,
     };
     return _withProtectedSession(
       session,
@@ -141,10 +142,12 @@ class DriverApiSession {
 
   Future<Map<String, dynamic>> readCharge(
     String principalId,
-    String key,
-  ) async => _protectedRead(
-    _ownedSession(principalId),
+    String key, [
+    CancelToken? cancel,
+  ]) async => _readForPrincipal(
+    principalId,
     'charges/${Uri.encodeComponent(key)}',
+    cancel ?? CancelToken(),
   );
 
   Future<Map<String, dynamic>> readCredit(

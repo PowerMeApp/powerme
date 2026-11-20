@@ -207,9 +207,10 @@ describeDb('migration 0021 — top-up IPN, khoản trễ, querydr, ngoại lệ 
             "CREATE INDEX top_ups_pending_next_attempt_idx ON public.top_ups USING btree (next_attempt_at) WHERE (status = 'pending'::top_up_status)",
         },
       ]);
-      expect((await one(`SELECT enum_range(NULL::top_up_exception_kind)::text AS r`))['r']).toBe(
-        '{unresolved_04,unresolved_07,loyalty_error}',
-      );
+      // 0021 tạo ba giá trị đầu; migration sau chỉ thêm vào cuối (0027: retry_exhausted).
+      expect(
+        String((await one(`SELECT enum_range(NULL::top_up_exception_kind)::text AS r`))['r']),
+      ).toMatch(/^\{unresolved_04,unresolved_07,loyalty_error[,}]/);
 
       const comment = async (table: string, col: string) =>
         String(
@@ -227,7 +228,8 @@ describeDb('migration 0021 — top-up IPN, khoản trễ, querydr, ngoại lệ 
       expect(lateRef).not.toMatch(/cửa sổ 1 giờ|LATE_WINDOW/);
       expect(await comment('top_ups', 'late_paid_at')).toContain('vnp_PayDate');
       expect(await comment('top_ups', 'late_amount_vnd')).toContain('vnp_Amount / 100');
-      expect(await comment('top_ups', 'next_attempt_at')).toContain('+ 5, 10, 20, 40, 60 phút');
+      // 0027 (T32 Phần 8c) viết lại COMMENT theo lịch mới; test chạy tới migration mới nhất.
+      expect(await comment('top_ups', 'next_attempt_at')).toContain('+ 15, 30, 45, 60 phút');
       expect(await comment('top_ups', 'exception_kind')).toContain('loyalty_error');
       expect(await comment('top_ups', 'exception_reviewed_at')).toContain('Phần 10');
       expect(await comment('top_ups', 'completed_at')).toContain('rời pending');
@@ -376,7 +378,7 @@ describeDb('migration 0021 — top-up IPN, khoản trễ, querydr, ngoại lệ 
         (i) => i.config.name === 'loyalty_transactions_one_adjust_per_top_up',
       )!;
       expect(l.config.unique).toBe(true);
-      expect(topUpExceptionKindEnum.enumValues).toEqual([
+      expect(topUpExceptionKindEnum.enumValues.slice(0, 3)).toEqual([
         'unresolved_04',
         'unresolved_07',
         'loyalty_error',

@@ -75,11 +75,14 @@ describe('Cảnh báo sự cố (màn 21)', () => {
   it('lists the three kinds with labels; buttons only from allowed_actions; nav link', async () => {
     const seen = fakeCsms({ [LIST]: list(base, offline, report) });
     open();
-    expect(await screen.findByText('Faulted · GroundFailure · Connector 1')).toBeInTheDocument();
-    expect(screen.getByText('Offline · toàn Charge Point')).toBeInTheDocument();
-    expect(screen.getByText('Driver report · Connector 2')).toBeInTheDocument();
+    expect(await screen.findByText('Faulted · GroundFailure · Súng 1')).toBeInTheDocument();
+    expect(screen.getByText('Offline · toàn trụ sạc')).toBeInTheDocument();
+    expect(
+      within(screen.getByRole('navigation', { name: 'Breadcrumb' })).getByText('Cảnh báo sự cố'),
+    ).toHaveAttribute('aria-current', 'page');
+    expect(screen.getByText('Driver report · Súng 2')).toBeInTheDocument();
     expect(kindLabel({ ...report, error_code: 'GroundFailure' })).toBe(
-      'Driver report · GroundFailure · Connector 2',
+      'Driver report · GroundFailure · Súng 2',
     );
     expect(screen.getByText('2 tài xế báo lỗi')).toBeInTheDocument();
     const a = within(await alert(1007));
@@ -88,7 +91,7 @@ describe('Cảnh báo sự cố (màn 21)', () => {
     expect(a.queryByRole('button', { name: 'Xác nhận' })).toBeNull();
     const o = within(await alert(1008));
     expect(o.getByRole('button', { name: 'Xác nhận' })).toBeInTheDocument();
-    expect(o.getByText('Charge Point offline')).toBeInTheDocument();
+    expect(o.getByText('Trụ sạc offline')).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Cảnh báo sự cố' })).toBeInTheDocument();
     // D41 (FE-05): the serial opens Charge Point Detail.
     expect(a.getByRole('link', { name: 'RH24D1-00001' })).toHaveAttribute(
@@ -176,7 +179,7 @@ describe('Cảnh báo sự cố (màn 21)', () => {
     const dialog = screen.getByRole('dialog', { name: 'Gửi Reset tới RH24D1-00001?' });
     expect(within(dialog).getByRole('radio', { name: /Soft/ })).toBeChecked();
     await user.click(within(dialog).getByRole('button', { name: 'Gửi Reset' }));
-    expect(await screen.findByText('Charge Point nhận lệnh Reset Soft')).toBeInTheDocument();
+    expect(await screen.findByText('Trụ sạc nhận lệnh Reset Soft')).toBeInTheDocument();
     expect(seen.find((r) => r.path.endsWith('/reset'))?.body).toEqual({ type: 'Soft' });
   });
 
@@ -216,10 +219,10 @@ describe('Cảnh báo sự cố (màn 21)', () => {
     await user.click(screen.getByRole('radio', { name: /Hard/ }));
     await user.click(screen.getByRole('button', { name: 'Gửi Reset' }));
     const second = await screen.findByRole('dialog', { name: 'RH24D1-00001 đang có phiên sạc' });
-    expect(within(second).getByText('Connector 2 — phiên 55')).toBeInTheDocument();
+    expect(within(second).getByText('Súng 2 — phiên 55')).toBeInTheDocument();
     await user.click(within(second).getByRole('button', { name: 'Vẫn Reset' }));
     expect(
-      await screen.findByText('Charge Point nhận lệnh Reset Hard (đã cắt phiên đang sạc)'),
+      await screen.findByText('Trụ sạc nhận lệnh Reset Hard (đã cắt phiên đang sạc)'),
     ).toBeInTheDocument();
     expect(seen.filter((r) => r.path.endsWith('/reset')).map((r) => r.body)).toEqual([
       { type: 'Hard' },
@@ -228,8 +231,8 @@ describe('Cảnh báo sự cố (màn 21)', () => {
   });
 
   it.each([
-    [502, 'station_error', 'Charge Point không trả lời lệnh Reset hợp lệ'],
-    [409, 'station_offline', 'Charge Point đang offline, không gửi được lệnh Reset'],
+    [502, 'station_error', 'Trụ sạc không trả lời lệnh Reset hợp lệ'],
+    [409, 'station_offline', 'Trụ sạc đang offline, không gửi được lệnh Reset'],
   ])('%s %s → Vietnamese message on the alert', async (status, error, text) => {
     fakeCsms({ [LIST]: list(base), [RESET]: { status, body: { error, detail: error } } });
     const { user } = open();

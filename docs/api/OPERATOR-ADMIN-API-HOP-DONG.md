@@ -2,7 +2,7 @@
 
 **Ngày:** 10/11/2026 · **sửa 12/11/2026** (BE-31: theo code FE-01a #118 / FE-01b #119 và ADR-0018)
 · **sửa lần 2 12/11/2026** (BE-33: Ân chốt access 900 s + refresh — T125; danh sách giao dịch Admin +
-CSV — T108)
+CSV — T108) · **sửa 20/11/2026** (T108a: 4 route doanh thu đã chạy, `unsettled`, K2 / K3 / K6, §4)
 **Task:** T98 — hợp đồng API Operator/Admin, cần có trước T97 (Nghĩa nối dashboard) và T108 (màn hình doanh thu)
 **Người chịu trách nhiệm:** Ngô Văn Minh Trí (WP2) — hợp đồng; route theo cột "Người làm" ở §3
 **File hợp đồng:** [`operator-admin-api.openapi.yaml`](operator-admin-api.openapi.yaml) (OpenAPI 3.1, v0.1.0)
@@ -211,6 +211,10 @@ Mọi route `/operator/v1` chỉ trả và chỉ cho tác động lên trụ thu
 onboarding vào site của operator khác trả 403 `site_of_other_operator` (SD-5a) vì site là thứ người
 dùng chọn từ danh sách của mình, nhận 403 nghĩa là dashboard có lỗi.
 
+Tham số **lọc** của danh sách và báo cáo (`site_id` của `charge-points` và của `revenue`) chỉ thu hẹp
+trong phạm vi operator người gọi: id của operator khác cho kết quả **rỗng** (200), như id không tồn
+tại — cùng cách `GET /operator/v1/charge-points?site_id=` đang làm (T108, 20/11).
+
 ### 2.4 JSON, lỗi, phân trang
 
 - snake_case, id bigint dạng chuỗi, tiền VND nguyên, điện năng Wh nguyên, thời điểm ISO 8601 UTC,
@@ -337,7 +341,7 @@ tách theo bề mặt — refresh token không mang `role`, role đọc lại t�
 | Endpoint | Role | UC / FR / BR | Trạng thái · người làm | Ghi chú |
 |---|---|---|---|---|
 | `GET /operator/v1/summary` | operator_staff | UC-OPS-02/03, Table 5 #17 | **done** FE-03 · `operator-monitoring.ts` · Nghĩa | số trụ theo trạng thái, súng theo nhóm BR-P38, sự cố mở theo mức, hàng việc review / unattributed (cùng luật `listPending`) / T72 (`driver_charge_intents.state='unknown'` chưa gắn phiên) |
-| `GET /operator/v1/charge-points` | operator_staff | UC-OPS-02, FR-10, BR-P10, BR-P38/39 | **done** FE-03 · `operator-monitoring.ts` · Nghĩa | lọc `site_id`, `lifecycle` (mặc định ẩn `decommissioned`), `online`; page/page_size; trạng thái OCPP nguyên văn từng súng + `status_quality` (offline 900 s / stale 2 × heartbeat, cùng ngưỡng Driver API) |
+| `GET /operator/v1/charge-points` | operator_staff | UC-OPS-02, FR-10, BR-P10, BR-P38/39 | **done** FE-03 · `operator-monitoring.ts` · Nghĩa | lọc `site_id`, `lifecycle` (mặc định ẩn `decommissioned`), `online`, tìm riêng `charge_point_q` (mã / serial / ID trụ) và `site_q` (mã / tên / ID trạm) — FE-07, không phân biệt hoa thường và dấu, ≤ 100 ký tự, cả hai thì phải khớp cả hai; page/page_size; trạng thái OCPP nguyên văn từng súng + `status_quality` (offline 900 s / stale 2 × heartbeat, cùng ngưỡng Driver API) |
 | `GET /operator/v1/charge-points/{id}` | operator_staff | UC-OPS-02/04, Table 5 #20 | **done** FE-05 · `operator-monitoring.ts` · Nghĩa | súng, sự cố mở (cùng DTO màn 21, có `allowed_actions`), 20 lệnh gần nhất; trụ của Operator khác hoặc không có → 404; trụ `decommissioned` vẫn xem được theo id |
 | `GET /operator/v1/charge-points/{id}/metrics` | operator_staff | UC-OPS-02, FR-10, BR-P43 | planned · Trí | `window=7d\|30d`; từ `connector_status_events` |
 | `POST /operator/v1/charge-points/{id}/commands` | operator_staff | UC-OPS-04, FR-11, BR-P01/P06/P07 | **console** (chỉ remote_stop) · Trí | `action` ∈ `remote_start`, `remote_stop`, `reset`; 202; Idempotency-Key |
@@ -388,10 +392,10 @@ tách theo bề mặt — refresh token không mang `role`, role đọc lại t�
 
 | Endpoint | Role | UC / FR / BR | Trạng thái · người làm | Ghi chú |
 |---|---|---|---|---|
-| `GET /operator/v1/revenue` | operator_staff | UC-OPS-09, FR-18, BR-P46 | planned · Khang (T108) | `from`, `to` (ngày), `group_by=charge_point\|site\|day`, `site_id` |
-| `GET /operator/v1/revenue.csv` | operator_staff | UC-OPS-09, BR-P46 | planned · Khang (T108) | cùng truy vấn với JSON |
-| `GET /admin/v1/revenue` | admin | UC-ADM-10, BR-P46 | planned · Khang (T108) | thêm `group_by=operator`, `operator_id` |
-| `GET /admin/v1/revenue.csv` | admin | UC-ADM-10, BR-P46 | planned · Khang (T108) | |
+| `GET /operator/v1/revenue` | operator_staff | UC-OPS-09, FR-18, BR-P46 | **đã chạy** (T108a) · Khang | `from`, `to` (ngày), `group_by=charge_point\|site\|day`, `site_id`; `operator_id` → 400 |
+| `GET /operator/v1/revenue.csv` | operator_staff | UC-OPS-09, BR-P46 | **đã chạy** (T108a) · Khang | cùng truy vấn với JSON |
+| `GET /admin/v1/revenue` | admin | UC-ADM-10, BR-P46 | **đã chạy** (T108a) · Khang | thêm `group_by=operator`, `operator_id` |
+| `GET /admin/v1/revenue.csv` | admin | UC-ADM-10, BR-P46 | **đã chạy** (T108a) · Khang | |
 | `GET /admin/v1/transactions` | admin | UC-ADM-10, BR-P46, Table 5 #35 | planned · T108 (Khang) | danh sách phiên đã dừng; lọc `from`/`to` (ngày, bắt buộc), `operator_id`, `site_id`, `charge_point_id`, `kind`, `origin`; page/page_size; `totals` của cả kết quả lọc |
 | `GET /admin/v1/transactions.csv` | admin | UC-ADM-10, BR-P46 | planned · T108 (Khang) | cùng tham số và truy vấn, không phân trang, dòng cuối `TOTAL`; đuôi `.csv` như `revenue.csv` |
 
@@ -449,12 +453,12 @@ với BE-31: +1 refresh (T125), +2 giao dịch Admin (T108).
 | Sự cố | 4 | 0 | 4 | 0 | 0 | 0 |
 | Phiên, đối soát, T72 | 15 | 0 | 3 | 9 | 2 | 1 |
 | Biểu giá & khuyến mãi | 6 | 0 | 0 | 0 | 0 | 6 |
-| Doanh thu & giao dịch | 6 | 0 | 0 | 0 | 0 | 6 |
+| Doanh thu & giao dịch | 6 | 4 | 0 | 0 | 0 | 2 |
 | Tài khoản & role | 8 | 0 | 0 | 0 | 0 | 8 |
 | Thẻ RFID | 3 | 0 | 0 | 0 | 0 | 3 |
 | Tổng quan nền tảng | 5 | 0 | 5 | 0 | 0 | 0 |
 | Ngoại lệ thanh toán | 8 | 0 | 0 | 0 | 0 | 8 |
-| **Cộng** | **76** | **3** | **16** | **11** | **2** | **44** |
+| **Cộng** | **76** | **7** | **16** | **11** | **2** | **40** |
 
 ## 4. Doanh thu theo BR-P46
 
@@ -468,14 +472,17 @@ Hợp đồng biến luật thành truy vấn:
 
 | Luật | Trong API |
 |---|---|
-| Chỉ `csms_billed` đã `reconciled` | `csms_billed_revenue_vnd` = Σ `credit_transactions.amount_vnd` (giá trị tuyệt đối) loại `session_debit` của phiên `payment_mode = csms_billed AND status = reconciled` |
+| Chỉ `csms_billed` đã `reconciled` | ~~`csms_billed_revenue_vnd` = Σ `credit_transactions.amount_vnd` (giá trị tuyệt đối) loại `session_debit` của phiên `payment_mode = csms_billed AND status = reconciled`~~ → thay bởi T108 20/11: phiên vào doanh thu = `payment_mode = csms_billed` **và** `status = reconciled` **và có dòng `session_debit`**; `csms_billed_revenue_vnd` = Σ \|`amount_vnd`\| của các dòng đó; `csms_billed_session_count` và `csms_billed_energy_wh` chỉ đếm các phiên này. Doanh thu là giá trị credit đã trừ cho phiên: không trừ điểm đổi lúc nạp, gồm cả phần thiếu đang nằm trong số dư âm (BR-P20) |
+| Đã đối soát nhưng chưa trừ tiền (T108) | phiên `csms_billed` `reconciled` **chưa có** `session_debit` (thẻ RFID chưa trừ tiền — T115; quyết toán treo: `promotion_unsupported`, `late_start_operator_review`, `missing_meter`, `invalid_energy`, `policy_unconfigured`…) không vào doanh thu, không vào `csms_billed_session_count`; đếm ở `unsettled: {session_count, by_reason}`. `reason` = `charge_settlement_jobs.reason` khi job `pending`; không có job hoặc job `ineligible` → `ineligible`; job `posted` mà không có debit → `posted_without_debit` (lệch sổ, cần kiểm tra). Mỗi phiên tối đa một job (`session_id` là khoá chính) |
 | Mỗi phiên một lần | unique index `credit_transactions_one_debit_per_session` đã bảo đảm một `session_debit` mỗi phiên; báo cáo join theo phiên, không theo dòng sổ cái khác |
-| Phiên unattributed là dòng riêng (UC-OPS-09) | `unattributed_session_count`, `unattributed_energy_wh` — **không có cột tiền** (không có ai để thu) |
-| Phiên chưa đối soát xong | không vào doanh thu; đếm ở `pending_reconciliation.session_count` để người xem biết số còn có thể tăng |
-| Operator chỉ thấy trạm của mình | `/operator/v1/revenue` lọc theo operator từ DB; `/admin/v1/revenue` toàn nền tảng, nhóm/lọc theo operator |
+| Phiên unattributed là dòng riêng (UC-OPS-09) | `unattributed_session_count`, `unattributed_energy_wh` — **không có cột tiền** (không có ai để thu). Gồm mọi phiên `payment_mode = unattributed` đã dừng (`closed`, `review`, `reconciled`), **kể cả free vend** (`origin = free_vend`). Số này không so với hàng đợi unattributed của FE-03 / BE-24, vì hàng đợi chỉ đếm phiên chưa xử lý |
+| Phiên chưa đối soát xong | không vào doanh thu; đếm ở `pending_reconciliation.session_count` (phiên `csms_billed` ở `closed` / `review`) để người xem biết số còn có thể tăng. Phiên đang chạy, `orphaned`, `failed` không vào nhóm nào (K11); phiên trên trụ chưa gắn site cũng không |
+| Một truy vấn (T108) | `rows`, `totals`, `pending_reconciliation`, `unsettled` tính trong **một câu SQL** (`GROUPING SETS ((nhóm), ())`), nên luôn khớp nhau; Σ `rows` = `totals`. **Chỉ trả nhóm có phiên** được tính (`csms_billed` hoặc `unattributed`); giao diện tự điền ngày trống. Thứ tự: `day` tăng dần; nhóm khác theo tên operator → tên site → serial → id |
+| Operator chỉ thấy trạm của mình | `/operator/v1/revenue` lọc theo operator từ DB; `/admin/v1/revenue` toàn nền tảng, nhóm/lọc theo operator. Route operator không nhận `operator_id` (gửi lên → 400 `invalid_input`); `site_id` của operator khác → báo cáo rỗng như site không tồn tại (§2.3) |
 | CSV khớp màn hình | `revenue.csv` nhận đúng tham số và chạy đúng truy vấn của JSON; cùng thứ tự dòng, dòng cuối `TOTAL` bằng `totals` |
+| Định dạng CSV (K9, T108) | UTF-8 có BOM, dấu phẩy, CRLF, RFC 4180 (bọc `"…"` khi có phẩy / ngoặc kép / xuống dòng). Cột: các trường `RevenueRow` (`key` … `day`), rồi `RevenueBucket`, cuối cùng `generated_at`. Dòng cuối `TOTAL` (`key = TOTAL`, cột nhóm trống) là dòng **duy nhất** có `generated_at` — "tính đến lúc", UTC+7 có offset (`2026-11-20T09:15:00+07:00`). Tiền và Wh là số nguyên không dấu nghìn; `null` → ô trống. **Chống CSV injection:** ô chuỗi bắt đầu bằng `=`, `+`, `-`, `@`, tab hoặc CR được thêm `'` ở đầu (tên site / operator do người dùng nhập). Tên tệp `revenue_<from>_<to>.csv` |
 | Không phí, không chia | không có trường `platform_fee`, `owner_share` (K1 đóng: D6 09/11 — không phí, không chia) |
-| Kỳ báo cáo (K3, Trí chốt 12/11) | phiên `reconciled` vào kỳ theo **đúng mốc giờ quyết toán đã dùng để tính giá** — giờ trụ (`cp_stopped_at`) khi đồng hồ trụ đã được kiểm, hoặc giờ CSMS (`received_stopped_at`) khi rơi về; cách lưu mốc này chờ #120 (T101, Sơn) chốt, trước đó dùng `COALESCE(cp_stopped_at, received_stopped_at)`. Phiên `closed` / `review` (đếm ở unattributed / `pending_reconciliation`) vào kỳ theo `received_stopped_at`. Chia ngày theo UTC+7 (Asia/Ho_Chi_Minh, `[from 00:00, to + 1 ngày 00:00)` giờ VN); kỳ ≤ 366 ngày |
+| Kỳ báo cáo (K3, Trí chốt 12/11) | phiên `reconciled` vào kỳ theo **đúng mốc giờ quyết toán đã dùng để tính giá** — giờ trụ (`cp_stopped_at`) khi đồng hồ trụ đã được kiểm, hoặc giờ CSMS (`received_stopped_at`) khi rơi về; ~~cách lưu mốc này chờ #120 (T101, Sơn) chốt, trước đó dùng `COALESCE(cp_stopped_at, received_stopped_at)`~~ → thay bởi T108 20/11: mốc đã lưu ở `sessions.priced_ended_at` (#120 / T134), nên dùng `COALESCE(priced_ended_at, cp_stopped_at, received_stopped_at)` — hai mốc sau chỉ cho phiên chưa được tính giá. So mốc này với hai mốc `timestamptz`, không ép `::date`. Phiên `closed` / `review` (đếm ở unattributed / `pending_reconciliation`) vào kỳ theo `received_stopped_at`. Chia ngày theo UTC+7 (Asia/Ho_Chi_Minh, `[from 00:00, to + 1 ngày 00:00)` giờ VN); kỳ ≤ 366 ngày |
 | Kỳ cũ có thể đổi | phiên đối soát muộn rơi vào kỳ của mốc giờ sạc, không vào kỳ lúc đối soát → báo cáo tháng trước có thể tăng sau khi đã xem; JSON có `generated_at`, màn hình và CSV ghi "tính đến lúc …" |
 
 Tình huống kiểm: tháng 11 operator A có 40 phiên app, 3 phiên thẻ online, 2 phiên thẻ lạ. 1 phiên app
@@ -483,6 +490,13 @@ vẫn ở `review`. Báo cáo: `csms_billed_session_count = 42`, doanh thu = Σ 
 `unattributed_session_count = 2`, `pending_reconciliation.session_count = 1`. Operator resolve phiên
 đó ngày 03/12 → báo cáo **tháng 11** xem lại có 43 phiên (phiên rơi vào ngày sạc, không vào tháng 12), CSV
 đổi theo; màn hình ghi "tính đến lúc 03/12 09:15" để người xem biết vì sao số khác lần trước.
+
+Tình huống kiểm `unsettled` (T108): cùng tháng, thêm 1 phiên app có khuyến mãi (job `pending`
+`promotion_unsupported`, K6) và 1 phiên thẻ RFID chưa trừ tiền (job `ineligible`), cả hai đã
+`reconciled`. Doanh thu và `csms_billed_session_count` không đổi;
+`unsettled = {session_count: 2, by_reason: {promotion_unsupported: 1, ineligible: 1}}`. Thêm một dòng
+`adjustment` gắn phiên, hay một top-up của cùng tài xế, cũng không đổi doanh thu (K2). Test:
+`apps/csms/test/fe16-revenue-report.integration.test.ts`, `fe16-revenue-route.integration.test.ts`.
 
 ### 4.1 Danh sách giao dịch Admin + CSV (UC-ADM-10, T108 — cột do Khang và Nghĩa chốt)
 
@@ -515,8 +529,15 @@ không thuộc Operator nào, nên không lọc theo Operator / trạm được.
 | `pending_reconciliation` | `payment_mode = csms_billed`, đã dừng, chưa `reconciled` (`closed`, `review`) | `null` — chưa vào doanh thu |
 | `unattributed` | `payment_mode = unattributed` | `null` — chỉ Wh (K5) |
 
-Xếp kỳ theo **K3 đã chốt** (§4): `reconciled` theo mốc giờ quyết toán đã dùng để tính giá (dự phòng
-`COALESCE(cp_stopped_at, received_stopped_at)` tới khi #120 chốt cách lưu), còn lại theo
+**Ghi chú cho T108b (20/11, sau T108a):** doanh thu nay đòi có `session_debit` (§4), nên `kind`
+`csms_billed` phải thêm điều kiện đó, và `TransactionKind` cần thêm kind `unsettled` (csms_billed
+`reconciled` chưa có debit, kèm lý do), để `totals` của danh sách vẫn bằng `GET /admin/v1/revenue`.
+Dùng lại `PERIOD_AT_SQL`, `KIND_SQL` trong `apps/csms/src/operator-api/revenue-report.ts`. Chưa sửa
+schema `TransactionRow` / `TransactionKind` — làm ở T108b.
+
+Xếp kỳ theo **K3 đã chốt** (§4): `reconciled` theo mốc giờ quyết toán đã dùng để tính giá
+(~~dự phòng `COALESCE(cp_stopped_at, received_stopped_at)` tới khi #120 chốt cách lưu~~ → thay bởi
+T108 20/11: `COALESCE(priced_ended_at, cp_stopped_at, received_stopped_at)`, §4), còn lại theo
 `received_stopped_at`; ngày UTC+7. Thứ tự cố định `period_at` giảm dần, rồi `session_id` giảm dần —
 CSV giữ đúng thứ tự này. Phiên đang chạy, `orphaned`, `failed` không có (K11).
 
@@ -620,7 +641,7 @@ trụ; hợp đồng trả id **chuỗi** và `charge_point_id` + `serial_number
 | 8 | FE-05 dashboard có "mở khoá súng" (UnlockConnector); SRS Table 7 #2 không có | Không đưa vào v0.1 | không có trong tập bản tin FR-16 (N2) |
 | 9 | Ai tạo operator và site — SRS không có UC | Chỉ `GET /admin/v1/operators`, `GET /operator/v1/sites`; tạo bằng seed | A3 |
 | 10 | UC-ADM-07 "Monitor Platform Health" (SRS) đổi thành "Monitor Charge Point Network" trong bản vẽ mới | Admin có `charge-points`, `sessions`, `reconciliation-records`, `ocpp-messages` chỉ đọc; không có `system-health` | Should; phần health là hạ tầng |
-| 11 | Doanh thu tính vào ngày nào: lúc dừng hay lúc reconciled; và theo đồng hồ nào | Phiên `reconciled`: mốc giờ quyết toán đã dùng để tính giá (giờ trụ đã kiểm, hoặc giờ CSMS khi rơi về — chờ #120), dự phòng `COALESCE(cp_stopped_at, received_stopped_at)`; phiên `closed` / `review`: `received_stopped_at`; ngày UTC+7 | K3 Trí chốt 12/11: doanh thu và tiền đã trừ dựa trên cùng một mốc giờ, nên tổng theo ngày khớp với khung giá đã áp; phiên đối soát muộn vẫn rơi đúng ngày sạc, kỳ cũ có thể đổi → "tính đến lúc …" (§4) |
+| 11 | Doanh thu tính vào ngày nào: lúc dừng hay lúc reconciled; và theo đồng hồ nào | Phiên `reconciled`: mốc giờ quyết toán đã dùng để tính giá (giờ trụ đã kiểm, hoặc giờ CSMS khi rơi về — ~~chờ #120~~ → T108 20/11: `priced_ended_at`, #120 / T134), dự phòng `COALESCE(cp_stopped_at, received_stopped_at)`; phiên `closed` / `review`: `received_stopped_at`; ngày UTC+7 | K3 Trí chốt 12/11: doanh thu và tiền đã trừ dựa trên cùng một mốc giờ, nên tổng theo ngày khớp với khung giá đã áp; phiên đối soát muộn vẫn rơi đúng ngày sạc, kỳ cũ có thể đổi → "tính đến lúc …" (§4) |
 | 12 | BM04 (F-09, F-10, F-13, F-14, F-16, NFR-05) không có trong repo | Dùng nguyên văn F-13 và NFR-05 trong yêu cầu T98; FR theo phiếu v1.3 | Trí bổ sung file BM04 nếu số F lệch FR |
 
 ## 7. Câu hỏi mở
@@ -655,11 +676,11 @@ trụ; hợp đồng trả id **chuỗi** và `charge_point_id` + `serial_number
 | # | Câu hỏi | Đề xuất |
 |---|---|---|
 | ~~K1~~ | ~~Chốt BR-P46 "không phí/không chia" với bản vẽ Revenue Share + UC-ADM-09~~ | **Đóng** — D6 09/11: không phí, không chia. Còn việc Ân sửa bản vẽ (A5) |
-| K2 | Doanh thu có trừ `adjustment` gắn phiên không? Nguồn: SRS Table 7 #11 — "amendments create compensating entries, never edits" (bút toán bù khi sửa phiên; BR-P20 chỉ là số dư âm, không phải nguồn của luật này) | Có, nếu `adjustment` mang `session_id`; xác nhận cách ghi |
-| ~~K3~~ | ~~Xếp kỳ theo `ended_at` hay ngày reconciled?~~ | **Đã chốt** (Trí 12/11): `reconciled` theo đúng mốc giờ quyết toán dùng để tính giá (giờ trụ đã kiểm / giờ CSMS khi rơi về — chờ #120 chốt cách lưu), dự phòng `COALESCE(cp_stopped_at, received_stopped_at)`; `closed` / `review` theo `received_stopped_at`; chia kỳ UTC+7; kỳ cũ có thể đổi → "tính đến lúc …". Chi tiết §4 |
+| K2 | Doanh thu có trừ `adjustment` gắn phiên không? Nguồn: SRS Table 7 #11 — "amendments create compensating entries, never edits" (bút toán bù khi sửa phiên; BR-P20 chỉ là số dư âm, không phải nguồn của luật này) | ~~Có, nếu `adjustment` mang `session_id`; xác nhận cách ghi~~ → T108 20/11: **T108 v1 chưa cộng adjustment gắn phiên; xem lại khi có luồng sửa phiên** (chỉ `session_debit`) |
+| ~~K3~~ | ~~Xếp kỳ theo `ended_at` hay ngày reconciled?~~ | **Đã chốt** (Trí 12/11): `reconciled` theo đúng mốc giờ quyết toán dùng để tính giá (giờ trụ đã kiểm / giờ CSMS khi rơi về — ~~chờ #120 chốt cách lưu~~ → T108 20/11: đã lưu ở `priced_ended_at`, #120 / T134), dự phòng `COALESCE(cp_stopped_at, received_stopped_at)`; `closed` / `review` theo `received_stopped_at`; chia kỳ UTC+7; kỳ cũ có thể đổi → "tính đến lúc …". Chi tiết §4 |
 | K4 | Đường dẫn admin billing: `/api/admin/billing/…` (WF-02 D8) hay `/api/admin/v1/billing/…` (hợp đồng này)? | `/api/admin/v1/…` để một bề mặt có một tiền tố và một cơ chế JWT |
 | K5 | Phiên unattributed có cần giá ước tính (Table 7 #11 "reports separately") không? | Không có tiền trong v0.1; chỉ phiên + Wh |
-| K6 | Khuyến mãi áp vào giá lúc quyết toán chưa? Nếu chưa, `promotions` chỉ là CRUD | Ghi rõ trong T108 |
+| K6 | Khuyến mãi áp vào giá lúc quyết toán chưa? Nếu chưa, `promotions` chỉ là CRUD | ~~Ghi rõ trong T108~~ → T108 20/11: **chưa** — quyết toán treo mọi phiên có `promotion_id` (job `pending` `promotion_unsupported`), nên phiên đó không vào doanh thu mà nằm ở `unsettled` (§4). T108 không sửa quyết toán |
 | K7 | "Giao dịch" của UC-ADM-10 là **phiên sạc** (một dòng một phiên, lọc được theo Operator / trạm) hay **dòng sổ cái** (`credit_transactions`: top-up, trừ phiên, hoàn, adjustment)? | Phiên sạc — top-up / hoàn / HĐĐT không thuộc Operator; sổ cái thuộc màn Billing Exceptions |
 | K8 | CSV có cần thông tin tài xế (email, điện thoại) không? Tệp gửi cho công ty khách hàng | Chỉ `driver_id`; không xuất dữ liệu cá nhân (BR-P05) |
 | K9 | Định dạng CSV: UTF-8 có BOM? dấu phẩy hay chấm phẩy (Excel locale VN mặc định dùng `;`)? thời điểm UTC+7 có offset hay UTC? tiền số nguyên không dấu nghìn? | BOM + phẩy + UTC+7 có offset + số nguyên — cùng quy ước với `revenue.csv` (đổi thì đổi cả hai) |

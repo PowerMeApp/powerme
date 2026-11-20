@@ -53,12 +53,12 @@ void main() {
       await _start(tester, camera);
       router.go('/charge-session?session_id=79');
       await tester.pumpAndSettle();
-      expect(_count(fixture, _progressPath), 0);
+      expect(_count(fixture, _progressPath), 1);
       await _tap(tester, _byKey('nav-account'));
       await _tap(tester, _byKey('nav-charging'));
       expect(router.routeInformationProvider.value.uri.path, '/charge-session');
       expect(_byKey('qr-follow-charge'), findsNothing);
-      expect(_count(fixture, _progressPath), 1);
+      expect(_count(fixture, _progressPath), 2);
       expect(find.text('Đang sạc'), findsOneWidget);
       expect(find.text('Đang chờ trụ báo cáo'), findsNothing);
       await _findText(tester, 'Số liệu sạc có thể chưa được cập nhật.');
@@ -69,10 +69,9 @@ void main() {
       );
 
       snapshot = _progress(consumed: 2500, estimate: 12500);
-      await tester.pump(const Duration(seconds: 4));
-      expect(_count(fixture, _progressPath), 1);
-      await _tick(tester, const Duration(seconds: 1));
-      expect(_count(fixture, _progressPath), 2);
+      final beforeSample = _count(fixture, _progressPath);
+      await _tick(tester);
+      expect(_count(fixture, _progressPath), beforeSample + 1);
       await _findText(tester, '2,5 kWh');
       expect(tester.widget<ChargeRing>(find.byType(ChargeRing)).fraction, .25);
       await _findText(tester, 'Chi phí (tạm tính, tối đa)');
@@ -106,8 +105,9 @@ void main() {
       await _findText(tester, '45.000 đ');
       await _findText(tester, '45');
       expect(_count(fixture, _statementPath), 1);
+      final settledReads = _count(fixture, _progressPath);
       await _tick(tester, const Duration(seconds: 20));
-      expect(_count(fixture, _progressPath), 4);
+      expect(_count(fixture, _progressPath), settledReads);
       expect(_count(fixture, _statementPath), 1);
       expect(
         fixture.requests.where((r) => r.method == 'POST').map((r) => r.path),
@@ -122,7 +122,7 @@ void main() {
       expect(_byKey('qr-manual-reference'), findsOneWidget);
       expect(_byKey('qr-follow-charge'), findsNothing);
       expect(_byKey('qr-charge-energy'), findsNothing);
-      expect(_count(fixture, _progressPath), 4);
+      expect(_count(fixture, _progressPath), settledReads);
       expect(
         fixture.requests.where((r) => r.path.startsWith('charges/')),
         isEmpty,
@@ -232,7 +232,8 @@ void main() {
         };
       });
       await _start(tester, await _signIn(tester, fixture));
-      expect(reads, 0);
+      await _tap(tester, find.byTooltip('Quay lại'));
+      expect(reads, 1);
       expect(_byKey('qr-clear-charge'), findsNothing);
       await _tick(tester);
       await _tick(tester);
@@ -283,7 +284,7 @@ void main() {
     await _submitStart(tester);
 
     await _tick(tester);
-    await _tap(tester, find.text('Quét mã khác'));
+    await _tap(tester, _byKey('charge-session-return-to-scan'));
     expect(tester.widget<TextField>(reference).controller!.text, isEmpty);
     expect(_byKey('qr-charge-energy'), findsNothing);
     expect(_count(fixture, _connectorPath), 1);
@@ -508,7 +509,7 @@ void main() {
     await _tick(tester);
     expect(_count(fixture, _progressPath), 2);
     expect(tester.widget<FilledButton>(confirm).onPressed, isNull);
-    await _tap(tester, find.text('Hủy'));
+    await _tap(tester, find.byKey(const Key('continue-charging')));
     expect(sheet, findsNothing);
     expect(_byKey('request-stop-charging'), findsNothing);
     expect(_count(fixture, _stopPath), 0);
@@ -538,7 +539,7 @@ void main() {
       await _openProgress(tester, fixture);
       await _tap(tester, _byKey('request-stop-charging'));
       expect(requests, isEmpty);
-      await _tap(tester, find.text('Hủy'));
+      await _tap(tester, find.byKey(const Key('continue-charging')));
       expect(requests, isEmpty);
       await _tap(tester, _byKey('request-stop-charging'));
       await _tap(tester, _byKey('confirm-stop-charging'));
@@ -884,5 +885,11 @@ Future<void> _openProgress(
   DriverApiFixture fixture,
 ) async {
   await _start(tester, await _signIn(tester, fixture));
-  await _tap(tester, _byKey('qr-follow-charge'));
+  expect(
+    _container(
+      tester,
+    ).read(routerProvider).routeInformationProvider.value.uri.path,
+    '/charge-session',
+  );
+  expect(_byKey('qr-follow-charge'), findsNothing);
 }

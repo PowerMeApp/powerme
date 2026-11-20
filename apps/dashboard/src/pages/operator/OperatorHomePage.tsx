@@ -75,7 +75,7 @@ export function OperatorHomePage() {
       {s && (
         <div className="tiles">
           {s.charge_points.total > 0 ? (
-            <Tile title="Charge Point" to="/operator/charge-points">
+            <Tile title="Trụ sạc" to="/operator/charge-points">
               <p className="tile-number">
                 {s.charge_points.online}
                 <span className="muted"> / {s.charge_points.total} online</span>
@@ -85,12 +85,12 @@ export function OperatorHomePage() {
               )}
             </Tile>
           ) : (
-            <Tile title="Charge Point">
-              <p className="muted">Operator chưa có Charge Point nào.</p>
+            <Tile title="Trụ sạc">
+              <p className="muted">Operator chưa có trụ sạc nào.</p>
             </Tile>
           )}
           {s.charge_points.total > 0 && (
-            <Tile title="Connector" to="/operator/charge-points">
+            <Tile title="Súng sạc" to="/operator/charge-points">
               <ul className="tile-list">
                 {CONNECTOR_GROUPS.filter(([k]) => s.connectors[k] > 0).map(([k, label, tone]) => (
                   <li key={k}>

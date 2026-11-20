@@ -34,14 +34,14 @@ const BUTTON: Record<FaultAction, string> = {
   close: 'Đóng',
 };
 
-const where = (no: number | null) => (no ? `Connector ${no}` : 'toàn Charge Point');
+const where = (no: number | null) => (no ? `Súng ${no}` : 'toàn trụ sạc');
 
 /**
  * D39 kind label: Faulted · code · Connector, Offline · whole charge point, Driver report · Connector.
  * A driver report that also got a hardware code (T131) shows it: Driver report · code · Connector.
  */
 export function kindLabel(f: OperatorFault): string {
-  if (f.kind === 'offline') return 'Offline · toàn Charge Point';
+  if (f.kind === 'offline') return 'Offline · toàn trụ sạc';
   if (f.kind === 'driver_report')
     return `Driver report · ${f.error_code ? `${f.error_code} · ` : ''}${where(f.connector_no)}`;
   return `Faulted · ${f.error_code ?? '—'} · ${where(f.connector_no)}`;
@@ -95,12 +95,12 @@ export function FaultRow({ fault }: { fault: OperatorFault }) {
       else if (r.data?.reset_status === 'Rejected')
         setNote({
           tone: 'warn',
-          text: `Charge Point từ chối Reset — sự cố ${no} về "Đã xác nhận"`,
+          text: `Trụ sạc từ chối Reset — sự cố ${no} về "Đã xác nhận"`,
         });
       else
         setNote({
           tone: 'ok',
-          text: `Charge Point nhận lệnh Reset ${type}${r.data?.forced ? ' (đã cắt phiên đang sạc)' : ''}`,
+          text: `Trụ sạc nhận lệnh Reset ${type}${r.data?.forced ? ' (đã cắt phiên đang sạc)' : ''}`,
         });
     }
     setPending(null);
@@ -124,7 +124,7 @@ export function FaultRow({ fault }: { fault: OperatorFault }) {
           {fault.charge_point_serial}
         </Link>
         {fault.station_name && <div className="muted small">{fault.station_name}</div>}
-        {!fault.charge_point_online && <span className="pill muted">Charge Point offline</span>}
+        {!fault.charge_point_online && <span className="pill muted">Trụ sạc offline</span>}
       </td>
       <td>
         <span className={`pill ${fault.severity}`}>{SEVERITY[fault.severity]}</span>
@@ -213,7 +213,7 @@ export function FaultRow({ fault }: { fault: OperatorFault }) {
                   ))}
                 </fieldset>
                 <p className="muted">
-                  Reset khởi động lại cả Charge Point. Sự cố chuyển sang "Đang reset" cho tới khi
+                  Reset khởi động lại cả trụ sạc. Sự cố chuyển sang "Đang reset" cho tới khi
                   connector hoạt động lại hoặc hết hạn chờ.
                 </p>
               </>
@@ -224,7 +224,7 @@ export function FaultRow({ fault }: { fault: OperatorFault }) {
                 <ul>
                   {(sessions ?? []).map((s) => (
                     <li key={s.session_id}>
-                      Connector {s.connector_no} — phiên {s.session_id}
+                      Súng {s.connector_no} — phiên {s.session_id}
                     </li>
                   ))}
                 </ul>

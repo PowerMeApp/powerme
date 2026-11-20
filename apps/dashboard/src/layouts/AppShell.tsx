@@ -46,7 +46,7 @@ export function AppShell() {
               className={({ isActive }) => `nav-link${isActive ? ' active' : ''}`}
             >
               <Icon name="plug" />
-              <span>Charge Point</span>
+              <span>Trụ sạc</span>
             </NavLink>
           )}
           {!admin && (
@@ -67,6 +67,13 @@ export function AppShell() {
               <span>Phiên cần xử lý</span>
             </NavLink>
           )}
+          <NavLink
+            to={admin ? '/admin/revenue' : '/operator/revenue'}
+            className={({ isActive }) => `nav-link${isActive ? ' active' : ''}`}
+          >
+            <Icon name="revenue" />
+            <span>{admin ? 'Giao dịch & doanh thu' : 'Doanh thu'}</span>
+          </NavLink>
         </nav>
         <div className="rail-foot">
           <button

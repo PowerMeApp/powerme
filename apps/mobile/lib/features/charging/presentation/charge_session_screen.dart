@@ -81,6 +81,7 @@ class _ChargeSessionViewState extends ConsumerState<_ChargeSessionView>
     _controller = ChargeSessionController(
       ref.read(chargeSessionRepositoryProvider),
       widget.target,
+      startContext: ref.read(chargeStartProvider)?.attempt.request,
       recordProgress: (target, progress) =>
           _visible &&
           ref
@@ -247,6 +248,9 @@ class _ChargeSessionViewState extends ConsumerState<_ChargeSessionView>
             }
           },
           children: [
+            if (progress != null &&
+                (waitingForStop || progress.closed || progress.confirmsEnd))
+              chargeStopMilestones(stop, progress, copy),
             if (showRing)
               ChargeSessionReadout(
                 copy: copy,
@@ -294,7 +298,6 @@ class _ChargeSessionViewState extends ConsumerState<_ChargeSessionView>
                     ),
                   ),
                 ),
-              if (stop != null) chargeStopMilestones(stop, progress, copy),
             ],
             if (showRing && !waitingForStop) ...[
               ChargeSessionMetrics(
@@ -362,6 +365,7 @@ class _ChargeSessionViewState extends ConsumerState<_ChargeSessionView>
               ChargeStatementCard(
                 copy: copy,
                 sessionId: widget.target.id,
+                progress: progress,
                 statement: _controller.statement,
                 issue: _controller.statementIssue,
                 retry: _controller.reading ? null : _controller.retryStatement,

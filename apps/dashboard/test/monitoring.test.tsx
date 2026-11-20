@@ -80,11 +80,11 @@ describe('Tổng quan vận hành (màn 17)', () => {
       [SUMMARY_URL]: { status: 200, body: SUMMARY },
     });
     renderApp('/operator', session(STAFF));
-    const cps = await screen.findByRole('region', { name: 'Charge Point' });
+    const cps = await screen.findByRole('region', { name: 'Trụ sạc' });
     expect(within(cps).getByText('2')).toBeInTheDocument();
     expect(within(cps).getByText('/ 3 online')).toBeInTheDocument();
     expect(within(cps).getByText('1 offline')).toBeInTheDocument();
-    const conns = screen.getByRole('region', { name: 'Connector' });
+    const conns = screen.getByRole('region', { name: 'Súng sạc' });
     expect(within(conns).getByText('Sẵn sàng')).toBeInTheDocument();
     expect(within(conns).queryByText('Sắp trống')).toBeNull(); // 0 → hidden (D36)
     const faults = screen.getByRole('region', { name: 'Cảnh báo sự cố' });
@@ -116,31 +116,39 @@ describe('Tổng quan vận hành (màn 17)', () => {
       },
     });
     renderApp('/operator', session(STAFF));
-    expect(await screen.findByText('Operator chưa có Charge Point nào.')).toBeInTheDocument();
-    expect(screen.queryByRole('region', { name: 'Connector' })).toBeNull();
+    expect(await screen.findByText('Operator chưa có trụ sạc nào.')).toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: 'Súng sạc' })).toBeNull();
     expect(screen.getByText('Không có sự cố đang mở.')).toBeInTheDocument();
     expect(screen.queryByRole('region', { name: 'Việc cần xử lý' })).toBeNull();
   });
 });
 
-describe('Danh sách Charge Point (màn 18)', () => {
+describe('Danh sách trụ sạc (màn 18)', () => {
   it('lists raw connector statuses, error code, stale mark, session and Offline override; nav link', async () => {
     const seen = fakeCsms({ [LIST_URL]: page([cp(), offline]) });
     renderApp('/operator/charge-points', session(STAFF));
-    const row = within(await screen.findByRole('row', { name: 'Charge Point PM-D1-HCM-0001' }));
+    const row = within(await screen.findByRole('row', { name: 'Trụ sạc PM-D1-HCM-0001' }));
     expect(row.getByText('Trạm sạc demo Quận 1')).toBeInTheDocument();
     expect(row.getByText('Online')).toBeInTheDocument();
     expect(row.getByText('Charging')).toBeInTheDocument();
     expect(row.getByText('Faulted · GroundFailure')).toBeInTheDocument();
     expect(row.getByText(/có thể đã cũ/)).toBeInTheDocument();
     expect(row.getByText(/phiên 77/)).toBeInTheDocument();
-    const off = within(screen.getByRole('row', { name: 'Charge Point RH24D1-00002' }));
+    const off = within(screen.getByRole('row', { name: 'Trụ sạc RH24D1-00002' }));
     expect(off.getAllByText('Offline')).toHaveLength(2); // the charge point and its connector
     expect(off.queryByText('Available')).toBeNull();
     expect(off.getByText('chưa từng kết nối')).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Charge Point' })).toHaveAttribute(
+    expect(screen.getByRole('link', { name: 'Trụ sạc' })).toHaveAttribute(
       'href',
       '/operator/charge-points',
+    );
+    // FE-07: breadcrumb, and the station name opens the station page.
+    const crumbs = within(screen.getByRole('navigation', { name: 'Breadcrumb' }));
+    expect(crumbs.getByRole('link', { name: 'Tổng quan' })).toHaveAttribute('href', '/operator');
+    expect(crumbs.getByText('Trụ sạc')).toHaveAttribute('aria-current', 'page');
+    expect(row.getByRole('link', { name: 'Trạm sạc demo Quận 1' })).toHaveAttribute(
+      'href',
+      '/operator/stations/1',
     );
     expect(seen[0]).toMatchObject({ search: '?page=1&page_size=20' });
   });
@@ -148,7 +156,7 @@ describe('Danh sách Charge Point (màn 18)', () => {
   it('filters send online / lifecycle from page 1; the pager asks for page 2', async () => {
     const seen = fakeCsms({ [LIST_URL]: page([cp()], 25) });
     const { user } = renderApp('/operator/charge-points', session(STAFF));
-    await screen.findByRole('row', { name: 'Charge Point PM-D1-HCM-0001' });
+    await screen.findByRole('row', { name: 'Trụ sạc PM-D1-HCM-0001' });
     expect(screen.getByText('Trang 1 / 2')).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Sau ›' }));
     await waitFor(() => expect(seen.some((r) => r.search === '?page=2&page_size=20')).toBe(true));
@@ -164,10 +172,35 @@ describe('Danh sách Charge Point (màn 18)', () => {
     );
   });
 
+  it('separate charge point and station searches go to the API (debounced) from page 1 (FE-07)', async () => {
+    const seen = fakeCsms({ [LIST_URL]: page([]) });
+    const { user } = renderApp('/operator/charge-points', session(STAFF));
+    await screen.findByText('Không có trụ sạc nào khớp bộ lọc.');
+    await user.type(screen.getByRole('searchbox', { name: 'Tìm trạm sạc' }), 'Trạm Q1');
+    await waitFor(() =>
+      expect(seen.some((r) => r.search === '?site_q=Tr%E1%BA%A1m+Q1&page=1&page_size=20')).toBe(
+        true,
+      ),
+    );
+    // One request for the whole word, not one per key.
+    expect(seen.filter((r) => r.search.includes('site_q=')).length).toBe(1);
+    await user.type(screen.getByRole('searchbox', { name: 'Tìm trụ sạc' }), '0001');
+    await waitFor(() =>
+      expect(
+        seen.some(
+          (r) => r.search === '?charge_point_q=0001&site_q=Tr%E1%BA%A1m+Q1&page=1&page_size=20',
+        ),
+      ).toBe(true),
+    );
+    expect(
+      await screen.findByText('Không có trụ sạc nào khớp ô tìm kiếm và bộ lọc.'),
+    ).toBeInTheDocument();
+  });
+
   it('empty result shows the empty state', async () => {
     fakeCsms({ [LIST_URL]: page([]) });
     renderApp('/operator/charge-points', session(STAFF));
-    expect(await screen.findByText('Không có Charge Point nào khớp bộ lọc.')).toBeInTheDocument();
+    expect(await screen.findByText('Không có trụ sạc nào khớp bộ lọc.')).toBeInTheDocument();
   });
 
   it('"last seen" reads seconds, minutes, hours, days', () => {
