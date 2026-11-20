@@ -12,6 +12,9 @@ const unattributed = (
   session_id: id,
   transaction_no: Number(id) + 100,
   charge_point_serial: 'RH24D1-00001',
+  charge_point_id: '1',
+  site_id: '5',
+  site_name: 'Trạm Q1',
   connector_no: 1,
   id_tag: `TAG-${id}`,
   origin: 'rfid',
@@ -27,6 +30,9 @@ const review: ReviewSession = {
   session_id: '7',
   transaction_no: 107,
   charge_point_serial: 'RH24D1-00001',
+  charge_point_id: '1',
+  site_id: '5',
+  site_name: 'Trạm Q1',
   connector_no: 2,
   id_tag: 'TAG-7',
   origin: 'rfid',
@@ -60,6 +66,15 @@ describe('Phiên cần xử lý (màn 23)', () => {
     const row = within(await screen.findByRole('row', { name: 'Phiên #101' }));
     expect(row.getByText('TAG-1')).toBeInTheDocument();
     expect(row.getByText('2,5 kWh')).toBeInTheDocument();
+    // The charge point and its station open their own pages.
+    expect(row.getByRole('link', { name: 'RH24D1-00001' })).toHaveAttribute(
+      'href',
+      '/operator/charge-points/1',
+    );
+    expect(row.getByRole('link', { name: 'Trạm Q1' })).toHaveAttribute(
+      'href',
+      '/operator/stations/5',
+    );
     // Records read as plain words; the raw detail is in the tooltip.
     expect(row.getByText('Thẻ không xác định')).toHaveAttribute('title', 'card_status=unknown');
     expect(row.getByRole('button', { name: 'Gán tài xế' })).toBeEnabled();
@@ -72,8 +87,8 @@ describe('Phiên cần xử lý (màn 23)', () => {
     const crumbs = within(screen.getByRole('navigation', { name: 'Breadcrumb' }));
     expect(crumbs.getByRole('link', { name: 'Tổng quan' })).toHaveAttribute('href', '/operator');
     expect(crumbs.getByText('Phiên cần xử lý')).toHaveAttribute('aria-current', 'page');
-    expect(screen.getByRole('columnheader', { name: 'Trụ sạc' })).toBeInTheDocument();
-    expect(row.getByText('Súng 1')).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: 'Trụ sạc · trạm sạc' })).toBeInTheDocument();
+    expect(row.getByText(/Súng 1/)).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Phiên cần xử lý' })).toHaveAttribute(
       'href',
       '/operator/sessions',

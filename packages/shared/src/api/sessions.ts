@@ -11,6 +11,10 @@ export interface UnattributedSession {
   session_id: string;
   transaction_no: number;
   charge_point_serial: string;
+  /** Links to the charge point page (screen 20) and the station page. */
+  charge_point_id: string;
+  site_id: string;
+  site_name: string;
   connector_no: number;
   id_tag: string;
   origin: string;
@@ -30,6 +34,10 @@ export interface ReviewSession {
   session_id: string;
   transaction_no: number;
   charge_point_serial: string;
+  /** Links to the charge point page (screen 20) and the station page. */
+  charge_point_id: string;
+  site_id: string;
+  site_name: string;
   connector_no: number;
   id_tag: string;
   origin: string;

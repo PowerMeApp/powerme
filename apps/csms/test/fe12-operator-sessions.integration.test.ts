@@ -188,6 +188,9 @@ describeDb('FE-12 operator session queues (screen 23; UC-OPS-05, F-12, STM-1 #17
     ]);
     expect(a.items[0]).toMatchObject({
       charge_point_serial: 'FE12-CP-A',
+      charge_point_id: ids['cpA'],
+      site_id: expect.stringMatching(/^[1-9][0-9]*$/),
+      site_name: 'Tram A',
       connector_no: 1,
       id_tag: 'FE12-A1',
       energy_wh: 2000,
@@ -200,7 +203,12 @@ describeDb('FE-12 operator session queues (screen 23; UC-OPS-05, F-12, STM-1 #17
     expect(b.items.map((s: any) => s.session_id)).toEqual([ids['B1'], ids['Breview']]);
     const review = (await get('/sessions?queue=review', tokens['a'])).body;
     expect(review).toMatchObject({ queue: 'review', total: 1 });
-    expect(review.items[0]).toMatchObject({ session_id: ids['Areview'], stopped: true });
+    expect(review.items[0]).toMatchObject({
+      session_id: ids['Areview'],
+      stopped: true,
+      charge_point_id: ids['cpA'],
+      site_name: 'Tram A',
+    });
     const page2 = (await get('/sessions?queue=unattributed&page=2&page_size=2', tokens['a'])).body;
     expect(page2).toMatchObject({ total: 4, page: 2, page_size: 2 });
     expect(page2.items.map((s: any) => s.session_id)).toEqual([ids['Afree'], ids['Areview']]);

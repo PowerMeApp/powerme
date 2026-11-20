@@ -361,7 +361,7 @@ tách theo bề mặt — refresh token không mang `role`, role đọc lại t�
 
 | Endpoint | Role | UC / FR / BR | Trạng thái · người làm | Ghi chú |
 |---|---|---|---|---|
-| `GET /operator/v1/sessions` | operator_staff | UC-OPS-05, FR-13, BR-P08 | **partial** FE-12 · `operator-sessions.ts` · Nghĩa (route) / Trí (service) | đã làm: `queue=unattributed\|review` (mặc định unattributed) + page/page_size, lọc theo operator của token (màn 23); chưa làm: lọc status/payment_mode/trụ/thời gian |
+| `GET /operator/v1/sessions` | operator_staff | UC-OPS-05, FR-13, BR-P08 | **partial** FE-12 · `operator-sessions.ts` · Nghĩa (route) / Trí (service) | đã làm: `queue=unattributed\|review` (mặc định unattributed) + page/page_size, lọc theo operator của token (màn 23); mỗi dòng có `charge_point_serial`, `charge_point_id`, `site_id`, `site_name` (link trang trụ / trạm); chưa làm: lọc status/payment_mode/trụ/thời gian |
 | `GET /operator/v1/sessions/{id}` | operator_staff | UC-OPS-05, FR-16 | **console** `session` · Trí | meter, tạm dừng, bản ghi đối soát |
 | `POST /operator/v1/sessions/{id}/resolve` | operator_staff | UC-OPS-05, STM-1 #17 | **done** FE-12 · bọc `SessionReviewService.resolveReview` · Nghĩa (route) / Trí (service) | body `{resolution, note}`; actor = staff của token |
 | `POST /operator/v1/sessions/{id}/assign` | operator_staff | UC-OPS-05, BR-P06/P08 | **done** FE-12 · bọc `UnattributedSessionService.assign` · Nghĩa (route) / Trí (service, T102) | body `{driver_id, note}`; 409 BR-P08 / đã quyết định, 422 `driver_not_eligible` |

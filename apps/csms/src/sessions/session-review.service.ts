@@ -130,7 +130,8 @@ export class SessionReviewService {
     )
       throw new SessionReviewError('invalid_input');
     const { rows } = await this.db.$client.query<ReviewQueueRow>(
-      `SELECT s.id,s.transaction_no,cp.serial_number,s.connector_no,s.id_tag,s.origin,s.payment_mode,
+      `SELECT s.id,s.transaction_no,cp.serial_number,cp.id::text AS charge_point_id,
+         st.id::text AS site_id,st.site_name,s.connector_no,s.id_tag,s.origin,s.payment_mode,
          s.energy_wh,s.received_stopped_at,s.updated_at,st.operator_id,
          coalesce((SELECT array_agg(r.resolution ORDER BY r.record_no) FROM reconciliation_records r
            WHERE r.session_id=s.id AND r.reviewed_at IS NULL
@@ -144,6 +145,9 @@ export class SessionReviewService {
       session_id: Number(r.id),
       transaction_no: r.transaction_no,
       station: r.serial_number,
+      charge_point_id: r.charge_point_id,
+      site_id: r.site_id,
+      site_name: r.site_name,
       connector_no: r.connector_no,
       id_tag: r.id_tag,
       origin: r.origin,
@@ -160,6 +164,9 @@ interface ReviewQueueRow {
   id: string;
   transaction_no: number;
   serial_number: string;
+  charge_point_id: string;
+  site_id: string;
+  site_name: string;
   connector_no: number;
   id_tag: string;
   origin: string;
@@ -175,6 +182,10 @@ export interface ReviewQueueItem {
   session_id: number;
   transaction_no: number;
   station: string;
+  /** FE-12: ids and name for links to the charge point / station pages. */
+  charge_point_id: string;
+  site_id: string;
+  site_name: string;
   connector_no: number;
   id_tag: string;
   origin: string;
