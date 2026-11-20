@@ -127,23 +127,15 @@ describe('Trang trạm sạc', () => {
     ).toEqual(['Trụ sạc', 'Ngày']);
   });
 
-  it('searching the station’s charge points asks the API with q; the header stays', async () => {
-    const seen = fakeCsms({
-      [CPS]: page([cp('11')]),
-      [REV]: { status: 200, body: revenue },
-    });
-    const { user } = renderApp('/operator/stations/5', session(STAFF));
-    await screen.findByRole('heading', { level: 1, name: 'Trạm Q1' });
-    await user.type(screen.getByRole('searchbox', { name: 'Tìm trụ sạc' }), 'PM-11');
-    await waitFor(() =>
-      expect(seen.some((r) => r.search === '?site_id=5&q=PM-11&page=1&page_size=100')).toBe(true),
-    );
-    expect(
-      await within(screen.getByRole('region', { name: 'Trụ sạc của trạm' })).findByRole('row', {
-        name: 'Trụ sạc PM-11',
-      }),
-    ).toBeInTheDocument();
-    expect(screen.getByRole('heading', { level: 1, name: 'Trạm Q1' })).toBeInTheDocument();
+  it('no search above the charge point list; the revenue filters have only the charge point box', async () => {
+    fakeCsms({ [CPS]: page([cp('11')]), [REV]: { status: 200, body: revenue } });
+    renderApp('/operator/stations/5', session(STAFF));
+    const list = within(await screen.findByRole('region', { name: 'Trụ sạc của trạm' }));
+    expect(list.queryByRole('searchbox')).toBeNull();
+    const rev = within(screen.getByRole('region', { name: 'Doanh thu của trạm' }));
+    const filters = within(rev.getByRole('region', { name: 'Bộ lọc' }));
+    expect(filters.getByRole('searchbox', { name: 'Tìm trụ sạc' })).toBeInTheDocument();
+    expect(filters.queryByRole('searchbox', { name: 'Tìm trạm sạc' })).toBeNull();
   });
 
   it('a station of another Operator (empty list) is not found', async () => {

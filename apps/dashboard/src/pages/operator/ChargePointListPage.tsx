@@ -62,13 +62,17 @@ export function ChargePointListPage() {
   const [online, setOnline] = useState<OnlineFilter>('all');
   const [lifecycle, setLifecycle] = useState<ChargePointLifecycle | ''>('');
   const [page, setPage] = useState(1);
-  const [search, setSearch] = useState('');
-  const q = useDebounced(search.trim());
+  const [cpSearch, setCpSearch] = useState('');
+  const [siteSearch, setSiteSearch] = useState('');
+  const chargePointQ = useDebounced(cpSearch.trim());
+  const siteQ = useDebounced(siteSearch.trim());
+  const searching = chargePointQ || siteQ;
   const now = useNow();
   const { data, error, isLoading } = useOperatorChargePointsQuery(
     {
       page,
-      ...(q ? { q } : {}),
+      ...(chargePointQ ? { chargePointQ } : {}),
+      ...(siteQ ? { siteQ } : {}),
       ...(lifecycle ? { lifecycle } : {}),
       ...(online === 'all' ? {} : { online: online === 'online' }),
     },
@@ -89,15 +93,29 @@ export function ChargePointListPage() {
       </div>
       <div className="filters">
         <label className="field search-field">
-          Tìm kiếm
+          Tìm trụ sạc
           <input
             className="input"
             type="search"
-            value={search}
+            value={cpSearch}
             maxLength={MAX_SEARCH}
-            placeholder="Mã, serial, ID trụ hoặc mã, tên, ID trạm"
+            placeholder="Mã, serial hoặc ID trụ"
             onChange={(e) => {
-              setSearch(e.target.value);
+              setCpSearch(e.target.value);
+              setPage(1);
+            }}
+          />
+        </label>
+        <label className="field search-field">
+          Tìm trạm sạc
+          <input
+            className="input"
+            type="search"
+            value={siteSearch}
+            maxLength={MAX_SEARCH}
+            placeholder="Mã, tên hoặc ID trạm"
+            onChange={(e) => {
+              setSiteSearch(e.target.value);
               setPage(1);
             }}
           />
@@ -145,7 +163,9 @@ export function ChargePointListPage() {
       ) : items.length === 0 ? (
         <div className="card">
           <p className="muted">
-            {q ? `Không có trụ sạc nào khớp "${q}".` : 'Không có trụ sạc nào khớp bộ lọc.'}
+            {searching
+              ? 'Không có trụ sạc nào khớp ô tìm kiếm và bộ lọc.'
+              : 'Không có trụ sạc nào khớp bộ lọc.'}
           </p>
         </div>
       ) : (

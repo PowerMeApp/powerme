@@ -47,8 +47,9 @@ export interface ChargePointFilter {
   siteId?: string;
   /** Default CHARGE_POINT_PAGE_SIZE; the station page asks for up to 100. */
   pageSize?: number;
-  /** Text search (FE-07): charge point code / serial / id, station code / name / id. */
-  q?: string;
+  /** FE-07 searches: charge point code / serial / id, and station code / name / id, separately. */
+  chargePointQ?: string;
+  siteQ?: string;
 }
 
 export interface ApiError {
@@ -170,10 +171,19 @@ export const api = createApi({
       providesTags: ['Summary'],
     }),
     operatorChargePoints: b.query<ChargePointPage, ChargePointFilter>({
-      query: ({ lifecycle, online, page, siteId, q: text, pageSize = CHARGE_POINT_PAGE_SIZE }) => {
+      query: ({
+        lifecycle,
+        online,
+        page,
+        siteId,
+        chargePointQ,
+        siteQ,
+        pageSize = CHARGE_POINT_PAGE_SIZE,
+      }) => {
         const q = new URLSearchParams();
         if (siteId) q.set('site_id', siteId);
-        if (text?.trim()) q.set('q', text.trim());
+        if (chargePointQ?.trim()) q.set('charge_point_q', chargePointQ.trim());
+        if (siteQ?.trim()) q.set('site_q', siteQ.trim());
         if (lifecycle) q.set('lifecycle', lifecycle);
         if (online !== undefined) q.set('online', String(online));
         q.set('page', String(page));

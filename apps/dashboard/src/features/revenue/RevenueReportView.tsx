@@ -26,6 +26,7 @@ import {
   defaultPeriod,
   fillDays,
   formatCount,
+  formatDay,
   formatKwh,
   formatVnd,
   GROUP_LABEL,
@@ -35,12 +36,55 @@ import {
 
 export const REVENUE_PAGE_SIZE = 20;
 
-const SEARCH_HINT: Record<RevenueGroupBy, string> = {
-  charge_point: 'Mã, serial, ID trụ hoặc tên, ID trạm',
-  site: 'Tên hoặc ID trạm',
-  operator: 'Tên hoặc ID Operator',
-  day: 'Ngày, ví dụ 05/11',
+/** One search box of the filter card: its URL parameter and the row values it looks in. */
+interface SearchField {
+  param: 'cp_search' | 'site_search' | 'search';
+  label: string;
+  hint: string;
+  values: (r: RevenueRow) => (string | null)[];
+}
+const CP_SEARCH: SearchField = {
+  param: 'cp_search',
+  label: 'Tìm trụ sạc',
+  hint: 'Serial hoặc ID trụ',
+  values: (r) => [r.serial_number, r.charge_point_id],
 };
+const SITE_SEARCH: SearchField = {
+  param: 'site_search',
+  label: 'Tìm trạm sạc',
+  hint: 'Tên hoặc ID trạm',
+  values: (r) => [r.site_name, r.site_id],
+};
+/**
+ * Separate boxes for charge points and stations (Nghĩa 20/11). On the station page the report is
+ * already one station, so only the charge point box.
+ */
+function searchFields(groupBy: RevenueGroupBy, inStation: boolean): SearchField[] {
+  switch (groupBy) {
+    case 'charge_point':
+      return inStation ? [CP_SEARCH] : [CP_SEARCH, SITE_SEARCH];
+    case 'site':
+      return [SITE_SEARCH];
+    case 'operator':
+      return [
+        {
+          param: 'search',
+          label: 'Tìm Operator',
+          hint: 'Tên hoặc ID Operator',
+          values: (r) => [r.operator_name, r.operator_id],
+        },
+      ];
+    case 'day':
+      return [
+        {
+          param: 'search',
+          label: 'Tìm ngày',
+          hint: 'Ví dụ 05/11',
+          values: (r) => [r.day ? formatDay(r.day) : null, r.day],
+        },
+      ];
+  }
+}
 
 /** CSV keeps its UTF-8 BOM so Excel reads Vietnamese (fetch's text() drops it). */
 function saveCsv(text: string, filename: string) {
@@ -144,7 +188,8 @@ export function RevenueReportView({
   const groupBy = groupParam && groups.includes(groupParam) ? groupParam : groups[0]!;
   const valid = periodDays(from, to) !== null;
   /** Client-side search over every row of the period (the API returns all groups at once). */
-  const search = params.get('search') ?? '';
+  const fields = searchFields(groupBy, Boolean(siteId));
+  const searching = fields.some((f) => (params.get(f.param) ?? '').trim());
   const query: RevenueQuery = {
     from,
     to,
@@ -186,17 +231,7 @@ export function RevenueReportView({
       : current.rows
     : [];
   const rows = allRows.filter((r) =>
-    matchesSearch(search, [
-      rowLabel(r, groupBy),
-      r.key,
-      r.serial_number,
-      r.site_name,
-      r.operator_name,
-      r.charge_point_id,
-      r.site_id,
-      r.operator_id,
-      r.day,
-    ]),
+    fields.every((f) => matchesSearch(params.get(f.param) ?? '', f.values(r))),
   );
   const pages = Math.max(1, Math.ceil(rows.length / REVENUE_PAGE_SIZE));
   const shownPage = Math.min(page, pages);
@@ -240,17 +275,19 @@ export function RevenueReportView({
             ))}
           </select>
         </label>
-        <label className="field search-field">
-          Tìm kiếm
-          <input
-            className="input"
-            type="search"
-            value={search}
-            maxLength={MAX_SEARCH}
-            placeholder={SEARCH_HINT[groupBy]}
-            onChange={(e) => update({ search: e.target.value })}
-          />
-        </label>
+        {fields.map((f) => (
+          <label key={f.param} className="field search-field">
+            {f.label}
+            <input
+              className="input"
+              type="search"
+              value={params.get(f.param) ?? ''}
+              maxLength={MAX_SEARCH}
+              placeholder={f.hint}
+              onChange={(e) => update({ [f.param]: e.target.value })}
+            />
+          </label>
+        ))}
         <button
           type="button"
           className="btn small revenue-export"
@@ -275,8 +312,8 @@ export function RevenueReportView({
           {rows.length === 0 ? (
             <div className="card">
               <p className="muted">
-                {allRows.length > 0
-                  ? `Không có dòng nào khớp "${search.trim()}".`
+                {allRows.length > 0 && searching
+                  ? 'Không có dòng nào khớp ô tìm kiếm.'
                   : 'Không có phiên nào trong kỳ.'}
               </p>
             </div>
