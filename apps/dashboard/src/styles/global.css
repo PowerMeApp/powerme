@@ -533,14 +533,7 @@ table.data-table tr.sev-minor td.num {
   margin-top: 24px;
 }
 .revenue-tiles {
-  margin: 0 0 12px;
-}
-.revenue-notes {
   margin: 0 0 16px;
-  padding-left: 18px;
-  display: grid;
-  gap: 4px;
-  font-size: 14px;
 }
 table.revenue-table td:nth-child(2) {
   min-width: 0;

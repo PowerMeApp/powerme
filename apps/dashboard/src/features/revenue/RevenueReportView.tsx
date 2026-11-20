@@ -7,7 +7,7 @@
  * shown as notes, outside revenue. Rows only hold groups with sessions; by day, the empty days are
  * filled here.
  *
- * Layout (Nghĩa 20/11): filter card on top → totals and notes → table, paged here (the API returns
+ * Layout (Nghĩa 20/11): filter card on top → totals → table, paged here (the API returns
  * every group at once), with the period total on every page. Names link to their own pages
  * (operator scope): trụ sạc → screen 20, trạm sạc → station page. Export: T108's revenue.csv with
  * the same query (SRS UC-ADM-10). Period and grouping live in the URL (?from=&to=&group_by=).
@@ -25,12 +25,10 @@ import {
   defaultPeriod,
   fillDays,
   formatCount,
-  formatGenerated,
   formatKwh,
   formatVnd,
   GROUP_LABEL,
   periodDays,
-  reasonLabel,
   rowLabel,
 } from './revenueModel';
 
@@ -76,35 +74,6 @@ function Totals({ report }: { report: RevenueReport }) {
         <p className="muted small">{formatKwh(t.unattributed_energy_wh)} · không tính tiền</p>
       </section>
     </div>
-  );
-}
-
-function Notes({ report }: { report: RevenueReport }) {
-  const pending = report.pending_reconciliation.session_count;
-  const unsettled = report.unsettled;
-  const reasons = Object.entries(unsettled?.by_reason ?? {}).filter(([, n]) => n > 0);
-  return (
-    <ul className="revenue-notes">
-      {pending > 0 && (
-        <li>
-          <b>{formatCount(pending)}</b> phiên chưa đối soát xong — chưa tính vào doanh thu, số có
-          thể còn tăng.
-        </li>
-      )}
-      {unsettled && unsettled.session_count > 0 && (
-        <li>
-          <b>{formatCount(unsettled.session_count)}</b> phiên đã đối soát nhưng chưa trừ tiền —
-          không tính vào doanh thu
-          {reasons.length > 0 &&
-            `: ${reasons.map(([code, n]) => `${reasonLabel(code)} (${formatCount(n)})`).join(', ')}`}
-          .
-        </li>
-      )}
-      <li className="muted">
-        Tính đến lúc {formatGenerated(report.generated_at)} — phiên đối soát muộn được tính vào kỳ
-        của giờ sạc, nên số của kỳ cũ có thể đổi.
-      </li>
-    </ul>
   );
 }
 
@@ -269,7 +238,6 @@ export function RevenueReportView({
       ) : current ? (
         <>
           <Totals report={current} />
-          <Notes report={current} />
           {rows.length === 0 ? (
             <div className="card">
               <p className="muted">Không có phiên nào trong kỳ.</p>

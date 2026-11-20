@@ -111,11 +111,10 @@ describe('Doanh thu (màn 25, Operator)', () => {
     expect(revenue.getByText('1.250.000 ₫')).toBeInTheDocument();
     const unattributed = within(screen.getByRole('region', { name: 'Phiên không định danh' }));
     expect(unattributed.getByText(/2 kWh · không tính tiền/)).toBeInTheDocument();
-    expect(screen.getByText(/phiên chưa đối soát xong/)).toHaveTextContent('2 phiên');
-    expect(screen.getByText(/đã đối soát nhưng chưa trừ tiền/)).toHaveTextContent(
-      'Có khuyến mãi (2), Thẻ RFID chờ T115 (1)',
-    );
-    expect(screen.getByText(/Tính đến lúc 20\/11\/2026 09:15/)).toBeInTheDocument();
+    // Nghĩa 20/11: no notes under the totals (pending / unsettled / "tính đến lúc").
+    expect(screen.queryByText(/chưa đối soát xong/)).toBeNull();
+    expect(screen.queryByText(/chưa trừ tiền/)).toBeNull();
+    expect(screen.queryByText(/Tính đến lúc/)).toBeNull();
     // Filters in their own card, above the totals (Nghĩa 20/11).
     const filters = screen.getByRole('region', { name: 'Bộ lọc' });
     expect(
