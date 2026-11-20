@@ -510,6 +510,29 @@ table.data-table tr.sev-minor td.num {
 }
 .dialog {
   width: min(480px, 100%);
+  /* Room between title, text, each labelled field and the buttons (popup spacing, 20/11). */
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 24px;
+}
+.dialog > h2,
+.dialog > p,
+.dialog > ul {
+  margin: 0;
+}
+.dialog .field {
+  gap: 8px;
+}
+.dialog .field + .field {
+  margin-top: 4px;
+}
+.dialog textarea.input {
+  min-height: 88px;
+}
+.dialog > .btn-row {
+  margin-top: 8px;
+  justify-content: flex-end;
 }
 .dialog fieldset {
   border: 0;
