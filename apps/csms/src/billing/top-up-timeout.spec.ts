@@ -10,6 +10,7 @@ import type { CreditLedgerService } from './credit-ledger.service.js';
 import type { LoyaltyService } from './loyalty.service.js';
 import {
   QUERYDR_FIRST_DELAY_MS,
+  QUERYDR_RC94_EXTRA_MIN,
   QUERYDR_SCHEDULE_MIN,
   TOP_UP_TIMEOUT_WORK,
   TopUpService,
@@ -50,9 +51,13 @@ describe('TopUpService — việc nền top-up-timeout (T32 Phần 8)', () => {
   });
   afterEach(() => warn.mockRestore());
 
-  it('lịch querydr tính từ expires_at: +2, 5, 10, 20, 40, 60 phút; mốc đầu = QUERYDR_FIRST_DELAY_MS', () => {
-    expect(QUERYDR_SCHEDULE_MIN).toEqual([2, 5, 10, 20, 40, 60]);
+  it('lịch querydr tính từ expires_at: +2, 15, 30, 45, 60 phút (T32 Phần 8c), mốc RC 94 = 75; mốc đầu = QUERYDR_FIRST_DELAY_MS', () => {
+    expect(QUERYDR_SCHEDULE_MIN).toEqual([2, 15, 30, 45, 60]);
+    expect(QUERYDR_RC94_EXTRA_MIN).toBe(75);
     expect(QUERYDR_SCHEDULE_MIN[0]! * 60_000).toBe(QUERYDR_FIRST_DELAY_MS);
+    // Hai lần hỏi liền nhau sau mốc đầu cách > 4,5 phút (VNPay chặn RC 94 khi hỏi lại quá sớm).
+    const gaps = QUERYDR_SCHEDULE_MIN.slice(1).map((m, i) => m - QUERYDR_SCHEDULE_MIN[i]!);
+    expect(Math.min(...gaps)).toBeGreaterThan(4.5);
   });
 
   it('onModuleInit đăng ký chính service với tên top-up-timeout', () => {

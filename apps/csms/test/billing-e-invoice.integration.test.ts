@@ -407,6 +407,93 @@ describeDb('billing: việc nền e-invoice-issue + Admin retry (T32 Phần 7, S
   });
 
   // ---------------------------------------------------------------------------------------------
+  describe('hết lượt giữ chỗ: unfinished_claims (T32 Phần 8c, D7)', () => {
+    const claimsOf = async (id: number) =>
+      Number(
+        (await one('SELECT unfinished_claims FROM e_invoices WHERE id=$1', [id]))[
+          'unfinished_claims'
+        ],
+      );
+
+    it('requested: tx2 ném 5 lần → lần thứ 6 không gọi nhà cung cấp, needs_review qua #3→#5, attempt_count 4; log e_invoice_needs_review', async () => {
+      const inv = await invoiceFor();
+      const spy = jest
+        .spyOn(service as unknown as { applyResult: () => Promise<unknown> }, 'applyResult')
+        .mockRejectedValue(new Error('lỗi lặp ở tx2'));
+      for (let i = 1; i <= 5; i++) {
+        expect(await run()).toBe(1);
+        expect(await claimsOf(inv.id)).toBe(i);
+        expect((await row(inv.id))['status']).toBe('requested');
+        await makeDue(inv.id);
+      }
+      spy.mockRestore();
+      expect(calls).toHaveLength(5);
+      expect(await run()).toBe(1);
+      expect(calls).toHaveLength(5);
+      expect(await row(inv.id)).toMatchObject({
+        status: 'needs_review',
+        attempt_count: 4,
+        last_error_kind: 'transient',
+        last_error_message: 'unfinished_claims_exhausted',
+        attempted: true,
+        no_next: true,
+      });
+      expect(await claimsOf(inv.id)).toBe(6);
+      expect(logged(errorSpy, 'e_invoice_needs_review')).toEqual([
+        {
+          event: 'e_invoice_needs_review',
+          e_invoice_id: inv.id,
+          top_up_id: inv.topUpId,
+          attempt_count: 4,
+          reason: 'unfinished_claims_exhausted',
+          unfinished_claims: 6,
+        },
+      ]);
+    });
+
+    it.each([
+      // [trạng thái, attempt_count trước, attempt_count sau]
+      ['failed', 2, 4],
+      ['failed', 3, 4],
+      ['requested', 5, 6],
+    ] as const)(
+      '%s, attempt_count %s, bộ đếm đã 5 → needs_review, attempt_count %s, không gọi nhà cung cấp',
+      async (status, before, after) => {
+        const inv = await invoiceFor();
+        await q(
+          `UPDATE e_invoices SET status=$2::e_invoice_status, attempt_count=$3, unfinished_claims=5,
+             last_error_kind='transient', last_attempt_at=now(),
+             next_attempt_at=now() - interval '1 second' WHERE id=$1`,
+          [inv.id, status, before],
+        );
+        expect(await run()).toBe(1);
+        expect(calls).toHaveLength(0);
+        expect(await row(inv.id)).toMatchObject({
+          status: 'needs_review',
+          attempt_count: after,
+          no_next: true,
+        });
+      },
+    );
+
+    it('adminRetry đặt unfinished_claims = 0; lượt sau gọi nhà cung cấp bình thường → issued', async () => {
+      const inv = await invoiceFor();
+      await q(
+        `UPDATE e_invoices SET unfinished_claims=5, next_attempt_at=now() - interval '1 second'
+         WHERE id=$1`,
+        [inv.id],
+      );
+      await run();
+      expect((await row(inv.id))['status']).toBe('needs_review');
+      await service.adminRetry(inv.id, 777);
+      expect(await claimsOf(inv.id)).toBe(0);
+      expect(await run()).toBe(1);
+      expect(await row(inv.id)).toMatchObject({ status: 'issued', attempt_count: 5 });
+      expect(await claimsOf(inv.id)).toBe(0);
+    });
+  });
+
+  // ---------------------------------------------------------------------------------------------
   describe('Admin retry (STM-7 #7, route ở Phần 10)', () => {
     /** Hoá đơn needs_review sau `attempts` lượt lỗi (fixture SQL thoả mọi CHECK). */
     async function needsReview(attempts: number): Promise<{ id: number; topUpId: number }> {
