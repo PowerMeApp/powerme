@@ -1,5 +1,24 @@
 # Coding reference 2 — class, package và ranh giới WP3
 
+## T96 — bốn chế độ, Stitch ZIP (5), 19/11
+
+Extension giữ `Screen → Controller → Domain repository ← API adapter`, WF01 `StartRequest(scope, connectorId, vehicleId, mode, limitValue?, key)` và enum `autoFull/timed/energy/cost`. `ApiChargeStartRepository` chuyển đúng shape §17 sang `full/timed/energy_kwh/amount_vnd`; full bỏ trường limit. Integer dương trong miền JS an toàn, cap 0 hợp lệ nhưng không Apply; cap khác mode/số sai kiểu/mode trả về mâu thuẫn là uncertain. `maxLimitValue` có đơn vị của request. Energy 0.13 không có các field 0.14 vẫn được đọc; chỉ thiếu field mới được xem là legacy, null/lạ không được coi là mode hợp lệ.
+
+`ChargeStartDraftController` giữ mode/input theo `DiscoverySession` và connector, reset khi auth/xe/cổng đổi. Attempt giữ draft đã gửi để `edit()` khôi phục sau kết quả từ chối/cap; chỉ cùng scope, xe, connector, không busy và chưa effect. `clear()` giữ hành vi quét lại. `acceptLimit` giữ mode và tạo key mới, `resend` dùng chính request bất biến. `pauseStatusReads()` hủy GET qua token và bỏ kết quả đã mất quyền hiển thị; POST đang chờ vẫn giữ key và kết quả cho recovery.
+
+`QrConnectScreen` dùng `listenManual` để lập lịch điều hướng sau frame. Đích chỉ lấy từ attempt đã xác nhận; route/mounted/foreground/scope/vehicle/attempt được đối chiếu lần nữa ngay trước `go('/charge-session')`. Xác nhận ở background được giữ chờ resume khi vẫn ở QR; rời route xóa chuyển màn đang chờ. Listener không tự chạy lại với snapshot đã started khi QR được tạo lại sau Back. Lối mở lại chỉ phục vụ phiên đã biết. Không HTTP trong widget hoặc thay router global.
+
+`ChargeProgress` bổ sung `billingMode?`, `limitValue?` (null/phút/Wh/VND), `elapsedSeconds?`, `costEstimateVnd?`, `ChargeCostQuality(exact,interpolated,unknown)` và `ChargeCostClock(cp,cpOffset,csms)?`; `estimatedCostVnd` vẫn là maximum riêng. Adapter kiểm integer/timestamp, bảo toàn unknown và không dùng maximum làm money progress. `withStartContext` chỉ bổ sung mode/target khi field billing_mode thiếu và controller đã có StartRequest của đích xác nhận. Mode trả về khác mode/limit request không ghi đè progress đã biết. Không dùng điện thoại làm đồng hồ cutoff hoặc tính tiền. GET statement vẫn chỉ sau chốt meter + closed/reconciled + posted, cùng principal/session.
+
+Nguồn code/tests được ghim theo commit ở bảng dưới; API public đã đối chiếu với cache khóa Riverpod 3.4.3/go_router 16.3.0. Áp dụng khái niệm lifecycle/navigation vào code PowerMe, không sao chép source hoặc thêm dependency:
+
+| Nguồn, giấy phép | Fit, dependencies, maintainability | Cách áp dụng và tradeoff/security |
+| --- | --- | --- |
+| [Riverpod widget_ref.dart](https://github.com/rrousselGit/riverpod/blob/cca264d8d6eeacfd0e650f89c8c1c3017ae4c75c/packages/flutter_riverpod/lib/src/core/widget_ref.dart), MIT | Có sẵn; listenManual dành cho initState, tự đóng subscription khi widget dispose | Listener cục bộ không cần provider/router toàn cục mới. Vẫn cần kiểm scope, route và response muộn; lifecycle thư viện không thay quyền sở hữu server. |
+| [go_router router.dart](https://github.com/flutter/packages/blob/b16aef16bc4fe24dbcadf081cf139f6edfe6750d/packages/go_router/lib/src/router.dart), [router tests](https://github.com/flutter/packages/blob/b16aef16bc4fe24dbcadf081cf139f6edfe6750d/packages/go_router/test/go_router_test.dart), BSD-3-Clause | Có sẵn; API go/pushReplacement và stack được maintained trong Flutter packages | `go` dùng route shell hiện hành, Back fallback QR đã có. Tránh giữ pending screen như bước phải bấm tiếp. State attempt sống ngoài route; URL không cung cấp session tùy ý và không bypass auth guard. |
+
+Stitch HTML/PNG chỉ làm visual reference read-only ở `.cache/stitch-charge-modes-5`; không chạy script/timer/random của HTML, không tải font/ảnh ngoài hoặc thêm WebView. Sai khác nghiệp vụ và evidence ở design-system/README; diagrams/root docs/backend giữ nguyên.
+
 **Đọc bắt buộc trước coding**, cùng [screen/function requirements](screens.md). File này là canonical reference kiến trúc mobile. README là cách chạy; `mb-01-foundation.md` là record nghiên cứu/baseline cũ, không được ghi đè reference này.
 
 ## Authority và cách dùng

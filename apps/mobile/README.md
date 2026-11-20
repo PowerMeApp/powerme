@@ -1,5 +1,21 @@
 # @powerme/mobile — App tài xế PowerMe (WP3)
 
+## T96 — Stitch ZIP (5), bốn chế độ sạc, 19/11
+
+Mobile nối `full`/`timed`/`energy_kwh`/`amount_vnd` theo Driver API 0.14 §17. Sau khi API xác nhận mã phiên và effect, M07 tự chuyển M08; accepted vẫn chờ. Cap dùng đúng phút/Wh/VND và cần đồng ý với key mới. Chỉnh sửa sau từ chối/cap giữ cổng, xe và draft; gửi lại kết quả chưa rõ giữ nguyên key/body. Back, background/resume, rời QR, đổi xe và logout giữ các guard của phiên. M08 hiển thị số đo/elapsed server và estimate T134, tách maximum tariff; không có timer tự dừng trên mobile. M09-A/4 pha/bảng kê giữ stop ACK, chỉ số chốt và quyết toán độc lập.
+
+Staging hiện vẫn API 0.13 vì PR #193 chưa merge/deploy. Energy legacy thiếu các field mới vẫn đọc được; elapsed thiếu hiển thị “—”. Mode lạ/null không được suy thành kWh. Khi staging từ chối mode mới, UI báo chế độ chưa khả dụng và cho chỉnh sửa, không fallback fixture. Chưa xác minh bốn chế độ trên staging, camera/charger thật, iOS hoặc NFR latency.
+
+Kiểm thực tế bằng Flutter 3.44.2 / Dart 3.12.2, dependency/cache hiện có, TMP/TEMP trong `apps/mobile/.cache/tmp`:
+
+- `dart format lib test tool`: 172 file, kiểm cuối **0 changed** với `--output=none --set-exit-if-changed`; log `.cache/four-mode-format-verify.log`.
+- `flutter analyze --no-pub`: **No issues found** (2,4 giây), `.cache/four-mode-analyze.log`.
+- `flutter test --no-pub --reporter expanded`: **212/212 pass** (30 giây), gồm 189 baseline và 23 ca mới; `.cache/four-mode-full-tests.log`. Hai test start/session đã cập nhật bàn giao tự động và giữ các ca stable-key/lifecycle/settlement. Bộ mới kiểm bốn wire shape, full null, caps 0/sai kiểu/mode binding, đơn vị progress, money unknown/maximum, overshoot 10,23 kWh, draft/edit, mode defaults/presets, auto-nav/Back/background/late/logout và không tự POST stop.
+- Capture batch đầu: **2/2 pass** (9 giây), **121 PNG / 17 scenario cho mỗi kích thước**, gồm M06 bốn mode, M07 pending/cap/zero, M08 bốn mode, M09-A, stopping/final-meter/posted. [390×844, 38 khung](build/previews/stitch-charging-zip5/390-1x/manifest.json) · [320px/200%, 83 khung](build/previews/stitch-charging-zip5/320-2x/manifest.json). Mỗi manifest có offset cuộn; `-01.png` là khung đầu, số cuối là đáy, các khung giữa có overlap. Đây là Flutter render với SDK fonts và transport/scanner fixture trong test, không phải screenshot emulator/device. Giao diện 390px và các form/xác nhận 320px/200% đã được review đạt, không cần chỉnh UI. Công cụ capture đã bổ sung unfocus trước khi chụp; bộ PNG đã review là batch đầu, chưa render lại chỉ để dọn caret. Log `.cache/four-mode-capture.log`.
+- Android debug: `android/gradlew.bat --offline --no-daemon "-Pkotlin.incremental=false" :app:assembleDebug` **BUILD SUCCESSFUL in 47s**, 125 task (19 executed/106 up-to-date). APK `build/app/outputs/apk/debug/app-debug.apk`; log `.cache/four-mode-apk.log`. Gradle có cảnh báo deprecation hiện hữu. Chưa cài/chạy APK trên thiết bị.
+
+Thay đổi chỉ ở `lib/features/charging`, adapter tối thiểu `lib/core/api/driver_api_session.dart`, test/support/tool và bốn tài liệu mobile. Logo, dependency, config, backend và diagrams giữ nguyên. Phạm vi phát hành: chỉ phần mobile; PR phụ thuộc API #193, chưa xác minh staging. Việc bàn giao source sang checkout Run dùng backup bytes, manifest SHA-256 và stash giữ lại. Branch `wp3/t96-mobile-bon-che-do-sac` từ `4ce6124`. Nguồn nghiên cứu, licenses và mapping kiến trúc ở [architecture](docs/architecture.md#t96--bốn-chế-độ-stitch-zip-5-1911); các sai khác nghiệp vụ với ZIP ở [design-system](docs/design-system.md#charging-theo-stitch-zip-5--1911).
+
 | | |
 |---|---|
 | Chủ sở hữu | WP3 — Mobile Developer (Sơn) |
@@ -42,7 +58,7 @@ Bản đóng gói T96 ngày 19/11 kiểm lại: `dart format --output=none --set
 
 ## Ràng buộc
 
-- Backend hiện chỉ nhận **một chế độ bắt đầu phiên: hạn mức kWh** (`mode: energy_kwh`, hợp đồng #69, D4). Mock trong app có thêm `autoFull`, `timed`, `cost`; ba chế độ này chưa có backend và phải được xem là hướng phát triển cho tới khi hợp đồng đổi.
+- Driver API 0.14 định nghĩa bốn chế độ `full`, `timed`, `energy_kwh`, `amount_vnd` (§17). Mobile đã nối bốn shape trong slice ZIP (5). Staging hiện vẫn 0.13, chỉ hỗ trợ energy vì PR #193 chưa merge/deploy. Response energy cũ tiếp tục đọc được; chế độ chưa hỗ trợ báo lỗi nghiệp vụ và cho chỉnh sửa, không chuyển sang fixture.
 - Có hai đường bắt đầu phiên **không đi qua app** (quẹt thẻ RFID, thao tác trên trụ). App phải xử lý được việc thấy một phiên mà nó không tạo ra; hợp đồng mô tả ở `DRIVER-API-HOP-DONG.md` §5.
 - Ngưỡng M3: SoC và kWh cập nhật **trong vòng vài giây** kể từ khi simulator gửi `MeterValues`. Giai đoạn mock: polling 5 s theo hợp đồng; SSE dự kiến tuần 10.
 - Các luồng chưa tích hợp dùng dữ liệu mock trong kiểm thử. Giao diện tài xế không hiển thị nhãn demo/mock.

@@ -18,10 +18,29 @@ final chargeStartProvider =
       ChargeStartController.new,
     );
 
+typedef ChargeStartDraft = ({ChargingMode mode, String input});
+final chargeStartDraftProvider =
+    NotifierProvider<ChargeStartDraftController, ChargeStartDraft>(
+      ChargeStartDraftController.new,
+    );
+
+class ChargeStartDraftController extends Notifier<ChargeStartDraft> {
+  @override
+  ChargeStartDraft build() {
+    ref.watch(discoverySessionProvider);
+    ref.watch(connectorLookupProvider.select((value) => value.connector));
+    return (mode: ChargingMode.energy, input: '');
+  }
+
+  void update(ChargingMode mode, String input) =>
+      state = (mode: mode, input: input);
+}
+
 typedef ChargeStartAttempt = ({
   StartRequest request,
   ResolvedConnector connector,
   String vehicleLabel,
+  String draftInput,
 });
 
 class ChargeStartState {
@@ -60,30 +79,36 @@ class ChargeStartState {
               !snapshot!.outcome.awaitingEffect) ||
           sessionEnded ||
           issue?.refused == true);
+
+  bool get canEdit => canClear && !sessionEnded && sessionTarget == null;
 }
 
 class ChargeStartController extends Notifier<ChargeStartState?> {
   DateTime? _latestProgressAt;
+  ChargeStartState? _pendingRead;
+  ChargeStartState? _beforeRead;
 
   @override
   ChargeStartState? build() {
     ref.watch(authScopeProvider);
     _latestProgressAt = null;
+    _pendingRead = null;
+    _beforeRead = null;
     return null;
   }
 
   Future<void> start(
     DiscoverySession selection,
     ResolvedConnector connector,
-    int wh,
-  ) async {
+    int? limit, {
+    ChargingMode mode = ChargingMode.energy,
+  }) async {
     if (state != null ||
         selection.scope == signedOutScope ||
         selection != ref.read(discoverySessionProvider) ||
         connector != ref.read(connectorLookupProvider).connector ||
         !connector.canRequestStart ||
-        wh < 1 ||
-        wh > maxChargeEnergyWh) {
+        !validChargeLimit(mode, limit)) {
       return;
     }
     final vehicle = ref.read(profileControllerProvider).profile.selectedVehicle;
@@ -93,11 +118,12 @@ class ChargeStartController extends Notifier<ChargeStartState?> {
         scope: selection.scope,
         connectorId: connector.id,
         vehicleId: vehicle.id,
-        mode: ChargingMode.energy,
-        limitValue: wh,
+        mode: mode,
+        limitValue: limit,
         key: newChargeStartKey(),
       ),
       connector: connector,
+      draftInput: ref.read(chargeStartDraftProvider).input,
       vehicleLabel: [
         vehicle.label,
         if (vehicle.plateNumber != null) vehicle.plateNumber!,
@@ -113,9 +139,10 @@ class ChargeStartController extends Notifier<ChargeStartState?> {
         current.snapshot?.outcome != ChargeStartOutcome.requiresConfirmation) {
       return;
     }
-    final maxWh = current.snapshot!.maxEnergyWh!;
+    final maxLimit = current.snapshot!.maxLimitValue;
     final selection = ref.read(discoverySessionProvider);
-    if (maxWh < 1 ||
+    if (maxLimit == null ||
+        !validChargeLimit(original.mode, maxLimit) ||
         selection.scope != original.scope ||
         selection.vehicleId != original.vehicleId) {
       return;
@@ -126,10 +153,11 @@ class ChargeStartController extends Notifier<ChargeStartState?> {
         connectorId: original.connectorId,
         vehicleId: original.vehicleId,
         mode: original.mode,
-        limitValue: maxWh,
+        limitValue: maxLimit,
         key: newChargeStartKey(),
       ),
       connector: current.attempt.connector,
+      draftInput: chargeLimitInput(original.mode, maxLimit),
       vehicleLabel: current.attempt.vehicleLabel,
     ));
   }
@@ -146,11 +174,24 @@ class ChargeStartController extends Notifier<ChargeStartState?> {
     await _request(current.attempt, previous: current, submit: false);
   }
 
+  void pauseStatusReads() {
+    if (!ref.mounted) return;
+    ref.read(chargeStartRepositoryProvider).cancelStatusRead();
+    if (_pendingRead != null && identical(state, _pendingRead)) {
+      state = _beforeRead;
+    }
+    _pendingRead = null;
+    _beforeRead = null;
+  }
+
   bool recordProgress(ChargeSessionTarget target, ChargeProgress progress) {
     final current = state;
     if (current == null ||
         current.sessionTarget != target ||
         ref.read(authScopeProvider) != target.scope ||
+        (progress.billingMode != null &&
+            (progress.billingMode != current.attempt.request.mode ||
+                progress.limitValue != current.attempt.request.limitValue)) ||
         _latestProgressAt?.isAfter(progress.updatedAt) == true ||
         (current.sessionEnded && !progress.confirmsEnd)) {
       return false;
@@ -179,6 +220,25 @@ class ChargeStartController extends Notifier<ChargeStartState?> {
     return true;
   }
 
+  bool edit() {
+    final current = state;
+    if (current?.canEdit != true) return false;
+    final request = current!.attempt.request;
+    final selection = ref.read(discoverySessionProvider);
+    if (selection.scope != request.scope ||
+        selection.vehicleId != request.vehicleId ||
+        ref.read(connectorLookupProvider).connector !=
+            current.attempt.connector) {
+      return false;
+    }
+    _latestProgressAt = null;
+    ref
+        .read(chargeStartDraftProvider.notifier)
+        .update(request.mode, current.attempt.draftInput);
+    state = null;
+    return true;
+  }
+
   Future<void> _submit(
     ChargeStartAttempt attempt, {
     ChargeStartState? previous,
@@ -199,6 +259,10 @@ class ChargeStartController extends Notifier<ChargeStartState?> {
       busy: true,
     );
     state = pending;
+    if (!submit) {
+      _pendingRead = pending;
+      _beforeRead = previous;
+    }
     bool isCurrent() =>
         ref.mounted &&
         ref.read(authScopeProvider) == request.scope &&
@@ -230,6 +294,11 @@ class ChargeStartController extends Notifier<ChargeStartState?> {
             ? ChargeStartIssue.uncertain
             : error.issue,
       );
+    } finally {
+      if (identical(_pendingRead, pending)) {
+        _pendingRead = null;
+        _beforeRead = null;
+      }
     }
   }
 }
