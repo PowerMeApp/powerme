@@ -21,9 +21,9 @@ type FaultAction = 'acknowledge' | 'reset' | 'close';
 
 const FAULT_PATH = /^\/faults(?:\/([1-9][0-9]{0,14})\/(acknowledge|reset|close))?$/;
 /** Contract §2.4: page from 1, page_size 1–100 (default 50). */
-const DEFAULT_PAGE_SIZE = 50;
-const MAX_PAGE_SIZE = 100;
-const MAX_PAGE = 10_000;
+export const DEFAULT_PAGE_SIZE = 50;
+export const MAX_PAGE_SIZE = 100;
+export const MAX_PAGE = 10_000;
 const STATUSES: readonly string[] = [
   'open',
   'all',
@@ -84,7 +84,7 @@ export function matchFaultRoute(rest: string, query: URLSearchParams): FaultRout
 }
 
 /** Plain decimal, no sign or leading zero; NaN otherwise. */
-function intParam(raw: string | null, fallback: number): number {
+export function intParam(raw: string | null, fallback: number): number {
   if (raw === null) return fallback;
   return /^(0|[1-9][0-9]{0,5})$/.test(raw) ? Number(raw) : NaN;
 }
