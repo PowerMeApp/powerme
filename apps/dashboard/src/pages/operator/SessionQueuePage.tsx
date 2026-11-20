@@ -13,6 +13,7 @@
 import { useState } from 'react';
 import { useSearchParams } from 'react-router';
 import type { ReviewSession, SessionQueue, UnattributedSession } from '@powerme/shared';
+import { Breadcrumbs } from '../../components/Breadcrumbs';
 import { ConfirmDialog } from '../../components/ConfirmDialog';
 import {
   errorMessage,
@@ -62,7 +63,7 @@ const NOT_ASSIGNABLE: Record<string, string> = {
 export function sessionError(err: unknown): string {
   switch ((err as Partial<ApiError> | undefined)?.code) {
     case 'not_found':
-      return 'Không tìm thấy phiên này trong các Charge Point của Operator';
+      return 'Không tìm thấy phiên này trong các trụ sạc của Operator';
     case 'driver_not_eligible':
       return 'Tài xế không hoạt động hoặc không có Charging Credit đang mở';
     case 'free_vend_not_billable':
@@ -160,7 +161,7 @@ function DecisionDialog({
       onConfirm={() => void submit()}
     >
       <p className="muted small">
-        {s.charge_point_serial} · Connector {s.connector_no} · {s.id_tag} · {kwh(s.energy_wh)}
+        {s.charge_point_serial} · Súng {s.connector_no} · {s.id_tag} · {kwh(s.energy_wh)}
       </p>
       <p>
         {decision.kind === 'assign'
@@ -224,7 +225,7 @@ function UnattributedRow({
       </td>
       <td>
         {s.charge_point_serial}
-        <div className="muted small">Connector {s.connector_no}</div>
+        <div className="muted small">Súng {s.connector_no}</div>
         {s.delivered_offline && <span className="pill major">gửi bù sau khi nối lại</span>}
       </td>
       <td>
@@ -268,7 +269,7 @@ function ReviewRow({ s, onDecide }: { s: ReviewSession; onDecide: (d: Decision) 
       </td>
       <td>
         {s.charge_point_serial}
-        <div className="muted small">Connector {s.connector_no}</div>
+        <div className="muted small">Súng {s.connector_no}</div>
       </td>
       <td>
         {s.id_tag}
@@ -322,6 +323,7 @@ export function SessionQueuePage() {
 
   return (
     <>
+      <Breadcrumbs items={[{ label: 'Phiên cần xử lý' }]} />
       <div className="page-head">
         <h1>Phiên cần xử lý</h1>
         <p>Phiên chưa gắn tài xế và phiên cần xem lại của Operator · cập nhật mỗi 10 giây</p>
@@ -365,7 +367,7 @@ export function SessionQueuePage() {
               <thead>
                 <tr>
                   <th scope="col">Phiên</th>
-                  <th scope="col">Charge Point</th>
+                  <th scope="col">Trụ sạc</th>
                   <th scope="col">Thẻ / nguồn</th>
                   <th scope="col">Năng lượng</th>
                   <th scope="col">{queue === 'review' ? 'Bản ghi đối soát' : 'Lý do'}</th>

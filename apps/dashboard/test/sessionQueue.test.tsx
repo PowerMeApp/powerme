@@ -67,6 +67,12 @@ describe('Phiên cần xử lý (màn 23)', () => {
     expect(free.getByText(/Free vend — không bao giờ tính tiền/)).toBeInTheDocument();
     expect(free.getByRole('button', { name: 'Đóng' })).toBeEnabled();
     expect(seen[0]).toMatchObject({ search: '?queue=unattributed&page=1&page_size=20' });
+    // FE-07 look: breadcrumb and Vietnamese names.
+    const crumbs = within(screen.getByRole('navigation', { name: 'Breadcrumb' }));
+    expect(crumbs.getByRole('link', { name: 'Tổng quan' })).toHaveAttribute('href', '/operator');
+    expect(crumbs.getByText('Phiên cần xử lý')).toHaveAttribute('aria-current', 'page');
+    expect(screen.getByRole('columnheader', { name: 'Trụ sạc' })).toBeInTheDocument();
+    expect(row.getByText('Súng 1')).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Phiên cần xử lý' })).toHaveAttribute(
       'href',
       '/operator/sessions',
