@@ -29,6 +29,13 @@ Future<void> _open(
 
 Future<void> _tap(WidgetTester tester, String key, {bool settle = true}) async {
   final target = find.byKey(Key(key));
+  if (target.evaluate().isEmpty) {
+    await tester.scrollUntilVisible(
+      target,
+      180,
+      scrollable: find.byType(Scrollable).first,
+    );
+  }
   await tester.ensureVisible(target);
   await tester.pump();
   await tester.tap(target);
@@ -106,11 +113,12 @@ void main() {
       });
       await _open(tester, fixture);
       expect(find.text('125.000 đ'), findsOneWidget);
+      expect(imageClient.urls, isEmpty);
+      await _tap(tester, 'open-vehicle-garage');
       expect(find.text(leafPhotoCredit), findsOneWidget);
       expect(find.text('Ảnh minh họa'), findsOneWidget);
       expect(imageClient.urls, [Uri.parse(leafPhotoUrl)]);
       expect(imageClient.request.headers.values, isEmpty);
-      await _tap(tester, 'open-vehicle-garage');
       expect(find.text(leafPhotoCredit), findsOneWidget);
       final secondary = find.byKey(const ValueKey('10'));
       expect(
@@ -210,6 +218,12 @@ void main() {
     await _chooseModel(tester);
     await _tap(tester, _save, settle: false);
     await tester.tap(find.byKey(const Key(_save)));
+    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(
+      find.text('51K-901.01'),
+      -180,
+      scrollable: find.byType(Scrollable).first,
+    );
     await tester.pumpAndSettle();
     expect(find.text('51K-901.01'), findsOneWidget);
     expect(find.text('Xe mặc định'), findsOneWidget);
@@ -501,6 +515,14 @@ void main() {
       expect(find.byKey(const Key(_save)), findsNothing);
       blocked = false;
       await _tap(tester, _reload);
+      if (received) {
+        await tester.scrollUntilVisible(
+          find.text('30A-123.45'),
+          -180,
+          scrollable: find.byType(Scrollable).first,
+        );
+        await tester.pumpAndSettle();
+      }
       expect(find.text('30A-123.45'), findsOneWidget);
       expect(fixture.requests.where((r) => r.path == 'vehicles'), hasLength(1));
       if (received) {

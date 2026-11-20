@@ -157,7 +157,9 @@ void main() {
     expect(find.textContaining('51A-00001'), findsOneWidget);
     expect(find.text('Tín dụng sạc'), findsOneWidget);
     expect(find.byKey(const Key('edit-profile')), findsNothing);
-    expect(find.byKey(const Key('add-vehicle')), findsOneWidget);
+    final addVehicle = find.byKey(const Key('add-vehicle'));
+    await _showProfileControl(tester, addVehicle);
+    expect(addVehicle, findsOneWidget);
     expect(find.byKey(const Key('edit-9')), findsNothing);
     expect(tester.widget<DriverTabBar>(bar).selected, DriverTab.account);
     for (final route in [
@@ -174,8 +176,7 @@ void main() {
     await tester.tap(find.byKey(const Key('nav-account')));
     await tester.pumpAndSettle();
     final reload = find.byKey(const Key('refresh-profile'));
-    await tester.ensureVisible(reload);
-    await tester.pump();
+    await _showProfileControl(tester, reload);
     await tester.tap(reload);
     await tester.pumpAndSettle();
     expect(
@@ -475,4 +476,16 @@ Future<void> _submitConnector(WidgetTester tester, String code) async {
   await tester.ensureVisible(submit);
   await tester.tap(submit);
   await tester.pumpAndSettle();
+}
+
+Future<void> _showProfileControl(WidgetTester tester, Finder target) async {
+  if (target.evaluate().isEmpty) {
+    await tester.scrollUntilVisible(
+      target,
+      180,
+      scrollable: find.byType(Scrollable).first,
+    );
+  }
+  await tester.ensureVisible(target);
+  await tester.pump();
 }
