@@ -12,6 +12,7 @@ import {
   type FetchArgs,
 } from '@reduxjs/toolkit/query/react';
 import type {
+  AdminSummary,
   ApiErrorBody,
   ChargePointLifecycle,
   ChargePointPage,
@@ -142,13 +143,18 @@ const baseQuery: BaseQueryFn<string | FetchArgs, unknown, ApiError> = async (arg
 export const api = createApi({
   reducerPath: 'api',
   baseQuery,
-  tagTypes: ['Fault', 'Summary', 'ChargePoint', 'Session', 'Revenue'],
+  tagTypes: ['Fault', 'Summary', 'ChargePoint', 'Session', 'Revenue', 'AdminSummary'],
   endpoints: (b) => ({
     login: b.mutation<LoginResponse, LoginRequest>({
       query: (body) => ({ url: 'auth/v1/login', method: 'POST', body }),
     }),
     operatorMe: b.query<DashboardMe, void>({ query: () => 'operator/v1/me' }),
     adminMe: b.query<DashboardMe, void>({ query: () => 'admin/v1/me' }),
+    // Screen 27 (FE-14, UC-ADM-07): platform counts.
+    adminSummary: b.query<AdminSummary, void>({
+      query: () => 'admin/v1/summary',
+      providesTags: ['AdminSummary'],
+    }),
     // Screen 21 (FE-04b, UC-OPS-03): FaultEvents of the signed-in staff's Operator.
     // One page of the server's order (D39); `page` is 1-based.
     operatorFaults: b.query<
@@ -256,6 +262,7 @@ export const {
   useLoginMutation,
   useOperatorMeQuery,
   useAdminMeQuery,
+  useAdminSummaryQuery,
   useOperatorFaultsQuery,
   useAcknowledgeFaultMutation,
   useResetFaultMutation,
