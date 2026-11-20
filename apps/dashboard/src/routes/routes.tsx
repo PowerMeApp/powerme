@@ -7,11 +7,13 @@ import { homePath } from '../core/auth/authSlice';
 import { useAppSelector } from '../core/store/store';
 import { AppShell } from '../layouts/AppShell';
 import { AdminHomePage } from '../pages/admin/AdminHomePage';
+import { AdminRevenuePage } from '../pages/admin/AdminRevenuePage';
 import { LoginPage } from '../pages/LoginPage';
 import { ChargePointDetailPage } from '../pages/operator/ChargePointDetailPage';
 import { ChargePointListPage } from '../pages/operator/ChargePointListPage';
 import { FaultAlertsPage } from '../pages/operator/FaultAlertsPage';
 import { OperatorHomePage } from '../pages/operator/OperatorHomePage';
+import { RevenuePage } from '../pages/operator/RevenuePage';
 import { RequireRole } from './RequireRole';
 
 function RootRedirect() {
@@ -35,6 +37,7 @@ export const routes: RouteObject[] = [
       { path: 'charge-points', element: <ChargePointListPage /> }, // 18
       { path: 'charge-points/:id', element: <ChargePointDetailPage /> }, // 20
       { path: 'faults', element: <FaultAlertsPage /> }, // 21
+      { path: 'revenue', element: <RevenuePage /> }, // 25
       { path: '*', element: <Navigate to="/operator" replace /> },
     ],
   },
@@ -47,6 +50,7 @@ export const routes: RouteObject[] = [
     ),
     children: [
       { index: true, element: <AdminHomePage /> }, // 27
+      { path: 'revenue', element: <AdminRevenuePage /> }, // 35
       { path: '*', element: <Navigate to="/admin" replace /> },
     ],
   },

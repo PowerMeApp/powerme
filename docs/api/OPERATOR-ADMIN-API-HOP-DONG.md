@@ -388,9 +388,9 @@ tách theo bề mặt — refresh token không mang `role`, role đọc lại t�
 
 | Endpoint | Role | UC / FR / BR | Trạng thái · người làm | Ghi chú |
 |---|---|---|---|---|
-| `GET /operator/v1/revenue` | operator_staff | UC-OPS-09, FR-18, BR-P46 | planned · Khang (T108) | `from`, `to` (ngày), `group_by=charge_point\|site\|day`, `site_id` |
+| `GET /operator/v1/revenue` | operator_staff | UC-OPS-09, FR-18, BR-P46 | planned · Khang (T108) | `from`, `to` (ngày), `group_by=charge_point\|site\|day`, `site_id`; thêm `unsettled {session_count, by_reason}` (Khang 20/11); `rows` chỉ nhóm có phiên, ngày trống giao diện điền. Màn 25 (FE-07, Nghĩa) |
 | `GET /operator/v1/revenue.csv` | operator_staff | UC-OPS-09, BR-P46 | planned · Khang (T108) | cùng truy vấn với JSON |
-| `GET /admin/v1/revenue` | admin | UC-ADM-10, BR-P46 | planned · Khang (T108) | thêm `group_by=operator`, `operator_id` |
+| `GET /admin/v1/revenue` | admin | UC-ADM-10, BR-P46 | planned · Khang (T108) | thêm `group_by=operator`, `operator_id`. Màn 35 phần doanh thu (FE-07, Nghĩa) |
 | `GET /admin/v1/revenue.csv` | admin | UC-ADM-10, BR-P46 | planned · Khang (T108) | |
 | `GET /admin/v1/transactions` | admin | UC-ADM-10, BR-P46, Table 5 #35 | planned · T108 (Khang) | danh sách phiên đã dừng; lọc `from`/`to` (ngày, bắt buộc), `operator_id`, `site_id`, `charge_point_id`, `kind`, `origin`; page/page_size; `totals` của cả kết quả lọc |
 | `GET /admin/v1/transactions.csv` | admin | UC-ADM-10, BR-P46 | planned · T108 (Khang) | cùng tham số và truy vấn, không phân trang, dòng cuối `TOTAL`; đuôi `.csv` như `revenue.csv` |

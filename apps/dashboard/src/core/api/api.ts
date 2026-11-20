@@ -26,6 +26,8 @@ import type {
   RefreshResponse,
   ResetRequest,
   ResetResponse,
+  RevenueQuery,
+  RevenueReport,
   SessionsActiveError,
 } from '@powerme/shared';
 import { loggedOut, tokenRefreshed, type AuthState } from '../auth/authSlice';
@@ -125,7 +127,7 @@ const baseQuery: BaseQueryFn<string | FetchArgs, unknown, ApiError> = async (arg
 export const api = createApi({
   reducerPath: 'api',
   baseQuery,
-  tagTypes: ['Fault', 'Summary', 'ChargePoint'],
+  tagTypes: ['Fault', 'Summary', 'ChargePoint', 'Revenue'],
   endpoints: (b) => ({
     login: b.mutation<LoginResponse, LoginRequest>({
       query: (body) => ({ url: 'auth/v1/login', method: 'POST', body }),
@@ -177,6 +179,19 @@ export const api = createApi({
       query: (id) => `operator/v1/charge-points/${id}`,
       providesTags: ['ChargePoint', 'Fault'],
     }),
+    // Screens 25 / 35 (FE-07, UC-OPS-09 / UC-ADM-10): revenue report of T108 (BR-P46).
+    revenue: b.query<RevenueReport, { scope: RevenueScope } & RevenueQuery>({
+      query: ({ scope, ...q }) => `${scope}/v1/revenue?${revenueSearch(q)}`,
+      providesTags: ['Revenue'],
+    }),
+    // Same parameters and query as the JSON (contract: "CSV khớp màn hình"). A mutation so it goes
+    // through baseQuery (Bearer + refresh on 401) and is never cached; the body is the CSV text.
+    revenueCsv: b.mutation<string, { scope: RevenueScope } & RevenueQuery>({
+      query: ({ scope, ...q }) => ({
+        url: `${scope}/v1/revenue.csv?${revenueSearch(q)}`,
+        responseHandler: (r) => (r.ok ? r.text() : r.json()),
+      }),
+    }),
   }),
 });
 
@@ -191,7 +206,19 @@ export const {
   useOperatorSummaryQuery,
   useOperatorChargePointsQuery,
   useOperatorChargePointQuery,
+  useRevenueQuery,
+  useRevenueCsvMutation,
 } = api;
+
+export type RevenueScope = 'operator' | 'admin';
+
+/** Query string of the revenue routes, in a fixed order (JSON and CSV ask the same thing). */
+export function revenueSearch(q: RevenueQuery): string {
+  const p = new URLSearchParams({ from: q.from, to: q.to, group_by: q.group_by });
+  if (q.site_id) p.set('site_id', q.site_id);
+  if (q.operator_id) p.set('operator_id', q.operator_id);
+  return p.toString();
+}
 
 /** Vietnamese text for any error of this API. */
 export function errorMessage(err: unknown): string {
@@ -221,6 +248,9 @@ export function errorMessage(err: unknown): string {
       return 'Charge Point không trả lời lệnh Reset hợp lệ, sự cố quay về "Đã xác nhận"';
     case 'not_found':
       return 'Không tìm thấy sự cố này';
+    // FE-07 revenue (T108).
+    case 'invalid_period':
+      return 'Kỳ báo cáo không hợp lệ: ngày đầu phải trước ngày cuối và dài tối đa 366 ngày';
   }
   if (e.status === 429) {
     const minutes = Math.max(1, Math.ceil((e.retryAfterS ?? 60) / 60));

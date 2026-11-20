@@ -517,3 +517,59 @@ table.data-table tr.sev-minor td.num {
   display: grid;
   gap: 6px;
 }
+
+/* FE-07 — screens 25 / 35 revenue report. */
+.revenue-filters {
+  align-items: flex-end;
+}
+.revenue-filters .field {
+  min-width: 170px;
+}
+.revenue-filter {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 12px;
+}
+.revenue-tiles {
+  margin: 0 0 12px;
+}
+.revenue-notes {
+  margin: 0 0 16px;
+  padding-left: 18px;
+  display: grid;
+  gap: 4px;
+  font-size: 14px;
+}
+table.revenue-table td:nth-child(2) {
+  min-width: 0;
+}
+table.revenue-table .revenue-num {
+  text-align: right;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+table.revenue-table tr.muted td {
+  color: var(--muted);
+}
+table.revenue-table tfoot th,
+table.revenue-table tfoot td {
+  font-weight: 700;
+  border-top: 1px solid var(--line);
+}
+.link-button {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--teal);
+  font: inherit;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+.link-button:hover {
+  text-decoration: underline;
+}
+.revenue-later {
+  margin-top: 16px;
+}

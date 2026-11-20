@@ -58,6 +58,13 @@ export function AppShell() {
               <span>Cảnh báo sự cố</span>
             </NavLink>
           )}
+          <NavLink
+            to={admin ? '/admin/revenue' : '/operator/revenue'}
+            className={({ isActive }) => `nav-link${isActive ? ' active' : ''}`}
+          >
+            <Icon name="revenue" />
+            <span>{admin ? 'Giao dịch & doanh thu' : 'Doanh thu'}</span>
+          </NavLink>
         </nav>
         <div className="rail-foot">
           <button
