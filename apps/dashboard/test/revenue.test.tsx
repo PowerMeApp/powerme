@@ -1,5 +1,5 @@
 /** Screens 25 / 35 revenue (FE-07) against a fake T108 API; pure helpers of revenueModel. */
-import { screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import type { RevenueReport, RevenueRow } from '@powerme/shared';
 import { afterEach, vi } from 'vitest';
 import {
@@ -30,6 +30,7 @@ const report = (over: Partial<RevenueReport> = {}): RevenueReport => ({
       key: '11',
       charge_point_id: '11',
       serial_number: 'RH-1',
+      site_id: '5',
       site_name: 'Trạm Q1',
       csms_billed_session_count: 3,
       csms_billed_energy_wh: 45_000,
@@ -115,8 +116,22 @@ describe('Doanh thu (màn 25, Operator)', () => {
       'Có khuyến mãi (2), Thẻ RFID chờ T115 (1)',
     );
     expect(screen.getByText(/Tính đến lúc 20\/11\/2026 09:15/)).toBeInTheDocument();
+    // Filters in their own card, above the totals (Nghĩa 20/11).
+    const filters = screen.getByRole('region', { name: 'Bộ lọc' });
+    expect(
+      filters.compareDocumentPosition(screen.getByRole('region', { name: 'Doanh thu' })) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
     const r = within(screen.getByRole('row', { name: 'RH-1' }));
-    expect(r.getByText('Trạm Q1')).toBeInTheDocument();
+    // Names open their own pages: the charge point (screen 20) and its station.
+    expect(r.getByRole('link', { name: 'RH-1' })).toHaveAttribute(
+      'href',
+      '/operator/charge-points/11',
+    );
+    expect(r.getByRole('link', { name: 'Trạm Q1' })).toHaveAttribute(
+      'href',
+      '/operator/stations/5',
+    );
     expect(r.getByText('45 kWh')).toBeInTheDocument();
     expect(
       within(screen.getByRole('row', { name: 'Tổng' })).getByText('1.250.000 ₫'),
@@ -125,6 +140,9 @@ describe('Doanh thu (màn 25, Operator)', () => {
       'href',
       '/operator/revenue',
     );
+    const crumbs = within(screen.getByRole('navigation', { name: 'Breadcrumb' }));
+    expect(crumbs.getByRole('link', { name: 'Tổng quan' })).toHaveAttribute('href', '/operator');
+    expect(crumbs.getByText('Doanh thu')).toHaveAttribute('aria-current', 'page');
   });
 
   it('by day: every day of the period is listed, empty ones as 0', async () => {
@@ -142,23 +160,48 @@ describe('Doanh thu (màn 25, Operator)', () => {
     ).toBeInTheDocument();
   });
 
-  it('a station drills down to its charge points; "Bỏ lọc" goes back', async () => {
-    const seen = fakeCsms({
+  it('by station: each station links to its own page (no drill-down on this page)', async () => {
+    fakeCsms({
       [OP]: ok(
         report({ group_by: 'site', rows: [row({ key: '5', site_id: '5', site_name: 'Trạm Q1' })] }),
       ),
     });
-    const { user } = renderApp(`/operator/revenue${PERIOD}&group_by=site`, session(STAFF));
-    await user.click(await screen.findByRole('button', { name: 'Trạm Q1' }));
-    await waitFor(() =>
-      expect(seen.some((r) => r.search === `${PERIOD}&group_by=charge_point&site_id=5`)).toBe(true),
+    renderApp(`/operator/revenue${PERIOD}&group_by=site`, session(STAFF));
+    expect(await screen.findByRole('link', { name: 'Trạm Q1' })).toHaveAttribute(
+      'href',
+      '/operator/stations/5',
     );
-    expect(screen.getByText(/Đang xem:/)).toHaveTextContent('Trạm Q1');
-    await user.click(screen.getByRole('button', { name: '‹ Bỏ lọc' }));
-    // Back to the stations (served from cache): no filter, grouped by station again.
-    expect(await screen.findByRole('button', { name: 'Trạm Q1' })).toBeInTheDocument();
     expect(screen.queryByText(/Đang xem:/)).toBeNull();
-    expect(screen.getByRole('combobox', { name: 'Nhóm theo' })).toHaveValue('site');
+  });
+
+  it('pages the table 20 rows at a time; the period total stays on every page', async () => {
+    const many = Array.from({ length: 45 }, (_, i) =>
+      row({
+        key: String(100 + i),
+        charge_point_id: String(100 + i),
+        serial_number: `RH-${String(i + 1).padStart(2, '0')}`,
+        csms_billed_session_count: 1,
+      }),
+    );
+    const { user } = (() => {
+      fakeCsms({ [OP]: ok(report({ rows: many })) });
+      return renderApp(`/operator/revenue${PERIOD}`, session(STAFF));
+    })();
+    await screen.findByRole('row', { name: 'RH-01' });
+    expect(screen.getByText('Hiển thị 1–20 / 45')).toBeInTheDocument();
+    expect(screen.queryByRole('row', { name: 'RH-21' })).toBeNull();
+    const total = () => within(screen.getByRole('row', { name: 'Tổng' })).getByText('1.250.000 ₫');
+    expect(total()).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Sau ›' }));
+    expect(screen.getByText('Hiển thị 21–40 / 45')).toBeInTheDocument();
+    expect(screen.getByRole('row', { name: 'RH-21' })).toBeInTheDocument();
+    expect(screen.queryByRole('row', { name: 'RH-01' })).toBeNull();
+    expect(total()).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Sau ›' }));
+    expect(screen.getByText('Hiển thị 41–45 / 45')).toBeInTheDocument();
+    // Changing the period (or the grouping) goes back to page 1.
+    fireEvent.change(screen.getByLabelText('Từ ngày'), { target: { value: '2026-11-02' } });
+    await waitFor(() => expect(screen.getByText('Hiển thị 1–20 / 45')).toBeInTheDocument());
   });
 
   it('an invalid period is caught before asking; the server’s invalid_period is shown too', async () => {
@@ -209,7 +252,7 @@ describe('Doanh thu (màn 25, Operator)', () => {
 });
 
 describe('Giao dịch & doanh thu (màn 35, Admin)', () => {
-  it('groups by Operator; an Operator drills down to its stations; nav link', async () => {
+  it('groups by Operator; names are plain text (Admin has no Operator pages); nav link', async () => {
     const seen = fakeCsms({
       [AD]: ok(
         report({
@@ -218,19 +261,22 @@ describe('Giao dịch & doanh thu (màn 35, Admin)', () => {
         }),
       ),
     });
-    const { user } = renderApp(`/admin/revenue${PERIOD}`, session(ADMIN));
-    await user.click(await screen.findByRole('button', { name: 'SaiGon EV' }));
+    renderApp(`/admin/revenue${PERIOD}`, session(ADMIN));
+    const r = within(await screen.findByRole('row', { name: 'SaiGon EV' }));
+    expect(r.queryByRole('link')).toBeNull();
+    expect(r.queryByRole('button')).toBeNull();
     expect(seen[0]).toMatchObject({
       path: '/api/admin/v1/revenue',
       search: `${PERIOD}&group_by=operator`,
     });
-    await waitFor(() =>
-      expect(seen.some((r) => r.search === `${PERIOD}&group_by=site&operator_id=3`)).toBe(true),
-    );
     expect(screen.getByRole('link', { name: 'Giao dịch & doanh thu' })).toHaveAttribute(
       'href',
       '/admin/revenue',
     );
-    expect(screen.getByRole('combobox', { name: 'Nhóm theo' })).toHaveValue('site');
+    expect(
+      within(screen.getByRole('navigation', { name: 'Breadcrumb' })).getByRole('link', {
+        name: 'Tổng quan',
+      }),
+    ).toHaveAttribute('href', '/admin');
   });
 });

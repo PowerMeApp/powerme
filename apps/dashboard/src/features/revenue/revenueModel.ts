@@ -9,10 +9,11 @@ const DAY_MS = 86_400_000;
 /** Contract: a period is at most 366 days. */
 export const MAX_PERIOD_DAYS = 366;
 
+/** UI labels in Vietnamese (GLOSSARY: "trụ sạc"; Nghĩa 20/11: no English names on this screen). */
 export const GROUP_LABEL: Record<RevenueGroupBy, string> = {
   operator: 'Operator',
-  site: 'Charging Station',
-  charge_point: 'Charge Point',
+  site: 'Trạm sạc',
+  charge_point: 'Trụ sạc',
   day: 'Ngày',
 };
 

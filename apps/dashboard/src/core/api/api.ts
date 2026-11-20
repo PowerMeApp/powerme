@@ -43,6 +43,10 @@ export interface ChargePointFilter {
   lifecycle?: ChargePointLifecycle;
   online?: boolean;
   page: number;
+  /** Station page (FE-07): only this Charging Station's charge points. */
+  siteId?: string;
+  /** Default CHARGE_POINT_PAGE_SIZE; the station page asks for up to 100. */
+  pageSize?: number;
 }
 
 export interface ApiError {
@@ -164,12 +168,13 @@ export const api = createApi({
       providesTags: ['Summary'],
     }),
     operatorChargePoints: b.query<ChargePointPage, ChargePointFilter>({
-      query: ({ lifecycle, online, page }) => {
+      query: ({ lifecycle, online, page, siteId, pageSize = CHARGE_POINT_PAGE_SIZE }) => {
         const q = new URLSearchParams();
+        if (siteId) q.set('site_id', siteId);
         if (lifecycle) q.set('lifecycle', lifecycle);
         if (online !== undefined) q.set('online', String(online));
         q.set('page', String(page));
-        q.set('page_size', String(CHARGE_POINT_PAGE_SIZE));
+        q.set('page_size', String(pageSize));
         return `operator/v1/charge-points?${q}`;
       },
       providesTags: ['ChargePoint'],
@@ -241,11 +246,11 @@ export function errorMessage(err: unknown): string {
     case 'fault_not_acknowledged':
       return 'Phải xác nhận sự cố trước khi Reset';
     case 'station_offline':
-      return 'Charge Point đang offline, không gửi được lệnh Reset';
+      return 'Trụ sạc đang offline, không gửi được lệnh Reset';
     case 'reset_in_progress':
-      return 'Charge Point đang chờ kết quả một lệnh Reset khác, thử lại sau';
+      return 'Trụ sạc đang chờ kết quả một lệnh Reset khác, thử lại sau';
     case 'station_error':
-      return 'Charge Point không trả lời lệnh Reset hợp lệ, sự cố quay về "Đã xác nhận"';
+      return 'Trụ sạc không trả lời lệnh Reset hợp lệ, sự cố quay về "Đã xác nhận"';
     case 'not_found':
       return 'Không tìm thấy sự cố này';
     // FE-07 revenue (T108).

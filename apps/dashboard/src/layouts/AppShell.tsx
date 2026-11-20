@@ -46,7 +46,7 @@ export function AppShell() {
               className={({ isActive }) => `nav-link${isActive ? ' active' : ''}`}
             >
               <Icon name="plug" />
-              <span>Charge Point</span>
+              <span>Trụ sạc</span>
             </NavLink>
           )}
           {!admin && (

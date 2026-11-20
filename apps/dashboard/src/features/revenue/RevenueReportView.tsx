@@ -1,14 +1,19 @@
 /**
- * Revenue report (FE-07) shared by screen 25 Station Revenue (Operator, UC-OPS-09) and the revenue
- * part of screen 35 Transactions & Revenue (Admin, UC-ADM-10), on T108's
- * GET /api/{operator|admin}/v1/revenue[.csv] (Khang). BR-P46: revenue only counts `csms_billed`
+ * Revenue report (FE-07) shared by screen 25 Station Revenue (Operator, UC-OPS-09), the revenue
+ * part of screen 35 Transactions & Revenue (Admin, UC-ADM-10) and the station page, on T108's
+ * GET /api/{operator|admin}/v1/revenue (Khang). BR-P46: revenue only counts `csms_billed`
  * sessions that are `reconciled`; unattributed sessions are a separate line without money; sessions
  * not yet reconciled (`pending_reconciliation`) or reconciled but not debited (`unsettled`) are
  * shown as notes, outside revenue. Rows only hold groups with sessions; by day, the empty days are
- * filled here. State lives in the URL (?from=&to=&group_by=&site_id|operator_id=&name=).
+ * filled here.
+ *
+ * Layout (Nghĩa 20/11): filter card on top → totals and notes → table, paged here (the API returns
+ * every group at once), with the period total on every page. Names link to their own pages
+ * (operator scope): trụ sạc → screen 20, trạm sạc → station page. Export: T108's revenue.csv with
+ * the same query (SRS UC-ADM-10). Period and grouping live in the URL (?from=&to=&group_by=).
  */
 import { useState } from 'react';
-import { useSearchParams } from 'react-router';
+import { Link, useSearchParams } from 'react-router';
 import type { RevenueGroupBy, RevenueQuery, RevenueReport, RevenueRow } from '@powerme/shared';
 import {
   errorMessage,
@@ -29,34 +34,11 @@ import {
   rowLabel,
 } from './revenueModel';
 
-interface ScopeConfig {
-  groups: readonly RevenueGroupBy[];
-  defaultGroup: RevenueGroupBy;
-  /** The filter a drill-down sets, and the grouping that has it. */
-  filter: 'site_id' | 'operator_id';
-  drillFrom: RevenueGroupBy;
-  drillTo: RevenueGroupBy;
-}
-const SCOPES: Record<RevenueScope, ScopeConfig> = {
-  operator: {
-    groups: ['charge_point', 'site', 'day'],
-    defaultGroup: 'charge_point',
-    filter: 'site_id',
-    drillFrom: 'site',
-    drillTo: 'charge_point',
-  },
-  admin: {
-    groups: ['operator', 'site', 'charge_point', 'day'],
-    defaultGroup: 'operator',
-    filter: 'operator_id',
-    drillFrom: 'operator',
-    drillTo: 'site',
-  },
-};
+export const REVENUE_PAGE_SIZE = 20;
 
 /** CSV keeps its UTF-8 BOM so Excel reads Vietnamese (fetch's text() drops it). */
 function saveCsv(text: string, filename: string) {
-  const blob = new Blob([text.startsWith('﻿') ? text : `﻿${text}`], {
+  const blob = new Blob([text.startsWith('\uFEFF') ? text : `\uFEFF${text}`], {
     type: 'text/csv;charset=utf-8',
   });
   const url = URL.createObjectURL(blob);
@@ -68,6 +50,11 @@ function saveCsv(text: string, filename: string) {
   a.remove();
   URL.revokeObjectURL(url);
 }
+
+const GROUPS: Record<RevenueScope, readonly RevenueGroupBy[]> = {
+  operator: ['charge_point', 'site', 'day'],
+  admin: ['operator', 'site', 'charge_point', 'day'],
+};
 
 function Totals({ report }: { report: RevenueReport }) {
   const t = report.totals;
@@ -121,58 +108,112 @@ function Notes({ report }: { report: RevenueReport }) {
   );
 }
 
-export function RevenueReportView({ scope }: { scope: RevenueScope }) {
-  const cfg = SCOPES[scope];
+/** Name cell: a link to the item's own page when there is one (operator scope only). */
+function NameCell({
+  row,
+  groupBy,
+  scope,
+}: {
+  row: RevenueRow;
+  groupBy: RevenueGroupBy;
+  scope: RevenueScope;
+}) {
+  const label = rowLabel(row, groupBy);
+  // Admin has no station / charge point pages yet (screen 29 not built): names stay plain text.
+  const linkable = scope === 'operator';
+  const station =
+    row.site_id && row.site_name ? (
+      linkable ? (
+        <Link to={`/operator/stations/${row.site_id}`}>{row.site_name}</Link>
+      ) : (
+        row.site_name
+      )
+    ) : null;
+  return (
+    <td>
+      {groupBy === 'charge_point' && linkable && row.charge_point_id ? (
+        <Link className="cell-title" to={`/operator/charge-points/${row.charge_point_id}`}>
+          {label}
+        </Link>
+      ) : groupBy === 'site' && linkable && row.site_id ? (
+        <Link className="cell-title" to={`/operator/stations/${row.site_id}`}>
+          {label}
+        </Link>
+      ) : (
+        <span className="cell-title">{label}</span>
+      )}
+      {groupBy === 'charge_point' && station && <div className="muted small">{station}</div>}
+      {scope === 'admin' && groupBy !== 'operator' && row.operator_name && (
+        <div className="muted small">{row.operator_name}</div>
+      )}
+    </td>
+  );
+}
+
+export function RevenueReportView({
+  scope,
+  siteId,
+}: {
+  scope: RevenueScope;
+  /** Station page: the report of this station only (operator scope); no "by station" grouping. */
+  siteId?: string;
+}) {
+  const groups = siteId ? GROUPS[scope].filter((g) => g !== 'site') : GROUPS[scope];
   const [params, setParams] = useSearchParams();
   const period = defaultPeriod();
   const from = params.get('from') ?? period.from;
   const to = params.get('to') ?? period.to;
   const groupParam = params.get('group_by') as RevenueGroupBy | null;
-  const groupBy = groupParam && cfg.groups.includes(groupParam) ? groupParam : cfg.defaultGroup;
-  const filterId = params.get(cfg.filter);
-  const filterName = params.get('name');
+  const groupBy = groupParam && groups.includes(groupParam) ? groupParam : groups[0]!;
   const valid = periodDays(from, to) !== null;
   const query: RevenueQuery = {
     from,
     to,
     group_by: groupBy,
-    ...(filterId ? { [cfg.filter]: filterId } : {}),
+    ...(siteId ? { site_id: siteId } : {}),
   };
   const { data, error, isFetching } = useRevenueQuery({ scope, ...query }, { skip: !valid });
-  const [csv, csvState] = useRevenueCsvMutation();
-  const [csvError, setCsvError] = useState<string | null>(null);
   const report = valid ? data : undefined;
+  const [page, setPage] = useState(1);
+  const [csv, csvState] = useRevenueCsvMutation();
+  const [exportError, setExportError] = useState<string | null>(null);
 
-  const update = (changes: Record<string, string | null>) =>
+  const update = (changes: Record<string, string>) => {
+    setPage(1);
     setParams(
       (p) => {
         for (const [k, v] of Object.entries(changes)) {
-          if (v === null || v === '') p.delete(k);
-          else p.set(k, v);
+          if (v) p.set(k, v);
+          else p.delete(k);
         }
         return p;
       },
       { replace: true },
     );
+  };
 
   async function download() {
-    setCsvError(null);
+    setExportError(null);
     const r = await csv({ scope, ...query });
-    if ('error' in r) return setCsvError(errorMessage(r.error));
-    const who = filterId ? `-${cfg.filter === 'site_id' ? 'tram' : 'operator'}-${filterId}` : '';
-    saveCsv(r.data, `doanh-thu_${from}_${to}_${groupBy}${who}.csv`);
+    if ('error' in r) return setExportError(errorMessage(r.error));
+    saveCsv(r.data, `doanh-thu_${from}_${to}_${groupBy}${siteId ? `-tram-${siteId}` : ''}.csv`);
   }
 
-  const rows: RevenueRow[] = report
+  // Rows of the report actually shown (a stale response for other parameters is not shown).
+  const current = report && report.group_by === groupBy ? report : undefined;
+  const rows: RevenueRow[] = current
     ? groupBy === 'day'
-      ? fillDays(report.rows, report.from, report.to)
-      : report.rows
+      ? fillDays(current.rows, current.from, current.to)
+      : current.rows
     : [];
-  const drill = groupBy === cfg.drillFrom && !filterId;
+  const pages = Math.max(1, Math.ceil(rows.length / REVENUE_PAGE_SIZE));
+  const shownPage = Math.min(page, pages);
+  const first = (shownPage - 1) * REVENUE_PAGE_SIZE;
+  const pageRows = rows.slice(first, first + REVENUE_PAGE_SIZE);
 
   return (
     <>
-      <div className="filters revenue-filters">
+      <section className="card revenue-filters" aria-label="Bộ lọc">
         <label className="field">
           Từ ngày
           <input
@@ -200,7 +241,7 @@ export function RevenueReportView({ scope }: { scope: RevenueScope }) {
             value={groupBy}
             onChange={(e) => update({ group_by: e.target.value })}
           >
-            {cfg.groups.map((g) => (
+            {groups.map((g) => (
               <option key={g} value={g}>
                 {GROUP_LABEL[g]}
               </option>
@@ -209,39 +250,26 @@ export function RevenueReportView({ scope }: { scope: RevenueScope }) {
         </label>
         <button
           type="button"
-          className="btn small revenue-csv"
-          disabled={!report || csvState.isLoading}
+          className="btn small revenue-export"
+          disabled={!current || csvState.isLoading}
           onClick={() => void download()}
         >
           {csvState.isLoading ? 'Đang tải CSV…' : 'Tải CSV'}
         </button>
-      </div>
-      {filterId && (
-        <p className="revenue-filter">
-          Đang xem:{' '}
-          <b>{filterName ?? `${cfg.filter === 'site_id' ? 'Trạm' : 'Operator'} #${filterId}`}</b>{' '}
-          <button
-            type="button"
-            className="btn small ghost"
-            onClick={() => update({ [cfg.filter]: null, name: null, group_by: cfg.drillFrom })}
-          >
-            ‹ Bỏ lọc
-          </button>
-        </p>
-      )}
-      {csvError && <p role="alert">{csvError}</p>}
+      </section>
+      {exportError && <p role="alert">{exportError}</p>}
       {!valid ? (
         <p role="alert">
           Kỳ báo cáo không hợp lệ: ngày đầu phải trước ngày cuối và dài tối đa 366 ngày.
         </p>
-      ) : !report && isFetching ? (
+      ) : !current && isFetching ? (
         <p className="muted">Đang tải…</p>
-      ) : error && !report ? (
+      ) : error && !current ? (
         <p role="alert">{errorMessage(error)}</p>
-      ) : report ? (
+      ) : current ? (
         <>
-          <Totals report={report} />
-          <Notes report={report} />
+          <Totals report={current} />
+          <Notes report={current} />
           {rows.length === 0 ? (
             <div className="card">
               <p className="muted">Không có phiên nào trong kỳ.</p>
@@ -271,37 +299,16 @@ export function RevenueReportView({ scope }: { scope: RevenueScope }) {
                     </tr>
                   </thead>
                   <tbody>
-                    {rows.map((r) => {
-                      const label = rowLabel(r, groupBy);
+                    {pageRows.map((r) => {
                       const empty =
                         r.csms_billed_session_count === 0 && r.unattributed_session_count === 0;
                       return (
-                        <tr key={r.key} aria-label={label} className={empty ? 'muted' : undefined}>
-                          <td>
-                            {drill ? (
-                              <button
-                                type="button"
-                                className="link-button"
-                                onClick={() =>
-                                  update({
-                                    [cfg.filter]: r.key,
-                                    name: label,
-                                    group_by: cfg.drillTo,
-                                  })
-                                }
-                              >
-                                {label}
-                              </button>
-                            ) : (
-                              label
-                            )}
-                            {groupBy === 'charge_point' && r.site_name && (
-                              <div className="muted small">{r.site_name}</div>
-                            )}
-                            {scope === 'admin' && groupBy !== 'operator' && r.operator_name && (
-                              <div className="muted small">{r.operator_name}</div>
-                            )}
-                          </td>
+                        <tr
+                          key={r.key}
+                          aria-label={rowLabel(r, groupBy)}
+                          className={empty ? 'muted' : undefined}
+                        >
+                          <NameCell row={r} groupBy={groupBy} scope={scope} />
                           <td className="revenue-num">
                             {formatCount(r.csms_billed_session_count)}
                           </td>
@@ -317,26 +324,52 @@ export function RevenueReportView({ scope }: { scope: RevenueScope }) {
                   </tbody>
                   <tfoot>
                     <tr aria-label="Tổng">
-                      <th scope="row">Tổng</th>
+                      <th scope="row">Tổng cả kỳ</th>
                       <td className="revenue-num">
-                        {formatCount(report.totals.csms_billed_session_count)}
+                        {formatCount(current.totals.csms_billed_session_count)}
                       </td>
                       <td className="revenue-num">
-                        {formatKwh(report.totals.csms_billed_energy_wh)}
+                        {formatKwh(current.totals.csms_billed_energy_wh)}
                       </td>
                       <td className="revenue-num">
-                        {formatVnd(report.totals.csms_billed_revenue_vnd)}
+                        {formatVnd(current.totals.csms_billed_revenue_vnd)}
                       </td>
                       <td className="revenue-num">
-                        {formatCount(report.totals.unattributed_session_count)}
+                        {formatCount(current.totals.unattributed_session_count)}
                       </td>
                       <td className="revenue-num">
-                        {formatKwh(report.totals.unattributed_energy_wh)}
+                        {formatKwh(current.totals.unattributed_energy_wh)}
                       </td>
                     </tr>
                   </tfoot>
                 </table>
               </div>
+              <nav className="pager" aria-label="Phân trang">
+                <span className="muted">
+                  Hiển thị {first + 1}–{first + pageRows.length} / {rows.length}
+                </span>
+                <div className="btn-row">
+                  <button
+                    type="button"
+                    className="btn small ghost"
+                    disabled={shownPage <= 1}
+                    onClick={() => setPage(shownPage - 1)}
+                  >
+                    ‹ Trước
+                  </button>
+                  <span className="pager-page">
+                    Trang {shownPage} / {pages}
+                  </span>
+                  <button
+                    type="button"
+                    className="btn small ghost"
+                    disabled={shownPage >= pages}
+                    onClick={() => setPage(shownPage + 1)}
+                  >
+                    Sau ›
+                  </button>
+                </div>
+              </nav>
             </div>
           )}
         </>
