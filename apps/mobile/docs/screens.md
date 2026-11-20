@@ -1,5 +1,17 @@
 # Coding reference 1 — màn hình và chức năng WP3
 
+## T96 — Stitch ZIP (5), bốn chế độ (19/11)
+
+Trạng thái: local fixture đã kiểm; format/analyze sạch, toàn bộ 212 test pass. Batch capture đầu pass 2 ca, 121 PNG ở 390×844 và 320px/200%; visual review đạt trên các ảnh 390px và form/xác nhận 320px/200%, không cần chỉnh UI. Chưa nghiệm thu thiết bị/staging. Mục này thay mô tả energy-only và nút Theo dõi trong các slice T96 cũ bên dưới.
+
+- M06/M07 → View 5, FR-04, UC-CHG-02, BR-P18/19, NFR-SEC-01 → PKG-3 Charging/Stations/Profile, `StartRequest`, `ChargeStartController`, `ChargeStartRepository` và Driver API §17/OpenAPI 0.14. Bốn lựa chọn, preset và nhập riêng Wh/phút/VND; full không có hạn mức. Tóm tắt chỉ có context đã chọn; không suy giá hoặc công suất từ ảnh Stitch. Cap phải đúng mode, kể cả 0; Apply chỉ cho cap dương và tạo key mới. Gửi lại giữ nguyên key/body. Chỉnh sửa sau từ chối/cap giữ cổng, xe, mode và draft đã gửi; Quét lại mới xóa cổng. Pending/active không được chỉnh mode.
+- M07 → M08 tự chuyển chỉ sau mã phiên và `effect_confirmed`. Listener cục bộ QR kiểm mounted, foreground, route, attempt, scope và xe; background giữ chuyển màn chờ khi resume. Rời QR/đăng xuất/hủy generation không kéo người dùng trở lại; Back từ M08 giữ lối mở lại rõ ràng, không tự chuyển vòng lặp. Poll status bị hủy khi rời route hoặc ra nền. Accepted vẫn ở M07.
+- M08 → View 6, FR-05, UC-CHG-03/04, BR-P01/19/39, NFR-SEC-01 → `ChargeProgress`/`ChargeSessionController`/API adapter. Ring theo mode; full chỉ điện năng quan sát, timed dùng elapsed server, energy dùng Wh, money dùng estimate T134. Các nhãn mode trong phiên chỉ đọc. Hiển thị số thật vượt mục tiêu (10,23/10 kWh), chỉ clamp nét vòng; không tạo timer tự dừng, công suất, SoC, điện áp, dòng hoặc đồ thị giả. Chi phí tối đa theo giá cao nhất được tách khỏi estimate T134 và khoản trừ cuối.
+- M09-A/M09/bảng kê → Views 6/7, FR-05/08/17, UC-CHG-03/04, BR-P19/34/45 → `ChargeStopController`, progress và statement BE-22. Tiếp tục chỉ đóng sheet; xác nhận gửi stop theo stable key. Bốn mốc: yêu cầu, phản hồi trụ, chỉ số chốt, quyết toán ghi sổ. ACK không xác nhận dừng hay trả tiền. Phiên kết thúc từ trụ/hệ thống không bị giả thành yêu cầu từ app. Bảng kê giữ debit/points/energy do server trả và bổ sung mode/target khi có context cùng phiên.
+- Tương thích 0.13: response start energy thiếu mode/cap mới vẫn hợp lệ. Progress thiếu mode chỉ nhận context từ chính StartRequest đã xác nhận; mode null/lạ rõ ràng không suy ra kWh. Elapsed thiếu là “—”. `unsupported_mode`/thiếu công suất có hướng chỉnh sửa; không fallback dữ liệu runtime.
+
+Acceptance: `driver_charge_modes_test.dart`, `driver_charge_start_widget_test.dart`, `driver_charge_session_widget_test.dart`; Kết quả format/analyze/full regression và capture ghi ở README. Fixture và công cụ chụp ở test/tool; không chứng minh NFR latency, camera native hoặc triển khai API 0.14.
+
 **Đọc bắt buộc trước mỗi slice**, cùng [kiến trúc](architecture.md). Đây là canonical checklist màn hình/chức năng trong mobile; README chỉ hướng dẫn chạy/trạng thái, design-system là visual guide, mock-scenarios là kế hoạch test. Không tạo thêm danh mục requirement cạnh tranh.
 
 ## Nguồn và thứ tự áp dụng

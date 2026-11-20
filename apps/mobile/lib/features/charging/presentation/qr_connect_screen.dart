@@ -15,6 +15,7 @@ import '../application/charge_session_controller.dart';
 import '../application/charge_start_controller.dart';
 import '../application/charging_controller.dart';
 import '../application/qr_connection_controller.dart';
+import '../domain/charging.dart';
 import 'charge_flow_visuals.dart';
 import 'charge_start_attempt_panel.dart';
 import 'charge_start_panel.dart';
@@ -37,6 +38,9 @@ class _QrConnectScreenState extends ConsumerState<QrConnectScreen>
   bool _opening = false;
   int _retry = 0;
   String? _lastScan;
+  int _navigationGeneration = 0;
+  StartRequest? _pendingAutoNavigation;
+  ChargeStartController? _startController;
 
   @override
   void initState() {
@@ -45,6 +49,49 @@ class _QrConnectScreenState extends ConsumerState<QrConnectScreen>
     _foreground =
         WidgetsBinding.instance.lifecycleState == null ||
         WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed;
+    if (widget.apiMode) {
+      _startController = ref.read(chargeStartProvider.notifier);
+      ref.listenManual(chargeStartProvider, (previous, next) {
+        if (next == null) {
+          _pendingAutoNavigation = null;
+          if (previous != null) _reference.clear();
+        }
+        if (next?.snapshot?.started != true ||
+            (previous?.attempt.request.key == next!.attempt.request.key &&
+                previous?.snapshot?.started == true)) {
+          return;
+        }
+        if (!_isScanCurrent) return;
+        _pendingAutoNavigation = next.attempt.request;
+        _scheduleAutoNavigation();
+      });
+    }
+  }
+
+  void _scheduleAutoNavigation() {
+    final request = _pendingAutoNavigation;
+    if (request == null || !_foreground || !_isScanCurrent) return;
+    final generation = _navigationGeneration;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted ||
+          generation != _navigationGeneration ||
+          !_foreground ||
+          !_isScanCurrent ||
+          !identical(_pendingAutoNavigation, request)) {
+        return;
+      }
+      final current = ref.read(chargeStartProvider);
+      final selection = ref.read(discoverySessionProvider);
+      if (!identical(current?.attempt.request, request) ||
+          current?.sessionTarget == null ||
+          selection.scope != request.scope ||
+          selection.vehicleId != request.vehicleId) {
+        return;
+      }
+      _pendingAutoNavigation = null;
+      context.go('/charge-session');
+    });
+    WidgetsBinding.instance.ensureVisualUpdate();
   }
 
   @override
@@ -58,16 +105,27 @@ class _QrConnectScreenState extends ConsumerState<QrConnectScreen>
   }
 
   void _routeChanged() {
+    if (!_isScanCurrent) {
+      _startController?.pauseStatusReads();
+      _navigationGeneration++;
+      _pendingAutoNavigation = null;
+    }
     if (mounted) setState(() {});
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state != AppLifecycleState.resumed) {
+      _startController?.pauseStatusReads();
+    }
+    if (state != AppLifecycleState.resumed) _navigationGeneration++;
     setState(() => _foreground = state == AppLifecycleState.resumed);
+    if (_foreground && widget.apiMode) _scheduleAutoNavigation();
   }
 
   @override
   void dispose() {
+    _startController?.pauseStatusReads();
     WidgetsBinding.instance.removeObserver(this);
     _router?.routerDelegate.removeListener(_routeChanged);
     _reference.dispose();
@@ -129,11 +187,6 @@ class _QrConnectScreenState extends ConsumerState<QrConnectScreen>
         ? ref.watch(discoverySessionProvider)
         : null;
     final attempt = widget.apiMode ? ref.watch(chargeStartProvider) : null;
-    if (widget.apiMode) {
-      ref.listen(chargeStartProvider, (previous, next) {
-        if (previous != null && next == null) _reference.clear();
-      });
-    }
     if (attempt != null) {
       return ChargeFlowPage(
         key: const Key('qr-start-attempt'),

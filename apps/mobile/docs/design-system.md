@@ -1,5 +1,13 @@
 # Thiết kế và thương hiệu
 
+## Charging theo Stitch ZIP (5) — 19/11
+
+Đã đọc năm HTML/PNG M06, M07, M08, M09, M09-A cùng DESIGN trong ZIP. Native Flutter giữ hierarchy thẻ cổng/xe, 2×2 chế độ có teal selected, preset/custom và tóm tắt; M07 có vòng chờ, timeline và panel quyết định tín dụng bo góc trên với Apply/Top up/Edit. M08 dùng ring lớn theo mode, nhãn mode chỉ đọc, ba số điện năng/thời gian/tạm tính và context trạm/xe. M09 có bốn pha adaptive trên cùng; M09-A là bottom sheet Material với một mode/mục tiêu của phiên. Ở 320px/200%, nhãn và số liệu xếp dọc/cuộn, không giảm cỡ chữ hoặc vùng chạm 48dp. Ring lớn chữ lớn tách readout ra ngoài, không animate số giả nên Remove animations không tạo timer giả.
+
+Điều chỉnh bắt buộc so với ZIP: bỏ Demo/Live CSMS/Backend Limit/OCPP 2.0.1, số đo kW/V/A, đồ thị mẫu, SoC/BMS%, 100% tương thích, thông số/giá/địa chỉ cổng chưa có trong lookup. Ảnh xe dùng hồ sơ, credit hoặc fallback có sẵn; không hardcode xe/350kW hay tải ảnh HTML. Full không hứa mobile dừng tại 100%; không khẳng định chốt mở, 0A, an toàn rút cáp, VAT đã phát hành hoặc trừ tín dụng bằng điểm. Chỉ giữ số và trạng thái có bằng chứng API.
+
+Giá trị actual có thể vượt target; chỉ nét vòng clamp, không clip số. Timed lấy elapsed server, money lấy estimate T134; maximum tariff hiển thị riêng, statement vẫn authoritative debit. M09 bốn pha quan sát được là yêu cầu / phản hồi trụ / nhận chỉ số chốt / ghi sổ; trường hợp app không gửi stop ghi “Theo trạng thái phiên”. Không mô phỏng relay/lock. M07 tự chuyển sau effect thay nút Theo dõi; nút mở lại chỉ phục vụ Back hoặc quay về phiên đã có. Màu/logo/byte assets và font theme/fallback hiện có giữ nguyên.
+
 Giữ nhận diện khách hàng. UI cũ/Stitch là tham khảo hình ảnh; [SRS](../../../docs/requirements/report3-srs.md) và [screens](screens.md) quyết định nội dung. Ghi sai khác để review.
 
 | Token | Giá trị |
