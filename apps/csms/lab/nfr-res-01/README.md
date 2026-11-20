@@ -15,6 +15,10 @@ Lệnh đầu chỉ xác nhận 50 ID, 50 tọa độ và 50 trạm có cổng C
 
 Bộ seed dùng 50 trạm đang rảnh, công suất 60/120 kW, giá 4.500 đ/kWh, SoC xuất phát 35%, bán kính 5 km. Heartbeat ban đầu đủ mới trong suốt batch nhờ cửa sổ freshness mặc định 600 giây. Các mẫu cách nhau 12,5 giây. Pilot là cache lạnh, còn batch có thể dùng cache 120 giây hoặc làm mới khi hết TTL. `provider_calls` trên từng mẫu cho biết số lượt Route được tạo trong tiến trình. Các số p50/p95 và tỷ lệ `brief` nằm trong dòng `summary`, cùng thứ tự trạm và ước tính route theo từng mẫu trong `evidence.jsonl` ở thư mục `.review/nfr-res-01-local/run-*` thuộc workspace PowerMe. Nghiệm thu NFR-RES-01 cần chạy lại trên staging. RQ2 có bộ kịch bản và cỡ mẫu riêng.
 
+## Bằng chứng staging T139
+
+[Lượt đo 20/11/2026](evidence/t139-20261120-b71120/README.md) dùng 21 mẫu gồm pilot lạnh, giữ cả fallback cuối: p95 1.390,14 ms, đạt ngưỡng 2 giây. Đây là bằng chứng riêng; launcher local ở trên vẫn dừng batch khi có fallback. Kiểm tra dữ liệu offline bằng `node apps/csms/lab/nfr-res-01/verify-staging-evidence.mjs --self-test` (không gọi staging). RQ2 vẫn có phạm vi riêng.
+
 ## Nguồn tọa độ
 
 [road-points.json](road-points.json) chứa các dòng `[OSM way ID, latitude, longitude]`. Điểm là đỉnh của đường dân cư công cộng, làm tròn sáu chữ số, chọn trong bbox `106.767,10.855,106.810,10.887` quanh Thủ Đức. Dữ liệu đường gốc là bản trích công khai năm 2020. Tọa độ dùng làm vị trí giả lập để test, không đại diện cho trạm sạc đang vận hành. [Lớp đường ArcGIS](https://services.arcgis.com/4Ko8f1mCWFLyY4NV/ArcGIS/rest/services/Residential_Roads_HCMC/FeatureServer/0) · [Truy vấn GeoJSON](https://services.arcgis.com/4Ko8f1mCWFLyY4NV/ArcGIS/rest/services/Residential_Roads_HCMC/FeatureServer/0/query?where=1%3D1&geometry=106.767%2C10.855%2C106.81%2C10.887&geometryType=esriGeometryEnvelope&inSR=4326&outSR=4326&outFields=osm_id&returnGeometry=true&resultRecordCount=120&f=geojson)

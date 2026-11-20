@@ -1,0 +1,560 @@
+{
+  "schema_version": 1,
+  "purpose": "Historical audit only; not an operational cleanup manifest",
+  "runid": "b71120",
+  "prefix": "T139b71120",
+  "state": "cleaned",
+  "created_at": "2026-11-20T03:48:15.597Z",
+  "seeded_at": "2026-11-20T03:48:40.138Z",
+  "cleaned_at": "2026-11-20T03:53:24.192Z",
+  "origin": [10.868697, 106.784288],
+  "radius_km": 5,
+  "operator_id": "14",
+  "tariff_id": "57",
+  "stations": [
+    {
+      "site_code": "T139b71120-01",
+      "site_name": "TEST T139 - Tram 01",
+      "latitude": 10.856783,
+      "longitude": 106.80976,
+      "osm_id": 32576516,
+      "site_id": "79",
+      "cp_id": "337",
+      "connector_id": "649"
+    },
+    {
+      "site_code": "T139b71120-02",
+      "site_name": "TEST T139 - Tram 02",
+      "latitude": 10.874061,
+      "longitude": 106.780147,
+      "osm_id": 32576593,
+      "site_id": "80",
+      "cp_id": "338",
+      "connector_id": "650"
+    },
+    {
+      "site_code": "T139b71120-03",
+      "site_name": "TEST T139 - Tram 03",
+      "latitude": 10.882341,
+      "longitude": 106.772336,
+      "osm_id": 32576594,
+      "site_id": "81",
+      "cp_id": "339",
+      "connector_id": "651"
+    },
+    {
+      "site_code": "T139b71120-04",
+      "site_name": "TEST T139 - Tram 04",
+      "latitude": 10.879067,
+      "longitude": 106.773918,
+      "osm_id": 32576595,
+      "site_id": "82",
+      "cp_id": "340",
+      "connector_id": "652"
+    },
+    {
+      "site_code": "T139b71120-05",
+      "site_name": "TEST T139 - Tram 05",
+      "latitude": 10.884599,
+      "longitude": 106.769626,
+      "osm_id": 32576596,
+      "site_id": "83",
+      "cp_id": "341",
+      "connector_id": "653"
+    },
+    {
+      "site_code": "T139b71120-06",
+      "site_name": "TEST T139 - Tram 06",
+      "latitude": 10.85733,
+      "longitude": 106.77201,
+      "osm_id": 32577437,
+      "site_id": "84",
+      "cp_id": "342",
+      "connector_id": "654"
+    },
+    {
+      "site_code": "T139b71120-07",
+      "site_name": "TEST T139 - Tram 07",
+      "latitude": 10.86446,
+      "longitude": 106.807375,
+      "osm_id": 32577578,
+      "site_id": "85",
+      "cp_id": "343",
+      "connector_id": "655"
+    },
+    {
+      "site_code": "T139b71120-08",
+      "site_name": "TEST T139 - Tram 08",
+      "latitude": 10.861676,
+      "longitude": 106.800299,
+      "osm_id": 32578267,
+      "site_id": "86",
+      "cp_id": "344",
+      "connector_id": "656"
+    },
+    {
+      "site_code": "T139b71120-09",
+      "site_name": "TEST T139 - Tram 09",
+      "latitude": 10.862808,
+      "longitude": 106.799244,
+      "osm_id": 32578268,
+      "site_id": "87",
+      "cp_id": "345",
+      "connector_id": "657"
+    },
+    {
+      "site_code": "T139b71120-10",
+      "site_name": "TEST T139 - Tram 10",
+      "latitude": 10.857793,
+      "longitude": 106.775315,
+      "osm_id": 32578388,
+      "site_id": "88",
+      "cp_id": "346",
+      "connector_id": "658"
+    },
+    {
+      "site_code": "T139b71120-11",
+      "site_name": "TEST T139 - Tram 11",
+      "latitude": 10.86186,
+      "longitude": 106.808178,
+      "osm_id": 32580106,
+      "site_id": "89",
+      "cp_id": "347",
+      "connector_id": "659"
+    },
+    {
+      "site_code": "T139b71120-12",
+      "site_name": "TEST T139 - Tram 12",
+      "latitude": 10.868273,
+      "longitude": 106.767679,
+      "osm_id": 32580665,
+      "site_id": "90",
+      "cp_id": "348",
+      "connector_id": "660"
+    },
+    {
+      "site_code": "T139b71120-13",
+      "site_name": "TEST T139 - Tram 13",
+      "latitude": 10.879276,
+      "longitude": 106.778906,
+      "osm_id": 32580672,
+      "site_id": "91",
+      "cp_id": "349",
+      "connector_id": "661"
+    },
+    {
+      "site_code": "T139b71120-14",
+      "site_name": "TEST T139 - Tram 14",
+      "latitude": 10.855628,
+      "longitude": 106.807039,
+      "osm_id": 32580759,
+      "site_id": "92",
+      "cp_id": "350",
+      "connector_id": "662"
+    },
+    {
+      "site_code": "T139b71120-15",
+      "site_name": "TEST T139 - Tram 15",
+      "latitude": 10.885289,
+      "longitude": 106.77067,
+      "osm_id": 32580832,
+      "site_id": "93",
+      "cp_id": "351",
+      "connector_id": "663"
+    },
+    {
+      "site_code": "T139b71120-16",
+      "site_name": "TEST T139 - Tram 16",
+      "latitude": 10.879962,
+      "longitude": 106.775166,
+      "osm_id": 32580835,
+      "site_id": "94",
+      "cp_id": "352",
+      "connector_id": "664"
+    },
+    {
+      "site_code": "T139b71120-17",
+      "site_name": "TEST T139 - Tram 17",
+      "latitude": 10.877622,
+      "longitude": 106.775368,
+      "osm_id": 32581239,
+      "site_id": "95",
+      "cp_id": "353",
+      "connector_id": "665"
+    },
+    {
+      "site_code": "T139b71120-18",
+      "site_name": "TEST T139 - Tram 18",
+      "latitude": 10.874994,
+      "longitude": 106.779532,
+      "osm_id": 32581476,
+      "site_id": "96",
+      "cp_id": "354",
+      "connector_id": "666"
+    },
+    {
+      "site_code": "T139b71120-19",
+      "site_name": "TEST T139 - Tram 19",
+      "latitude": 10.886349,
+      "longitude": 106.768259,
+      "osm_id": 32582249,
+      "site_id": "97",
+      "cp_id": "355",
+      "connector_id": "667"
+    },
+    {
+      "site_code": "T139b71120-20",
+      "site_name": "TEST T139 - Tram 20",
+      "latitude": 10.880879,
+      "longitude": 106.777578,
+      "osm_id": 32582453,
+      "site_id": "98",
+      "cp_id": "356",
+      "connector_id": "668"
+    },
+    {
+      "site_code": "T139b71120-21",
+      "site_name": "TEST T139 - Tram 21",
+      "latitude": 10.880866,
+      "longitude": 106.774331,
+      "osm_id": 32582454,
+      "site_id": "99",
+      "cp_id": "357",
+      "connector_id": "669"
+    },
+    {
+      "site_code": "T139b71120-22",
+      "site_name": "TEST T139 - Tram 22",
+      "latitude": 10.878336,
+      "longitude": 106.778169,
+      "osm_id": 32582456,
+      "site_id": "100",
+      "cp_id": "358",
+      "connector_id": "670"
+    },
+    {
+      "site_code": "T139b71120-23",
+      "site_name": "TEST T139 - Tram 23",
+      "latitude": 10.878811,
+      "longitude": 106.771148,
+      "osm_id": 32582459,
+      "site_id": "101",
+      "cp_id": "359",
+      "connector_id": "671"
+    },
+    {
+      "site_code": "T139b71120-24",
+      "site_name": "TEST T139 - Tram 24",
+      "latitude": 10.879282,
+      "longitude": 106.768075,
+      "osm_id": 32582460,
+      "site_id": "102",
+      "cp_id": "360",
+      "connector_id": "672"
+    },
+    {
+      "site_code": "T139b71120-25",
+      "site_name": "TEST T139 - Tram 25",
+      "latitude": 10.85528,
+      "longitude": 106.80954,
+      "osm_id": 32582695,
+      "site_id": "103",
+      "cp_id": "361",
+      "connector_id": "673"
+    },
+    {
+      "site_code": "T139b71120-26",
+      "site_name": "TEST T139 - Tram 26",
+      "latitude": 10.877734,
+      "longitude": 106.770921,
+      "osm_id": 32583425,
+      "site_id": "104",
+      "cp_id": "362",
+      "connector_id": "674"
+    },
+    {
+      "site_code": "T139b71120-27",
+      "site_name": "TEST T139 - Tram 27",
+      "latitude": 10.88219,
+      "longitude": 106.769572,
+      "osm_id": 32583428,
+      "site_id": "105",
+      "cp_id": "363",
+      "connector_id": "675"
+    },
+    {
+      "site_code": "T139b71120-28",
+      "site_name": "TEST T139 - Tram 28",
+      "latitude": 10.860057,
+      "longitude": 106.809849,
+      "osm_id": 32583594,
+      "site_id": "106",
+      "cp_id": "364",
+      "connector_id": "676"
+    },
+    {
+      "site_code": "T139b71120-29",
+      "site_name": "TEST T139 - Tram 29",
+      "latitude": 10.875123,
+      "longitude": 106.808908,
+      "osm_id": 32583933,
+      "site_id": "107",
+      "cp_id": "365",
+      "connector_id": "677"
+    },
+    {
+      "site_code": "T139b71120-30",
+      "site_name": "TEST T139 - Tram 30",
+      "latitude": 10.88166,
+      "longitude": 106.767377,
+      "osm_id": 32584215,
+      "site_id": "108",
+      "cp_id": "366",
+      "connector_id": "678"
+    },
+    {
+      "site_code": "T139b71120-31",
+      "site_name": "TEST T139 - Tram 31",
+      "latitude": 10.85893,
+      "longitude": 106.809723,
+      "osm_id": 32584276,
+      "site_id": "109",
+      "cp_id": "367",
+      "connector_id": "679"
+    },
+    {
+      "site_code": "T139b71120-32",
+      "site_name": "TEST T139 - Tram 32",
+      "latitude": 10.86478,
+      "longitude": 106.790465,
+      "osm_id": 32585805,
+      "site_id": "110",
+      "cp_id": "368",
+      "connector_id": "680"
+    },
+    {
+      "site_code": "T139b71120-33",
+      "site_name": "TEST T139 - Tram 33",
+      "latitude": 10.871868,
+      "longitude": 106.768964,
+      "osm_id": 32587188,
+      "site_id": "111",
+      "cp_id": "369",
+      "connector_id": "681"
+    },
+    {
+      "site_code": "T139b71120-34",
+      "site_name": "TEST T139 - Tram 34",
+      "latitude": 10.886539,
+      "longitude": 106.771592,
+      "osm_id": 32587657,
+      "site_id": "112",
+      "cp_id": "370",
+      "connector_id": "682"
+    },
+    {
+      "site_code": "T139b71120-35",
+      "site_name": "TEST T139 - Tram 35",
+      "latitude": 10.866734,
+      "longitude": 106.771207,
+      "osm_id": 32588351,
+      "site_id": "113",
+      "cp_id": "371",
+      "connector_id": "683"
+    },
+    {
+      "site_code": "T139b71120-36",
+      "site_name": "TEST T139 - Tram 36",
+      "latitude": 10.88335,
+      "longitude": 106.787509,
+      "osm_id": 137036061,
+      "site_id": "114",
+      "cp_id": "372",
+      "connector_id": "684"
+    },
+    {
+      "site_code": "T139b71120-37",
+      "site_name": "TEST T139 - Tram 37",
+      "latitude": 10.857368,
+      "longitude": 106.795671,
+      "osm_id": 191937812,
+      "site_id": "115",
+      "cp_id": "373",
+      "connector_id": "685"
+    },
+    {
+      "site_code": "T139b71120-38",
+      "site_name": "TEST T139 - Tram 38",
+      "latitude": 10.857448,
+      "longitude": 106.792244,
+      "osm_id": 191937823,
+      "site_id": "116",
+      "cp_id": "374",
+      "connector_id": "686"
+    },
+    {
+      "site_code": "T139b71120-39",
+      "site_name": "TEST T139 - Tram 39",
+      "latitude": 10.866634,
+      "longitude": 106.793005,
+      "osm_id": 203218306,
+      "site_id": "117",
+      "cp_id": "375",
+      "connector_id": "687"
+    },
+    {
+      "site_code": "T139b71120-40",
+      "site_name": "TEST T139 - Tram 40",
+      "latitude": 10.866593,
+      "longitude": 106.79434,
+      "osm_id": 203218308,
+      "site_id": "118",
+      "cp_id": "376",
+      "connector_id": "688"
+    },
+    {
+      "site_code": "T139b71120-41",
+      "site_name": "TEST T139 - Tram 41",
+      "latitude": 10.877245,
+      "longitude": 106.798306,
+      "osm_id": 211848907,
+      "site_id": "119",
+      "cp_id": "377",
+      "connector_id": "689"
+    },
+    {
+      "site_code": "T139b71120-42",
+      "site_name": "TEST T139 - Tram 42",
+      "latitude": 10.87387,
+      "longitude": 106.79312,
+      "osm_id": 290318806,
+      "site_id": "120",
+      "cp_id": "378",
+      "connector_id": "690"
+    },
+    {
+      "site_code": "T139b71120-43",
+      "site_name": "TEST T139 - Tram 43",
+      "latitude": 10.882119,
+      "longitude": 106.804762,
+      "osm_id": 290318807,
+      "site_id": "121",
+      "cp_id": "379",
+      "connector_id": "691"
+    },
+    {
+      "site_code": "T139b71120-44",
+      "site_name": "TEST T139 - Tram 44",
+      "latitude": 10.866677,
+      "longitude": 106.796517,
+      "osm_id": 290326845,
+      "site_id": "122",
+      "cp_id": "380",
+      "connector_id": "692"
+    },
+    {
+      "site_code": "T139b71120-45",
+      "site_name": "TEST T139 - Tram 45",
+      "latitude": 10.883536,
+      "longitude": 106.807655,
+      "osm_id": 290326848,
+      "site_id": "123",
+      "cp_id": "381",
+      "connector_id": "693"
+    },
+    {
+      "site_code": "T139b71120-46",
+      "site_name": "TEST T139 - Tram 46",
+      "latitude": 10.885243,
+      "longitude": 106.804877,
+      "osm_id": 290326849,
+      "site_id": "124",
+      "cp_id": "382",
+      "connector_id": "694"
+    },
+    {
+      "site_code": "T139b71120-47",
+      "site_name": "TEST T139 - Tram 47",
+      "latitude": 10.875601,
+      "longitude": 106.796018,
+      "osm_id": 290360524,
+      "site_id": "125",
+      "cp_id": "383",
+      "connector_id": "695"
+    },
+    {
+      "site_code": "T139b71120-48",
+      "site_name": "TEST T139 - Tram 48",
+      "latitude": 10.877391,
+      "longitude": 106.794783,
+      "osm_id": 290360526,
+      "site_id": "126",
+      "cp_id": "384",
+      "connector_id": "696"
+    },
+    {
+      "site_code": "T139b71120-49",
+      "site_name": "TEST T139 - Tram 49",
+      "latitude": 10.874634,
+      "longitude": 106.794684,
+      "osm_id": 290360532,
+      "site_id": "127",
+      "cp_id": "385",
+      "connector_id": "697"
+    },
+    {
+      "site_code": "T139b71120-50",
+      "site_name": "TEST T139 - Tram 50",
+      "latitude": 10.878576,
+      "longitude": 106.809569,
+      "osm_id": 290360533,
+      "site_id": "128",
+      "cp_id": "386",
+      "connector_id": "698"
+    }
+  ],
+  "auth_test_ids": {
+    "user_id": "285",
+    "driver_id": "285",
+    "vehicle_id": "17",
+    "model_id": "5"
+  },
+  "baseline_counts": {
+    "operators": "2",
+    "tariff_periods": "7",
+    "sites": "14",
+    "charge_points": "252",
+    "connectors": "502",
+    "users": "243",
+    "drivers": "241",
+    "vehicles": "10",
+    "credit_accounts": "241",
+    "loyalty_accounts": "4",
+    "credit_transactions": "251",
+    "loyalty_transactions": "10",
+    "sessions": "455",
+    "driver_charge_intents": "11",
+    "driver_stop_intents": "9",
+    "reservations": "0",
+    "top_ups": "244"
+  },
+  "final_counts": {
+    "operators": "2",
+    "tariff_periods": "7",
+    "sites": "14",
+    "charge_points": "252",
+    "connectors": "502",
+    "users": "243",
+    "drivers": "241",
+    "vehicles": "10",
+    "credit_accounts": "241",
+    "loyalty_accounts": "4",
+    "credit_transactions": "251",
+    "loyalty_transactions": "10",
+    "sessions": "455",
+    "driver_charge_intents": "11",
+    "driver_stop_intents": "9",
+    "reservations": "0",
+    "top_ups": "244"
+  }
+}
