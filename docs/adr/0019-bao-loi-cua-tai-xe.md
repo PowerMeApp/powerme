@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | Trạng thái | Đề xuất |
-| Ngày | 11/11/2026 · sửa mục 4–7 ngày 16/11/2026 (T131, review #139, quyết định D-G 14/11) |
+| Ngày | 11/11/2026 · sửa mục 4–7 ngày 16/11/2026 (T131, review #139, quyết định D-G 14/11) · sửa mục 6 ngày 19/11/2026 (T141, quyết định D-X 17/11) |
 | Người quyết định | WP4 (Trần Trọng Nghĩa) |
 | Liên quan | FE-17, UC-CHG-05, FR-06, F-05, BR-P42, STM-6 (Report 4 Fig 14), AD-7 (SRS Fig 16), ADR-0016 |
 
@@ -34,7 +34,8 @@ Chúng ta sẽ:
    - *Sửa 16/11 (T131):* "bắt đầu sau" so theo **giờ trụ đã đối soát**: `cp_started_at` khi đồng hồ trụ qua đúng phép kiểm của BR-P02 (`checkTariffTimeline`: lệch ≤ 300 s, đúng epoch); không qua thì giờ CSMS nhận, nhưng chỉ khi phiên không phải bản gửi bù (`delivered_offline`). Bản đầu so giờ CSMS nhận, nên một phiên trụ gửi bù sau khi nối lại (đã sạc trước khi có báo cáo) có thể đóng nhầm sự cố.
 5. *Sửa 16/11 (T131, quyết định D-G 14/11 — BR-P42 "a connector status change alone does not clear it"):* sự cố `driver_report` **không đóng theo trạng thái nào**, kể cả `Available` hay trụ khởi động lại; chỉ Operator đóng (t7) hoặc t8. Bản đầu nhận `Available` (Q76), nên một phiên 0 Wh rồi `Available` hoặc trụ khởi động lại vượt qua được điều kiện của t8. Reset trên sự cố này chờ hết hạn rồi về `acknowledged`.
    - Trụ báo `Faulted` có mã lỗi khi súng đang có sự cố `driver_report` chưa có mã → ghi mã đó vào sự cố (vẫn một sự cố, vẫn `driver_report`), để Operator thấy lỗi phần cứng thật và mức nghiêm trọng của nó.
-6. Mọi lần sự cố đóng (Operator đóng, t8; với sự cố OCPP / Offline có báo cáo gắn vào: Available, trụ kết nối lại) đều ghi `fault_reports.cleared_at`; `cleared_by` là nhân viên khi Operator đóng.
+6. Nhãn chỉ xoá khi Operator đóng sự cố (t7) hoặc t8: khi đó ghi `fault_reports.cleared_at`; `cleared_by` là nhân viên khi Operator đóng.
+   - *Sửa 19/11 (T141, quyết định D-X 17/11):* sự cố OCPP / Offline có báo cáo tài xế gắn kèm mà **tự đóng** (súng báo hồi phục, trụ nối lại) thì **không** xoá nhãn. Các báo cáo chưa xoá được chuyển, theo từng súng, sang sự cố đang mở của súng đó, hoặc một sự cố `driver_report` mới (`raised`, t1). Súng vẫn bị ẩn và vẫn mang nhãn tới khi Operator đóng hoặc t8. Bản 16/11 còn xoá nhãn ở hai đường này (điểm mở, nay đã đóng). Sự cố tạo do chuyển giao không phải "tài xế tự mở" nên không tính vào giới hạn một sự cố / trụ / 2 giờ của mục 1; giới hạn đó giữ nguyên, Ân thêm vào BR-P42 (T143).
 7. Cùng tài xế, cùng súng trong 60 s → 409 `duplicate_report`, không ghi gì. Cùng một tài xế báo nhiều lần chỉ tính một.
 8. *Thêm 16/11 (T131):* hai đường mở sự cố (StatusNotification và báo cáo của tài xế) đều khoá dòng connector `FOR NO KEY UPDATE` trước, sự cố cả trụ khoá mọi connector của trụ theo id. Hai đường đi tuần tự: không deadlock, không 500 vì trùng chỉ mục một-sự-cố-mở, không rơi sự cố OCPP. `NO KEY` để không chặn insert có khoá ngoại tới connector (phiên, báo cáo).
 
@@ -53,7 +54,7 @@ Không cần migration: `fault_reports.fault_event_id / cleared_at / cleared_by`
 - STM-6 trong Report 4 (Fig 14) cần thêm t8; SRS Table 5 #6 ghi "category and note" phải sửa thành chỉ mô tả (khớp ERD). Nhờ Ân cập nhật.
 - Súng bị ẩn nên tài xế chỉ thấy nhãn khi quét QR tại trụ, không thấy trong danh sách.
 - Hai báo cáo sai của hai người có thể ẩn một súng tốt cho tới khi Operator đóng hoặc có một phiên sạc bình thường trên súng (D-G: súng báo Available không còn đóng).
-- Còn mở (hỏi Ân): báo cáo gắn vào sự cố OCPP / Offline vẫn được xoá nhãn khi sự cố đó đóng theo trạng thái (Available, trụ nối lại) — đọc chặt D-G thì không được.
+- Một sự cố phần cứng tự hết (súng báo Available) mà có tài xế đã báo cùng lúc thì súng vẫn bị ẩn tới khi Operator đóng — chủ đích của D-X (T141): Operator kiểm lại lời báo của tài xế trước khi mở súng.
 
 ## Các phương án đã cân nhắc và loại bỏ
 
