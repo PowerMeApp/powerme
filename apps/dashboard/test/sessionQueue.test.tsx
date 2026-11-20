@@ -33,7 +33,7 @@ const review: ReviewSession = {
   payment_mode: 'csms_billed',
   energy_wh: 12000,
   stopped: true,
-  open_records: ['meter_gap 300 Wh'],
+  open_records: ['conflict: meter_stop_minus_start=510 series_last=1360 diff=850'],
 };
 const unattributedPage = {
   status: 200,
@@ -60,7 +60,8 @@ describe('Phiên cần xử lý (màn 23)', () => {
     const row = within(await screen.findByRole('row', { name: 'Phiên #101' }));
     expect(row.getByText('TAG-1')).toBeInTheDocument();
     expect(row.getByText('2,5 kWh')).toBeInTheDocument();
-    expect(row.getByText('card_status=unknown')).toBeInTheDocument();
+    // Records read as plain words; the raw detail is in the tooltip.
+    expect(row.getByText('Thẻ không xác định')).toHaveAttribute('title', 'card_status=unknown');
     expect(row.getByRole('button', { name: 'Gán tài xế' })).toBeEnabled();
     const free = within(screen.getByRole('row', { name: 'Phiên #102' }));
     expect(free.getByRole('button', { name: 'Gán tài xế' })).toBeDisabled();
@@ -149,7 +150,12 @@ describe('Phiên cần xử lý (màn 23)', () => {
       'true',
     );
     const row = within(await screen.findByRole('row', { name: 'Phiên #107' }));
-    expect(row.getByText('meter_gap 300 Wh')).toBeInTheDocument();
+    expect(row.getByText('Số đo cuối không khớp chuỗi đo')).toHaveAttribute(
+      'title',
+      expect.stringContaining('meter_stop_minus_start=510'),
+    );
+    expect(row.getByText(/Tính tiền/)).toBeInTheDocument(); // not the raw csms_billed
+    expect(row.queryByText(/csms_billed/)).toBeNull();
     expect(seen[0]).toMatchObject({ search: '?queue=review&page=1&page_size=20' });
     await user.click(row.getByRole('button', { name: 'Chốt đối soát' }));
     const dialog = within(screen.getByRole('dialog', { name: 'Chốt đối soát phiên #107' }));

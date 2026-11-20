@@ -55,9 +55,47 @@ const RESOLUTIONS: readonly [string, string][] = [
 ];
 
 const NOT_ASSIGNABLE: Record<string, string> = {
-  free_vend_not_billable: 'Free vend — không bao giờ tính tiền, chỉ đóng được (BR-P08)',
-  wallet_card_not_billable: 'Thẻ ví đã trả tại trụ — chỉ đóng được (BR-P08)',
+  free_vend_not_billable: 'Free vend — không bao giờ tính tiền, chỉ đóng được',
+  wallet_card_not_billable: 'Thẻ ví đã trả tại trụ — chỉ đóng được',
 };
+
+/** How the session is paid, in plain words (raw `payment_mode` never shown). */
+const PAYMENT: Record<string, string> = {
+  csms_billed: 'Tính tiền',
+  unattributed: 'Không định danh',
+  station_wallet: 'Thẻ ví tại trụ',
+};
+
+/** Reconciliation record kinds, in plain words; the raw detail stays in the tooltip. */
+const RECORD: Record<string, string> = {
+  conflict: 'Số đo cuối không khớp chuỗi đo',
+  late_sample: 'Mẫu đo đến muộn',
+  meter_gap: 'Thiếu mẫu đo',
+  unknown_id_tag: 'Thẻ không xác định',
+  replay: 'Bản tin gửi lại',
+  duplicate: 'Bản tin trùng',
+};
+
+/**
+ * One open reconciliation record as a readable label: `conflict: meter_stop…` → "Số đo cuối không
+ * khớp chuỗi đo". Unattributed records carry only details (`card_status=…`): `fallback` names them.
+ */
+function RecordList({ records, fallback }: { records: string[]; fallback: string }) {
+  if (records.length === 0) return <>{fallback}</>;
+  return (
+    <ul className="record-list">
+      {records.map((text, i) => {
+        const kind = /^([a-z_]+):/.exec(text)?.[1];
+        const label = kind ? (RECORD[kind] ?? kind) : fallback;
+        return (
+          <li key={i} title={text}>
+            {label}
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
 
 /** Session-specific error text; anything else falls back to the shared messages. */
 export function sessionError(err: unknown): string {
@@ -68,15 +106,15 @@ export function sessionError(err: unknown): string {
       return 'Tài xế không hoạt động hoặc không có Charging Credit đang mở';
     case 'free_vend_not_billable':
     case 'wallet_card_not_billable':
-      return 'Phiên này không tính tiền được (BR-P08) — chỉ đóng được';
+      return 'Phiên này không tính tiền được — chỉ đóng được';
     case 'already_resolved':
       return 'Phiên đã có quyết định khác, danh sách đã được làm mới';
     case 'not_in_review':
-      return 'Phiên không còn ở trạng thái review, danh sách đã được làm mới';
+      return 'Phiên không còn chờ xem lại, danh sách đã được làm mới';
     case 'not_unattributed':
       return 'Phiên không còn là phiên chưa gắn tài xế';
     case 'session_not_stopped':
-      return 'Phiên chưa có StopTransaction — chưa quyết định được';
+      return 'Phiên chưa kết thúc trên trụ — chưa quyết định được';
     case 'invalid_input':
       return 'Dữ liệu không hợp lệ (ghi chú 1–500 ký tự)';
     case 'sessions_unavailable':
@@ -165,10 +203,10 @@ function DecisionDialog({
       </p>
       <p>
         {decision.kind === 'assign'
-          ? 'Phiên chuyển sang tính tiền vào Charging Credit của tài xế (BR-P06). Không hoàn tác được.'
+          ? 'Phiên chuyển sang tính tiền, trừ vào Charging Credit của tài xế. Không hoàn tác được.'
           : decision.kind === 'close'
             ? 'Phiên giữ không tính tiền và rời hàng đợi; quyết định được ghi lại.'
-            : 'Chốt số đo dùng để tính tiền (review → reconciled, STM-1 #17); phiên đã dừng sẽ được quyết toán.'}
+            : 'Chốt số đo dùng để tính tiền. Phiên đã kết thúc sẽ được trừ tiền vào tài khoản tài xế.'}
       </p>
       {decision.kind === 'assign' ? (
         <label className="field">
@@ -234,7 +272,7 @@ function UnattributedRow({
       </td>
       <td className="nowrap">{kwh(s.energy_wh)}</td>
       <td className="small">
-        {blocked ?? (s.open_records.length ? s.open_records.join(' · ') : 'Thẻ không gắn tài xế')}
+        {blocked ?? <RecordList records={s.open_records} fallback="Thẻ không xác định" />}
       </td>
       <td>
         <div className="btn-row">
@@ -274,11 +312,13 @@ function ReviewRow({ s, onDecide }: { s: ReviewSession; onDecide: (d: Decision) 
       <td>
         {s.id_tag}
         <div className="muted small">
-          {ORIGIN[s.origin] ?? s.origin} · {s.payment_mode}
+          {ORIGIN[s.origin] ?? s.origin} · {PAYMENT[s.payment_mode] ?? s.payment_mode}
         </div>
       </td>
       <td className="nowrap">{kwh(s.energy_wh)}</td>
-      <td className="small">{s.open_records.length ? s.open_records.join(' · ') : '—'}</td>
+      <td className="small">
+        <RecordList records={s.open_records} fallback="—" />
+      </td>
       <td>
         <button
           type="button"

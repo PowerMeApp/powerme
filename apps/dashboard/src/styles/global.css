@@ -606,3 +606,13 @@ table.revenue-table tfoot td {
   min-width: 280px;
   flex: 1 1 280px;
 }
+
+/* Readable reconciliation records on the session queue (raw detail in the tooltip). */
+.record-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.record-list li + li {
+  margin-top: 2px;
+}
