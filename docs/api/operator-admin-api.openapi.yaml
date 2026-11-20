@@ -3804,8 +3804,44 @@ components:
     # ---- admin tóm tắt / ngoại lệ thanh toán ---------------------------------------------------
     AdminSummary:
       type: object
-      required: [users, charge_points, rfid_cards, billing_exceptions]
+      required: [operators, sites, network, users, charge_points, rfid_cards, billing_exceptions]
       properties:
+        operators:
+          type: object
+          description: 'Thống kê chung (20/11): số Operator, trong đó đang hoạt động'
+          required: [total, active]
+          properties:
+            total: { type: integer, minimum: 0 }
+            active: { type: integer, minimum: 0 }
+        sites: { type: integer, minimum: 0, description: 'Số Charging Station toàn nền tảng' }
+        network:
+          type: object
+          description: |
+            Mạng lưới trụ toàn nền tảng (UC-ADM-07, chỉ đọc): trụ đang hoạt động (`in_service`)
+            online / offline theo luật offline của operator API; súng của trụ chưa gỡ theo nhóm
+            BR-P38 (cùng luật với `GET /operator/v1/summary`); sự cố đang mở theo mức
+          required: [in_service_online, in_service_offline, connectors, open_faults]
+          properties:
+            in_service_online: { type: integer, minimum: 0 }
+            in_service_offline: { type: integer, minimum: 0 }
+            connectors:
+              type: object
+              required: [available, in_use, freeing_soon, unavailable, offline]
+              properties:
+                available: { type: integer, minimum: 0 }
+                in_use: { type: integer, minimum: 0 }
+                freeing_soon: { type: integer, minimum: 0 }
+                unavailable: { type: integer, minimum: 0 }
+                offline: { type: integer, minimum: 0 }
+            open_faults:
+              type: object
+              required: [total, critical, major, minor, none]
+              properties:
+                total: { type: integer, minimum: 0 }
+                critical: { type: integer, minimum: 0 }
+                major: { type: integer, minimum: 0 }
+                minor: { type: integer, minimum: 0 }
+                none: { type: integer, minimum: 0 }
         users:
           type: object
           required: [driver, operator_staff, admin, suspended]

@@ -5,8 +5,12 @@
  * Counts over the whole platform (the Admin has no Operator scope): user accounts by role,
  * charge points by lifecycle and online, RFID cards by status, and the open billing exceptions
  * in the terms of docs/UC-ADM-08-BILLING-EXCEPTIONS.md (read-only SQL, no code in billing/, D35).
+ * Platform statistics (20/11): Operators and stations, and the charge point network — charge
+ * points in service online / offline, connectors in the driver groups (same rule as the operator
+ * summary, BR-P38) and open faults by severity, across every Operator (read-only, UC-ADM-07).
  */
 import type { Db } from '../db/db.module.js';
+import { guideFor } from '../stations/faults/error-code-guide.js';
 import { AuthError } from '../users/auth.js';
 import { OFFLINE_SQL, type MonitoringThresholds } from './operator-monitoring.js';
 
@@ -58,7 +62,65 @@ export async function runAdminSummary(db: Db, { offlineAfterMs }: MonitoringThre
       [offlineAfterMs],
     )
   ).rows;
+  const [net] = (
+    await db.$client.query<{
+      operators: number;
+      active_operators: number;
+      sites: number;
+      in_service_online: number;
+      in_service_offline: number;
+      available: number;
+      in_use: number;
+      freeing_soon: number;
+      unavailable: number;
+      conn_offline: number;
+    }>(
+      `WITH cps AS (
+         SELECT cp.id,cp.lifecycle,${OFFLINE} AS offline FROM charge_points cp
+         WHERE cp.lifecycle<>'decommissioned'
+       ), grouped AS (
+         SELECT CASE WHEN cps.offline THEN 'offline' WHEN c.status='Available' THEN 'available'
+           WHEN c.status IN ('Preparing','Charging','SuspendedEV','SuspendedEVSE') THEN 'in_use'
+           WHEN c.status='Finishing' THEN 'freeing_soon' ELSE 'unavailable' END AS g
+         FROM cps JOIN connectors c ON c.charge_point_id=cps.id
+       )
+       SELECT
+         (SELECT count(*)::int FROM operators) AS operators,
+         (SELECT count(*)::int FROM operators WHERE status='active') AS active_operators,
+         (SELECT count(*)::int FROM sites) AS sites,
+         (SELECT count(*)::int FROM cps WHERE lifecycle='in_service' AND NOT offline) AS in_service_online,
+         (SELECT count(*)::int FROM cps WHERE lifecycle='in_service' AND offline) AS in_service_offline,
+         count(*) FILTER (WHERE g='available')::int AS available,
+         count(*) FILTER (WHERE g='in_use')::int AS in_use,
+         count(*) FILTER (WHERE g='freeing_soon')::int AS freeing_soon,
+         count(*) FILTER (WHERE g='unavailable')::int AS unavailable,
+         count(*) FILTER (WHERE g='offline')::int AS conn_offline
+       FROM grouped`,
+      [offlineAfterMs],
+    )
+  ).rows;
+  const faults = (
+    await db.$client.query<{ error_code: string | null }>(
+      "SELECT error_code FROM fault_events WHERE status<>'resolved'",
+    )
+  ).rows;
+  const open_faults = { total: faults.length, critical: 0, major: 0, minor: 0, none: 0 };
+  for (const f of faults) open_faults[guideFor(f.error_code).severity] += 1;
   return {
+    operators: { total: net!.operators, active: net!.active_operators },
+    sites: net!.sites,
+    network: {
+      in_service_online: net!.in_service_online,
+      in_service_offline: net!.in_service_offline,
+      connectors: {
+        available: net!.available,
+        in_use: net!.in_use,
+        freeing_soon: net!.freeing_soon,
+        unavailable: net!.unavailable,
+        offline: net!.conn_offline,
+      },
+      open_faults,
+    },
     users: {
       driver: row!.driver,
       operator_staff: row!.operator_staff,

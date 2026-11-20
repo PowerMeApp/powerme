@@ -110,6 +110,22 @@ describeDb('FE-14 admin platform summary (screen 27, UC-ADM-07)', () => {
          VALUES($1,$2,$3,$4,CASE WHEN $5::int IS NULL THEN NULL ELSE now()-($5::int*interval '1 second') END)`,
         [serial, withSite ? site.id : null, lifecycle, online, silentS],
       );
+    // Connectors (20/11 network stats): online charge point Available + Charging; the silent one
+    // and the never-connected one count as Offline whatever they last said; decommissioned excluded.
+    await q(
+      `INSERT INTO connectors(charge_point_id,connector_no,status,status_changed_at)
+       SELECT cp.id,v.no,v.st::connector_status,now() FROM charge_points cp
+       JOIN (VALUES ('FE14-ON',1,'Available'),('FE14-ON',2,'Charging'),('FE14-SILENT',1,'Available'),
+                    ('FE14-NEW',1,'Unavailable'),('FE14-OLD',1,'Available')) v(serial,no,st)
+         ON v.serial=cp.serial_number`,
+    );
+    // One open critical fault (GroundFailure), one resolved (not counted).
+    await q(
+      `INSERT INTO fault_events(charge_point_id,source,error_code,status,resolved_at)
+       SELECT id,'ocpp'::fault_source,'GroundFailure','raised'::fault_event_status,NULL::timestamptz FROM charge_points WHERE serial_number='FE14-ON'
+       UNION ALL
+       SELECT id,'ocpp'::fault_source,'OverCurrentFailure','resolved'::fault_event_status,now() FROM charge_points WHERE serial_number='FE14-SILENT'`,
+    );
     for (const [i, status] of ['active', 'active', 'blocked', 'unlinked'].entries())
       await q(
         `INSERT INTO rfid_cards(card_identifier,card_kind,driver_id,status)
@@ -126,8 +142,9 @@ describeDb('FE-14 admin platform summary (screen 27, UC-ADM-07)', () => {
     const credited = await topUp(account, 'credited', true); // second payment on credited (T116)
     const other = await topUp(account, 'credited');
     await q(
-      `INSERT INTO e_invoices(top_up_id,amount_vnd,vat_amount_vnd,status,invoice_no,issued_at) VALUES
-         ($1,100000,8000,'needs_review',NULL,NULL),($2,100000,8000,'issued','FE14-INV-1',now())`,
+      // vat_rate is NOT NULL since migration 0025 (#168, after this test was written).
+      `INSERT INTO e_invoices(top_up_id,amount_vnd,vat_amount_vnd,vat_rate,status,invoice_no,issued_at) VALUES
+         ($1,100000,8000,8,'needs_review',NULL,NULL),($2,100000,8000,8,'issued','FE14-INV-1',now())`,
       [credited, other],
     );
     await q(
@@ -174,6 +191,14 @@ describeDb('FE-14 admin platform summary (screen 27, UC-ADM-07)', () => {
     const r = await get('/summary', tokens['admin']);
     expect(r.status).toBe(200);
     expect(r.body).toEqual({
+      operators: { total: 1, active: 1 },
+      sites: 1,
+      network: {
+        in_service_online: 1,
+        in_service_offline: 1,
+        connectors: { available: 1, in_use: 1, freeing_soon: 0, unavailable: 0, offline: 2 },
+        open_faults: { total: 1, critical: 1, major: 0, minor: 0, none: 0 },
+      },
       users: { driver: 3, operator_staff: 1, admin: 1, suspended: 1 },
       charge_points: {
         by_lifecycle: {
