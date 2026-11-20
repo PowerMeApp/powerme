@@ -7,7 +7,9 @@
  *   - CSV injection: a text cell starting with = + - @ tab or CR gets a leading `'` (site and
  *     Operator names are typed by users).
  *   - `generated_at` in UTC+7 with offset (K9); the JSON keeps UTC `Z`.
+ * The cell / BOM / time rules live in csv.ts (shared with transactions.csv, T108b).
  */
+import { cell, csvDocument, vietnamTime } from './csv.js';
 import type { RevenueReport } from './revenue-report.js';
 
 const COLUMNS = [
@@ -39,17 +41,5 @@ export function toRevenueCsv(report: RevenueReport): string {
     generated_at: vietnamTime(report.generated_at),
   };
   lines.push(COLUMNS.map((c) => cell(total[c] ?? null)).join(','));
-  return `\uFEFF${lines.join('\r\n')}\r\n`;
-}
-
-function cell(value: string | number | null): string {
-  if (value === null) return '';
-  if (typeof value === 'number') return String(value);
-  const text = /^[=+\-@\t\r]/.test(value) ? `'${value}` : value;
-  return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
-}
-
-/** `2026-11-20T02:15:00.123Z` → `2026-11-20T09:15:00+07:00` (Vietnam has no DST). */
-function vietnamTime(iso: string): string {
-  return `${new Date(Date.parse(iso) + 7 * 3_600_000).toISOString().slice(0, 19)}+07:00`;
+  return csvDocument(lines);
 }
