@@ -15,12 +15,14 @@ import { useSearchParams } from 'react-router';
 import type { ReviewSession, SessionQueue, UnattributedSession } from '@powerme/shared';
 import { Breadcrumbs } from '../../components/Breadcrumbs';
 import { ConfirmDialog } from '../../components/ConfirmDialog';
+import { CountBadge } from '../../components/CountBadge';
 import {
   errorMessage,
   SESSION_PAGE_SIZE,
   useAssignSessionMutation,
   useCloseSessionMutation,
   useOperatorSessionsQuery,
+  useOperatorSummaryQuery,
   useResolveSessionMutation,
   type ApiError,
 } from '../../core/api/api';
@@ -348,6 +350,16 @@ export function SessionQueuePage() {
   const pages = Math.max(1, Math.ceil(total / SESSION_PAGE_SIZE));
   if (current && page > pages) setPage(pages);
 
+  // Count of each queue on its tab (same summary as the menu badge).
+  const { data: summary } = useOperatorSummaryQuery(undefined, {
+    pollingInterval: SESSION_POLL_MS,
+    skipPollingIfUnfocused: true,
+  });
+  const counts: Record<SessionQueue, number | undefined> = {
+    unattributed: summary?.unattributed_sessions,
+    review: summary?.sessions_to_review,
+  };
+
   const switchQueue = (next: SessionQueue) => {
     setPage(1);
     setNote(null);
@@ -379,6 +391,7 @@ export function SessionQueuePage() {
               onClick={() => switchQueue(id)}
             >
               {label}
+              <CountBadge count={counts[id]} label="phiên" />
             </button>
           ))}
         </div>

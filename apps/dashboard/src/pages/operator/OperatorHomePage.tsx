@@ -5,6 +5,7 @@
  * shows when it has something to say — never a placeholder 0 (D36). Polled every 5 s (D5).
  */
 import { Link } from 'react-router';
+import { CountBadge } from '../../components/CountBadge';
 import type { OperatorSummary } from '@powerme/shared';
 import { errorMessage, useOperatorMeQuery, useOperatorSummaryQuery } from '../../core/api/api';
 
@@ -24,9 +25,20 @@ const SEVERITIES: [keyof OperatorSummary['open_faults'], string, string][] = [
   ['none', 'Khác', 'muted'],
 ];
 
-function Tile({ title, children, to }: { title: string; children: React.ReactNode; to?: string }) {
+function Tile({
+  title,
+  children,
+  to,
+  urgent,
+}: {
+  title: string;
+  children: React.ReactNode;
+  to?: string;
+  /** Pending work: red border, shown first. */
+  urgent?: boolean;
+}) {
   return (
-    <section className="card tile" aria-label={title}>
+    <section className={`card tile${urgent ? ' tile-urgent' : ''}`} aria-label={title}>
       <h2>{title}</h2>
       {children}
       {to && (
@@ -74,6 +86,18 @@ export function OperatorHomePage() {
       {summary.error && !s && <p role="alert">{errorMessage(summary.error)}</p>}
       {s && (
         <div className="tiles">
+          {queues.length > 0 && (
+            <Tile title="Việc cần xử lý" urgent>
+              <ul className="tile-list">
+                {queues.map(([n, label, to]) => (
+                  <li key={label}>
+                    <CountBadge count={n} label={label} />{' '}
+                    {to ? <Link to={to}>{label}</Link> : label}
+                  </li>
+                ))}
+              </ul>
+            </Tile>
+          )}
           {s.charge_points.total > 0 ? (
             <Tile title="Trụ sạc" to="/operator/charge-points">
               <p className="tile-number">
@@ -116,23 +140,6 @@ export function OperatorHomePage() {
               <p className="muted">Không có sự cố đang mở.</p>
             )}
           </Tile>
-          {queues.length > 0 && (
-            <Tile title="Việc cần xử lý">
-              <ul className="tile-list">
-                {queues.map(([n, label, to]) => (
-                  <li key={label}>
-                    <b>{n}</b>{' '}
-                    {to ? (
-                      // FE-12: screen 23 handles both queues.
-                      <Link to={to}>{label}</Link>
-                    ) : (
-                      label
-                    )}
-                  </li>
-                ))}
-              </ul>
-            </Tile>
-          )}
         </div>
       )}
     </>

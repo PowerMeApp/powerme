@@ -183,4 +183,31 @@ describe('Phiên cần xử lý (màn 23)', () => {
       expect(seen.some((r) => r.search === '?queue=unattributed&page=1&page_size=20')).toBe(true),
     );
   });
+
+  it('red count badges: menu (sessions and faults) and both queue tabs, hidden at 0', async () => {
+    fakeCsms({
+      [LIST]: unattributedPage,
+      'GET /api/operator/v1/summary': {
+        status: 200,
+        body: {
+          charge_points: { total: 1, online: 1, offline: 0, by_lifecycle: {} },
+          connectors: { available: 1, in_use: 0, freeing_soon: 0, unavailable: 0, offline: 0 },
+          open_faults: { total: 2, critical: 1, major: 1, minor: 0, none: 0 },
+          sessions_to_review: 0,
+          unattributed_sessions: 3,
+          uncertain_starts: 0,
+        },
+      },
+    });
+    renderApp('/operator/sessions', session(STAFF));
+    const menu = within(screen.getByRole('navigation', { name: 'Vận hành' }));
+    expect(await menu.findByLabelText('3 phiên cần xử lý')).toHaveClass('count-badge');
+    expect(menu.getByLabelText('2 sự cố đang mở')).toHaveTextContent('2');
+    const tabs = within(screen.getByRole('group', { name: 'Hàng đợi' }));
+    expect(tabs.getByRole('button', { name: /Chưa gắn tài xế/ })).toHaveTextContent('3');
+    // 0 waiting for review → no badge on that tab.
+    expect(
+      within(tabs.getByRole('button', { name: /Cần xem lại/ })).queryByRole('status'),
+    ).toBeNull();
+  });
 });

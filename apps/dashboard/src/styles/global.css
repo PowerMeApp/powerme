@@ -616,3 +616,30 @@ table.revenue-table tfoot td {
 .record-list li + li {
   margin-top: 2px;
 }
+
+/* Pending-work badge: red circle, white text (menu, queue tabs, home tile). */
+.count-badge {
+  display: inline-grid;
+  place-items: center;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 6px;
+  margin-left: 8px;
+  border-radius: 11px;
+  background: var(--danger);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+  vertical-align: middle;
+}
+.nav-link .count-badge {
+  margin-left: auto;
+}
+.tile-list .count-badge {
+  margin-left: 0;
+}
+.tile-urgent {
+  border: 1px solid var(--danger);
+  box-shadow: 0 0 0 1px var(--danger-soft);
+}

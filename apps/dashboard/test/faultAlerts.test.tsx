@@ -60,6 +60,9 @@ function pagedCsms(items: OperatorFault[], total: () => number) {
   const record = globalThis.fetch as unknown as (r: Request) => Promise<Response>;
   globalThis.fetch = (async (r: Request) => {
     await record(r);
+    // Only the fault list; anything else (the menu's summary) is not served.
+    if (!new URL(r.url).pathname.endsWith('/operator/v1/faults'))
+      return new Response(JSON.stringify({ error: 'not_found' }), { status: 404 });
     const page = Number(new URL(r.url).searchParams.get('page') ?? 1);
     return new Response(JSON.stringify({ items, total: total(), page, page_size: 20 }), {
       status: 200,

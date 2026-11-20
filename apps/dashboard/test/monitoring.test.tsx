@@ -95,6 +95,12 @@ describe('Tổng quan vận hành (màn 17)', () => {
       '/operator/faults',
     );
     const queue = screen.getByRole('region', { name: 'Việc cần xử lý' });
+    // Pending work comes first, highlighted, with a red count.
+    expect(document.querySelector('.tiles')!.firstElementChild).toBe(queue);
+    expect(queue).toHaveClass('tile-urgent');
+    expect(within(queue).getByLabelText('1 phiên cần xem lại (đối soát)')).toHaveClass(
+      'count-badge',
+    );
     expect(within(queue).getByRole('link', { name: /phiên cần xem lại/ })).toHaveAttribute(
       'href',
       '/operator/sessions?queue=review',
