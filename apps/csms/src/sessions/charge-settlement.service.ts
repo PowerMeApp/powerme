@@ -11,6 +11,7 @@ import {
   meterAt,
   MeterPoint,
   resolveTariffClock,
+  resolveActiveTariffClock,
   TARIFF_BOUNDARY_INTERPOLATED_PREFIX,
   TARIFF_CLOCK_FALLBACK_PREFIX,
   TARIFF_CLOCK_OFFSET_PREFIX,
@@ -18,6 +19,13 @@ import {
 } from '../reconciliation/tariff-clock.js';
 import { ChargePolicy, validateChargePolicy } from './charge-start-policy.js';
 import { chargeTransaction } from './charge-sql.js';
+import {
+  meteredCostBounds,
+  scaledInteger,
+  type MeteredCostBounds,
+  type MeterPoint as ExactMeterPoint,
+  type TariffWindow,
+} from './charge-mode-policy.js';
 
 export const CHARGE_POLICY = Symbol('WP3_T31_CHARGE_POLICY');
 
@@ -69,6 +77,154 @@ interface PricedSession {
 @Injectable()
 export class ChargeSettlementService {
   private readonly logger = new Logger(ChargeSettlementService.name);
+
+  // WP3: active pricing shares T134 clock/interpolation policy; it never writes billing evidence.
+  async meteredProgress(
+    c: PoolClient,
+    sessionId: number,
+    staleMs: number,
+    lastKnown = false,
+  ): Promise<{
+    consumedMilliWh: bigint;
+    bounds: MeteredCostBounds | null;
+    fresh: boolean;
+    estimateVnd: number | null;
+    costQuality: 'exact' | 'interpolated' | 'unknown';
+    pricingClock: 'cp' | 'cp_offset' | 'csms';
+  } | null> {
+    const session = (
+      await c.query<BillableSession>(
+        `SELECT s.*,st.operator_id FROM sessions s JOIN charge_points cp ON cp.id=s.charge_point_id
+       JOIN sites st ON st.id=cp.site_id WHERE s.id=$1`,
+        [sessionId],
+      )
+    ).rows[0];
+    if (!session) return null;
+    const issues = (
+      await c.query<{ event: string }>(
+        `SELECT event FROM session_status_history WHERE session_id=$1
+       AND event IN ('METER_EVIDENCE_CONFLICT','TARIFF_CLOCK_UNTRUSTED')`,
+        [sessionId],
+      )
+    ).rows;
+    if (issues.some((r) => r.event === 'METER_EVIDENCE_CONFLICT')) return null;
+    const samples = (
+      await c.query<{
+        wh: string;
+        at: Date;
+        receivedAt: Date;
+        epoch: number;
+        replayed: boolean;
+        current: boolean;
+        fresh: boolean;
+      }>(
+        `SELECT CASE WHEN m.unit='kWh' THEN m.value*1000 ELSE m.value END AS wh,
+         m.cp_timestamp AS at,m.received_at AS "receivedAt",m.epoch,m.replayed,
+         m.epoch=cp.current_epoch AS current,
+         (cp.is_online AND m.epoch=cp.current_epoch AND m.received_at>=cp.online_changed_at
+          AND extract(epoch FROM (now()-m.received_at))*1000<=$2::numeric) AS fresh
+       FROM meter_values m JOIN sessions s ON s.id=m.session_id
+       JOIN charge_points cp ON cp.id=s.charge_point_id
+       JOIN charge_point_connections e ON e.charge_point_id=s.charge_point_id AND e.epoch=m.epoch
+       WHERE m.session_id=$1 AND m.measurand='Energy.Active.Import.Register'
+         AND m.phase IS NULL AND (m.unit IN ('Wh','kWh') OR m.unit IS NULL)
+         AND m.received_at BETWEEN s.received_started_at AND now()
+         AND m.received_at>=e.opened_at AND (e.closed_at IS NULL OR m.received_at<=e.closed_at)
+       ORDER BY m.cp_timestamp,m.received_at,m.id`,
+        [sessionId, staleMs],
+      )
+    ).rows;
+    const latest = samples.at(-1);
+    if (!latest || !latest.current || (!lastKnown && !latest.fresh)) return null;
+    const tolerance =
+      (this.config?.tariffClockToleranceS ?? DEFAULT_TARIFF_CLOCK_TOLERANCE_S) * 1000;
+    const liveWindow = (this.config?.replaySkewThresholdS ?? DEFAULT_REPLAY_SKEW_S) * 1000;
+    const clock = await resolveActiveTariffClock(c, session, latest, tolerance, liveWindow);
+    const fallback = issues.length > 0 || 'issue' in clock;
+    const offsetMs = 'issue' in clock ? 0 : clock.offsetMs;
+    const lag = latest.receivedAt.getTime() - latest.at.getTime() - offsetMs;
+    // WP3: T134 can identify live offset frames even when the raw replay flag says otherwise.
+    if (latest.replayed && (fallback || Math.abs(lag) > liveWindow)) return null;
+    const baseline = scaledInteger(session.meter_start_wh);
+    const finalMeter = scaledInteger(latest.wh);
+    if (baseline === null || finalMeter === null || finalMeter < baseline) return null;
+    let prior = baseline;
+    for (const sample of samples) {
+      if (sample.replayed && sample.at < session.cp_started_at) continue;
+      const value = scaledInteger(sample.wh);
+      if (value === null || value < prior) return null;
+      prior = value;
+    }
+    const consumedMilliWh = finalMeter - baseline;
+    const pricingClock: 'cp' | 'cp_offset' | 'csms' = fallback
+      ? 'csms'
+      : offsetMs
+        ? 'cp_offset'
+        : 'cp';
+    const start = fallback
+      ? session.received_started_at
+      : new Date(session.cp_started_at.getTime() + offsetMs);
+    const end = fallback ? latest.receivedAt : new Date(latest.at.getTime() + offsetMs);
+    const unknown = {
+      consumedMilliWh,
+      bounds: null,
+      fresh: latest.fresh,
+      estimateVnd: null,
+      costQuality: 'unknown' as const,
+      pricingClock,
+    };
+    if (end < start || end.getTime() - start.getTime() > 366 * 86400000) return unknown;
+    const tariffs = await this.tariffWindows(c, session.operator_id, start, fallback ? start : end);
+    if (fallback) {
+      if (tariffs.length !== 1 || !/^\d+$/.test(tariffs[0]!.price)) return unknown;
+      const amount = (consumedMilliWh * BigInt(tariffs[0]!.price) + 500000n) / 1000000n;
+      if (amount > BigInt(Number.MAX_SAFE_INTEGER)) return unknown;
+      const estimateVnd = Number(amount);
+      return {
+        consumedMilliWh,
+        bounds: { minVnd: estimateVnd, maxVnd: estimateVnd, quality: 'exact' },
+        fresh: latest.fresh,
+        estimateVnd,
+        costQuality: 'exact',
+        pricingClock,
+      };
+    }
+    const points: ExactMeterPoint[] = [{ at: start, milliWh: baseline }];
+    for (const sample of samples) {
+      const at = new Date(sample.at.getTime() + offsetMs);
+      const value = scaledInteger(sample.wh);
+      const before = points.at(-1)!;
+      if (value === null || value < before.milliWh || at < before.at) return null;
+      if (at.getTime() === before.at.getTime()) {
+        if (value !== before.milliWh) return null;
+      } else points.push({ at, milliWh: value });
+    }
+    const bounds = meteredCostBounds(points, tariffs);
+    if (!bounds) return unknown;
+    if (bounds.quality === 'exact')
+      return { ...unknown, bounds, estimateVnd: bounds.minVnd, costQuality: 'exact' };
+    const meterPoints = points.map((p) => ({ at: p.at.getTime(), wh: Number(p.milliWh) / 1000 }));
+    let previous = baseline;
+    let numerator = 0n;
+    let cursor = start.getTime();
+    for (const tariff of tariffs) {
+      const left = Math.max(start.getTime(), tariff.starts.getTime());
+      const right = Math.min(end.getTime(), tariff.ends.getTime());
+      if (right <= left) continue;
+      if (left !== cursor) return unknown;
+      const reading = meterAt(meterPoints, right);
+      if (!reading) return unknown;
+      let value = right === end.getTime() ? finalMeter : BigInt(Math.round(reading.wh)) * 1000n;
+      if (value < previous) value = previous;
+      if (value > finalMeter) value = finalMeter;
+      numerator += (value - previous) * BigInt(tariff.price);
+      previous = value;
+      cursor = right;
+    }
+    const amount = (numerator + 500000n) / 1000000n;
+    if (cursor !== end.getTime() || amount > BigInt(Number.MAX_SAFE_INTEGER)) return unknown;
+    return { ...unknown, bounds, estimateVnd: Number(amount), costQuality: 'interpolated' };
+  }
 
   // WP3/T72: stop evidence already owns a durable job; a billing failure must not reject its ACK.
   async settle(sessionId: number): Promise<'posted' | 'already_posted' | 'pending' | 'ineligible'> {
@@ -513,23 +669,8 @@ export class ChargeSettlementService {
     )
       return undefined;
     if (timeline.clock === 'csms') return this.receiptSegment(c, session, timeline);
-    // Mẫu công tơ lưu theo giờ trụ gốc: biên khung giá (trục đã chỉnh) trừ lại độ lệch.
     const offsetMs = timeline.clock === 'cp_offset' ? timeline.offsetMs : 0;
-    const { rows } = await c.query<{ id: string; price: string; starts: Date; ends: Date }>(
-      `
-      SELECT t.id,t.price_per_kwh_vnd AS price,
-        ((d.day::date+t.time_start) AT TIME ZONE 'Asia/Ho_Chi_Minh') AS starts,
-        ((d.day::date+t.time_end) AT TIME ZONE 'Asia/Ho_Chi_Minh') AS ends
-      FROM tariff_periods t CROSS JOIN generate_series(
-        ($2::timestamptz AT TIME ZONE 'Asia/Ho_Chi_Minh')::date::timestamp,
-        ($3::timestamptz AT TIME ZONE 'Asia/Ho_Chi_Minh')::date::timestamp,interval '1 day') d(day)
-      WHERE t.operator_id=$1 AND t.effective_from<=d.day::date
-        AND (t.effective_to IS NULL OR t.effective_to>=d.day::date)
-        AND ((d.day::date+t.time_start) AT TIME ZONE 'Asia/Ho_Chi_Minh') <= $3
-        AND ((d.day::date+t.time_end) AT TIME ZONE 'Asia/Ho_Chi_Minh') > $2
-      ORDER BY starts,t.id`,
-      [session.operator_id, start, end],
-    );
+    const rows = await this.tariffWindows(c, session.operator_id, start, end);
     let cursor = start.getTime();
     let previous = BigInt(session.meter_start_wh);
     const stop = BigInt(session.meter_stop_wh!);
@@ -588,5 +729,28 @@ export class ChargeSettlementService {
     )
       return undefined;
     return { segments: result, interpolated, maxGapMs };
+  }
+  private async tariffWindows(
+    c: PoolClient,
+    operatorId: string,
+    start: Date,
+    end: Date,
+  ): Promise<TariffWindow[]> {
+    const { rows } = await c.query<TariffWindow>(
+      `
+      SELECT t.id,t.price_per_kwh_vnd AS price,
+        ((d.day::date+t.time_start) AT TIME ZONE 'Asia/Ho_Chi_Minh') AS starts,
+        ((d.day::date+t.time_end) AT TIME ZONE 'Asia/Ho_Chi_Minh') AS ends
+      FROM tariff_periods t CROSS JOIN generate_series(
+        ($2::timestamptz AT TIME ZONE 'Asia/Ho_Chi_Minh')::date::timestamp,
+        ($3::timestamptz AT TIME ZONE 'Asia/Ho_Chi_Minh')::date::timestamp,interval '1 day') d(day)
+      WHERE t.operator_id=$1 AND t.effective_from<=d.day::date
+        AND (t.effective_to IS NULL OR t.effective_to>=d.day::date)
+        AND ((d.day::date+t.time_start) AT TIME ZONE 'Asia/Ho_Chi_Minh') <= $3
+        AND ((d.day::date+t.time_end) AT TIME ZONE 'Asia/Ho_Chi_Minh') > $2
+      ORDER BY starts,t.id`,
+      [operatorId, start, end],
+    );
+    return rows;
   }
 }

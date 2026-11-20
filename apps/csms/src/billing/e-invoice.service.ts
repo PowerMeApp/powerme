@@ -21,9 +21,9 @@
  * invoice to Driver"): chưa có kênh, không làm. Báo Admin = log error `e_invoice_needs_review` + màn
  * Billing Exceptions đọc bảng (Phần 10).
  *
- * Rủi ro đã biết (8c): lease không tăng `attempt_count`, nên dòng làm tiến trình sập mỗi lần (hoặc
- * lỗi lặp ở tx2) được thử lại sau mỗi lease mà không bị đếm; PR 8c sửa chung trong `due-rows.ts`,
- * bao cả `e_invoices`.
+ * Hết lượt giữ chỗ (T32 Phần 8c, D7): dòng bị giữ chỗ quá `UNFINISHED_CLAIM_LIMIT` lần liên tiếp mà
+ * không ra kết quả (sập, lỗi lặp ở tx2) → `needs_review` qua STM-7 #3→#5 (`onClaimsExhausted`);
+ * Admin retry đặt `unfinished_claims = 0`.
  */
 import { Inject, Injectable, Logger, OnModuleInit, Optional } from '@nestjs/common';
 import type { PoolClient } from 'pg';
@@ -44,6 +44,7 @@ import {
 } from './e-invoice-provider.js';
 import { EInvoiceStateMachine, EInvoiceStatus } from './e-invoice-state-machine.js';
 import { splitVat, vatRateAt } from './e-invoice.js';
+import { RETRY_LIMIT } from './refund-state-machine.js';
 import { nextRetry } from './retry-schedule.js';
 
 /** `BackgroundWork.name` của việc xuất hoá đơn (D7). */
@@ -160,6 +161,7 @@ export class EInvoiceService implements BackgroundWork, OnModuleInit {
         statuses: ['requested', 'failed'],
         leaseMs: this.workConfig.leaseMs,
         limit,
+        onExhausted: (locked, c) => this.onClaimsExhausted(c, locked as LockedInvoice),
       },
       (row) => this.issue(row, signal),
       signal,
@@ -233,7 +235,7 @@ export class EInvoiceService implements BackgroundWork, OnModuleInit {
       const step = this.stm.apply(inv.status, 'ADMIN_RETRY');
       await c.query(
         `UPDATE e_invoices SET status = $2::e_invoice_status, next_attempt_at = now(),
-           updated_at = now() WHERE id = $1`,
+           unfinished_claims = 0, updated_at = now() WHERE id = $1`,
         [invoiceId, step.to],
       );
       return {
@@ -265,6 +267,42 @@ export class EInvoiceService implements BackgroundWork, OnModuleInit {
       );
     }
     return { eInvoiceId: out.eInvoiceId, status: out.status, attemptCount: out.attemptCount };
+  }
+
+  /**
+   * Hết lượt giữ chỗ (T32 Phần 8c, D7): chạy trong tx riêng của `runLeasedBatch`, dòng đã khoá bằng
+   * lease, KHÔNG gọi nhà cung cấp. Chỉ dùng chuyển trạng thái có sẵn của STM-7: `failed` qua #6
+   * trước, rồi `ATTEMPT_FAILED` → #3→#5 `needs_review`. Guard và `attempt_count` ghi vào dòng là
+   * `max(attempt_count + 1, RETRY_LIMIT)` (Khang chốt 19/11): guard #5 "lượt thứ RETRY_LIMIT trở đi"
+   * giữ đúng nghĩa, và Admin retry (#7) vẫn là "một lượt". Đổi lại `attempt_count` có thể lớn hơn
+   * số lần gọi thật. Log sau commit.
+   */
+  private async onClaimsExhausted(
+    c: LedgerClient,
+    locked: LockedInvoice & { unfinished_claims?: number },
+  ): Promise<() => Promise<void>> {
+    const id = Number(locked.id);
+    const from: EInvoiceStatus =
+      locked.status === 'failed' ? this.stm.apply('failed', 'RETRY_DUE').to : locked.status;
+    const attemptCount = Math.max(Number(locked.attempt_count) + 1, RETRY_LIMIT);
+    const step = this.stm.apply(from, 'ATTEMPT_FAILED', { errorKind: 'transient', attemptCount });
+    await c.query(
+      `UPDATE e_invoices SET status = $2::e_invoice_status, attempt_count = $3,
+         last_error_kind = 'transient', last_error_message = 'unfinished_claims_exhausted',
+         last_attempt_at = now(), next_attempt_at = NULL, updated_at = now()
+       WHERE id = $1`,
+      [id, step.to, attemptCount],
+    );
+    const fields = {
+      e_invoice_id: id,
+      top_up_id: Number(locked.top_up_id),
+      attempt_count: attemptCount,
+      reason: 'unfinished_claims_exhausted',
+      unfinished_claims: locked.unfinished_claims ?? null,
+    };
+    return async () => {
+      this.logger.error(JSON.stringify({ event: 'e_invoice_needs_review', ...fields }));
+    };
   }
 
   /** tx2: áp kết quả một lượt gọi lên dòng đã khoá theo lease, ghi MỘT câu UPDATE. */

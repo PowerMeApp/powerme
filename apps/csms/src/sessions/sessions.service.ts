@@ -176,7 +176,10 @@ export class SessionsService {
           id: string;
           driver_id: string;
           vehicle_id: string;
-          energy_limit_wh: string;
+          mode: 'full' | 'timed' | 'energy_kwh' | 'amount_vnd';
+          energy_limit_wh: string | null;
+          duration_minutes: string | null;
+          amount_limit_vnd: string | null;
           session_id: string | null;
         }>(sql`SELECT i.* FROM driver_charge_intents i JOIN remote_commands r ON r.id=i.command_id
         WHERE i.id_tag=${req.idTag} AND i.connector_id=${connector.id}
@@ -224,8 +227,17 @@ export class SessionsService {
                 vehicleId: Number(appStart.vehicle_id),
                 origin: 'app_qr' as const,
                 paymentMode: 'csms_billed' as const,
-                billingMode: 'energy_kwh' as const,
-                limitValue: Number(appStart.energy_limit_wh),
+                billingMode: appStart.mode,
+                limitValue:
+                  appStart.mode === 'full'
+                    ? null
+                    : Number(
+                        appStart.mode === 'energy_kwh'
+                          ? appStart.energy_limit_wh
+                          : appStart.mode === 'timed'
+                            ? appStart.duration_minutes
+                            : appStart.amount_limit_vnd,
+                      ),
               }
             : {}),
         })

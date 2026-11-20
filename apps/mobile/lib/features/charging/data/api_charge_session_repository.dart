@@ -77,6 +77,25 @@ class ApiChargeSessionRepository implements ChargeSessionRepository {
         : DataQuality.unknown;
     final point = json['charge_point'];
     final online = point is Map<String, dynamic> ? point['is_online'] : null;
+    final mode = switch (json['billing_mode']) {
+      'full' => ChargingMode.autoFull,
+      'timed' => ChargingMode.timed,
+      'energy_kwh' => ChargingMode.energy,
+      'amount_vnd' => ChargingMode.cost,
+      _ => null,
+    };
+    final limit = _integerOrNull(json['limit_value']);
+    if (mode == ChargingMode.autoFull
+        ? limit != null
+        : mode != null && (limit == null || limit == 0)) {
+      throw _retry;
+    }
+    final costQuality = _state(
+      ChargeCostQuality.values,
+      json['metered_cost_quality'],
+      ChargeCostQuality.unknown,
+    );
+    final cost = _integerOrNull(json['metered_cost_vnd_estimate']);
     return ChargeProgress(
       status: _state(SessionState.values, json['status'], SessionState.unknown),
       settlement: switch (json['settlement_state']) {
@@ -93,7 +112,18 @@ class ApiChargeSessionRepository implements ChargeSessionRepository {
       },
       quality: quality,
       updatedAt: _timestamp(json['updated_at']),
-      limitWh: _integerOrNull(json['limit_value']),
+      billingMode: mode,
+      billingModeMissing: !json.containsKey('billing_mode'),
+      limitValue: limit,
+      elapsedSeconds: _integerOrNull(json['elapsed_seconds']),
+      costEstimateVnd: costQuality == ChargeCostQuality.unknown ? null : cost,
+      costQuality: cost == null ? ChargeCostQuality.unknown : costQuality,
+      costClock: switch (json['metered_cost_clock']) {
+        'cp' => ChargeCostClock.cp,
+        'cp_offset' => ChargeCostClock.cpOffset,
+        'csms' => ChargeCostClock.csms,
+        _ => null,
+      },
       consumedWh: _integerOrNull(json['consumed_wh']),
       meterStopWh: _integerOrNull(json['meter_stop_wh']),
       energyWh: _integerOrNull(json['energy_wh']),

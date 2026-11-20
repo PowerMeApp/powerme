@@ -321,8 +321,10 @@ export type QueryUnresolvedReason =
 
 /**
  * Mã / câu thô của một response querydr CHƯA xác thực (sai / thiếu chữ ký, `vnp_TmnCode` hay
- * `vnp_TxnRef` khác). Chỉ để log (vd. phân biệt RC `94` với `99`, thử sandbox 16/11), không dùng để
- * quyết định gì.
+ * `vnp_TxnRef` khác), ví dụ để phân biệt RC `94` với `99` (thử sandbox 16/11).
+ *
+ * RC chưa xác thực chỉ để log, ngoại lệ duy nhất: 94 ở mốc +60 để hẹn thêm một lần querydr (D4, T32
+ * Phần 8c). Không bao giờ dùng để phân loại kết quả hay ghi gì vào DB.
  */
 export interface UnverifiedResponseInfo {
   responseCode?: string;

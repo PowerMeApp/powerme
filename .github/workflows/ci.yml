@@ -74,6 +74,9 @@ jobs:
       - name: Test
         run: npm test
 
+      - name: T139 staging evidence (offline)
+        run: node apps/csms/lab/nfr-res-01/verify-staging-evidence.mjs --self-test
+
       - name: MB03 isolated Driver HTTP integration
         run: npm run test:driver-discovery -w @powerme/csms
         env:

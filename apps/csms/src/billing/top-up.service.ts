@@ -65,13 +65,28 @@ export const PENDING_TIMEOUT_MS = 15 * 60 * 1000;
  */
 export const QUERYDR_FIRST_DELAY_MS = 2 * 60 * 1000;
 /**
- * Lịch querydr (T117 / D4 ⊕ ĐIỀU KIỆN, T127; T32 Phần 8): các mốc tính **từ `expires_at`**, phút.
- * Kết quả chưa ngã ngũ → mốc kế = mốc nhỏ nhất có `expires_at + mốc > now()` (đồng hồ DB). Không suy
- * "lần thứ mấy" từ `next_attempt_at` vì lease ghi đè cột này. Không còn mốc → hết lịch → `expired`.
+ * Lịch querydr (T117 / D4 ⊕ ĐIỀU KIỆN, T127; T32 Phần 8, đổi ở 8c 19/11): các mốc tính **từ
+ * `expires_at`**, phút. Kết quả chưa ngã ngũ → mốc kế = mốc nhỏ nhất có `expires_at + mốc > now()`
+ * (đồng hồ DB). Không suy "lần thứ mấy" từ `next_attempt_at` vì lease ghi đè cột này. Không còn mốc
+ * → hết lịch → `expired`.
+ *
+ * Bỏ +5 của lịch cũ `[2, 5, 10, 20, 40, 60]`: sandbox VNPay trả RC `94` (yêu cầu trùng) khi hỏi lại
+ * cùng giao dịch trong khoảng ≤ 4,5 phút; cách 11 phút trở lên thì không bị chặn (thử 16/11). Các mốc
+ * sau cách nhau ≥ 13 phút.
  */
-export const QUERYDR_SCHEDULE_MIN: readonly number[] = [2, 5, 10, 20, 40, 60];
+export const QUERYDR_SCHEDULE_MIN: readonly number[] = [2, 15, 30, 45, 60];
+/**
+ * Mốc thêm (phút từ `expires_at`), CHỈ khi lần hỏi ở mốc +60 (`now() >= expires_at + 60 phút`) trả
+ * RC `94`: lần đó bị VNPay chặn vì trùng, chưa phải câu trả lời. Ở +75 mà vẫn chưa ngã ngũ thì hết
+ * lịch theo luật thường (TS 04 / 07 → `unresolved_*`), không có +90. RC `94` chưa xác thực chữ ký
+ * cũng được nhận, chỉ để hẹn thêm lần này (D4, T32 Phần 8c).
+ */
+export const QUERYDR_RC94_EXTRA_MIN = 75;
 if (QUERYDR_SCHEDULE_MIN[0]! * 60_000 !== QUERYDR_FIRST_DELAY_MS) {
   throw new Error('top-up: mốc querydr đầu phải bằng QUERYDR_FIRST_DELAY_MS');
+}
+if (QUERYDR_RC94_EXTRA_MIN <= QUERYDR_SCHEDULE_MIN[QUERYDR_SCHEDULE_MIN.length - 1]!) {
+  throw new Error('top-up: mốc RC 94 phải sau mốc querydr cuối');
 }
 /** Tên `BackgroundWork` của vòng quét top-up quá hạn (D7). */
 export const TOP_UP_TIMEOUT_WORK = 'top-up-timeout';
@@ -189,7 +204,10 @@ type LockedResult =
       amountVnd: number;
     }
   | { event: 'PAYMENT_FAILED' }
-  | { event: 'TIMEOUT_NOT_PAID'; exceptionKind?: 'unresolved_04' | 'unresolved_07' };
+  | {
+      event: 'TIMEOUT_NOT_PAID';
+      exceptionKind?: 'unresolved_04' | 'unresolved_07' | 'retry_exhausted';
+    };
 
 /** Trường log `ipn_applied` / `querydr_applied` / `payment_not_creditable` (ghi sau commit). */
 interface AppliedLog {
@@ -197,7 +215,11 @@ interface AppliedLog {
   gateway_reference: string;
   outcome: PaymentResultCommitted['outcome'];
   vnp_TransactionNo: string | null;
-  reason?: NotCreditableReason;
+  /**
+   * `not_creditable`: lý do không cộng được. `retry_exhausted` (Phần 8c): `expired` do hết lượt giữ
+   * chỗ, KHÔNG có querydr nào ra kết quả (log vẫn tên `querydr_applied`).
+   */
+  reason?: NotCreditableReason | 'retry_exhausted';
   amount_paid_vnd: number;
   late_amount_vnd?: number;
 }
@@ -240,7 +262,11 @@ type RecheckIneligible = Extract<RecheckResult, { result: 'not_eligible' }>['rea
 function recheckIneligible(row: RecheckTopUpRow | undefined): RecheckIneligible | null {
   if (!row) return 'not_found';
   if (row.status !== 'expired') return 'not_expired';
-  if (row.exception_kind !== 'unresolved_04' && row.exception_kind !== 'unresolved_07')
+  if (
+    row.exception_kind !== 'unresolved_04' &&
+    row.exception_kind !== 'unresolved_07' &&
+    row.exception_kind !== 'retry_exhausted'
+  )
     return 'no_unresolved_exception';
   if (row.exception_reviewed_at !== null) return 'already_reviewed';
   return null;
@@ -341,7 +367,13 @@ export class TopUpService implements BackgroundWork, OnModuleInit {
     }
     return runLeasedBatch(
       this.db.$client,
-      { table: 'top_ups', statuses: ['pending'], leaseMs: this.workConfig.leaseMs, limit },
+      {
+        table: 'top_ups',
+        statuses: ['pending'],
+        leaseMs: this.workConfig.leaseMs,
+        limit,
+        onExhausted: (locked, c) => this.onClaimsExhausted(c, locked as LockedTopUpRow),
+      },
       (row) => this.onPendingTimeout(row, signal),
       signal,
       this.logger,
@@ -392,8 +424,43 @@ export class TopUpService implements BackgroundWork, OnModuleInit {
   }
 
   /**
+   * Hết lượt giữ chỗ (T32 Phần 8c, D7): vòng quét giữ chỗ dòng quá `UNFINISHED_CLAIM_LIMIT` lần liên
+   * tiếp mà không ra kết quả (querydr / tx2 ném, sập). Chạy trong tx riêng của `runLeasedBatch`, dòng
+   * đã khoá bằng lease; KHÔNG querydr. `pending → expired` (STM-4 #4, `TIMEOUT_NOT_PAID`) +
+   * `exception_kind = 'retry_exhausted'` qua `applyLockedResult` (đặt `completed_at`,
+   * `next_attempt_at = NULL`). Không giữ `pending`: tài xế sẽ bị chặn tạo top-up mới tới khi có
+   * Admin. IPN thành công tới sau đó → khoản trễ; Admin "Kiểm tra lại" được (`recheckTopUp`).
+   * Trả việc sau commit (log + `afterPaymentCommitted`) cho `runLeasedBatch` chạy sau COMMIT.
+   */
+  private async onClaimsExhausted(
+    c: PoolClient,
+    locked: LockedTopUpRow & { unfinished_claims?: number },
+  ): Promise<(() => Promise<void>) | void> {
+    const account = await this.lockAccount(c, locked.credit_account_id);
+    const applied = await this.applyLockedResult(
+      c,
+      locked,
+      account,
+      { event: 'TIMEOUT_NOT_PAID', exceptionKind: 'retry_exhausted' },
+      'querydr',
+    );
+    return async () => {
+      this.log('warn', 'top_up_retry_exhausted', {
+        top_up_id: Number(locked.id),
+        gateway_reference: locked.gateway_reference,
+        unfinished_claims: locked.unfinished_claims ?? null,
+        outcome: applied.outcome,
+      });
+      if (applied.log) this.logApplied('querydr', applied.log);
+      if (applied.committed)
+        await this.afterCommit(applied.committed, 'top_up_timeout_after_commit_failed');
+    };
+  }
+
+  /**
    * "Kiểm tra lại" của Admin (chốt Khang 14/11; route, phân quyền, audit ở Phần 10). Chỉ cho top-up
-   * `expired` có `exception_kind` `unresolved_04` / `unresolved_07` chưa `exception_reviewed_at`.
+   * `expired` có `exception_kind` `unresolved_04` / `unresolved_07` / `retry_exhausted` (Phần 8c)
+   * chưa `exception_reviewed_at`.
    * querydr ngoài transaction, rồi khoá `top_ups` → `credit_accounts`, kiểm lại điều kiện dưới khoá.
    * Không đổi `status`, không ghi sổ cái.
    *
@@ -768,7 +835,10 @@ export class TopUpService implements BackgroundWork, OnModuleInit {
              updated_at = now() WHERE id = $1`,
           [topUpId, step.to, exceptionKind],
         );
-        return done({ topUpId, outcome: step.to === 'expired' ? 'expired' : 'failed' });
+        const left = done({ topUpId, outcome: step.to === 'expired' ? 'expired' : 'failed' });
+        // Phần 8c: hết lượt giữ chỗ, không có querydr nào ra kết quả → đánh dấu trên log.
+        if (exceptionKind === 'retry_exhausted') left.log!.reason = 'retry_exhausted';
+        return left;
       }
       case 'not_creditable': {
         const reason = step.reason;
@@ -868,17 +938,27 @@ export class TopUpService implements BackgroundWork, OnModuleInit {
       case 'not_found':
         return { event: 'TIMEOUT_NOT_PAID' };
       case 'unresolved': {
+        // RC 94 (yêu cầu trùng): thêm mốc +75 vào lịch. Chỉ đổi lịch hỏi, không đổi phân loại hay
+        // ghi gì. RC chưa xác thực chỉ để log, ngoại lệ duy nhất: 94 ở mốc +60 để hẹn thêm một lần
+        // querydr (D4, T32 Phần 8c). Ở mốc +45 trở về trước, mốc +60 vẫn nhỏ hơn nên 94 không đổi gì.
+        const rc94 = q.responseCode === '94' || q.unverified?.responseCode === '94';
+        const schedule = rc94
+          ? [...QUERYDR_SCHEDULE_MIN, QUERYDR_RC94_EXTRA_MIN]
+          : QUERYDR_SCHEDULE_MIN;
         // Đọc trạng thái + mốc kế (dòng đã khoá ở tx2), không suy "hết lịch" từ việc UPDATE không
         // trả dòng nào.
         const sched = (
-          await c.query<{ status: TopUpStatus; next_at: string | null }>(
-            `SELECT t.status,
-                    (SELECT (t.expires_at + make_interval(mins => m))::text
-                     FROM unnest($2::int[]) AS m
-                     WHERE t.expires_at + make_interval(mins => m) > now()
-                     ORDER BY m LIMIT 1) AS next_at
-             FROM top_ups t WHERE t.id = $1`,
-            [Number(top.id), QUERYDR_SCHEDULE_MIN],
+          await c.query<{ status: TopUpStatus; next_at: string | null; next_min: number | null }>(
+            `SELECT t.status, n.next_at, n.m AS next_min
+             FROM top_ups t
+             LEFT JOIN LATERAL (
+               SELECT m, (t.expires_at + make_interval(mins => m))::text AS next_at
+               FROM unnest($2::int[]) AS m
+               WHERE t.expires_at + make_interval(mins => m) > now()
+               ORDER BY m LIMIT 1
+             ) n ON true
+             WHERE t.id = $1`,
+            [Number(top.id), schedule],
           )
         ).rows[0]!;
         if (sched.status !== 'pending') {
@@ -908,10 +988,12 @@ export class TopUpService implements BackgroundWork, OnModuleInit {
             response_code: q.responseCode ?? null,
             transaction_status: q.transactionStatus ?? null,
             next_attempt_at: next.next_attempt_at,
+            ...(sched.next_min === QUERYDR_RC94_EXTRA_MIN && { rc94_extension: true }),
           });
           return null;
         }
-        // Hết lịch (đã qua expires_at + 60 phút): expired; TS 04 / 07 → Billing Exceptions.
+        // Hết lịch (đã qua expires_at + 60 phút, hoặc + 75 khi lần +60 trả RC 94): expired;
+        // TS 04 / 07 → Billing Exceptions.
         const ts = q.responseCode === '00' ? q.transactionStatus : undefined;
         const exceptionKind =
           ts === '04' ? 'unresolved_04' : ts === '07' ? 'unresolved_07' : undefined;

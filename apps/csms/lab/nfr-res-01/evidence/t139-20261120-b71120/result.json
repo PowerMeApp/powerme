@@ -1,0 +1,220 @@
+{
+  "schema_version": 1,
+  "task": "T139",
+  "runid": "b71120",
+  "environment": {
+    "target": "Deployed staging via SSH tunnel",
+    "driver_api": "http://127.0.0.1:3000/api/driver/v1",
+    "endpoint": "GET /stations?sort=smart",
+    "latency_scope": "client elapsed, including SSH/network/HTTP JSON response",
+    "deployed_source_sha": null
+  },
+  "fixture": {
+    "sites": 50,
+    "charge_points": 50,
+    "connectors": 50,
+    "unique_osm_station_points": 50,
+    "one_origin_point": true,
+    "origin": {
+      "latitude": 10.868697,
+      "longitude": 106.784288
+    },
+    "soc_percent": 35,
+    "radius_km": 5,
+    "page_size": 50,
+    "query_prefix": "T139b71120",
+    "model": {
+      "vehicle_model_id": "5",
+      "brand": "Hyundai",
+      "model_name": "Ioniq 5",
+      "battery_capacity_kwh": 72.6,
+      "rated_range_km": 451,
+      "max_dc_kw": 220
+    },
+    "mark": "DB-only online/fresh/Available station load test; no charging or OCPP simulation"
+  },
+  "method": {
+    "requests": 21,
+    "cold_pilot_in_primary": true,
+    "batch_requests": 20,
+    "percentile": "nearest rank: sorted[ceil(p*n)-1]",
+    "p50_rank_21": 11,
+    "p95_rank_21": 20,
+    "min_start_spacing_ms": 12500,
+    "shortlist_limit": 6,
+    "route_policy": "At most six shortlisted stations, not 50 Route requests per sample; cache reuse observed",
+    "omitted_samples": 0,
+    "failures": 0
+  },
+  "performance": {
+    "primary": {
+      "n": 21,
+      "p50_ms": 433.85960000002524,
+      "p95_ms": 1390.1427000000003,
+      "max_ms": 4439.036699999997,
+      "brief_count": 1,
+      "brief_ratio": 0.047619047619047616,
+      "six_road_samples": 20,
+      "threshold_ms": 2000,
+      "pass": true
+    },
+    "cold_pilot": {
+      "n": 1,
+      "p50_ms": 1390.1427000000003,
+      "p95_ms": 1390.1427000000003,
+      "max_ms": 1390.1427000000003,
+      "brief_count": 0,
+      "brief_ratio": 0,
+      "six_road_samples": 1
+    },
+    "batch": {
+      "n": 20,
+      "p50_ms": 425.0673999999999,
+      "p95_ms": 1194.1016000000236,
+      "max_ms": 4439.036699999997,
+      "brief_count": 1,
+      "brief_ratio": 0.05,
+      "six_road_samples": 19
+    },
+    "ranking_source_counts": {
+      "vietmap_route": 20,
+      "brief": 1
+    },
+    "cache_class_counts": {
+      "cold_new_principal": 1,
+      "warm_observed": 18,
+      "refreshed_estimates_observed": 1,
+      "fallback": 1
+    },
+    "last_sample": {
+      "index": 20,
+      "source": "brief",
+      "elapsed_ms": 4439.036699999997,
+      "elapsed_seconds": 4.439036699999997,
+      "is_maximum": true,
+      "included_in_primary": true
+    },
+    "limitations": "One 21-request staging run; p95 passing does not mean every request was <=2s. The final 4.439s brief fallback is retained."
+  },
+  "per_station_evidence": {
+    "file": "samples.jsonl",
+    "ordered_rows": 1050,
+    "rows_each_sample": 50,
+    "non_null_road_estimates": 120,
+    "null_road_estimates": 930,
+    "road_fields": ["distance_m", "duration_s", "computed_at"],
+    "every_sample_exact_manifest_ids": true
+  },
+  "timing": {
+    "run_created_at": "2026-11-20T03:48:15.597Z",
+    "baseline_exact_timestamp_recorded": false,
+    "baseline_capture_window": {
+      "not_before": "2026-11-20T03:48:15.597Z",
+      "not_after": "2026-11-20T03:48:20.997Z"
+    },
+    "auth_started_at": "2026-11-20T03:48:20.997Z",
+    "seeded_at": "2026-11-20T03:48:40.138Z",
+    "first_sample_at": "2026-11-20T03:48:40.713Z",
+    "last_sample_at": "2026-11-20T03:52:50.878Z",
+    "last_response_completed_at_approx": "2026-11-20T03:52:55.317Z",
+    "cleaned_at": "2026-11-20T03:53:24.192Z"
+  },
+  "cleanup": {
+    "manifest_state": "cleaned",
+    "own_ids_recorded": {
+      "operator": "14",
+      "tariff": "57",
+      "sites": 50,
+      "charge_points": 50,
+      "connectors": 50,
+      "user": "285",
+      "driver": "285",
+      "vehicle": "17",
+      "station_rows": 152,
+      "auth_rows": 3,
+      "exact_ids_file": "manifest.json"
+    },
+    "baseline_counts": {
+      "operators": "2",
+      "tariff_periods": "7",
+      "sites": "14",
+      "charge_points": "252",
+      "connectors": "502",
+      "users": "243",
+      "drivers": "241",
+      "vehicles": "10",
+      "credit_accounts": "241",
+      "loyalty_accounts": "4",
+      "credit_transactions": "251",
+      "loyalty_transactions": "10",
+      "sessions": "455",
+      "driver_charge_intents": "11",
+      "driver_stop_intents": "9",
+      "reservations": "0",
+      "top_ups": "244"
+    },
+    "final_counts": {
+      "operators": "2",
+      "tariff_periods": "7",
+      "sites": "14",
+      "charge_points": "252",
+      "connectors": "502",
+      "users": "243",
+      "drivers": "241",
+      "vehicles": "10",
+      "credit_accounts": "241",
+      "loyalty_accounts": "4",
+      "credit_transactions": "251",
+      "loyalty_transactions": "10",
+      "sessions": "455",
+      "driver_charge_intents": "11",
+      "driver_stop_intents": "9",
+      "reservations": "0",
+      "top_ups": "244"
+    },
+    "all_17_table_counts_identical": true,
+    "verification_scope": "Recorded live SELECT verification; offline verifier cannot requery the database",
+    "recorded_postrun_exact_id_check": {
+      "reported_by": "Independent post-run live SELECT",
+      "absent_station_rows": 152,
+      "absent_auth_rows": 3,
+      "tables": 8
+    }
+  },
+  "provider": {
+    "ranking_deadline_ms_in_local_source": 4000,
+    "local_source": {
+      "path": "apps/csms/src/driver/road-discovery.ts",
+      "sha256": "b0556bd7972359ea2434beaded0e10ceb10093c675bc0fc17a0c24b92f1ec4d9",
+      "last_write_utc": "2026-11-19T06:15:41.710Z"
+    },
+    "deployed_source_sha": null,
+    "configuration_changed": false,
+    "quota_before_remaining": 1500,
+    "planned_worst_case_route_calls": 126,
+    "console_observation": {
+      "reported_by": "Recorded Vietmap Dashboard Details observation",
+      "before_route_today": 0,
+      "after_route_today": 16,
+      "delta": 16,
+      "observed_at_approx": "2026-11-20T03:54Z",
+      "remaining": 1484,
+      "account_today_requests": 16,
+      "attribution": "Observed console counter delta; not exact per-test server-call instrumentation"
+    },
+    "actual_upstream_calls_instrumented": null
+  },
+  "attribution": {
+    "coordinates": "OpenStreetMap contributors; ODbL 1.0",
+    "copyright_url": "https://www.openstreetmap.org/copyright",
+    "license_url": "https://opendatacommons.org/licenses/odbl/1-0/",
+    "source": "Existing apps/csms/lab/nfr-res-01/road-points.json; public residential road vertices, not real operating charging stations"
+  },
+  "provenance": {
+    "samples_sha256": "21c3b322cf853c83fa722bd4445c9631c125dac715489d8d81b41bb6785b0661",
+    "samples_bytes": 54768,
+    "source_sample_last_write_utc": "2026-11-20T03:52:55.317Z",
+    "source_manifest_last_write_utc": "2026-11-20T03:53:28.222Z",
+    "source_road_points_last_write_utc": "2026-11-19T06:15:41.689Z"
+  }
+}
