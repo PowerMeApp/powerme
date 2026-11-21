@@ -25,88 +25,202 @@ class ProfileScreen extends ConsumerWidget {
     final text = Theme.of(context).textTheme;
     if (apiMode) {
       final credit = ref.watch(chargingCreditProvider);
+      final vehicle = profile.selectedVehicle;
       return AppPage(
         children: [
           Wrap(
-            spacing: 8,
+            spacing: 16,
+            runSpacing: 8,
             crossAxisAlignment: WrapCrossAlignment.center,
             alignment: WrapAlignment.spaceBetween,
             children: [
+              const BrandMark(),
               Semantics(
                 header: true,
-                child: Text(copy.profile, style: text.headlineSmall),
+                child: Text(copy.profile, style: text.titleLarge),
               ),
-              const BrandMark(),
             ],
           ),
-          const SizedBox(height: 8),
-          HeroCard(
-            accent: PowerMeColors.gold,
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const CircleAvatar(
-                  radius: 24,
-                  backgroundColor: PowerMeColors.gold,
-                  foregroundColor: PowerMeColors.black,
-                  child: Icon(Icons.person_outline_rounded),
+          const SizedBox(height: 20),
+          _AccountIdentity(profile: profile),
+          const SizedBox(height: 16),
+          LayoutBuilder(
+            builder: (context, box) {
+              final stacked =
+                  box.maxWidth < 320 ||
+                  MediaQuery.textScalerOf(context).scale(14) > 19;
+              final tiles = [
+                _AccountSummary(
+                  icon: Icons.account_balance_wallet_outlined,
+                  label: copy.text('Tín dụng sạc', 'Charging credit'),
+                  accent: PowerMeColors.gold,
+                  onTap: () => context.push('/credit'),
+                  child: credit.when(
+                    skipLoadingOnRefresh: false,
+                    loading: () =>
+                        Text(copy.text('Đang tải số dư…', 'Loading balance…')),
+                    error: (_, _) => Text(
+                      copy.text('Chưa tải được số dư', 'Balance unavailable'),
+                    ),
+                    data: (summary) => Text(
+                      summary.status == CreditStatus.none
+                          ? copy.text(
+                              'Chưa có tài khoản tín dụng',
+                              'No credit account yet',
+                            )
+                          : copy.text(
+                              vnd(summary.availableVnd),
+                              vnd(
+                                summary.availableVnd,
+                              ).replaceAll('.', ',').replaceFirst(' đ', ' VND'),
+                            ),
+                      style: text.titleLarge?.copyWith(
+                        color: PowerMeColors.gold,
+                      ),
+                    ),
+                  ),
                 ),
-                const SizedBox(width: 12),
-                Expanded(
+                _AccountSummary(
+                  icon: Icons.directions_car_outlined,
+                  label: copy.text('Xe mặc định', 'Default vehicle'),
+                  accent: PowerMeColors.teal,
+                  onTap: () => context.push(
+                    vehicle == null ? '/vehicles' : '/vehicles/${vehicle.id}',
+                  ),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(profile.displayName, style: text.titleLarge),
-                      if (profile.email.isNotEmpty) ...[
+                      Text(
+                        vehicle?.label ??
+                            copy.text(
+                              'Chưa có xe trong hồ sơ.',
+                              'No vehicles yet.',
+                            ),
+                        style: text.titleMedium,
+                      ),
+                      if (vehicle?.plateNumber case final String plate) ...[
                         const SizedBox(height: 4),
-                        Text(
-                          profile.email,
-                          style: text.bodyMedium?.copyWith(
-                            color: PowerMeColors.muted,
-                          ),
-                        ),
+                        Text(plate, style: text.bodySmall),
                       ],
                     ],
                   ),
                 ),
-              ],
-            ),
+              ];
+              return stacked
+                  ? Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        tiles[0],
+                        const SizedBox(height: 12),
+                        tiles[1],
+                      ],
+                    )
+                  : IntrinsicHeight(
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          Expanded(child: tiles[0]),
+                          const SizedBox(width: 12),
+                          Expanded(child: tiles[1]),
+                        ],
+                      ),
+                    );
+            },
           ),
-          const SizedBox(height: 20),
-          Semantics(
-            header: true,
-            child: Text(
-              copy.text('Tài chính và lịch sử', 'Finance and history'),
-              style: text.titleMedium,
-            ),
-          ),
-          const SizedBox(height: 8),
-          InfoCard(
-            spacing: 0,
+          const SizedBox(height: 28),
+          _AccountGroup(
+            title: copy.text('Tài chính và điểm thưởng', 'Finance and rewards'),
             children: [
-              _AccountCredit(copy: copy, credit: credit),
-              const Divider(height: 1),
-              MenuRow(
+              _AccountMenu(
+                label: copy.text('Tín dụng', 'Charging credit'),
+                description: copy.text(
+                  'Số dư và giao dịch',
+                  'Balance and transactions',
+                ),
+                icon: Icons.account_balance_wallet_outlined,
+                onTap: () => context.push('/credit'),
+              ),
+              _AccountMenu(
+                key: const Key('open-loyalty'),
+                label: copy.text('Điểm PowerMe', 'PowerMe points'),
+                description: copy.text(
+                  'Xem điểm và đổi khi nạp',
+                  'View points and redeem on top-up',
+                ),
+                icon: Icons.stars_outlined,
+                accent: PowerMeColors.gold,
+                onTap: () => context.push('/loyalty'),
+              ),
+              _AccountMenu(
                 label: copy.text('Lịch sử sạc', 'Charging history'),
+                description: copy.text(
+                  'Phiên sạc và bảng kê',
+                  'Sessions and statements',
+                ),
                 icon: Icons.history_rounded,
                 onTap: () => context.push('/history'),
               ),
             ],
           ),
-          const SizedBox(height: 4),
-          const VehicleDashboard(),
-          const SizedBox(height: 8),
-          InfoCard(
-            spacing: 0,
+          const SizedBox(height: 24),
+          _AccountGroup(
+            title: copy.text(
+              'Phương tiện và trạm sạc',
+              'Vehicles and stations',
+            ),
             children: [
-              MenuRow(
+              _AccountMenu(
+                key: vehicle == null
+                    ? null
+                    : Key('vehicle-detail-${vehicle.id}'),
+                label: copy.text('Xe của tôi', 'My vehicles'),
+                description: copy.text(
+                  'Chi tiết và thông số sạc',
+                  'Details and charging specifications',
+                ),
+                icon: Icons.directions_car_outlined,
+                onTap: () => context.push(
+                  vehicle == null ? '/vehicles' : '/vehicles/${vehicle.id}',
+                ),
+              ),
+              _AccountMenu(
+                key: const Key('open-vehicle-garage'),
+                label: copy.text('Nhà xe của bạn', 'Your garage'),
+                description: copy.text(
+                  'Quản lý và đặt xe mặc định',
+                  'Manage vehicles and choose a default',
+                ),
+                icon: Icons.garage_outlined,
+                value: copy.text(
+                  '${profile.vehicles.length} xe',
+                  '${profile.vehicles.length} ${profile.vehicles.length == 1 ? 'vehicle' : 'vehicles'}',
+                ),
+                onTap: () => context.push('/vehicles'),
+              ),
+              _AccountMenu(
+                key: const Key('add-vehicle'),
+                label: copy.text('Thêm xe mới', 'Add a vehicle'),
+                icon: Icons.add_rounded,
+                onTap: state.canChange
+                    ? () => context.push('/vehicles/new')
+                    : null,
+              ),
+              _AccountMenu(
                 key: const Key('open-discovery'),
                 label: copy.text('Khám phá trạm sạc', 'Explore stations'),
+                description: copy.text(
+                  'Tìm trạm và xem đường đi',
+                  'Find stations and view routes',
+                ),
                 icon: Icons.explore_outlined,
+                accent: PowerMeColors.teal,
                 onTap: () => context.push('/discover'),
               ),
             ],
           ),
+          const SizedBox(height: 12),
+          const VehicleProfileFeedback(showReload: true),
+          const SizedBox(height: 24),
           _SignOutButton(copy: copy),
         ],
       );
@@ -492,58 +606,248 @@ class ProfileScreen extends ConsumerWidget {
   }
 }
 
-class _AccountCredit extends StatelessWidget {
-  const _AccountCredit({required this.copy, required this.credit});
-
-  final AppCopy copy;
-  final AsyncValue<ChargingCredit> credit;
+class _AccountIdentity extends StatelessWidget {
+  const _AccountIdentity({required this.profile});
+  final DriverProfile profile;
 
   @override
   Widget build(BuildContext context) {
-    final type = Theme.of(context).textTheme;
-    return ListTile(
-      contentPadding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
-      minTileHeight: 56,
-      leading: const Icon(
-        Icons.account_balance_wallet_outlined,
-        color: PowerMeColors.gold,
+    final text = Theme.of(context).textTheme;
+    final identity = Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          profile.displayName,
+          style: text.titleLarge?.copyWith(fontWeight: FontWeight.w700),
+        ),
+        if (profile.email.isNotEmpty) ...[
+          const SizedBox(height: 8),
+          Text(
+            profile.email,
+            style: text.bodyMedium?.copyWith(color: PowerMeColors.muted),
+          ),
+        ],
+      ],
+    );
+    const avatar = CircleAvatar(
+      radius: 28,
+      backgroundColor: PowerMeColors.graphite,
+      foregroundColor: PowerMeColors.gold,
+      child: Icon(Icons.person_outline_rounded, size: 30),
+    );
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(12),
+        gradient: LinearGradient(
+          begin: Alignment.bottomLeft,
+          end: Alignment.topRight,
+          colors: [
+            Color.alphaBlend(
+              PowerMeColors.teal.withValues(alpha: .07),
+              PowerMeColors.graphite,
+            ),
+            Color.alphaBlend(
+              PowerMeColors.gold.withValues(alpha: .10),
+              PowerMeColors.graphite,
+            ),
+          ],
+        ),
       ),
-      title: Text(
-        copy.text('Tín dụng sạc', 'Charging credit'),
-        style: type.titleMedium,
-      ),
-      subtitle: credit.when(
-        skipLoadingOnRefresh: false,
-        loading: () => Text(copy.text('Đang tải số dư…', 'Loading balance…')),
-        error: (_, _) =>
-            Text(copy.text('Chưa tải được số dư', 'Balance unavailable')),
-        data: (summary) => summary.status == CreditStatus.none
-            ? Text(
-                copy.text(
-                  'Chưa có tài khoản tín dụng',
-                  'No credit account yet',
+      child: MediaQuery.textScalerOf(context).scale(14) > 19
+          ? Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [avatar, const SizedBox(height: 16), identity],
+            )
+          : Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                avatar,
+                const SizedBox(width: 16),
+                Expanded(child: identity),
+              ],
+            ),
+    );
+  }
+}
+
+class _AccountSummary extends StatelessWidget {
+  const _AccountSummary({
+    required this.icon,
+    required this.label,
+    required this.accent,
+    required this.child,
+    required this.onTap,
+  });
+  final IconData icon;
+  final String label;
+  final Color accent;
+  final Widget child;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) => Material(
+    color: PowerMeColors.graphite,
+    borderRadius: BorderRadius.circular(12),
+    child: InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(12),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  child: Text(
+                    label,
+                    style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                      color: PowerMeColors.muted,
+                    ),
+                  ),
                 ),
-              )
-            : Column(
+                const SizedBox(width: 8),
+                Icon(icon, size: 20, color: accent),
+              ],
+            ),
+            const SizedBox(height: 16),
+            child,
+          ],
+        ),
+      ),
+    ),
+  );
+}
+
+class _AccountGroup extends StatelessWidget {
+  const _AccountGroup({required this.title, required this.children});
+  final String title;
+  final List<Widget> children;
+
+  @override
+  Widget build(BuildContext context) => Column(
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    children: [
+      Semantics(
+        header: true,
+        child: Text(
+          title,
+          style: Theme.of(context).textTheme.titleSmall?.copyWith(
+            color: PowerMeColors.muted,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+      ),
+      const SizedBox(height: 12),
+      Material(
+        color: PowerMeColors.graphite,
+        borderRadius: BorderRadius.circular(12),
+        clipBehavior: Clip.antiAlias,
+        child: Column(
+          children: [
+            for (final (index, child) in children.indexed) ...[
+              if (index > 0)
+                const Padding(
+                  padding: EdgeInsets.symmetric(horizontal: 16),
+                  child: Divider(),
+                ),
+              child,
+            ],
+          ],
+        ),
+      ),
+    ],
+  );
+}
+
+class _AccountMenu extends StatelessWidget {
+  const _AccountMenu({
+    super.key,
+    required this.label,
+    required this.icon,
+    required this.onTap,
+    this.description,
+    this.value,
+    this.accent = PowerMeColors.muted,
+  });
+  final String label;
+  final String? description;
+  final String? value;
+  final IconData icon;
+  final Color accent;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final text = Theme.of(context).textTheme;
+    final stacked =
+        MediaQuery.sizeOf(context).width < 360 ||
+        MediaQuery.textScalerOf(context).scale(14) > 19;
+    final badge = value == null
+        ? null
+        : Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            decoration: BoxDecoration(
+              color: PowerMeColors.gold.withValues(alpha: .10),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Text(
+              value!,
+              style: text.labelMedium?.copyWith(color: PowerMeColors.gold),
+            ),
+          );
+    return InkWell(
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            Container(
+              width: 40,
+              height: 40,
+              decoration: BoxDecoration(
+                color: accent.withValues(alpha: .10),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Icon(icon, color: accent, size: 22),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const SizedBox(height: 4),
                   Text(
-                    copy.text('Khả dụng', 'Available'),
-                    style: type.bodySmall,
+                    label,
+                    style: text.titleMedium?.copyWith(
+                      color: onTap == null
+                          ? PowerMeColors.muted
+                          : PowerMeColors.text,
+                    ),
                   ),
-                  Text(
-                    vnd(summary.availableVnd),
-                    style: type.titleLarge?.copyWith(color: PowerMeColors.gold),
-                  ),
+                  if (description != null) ...[
+                    const SizedBox(height: 4),
+                    Text(description!, style: text.bodySmall),
+                  ],
+                  if (stacked && badge != null) ...[
+                    const SizedBox(height: 8),
+                    badge,
+                  ],
                 ],
               ),
+            ),
+            if (!stacked && badge != null) ...[const SizedBox(width: 8), badge],
+            const SizedBox(width: 8),
+            const Icon(
+              Icons.chevron_right_rounded,
+              size: 18,
+              color: PowerMeColors.muted,
+            ),
+          ],
+        ),
       ),
-      trailing: const Icon(
-        Icons.chevron_right_rounded,
-        color: PowerMeColors.muted,
-      ),
-      onTap: () => context.push('/credit'),
     );
   }
 }
@@ -555,6 +859,15 @@ class _SignOutButton extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) => OutlinedButton.icon(
     key: const Key('logout'),
+    style: OutlinedButton.styleFrom(
+      foregroundColor: Theme.of(context).colorScheme.error,
+      backgroundColor: Theme.of(
+        context,
+      ).colorScheme.error.withValues(alpha: .05),
+      side: BorderSide(
+        color: Theme.of(context).colorScheme.error.withValues(alpha: .5),
+      ),
+    ),
     onPressed: () async {
       final scope = ref.read(authControllerProvider).scope;
       final confirmed = await showDialog<bool>(

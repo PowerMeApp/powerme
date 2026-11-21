@@ -1,5 +1,18 @@
 import '../../auth/domain/auth_scope.dart';
 
+class LoyaltyBalance {
+  const LoyaltyBalance({required this.scope, required this.availablePoints});
+
+  final AuthScope scope;
+  final int availablePoints;
+}
+
+typedef LoyaltyRead = ({Future<LoyaltyBalance> result, void Function() cancel});
+
+abstract interface class LoyaltyBalanceRepository {
+  LoyaltyRead read(AuthScope scope);
+}
+
 class PointLot {
   const PointLot(this.id, this.points, this.expiresAt);
   final String id;

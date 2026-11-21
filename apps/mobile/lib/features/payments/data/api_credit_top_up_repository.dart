@@ -3,6 +3,7 @@ import 'package:dio/dio.dart';
 import '../../../core/api/driver_api_exception.dart';
 import '../../../core/api/driver_api_session.dart';
 import '../../../core/api/driver_api_values.dart';
+import '../../../core/api/driver_top_up_quote.dart';
 import '../../../core/api/vnpay_checkout_url.dart';
 import '../../auth/domain/auth_scope.dart';
 import '../domain/credit_top_up.dart';
@@ -17,22 +18,7 @@ class ApiCreditTopUpRepository implements CreditTopUpRepository {
     final cancel = CancelToken();
     final result = _session
         .quoteTopUp(scope.principalId, amountVnd, cancel)
-        .then((json) {
-          final available = _integer(json['points_available']);
-          final max = _integer(json['max_points']);
-          final discount = _integer(json['max_discount_vnd']);
-          if (max > available ||
-              (max != 0 && max < minRedeemPoints) ||
-              discount > amountVnd ~/ 2 ||
-              (max == 0) != (discount == 0)) {
-            throw _malformed;
-          }
-          return (
-            pointsAvailable: available,
-            maxPoints: max,
-            maxDiscountVnd: discount,
-          );
-        });
+        .then((json) => driverTopUpQuote(json, amountVnd));
     return (result: result, cancel: cancel.cancel);
   }
 
