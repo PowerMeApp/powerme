@@ -110,7 +110,7 @@ export class FaultService implements OnApplicationBootstrap, OnApplicationShutdo
       const open = await findOpenForUpdate(tx, input.chargePointId, connectorId);
       if (input.status === 'Faulted') {
         if (open) {
-          this.sm.apply(open.status, 'SIGNAL'); 
+          this.sm.apply(open.status, 'SIGNAL');
           const code = input.errorCode;
           if (
             open.source === 'driver_report' &&
@@ -242,7 +242,6 @@ export class FaultService implements OnApplicationBootstrap, OnApplicationShutdo
     }
     return res.kind;
   }
-
 
   async reportFromDriver(
     driverId: number,
@@ -398,7 +397,6 @@ export class FaultService implements OnApplicationBootstrap, OnApplicationShutdo
     this.clearTimer(faultId);
     return res;
   }
-
 
   async list(
     filter: FaultListFilter,
