@@ -78,7 +78,7 @@ export function FaultTable({
           <p className="muted">
             {status === 'open'
               ? chargePointId
-                ? 'Charge Point này không có sự cố đang mở.'
+                ? 'Trụ sạc này không có sự cố đang mở.'
                 : 'Không có cảnh báo. Mọi connector đang hoạt động bình thường.'
               : 'Không có sự cố ở trạng thái này.'}
           </p>
@@ -91,7 +91,7 @@ export function FaultTable({
                 <tr>
                   <th scope="col">#</th>
                   <th scope="col">Sự cố</th>
-                  <th scope="col">Charge Point</th>
+                  <th scope="col">Trụ sạc</th>
                   <th scope="col">Mức độ</th>
                   <th scope="col">Trạng thái</th>
                   <th scope="col">Phát sinh</th>

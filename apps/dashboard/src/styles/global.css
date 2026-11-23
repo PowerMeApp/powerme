@@ -517,3 +517,73 @@ table.data-table tr.sev-minor td.num {
   display: grid;
   gap: 6px;
 }
+
+/* FE-07 — screens 25 / 35 revenue report. */
+.revenue-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.revenue-filters .field {
+  min-width: 170px;
+}
+.station-revenue {
+  margin-top: 24px;
+}
+.revenue-tiles {
+  margin: 0 0 16px;
+}
+table.revenue-table td:nth-child(2) {
+  min-width: 0;
+}
+table.revenue-table .revenue-num {
+  text-align: right;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+table.revenue-table tr.muted td {
+  color: var(--muted);
+}
+table.revenue-table tfoot th,
+table.revenue-table tfoot td {
+  font-weight: 700;
+  border-top: 1px solid var(--line);
+}
+.revenue-later {
+  margin-top: 16px;
+}
+
+/* Breadcrumb trail above page titles (FE-07). */
+.breadcrumbs ol {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0 0 8px;
+  padding: 0;
+  list-style: none;
+  font-size: 13px;
+  color: var(--muted);
+}
+.breadcrumbs li + li::before {
+  content: '›';
+  margin-right: 6px;
+  color: var(--muted);
+}
+.breadcrumbs a {
+  color: var(--muted);
+}
+.breadcrumbs a:hover {
+  color: var(--teal);
+}
+.breadcrumbs [aria-current='page'] {
+  color: var(--text);
+}
+
+/* FE-07 — search boxes (screen 18, station page, revenue). */
+.filters .search-field,
+.revenue-filters .search-field {
+  min-width: 280px;
+  flex: 1 1 280px;
+}

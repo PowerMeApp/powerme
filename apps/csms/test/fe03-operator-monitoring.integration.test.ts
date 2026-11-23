@@ -249,6 +249,31 @@ describeDb('FE-03 operator monitoring (screens 17, 18; BR-P16, D19–D25)', () =
     });
   });
 
+  it('charge_point_q and site_q search separately, case- and accent-insensitive, or by exact id (FE-07)', async () => {
+    const t = tokens['a'];
+    const names = async (qs: string) =>
+      (await get(`/charge-points?${qs}`, t)).body.items.map((c: any) => c.serial_number);
+    const all = ['A-FRESH', 'A-NEW', 'A-OFF', 'A-STALE'];
+    // Charge point: code / serial or exact id — not the station.
+    expect(await names('charge_point_q=a-fresh')).toEqual(['A-FRESH']);
+    expect(await names('charge_point_q=%20A-STALE%20')).toEqual(['A-STALE']);
+    expect(await names(`charge_point_q=${ids['A-OFF']}`)).toContain('A-OFF');
+    expect(await names('charge_point_q=fe03-a')).toEqual([]);
+    // Station: code / name (site A: FE03-A / "Tram A") or exact id — not the charge point.
+    expect(await names('site_q=fe03-a')).toEqual(all);
+    expect(await names(`site_q=${encodeURIComponent('Trạm A')}`)).toEqual(all);
+    expect(await names(`site_q=${ids['siteA']}`)).toEqual(all);
+    expect(await names('site_q=a-fresh')).toEqual([]);
+    // Both must match; with the other filters; scoped to the token's Operator.
+    expect(await names('charge_point_q=a-o&site_q=tram%20a')).toEqual(['A-OFF']);
+    expect(await names('site_q=fe03-a&online=false')).toEqual(['A-NEW', 'A-OFF']);
+    expect(await names('charge_point_q=b-fresh')).toEqual([]);
+    expect(await names('site_q=fe03-b')).toEqual([]);
+    expect(await names('charge_point_q=&site_q=')).toEqual(all); // blank = no search
+    for (const qs of [`charge_point_q=${'x'.repeat(101)}`, 'site_q=a%01b', 'q=a-fresh'])
+      expect([qs, (await get(`/charge-points?${qs}`, t)).status]).toEqual([qs, 400]);
+  });
+
   it('summarises the Operator: charge points, BR-P38 connector groups, open faults by severity, queues', async () => {
     expect((await get('/summary', tokens['a'])).body).toEqual({
       charge_points: {
