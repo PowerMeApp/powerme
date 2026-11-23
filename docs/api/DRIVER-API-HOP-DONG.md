@@ -52,9 +52,9 @@ Tình huống chuỗi phải chạy được ở Review 3: HMI trụ đổi sún
 | `GET /credit` | — (đọc `credit_accounts`, `driver/driver-credit.ts`) | UC-PAY-02; BR-P18 | có (BE-22) |
 | `GET /credit/transactions` | — (đọc `credit_transactions`) | UC-PAY-02 | có (BE-22) |
 | `GET /vehicle-models`, `POST /vehicles`, `PATCH`/`DELETE /vehicles/{id}` | — (`driver/vehicles.http.ts`) | UC-ACC-03; BR-P03, BR-P17 | có (BE-34), §13 |
-| `GET /billing/top-ups/quote` | `TopUpService.quote` (billing) | UC-PAY-01; BR-P35 | có (T32 Phần 5), **chưa dùng cho app** (§14) |
-| `POST /billing/top-ups` | `TopUpService.create` (billing) | UC-PAY-01; BR-P22, P35; WF-02 D2 | có (T32 Phần 5), **chưa dùng cho app** (§14) |
-| `GET /billing/top-ups/{id}` | `TopUpService.get` (billing) | UC-PAY-01 | có (T32 Phần 5), **chưa dùng cho app** (§14) |
+| `GET /billing/top-ups/quote` | `TopUpService.quote` (billing) | UC-PAY-01; BR-P35 | có (T32 Phần 5), dùng được cho app từ T32 Phần 8 (§14) |
+| `POST /billing/top-ups` | `TopUpService.create` (billing) | UC-PAY-01; BR-P22, P35; WF-02 D2 | có (T32 Phần 5), dùng được cho app từ T32 Phần 8 (§14) |
+| `GET /billing/top-ups/{id}` | `TopUpService.get` (billing) | UC-PAY-01 | có (T32 Phần 5), dùng được cho app từ T32 Phần 8 (§14) |
 | `POST /connectors/{id}/fault-reports` | `FaultService.reportFromDriver` | UC-CHG-05; BR-P42 | có (FE-17) — xem §15 |
 
 Route tài xế nằm **cùng tiến trình/cổng HTTP** với console `/api/admin/*` (mặc định 3000),
@@ -321,13 +321,15 @@ Content-Type: application/json
 
 ## 14. Top-up (WF-02) — nạp Charging Credit qua VNPay (T32 Phần 5)
 
-> **Dùng được cho app từ T32 Phần 8 (14/11).** Từ T32 Phần 6 (13/11) đã có IPN
-> (`/billing/vnpay/ipn`, cộng tiền) và trang return `/billing/vnpay/return` (chỉ báo "đang xác
-> nhận", app poll `GET /billing/top-ups/{id}`). Từ Phần 8, top-up `pending` quá `expires_at` được
-> vòng quét hỏi VNPay (querydr) từ `expires_at + 2 phút`, hỏi lại tới tối đa `expires_at + 60 phút`
-> khi VNPay chưa trả lời dứt khoát, rồi chuyển `credited` / `failed` / `expired`; trong lúc đó tạo
-> top-up mới bị chặn `pending_top_up_confirming`. Còn thiếu: e-invoice (Phần 7), chưa thử sandbox
-> VNPay thật.
+> **Dùng được cho app từ T32 Phần 8 (14/11).** IPN `/billing/vnpay/ipn` và trang return
+> `/billing/vnpay/return` có từ Phần 6 (13/11); return chỉ báo "đang xác nhận", app poll
+> `GET /billing/top-ups/{id}`. Top-up `pending` quá `expires_at` được hỏi VNPay (querydr) theo lịch
+> T32 Phần 8c (#194, 19/11): `expires_at` + 2 / 15 / 30 / 45 / 60 phút, thêm +75 chỉ khi lần +60
+> trả RC 94; hết lịch → `expired`. Trong lúc chờ, tạo top-up mới bị chặn
+> `pending_top_up_confirming`. Hoá đơn điện tử có từ Phần 7 (17/11), hiện dùng stub
+> (`StubEInvoiceProvider`); chưa có route xem hoá đơn cho app. Sandbox VNPay: querydr đã thử từ máy
+> dev ở Việt Nam (16/11); staging VM không gọi ra được `sandbox.vnpayment.vn` (xem
+> `infra/staging/README.md`, mục VNPay sandbox).
 
 Route ở `driver/top-ups.http.ts`, luật ở `billing/top-up.service.ts`; ánh xạ lỗi ở `topUpErrorJson`.
 Luật: WF-02 decisions D2, BR-P22 theo ADR-0013, BR-P35.
@@ -349,8 +351,8 @@ Luật: WF-02 decisions D2, BR-P22 theo ADR-0013, BR-P35.
    - `top_up_pending` → hỏi "Bạn còn giao dịch nạp chưa thanh toán, tiếp tục?" và mở lại
      `payment_url` trong body lỗi;
    - `pending_top_up_confirming` → báo "Giao dịch trước đang được xác nhận, thử lại sau ít phút"
-     (thường ~2 phút sau `expires_at`, tối đa ~1 giờ khi ngân hàng xác nhận chậm). Không có
-     `payment_url`.
+     (thường ~2 phút sau `expires_at`; khi ngân hàng xác nhận chậm tối đa ~1 giờ, ~1 giờ 15 khi
+     VNPay trả RC 94). Không có `payment_url`.
 4. **Kết quả.** Return URL chỉ để hiển thị — **không** coi là đã nạp. Poll
    `GET /billing/top-ups/{top_up_id}` tới khi `status` rời `pending` (`credited` → đọc lại
    `GET /credit`; `failed` / `expired` → báo chưa nạp được). Tiền chỉ được cộng khi VNPay báo qua
