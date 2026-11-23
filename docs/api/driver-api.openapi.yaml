@@ -42,7 +42,8 @@ tags:
     description: |
       UC-PAY-01 nạp Charging Credit qua VNPay (WF-02 SD-2a, T32 Phần 5). Dùng được cho app từ
       T32 Phần 8 (quét top-up quá hạn + querydr); IPN cộng tiền và trang return
-      `/billing/vnpay/return` có từ T32 Phần 6. Chưa có e-invoice, chưa thử sandbox VNPay thật.
+      `/billing/vnpay/return` có từ T32 Phần 6. E-invoice có từ T32 Phần 7, đang dùng stub.
+      querydr đã thử từ máy dev (16/11); staging VM chưa gọi ra được VNPay.
 
 security:
   - bearerAuth: []
@@ -979,8 +980,8 @@ paths:
           "giao dịch trước đang được xác nhận, thử lại sau ít phút". Không có `payment_url`.
 
         **Dùng được cho app từ T32 Phần 8**: top-up bỏ dở được vòng quét hỏi VNPay (querydr) từ
-        `expires_at + 2 phút`, tối đa tới `expires_at + 60 phút`, rồi chuyển `credited` / `failed` /
-        `expired`; trong lúc đó tạo mới trả `pending_top_up_confirming`. IPN cộng tiền và trang
+        `expires_at + 2 phút`, tối đa tới `expires_at + 60 phút` (+75 khi lần +60 trả RC 94), rồi
+        chuyển `credited` / `failed` / `expired`; trong lúc đó tạo mới trả `pending_top_up_confirming`. IPN cộng tiền và trang
         return `/billing/vnpay/return` có từ T32 Phần 6.
       parameters:
         - $ref: '#/components/parameters/idempotencyKey'
@@ -1421,7 +1422,7 @@ components:
         error: { type: string, description: 'Mã ổn định, snake_case' }
         detail: { type: string, description: Lời giải thích để hiển thị }
       examples:
-        - { error: credit_unavailable, detail: 'Số dư 15.000 ₫ thấp hơn mức khởi đầu 50.000 ₫' }
+        - { error: credit_unavailable, detail: 'Tài xế chưa có tài khoản Charging Credit hoặc tài khoản không ở trạng thái active' }
 
     RegisterRequest:
       type: object
