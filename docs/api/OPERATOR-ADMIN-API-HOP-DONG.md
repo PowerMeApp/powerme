@@ -441,15 +441,17 @@ nên `credit-accounts/{id}/closure-refund` trong mock dashboard bỏ.
 
 ### 3.10 Số liệu
 
+Cập nhật 23/11/2026 theo x-status của YAML sau T108b (#200) và FE-07: đã chạy 9 → 13 (auth +1, giám sát +3).
+
 **76 endpoint** (bản 10/11: 76; bản BE-31 12/11: 73): 2 dưới `/api/auth/v1` (đăng nhập và refresh,
 công khai — hai route công khai duy nhất), 39 dưới `/api/operator/v1`, 35 dưới `/api/admin/v1`. So
 với BE-31: +1 refresh (T125), +2 giao dịch Admin (T108).
 
 | Nhóm | Tổng | đã chạy | console | service | in progress | planned |
 |---|---|---|---|---|---|---|
-| Đăng nhập, refresh & `/me` | 4 | 3 | 0 | 0 | 0 | 1 |
+| Đăng nhập, refresh & `/me` | 4 | 4 | 0 | 0 | 0 | 0 |
 | Onboarding & sổ trụ | 10 | 0 | 1 | 2 | 0 | 7 |
-| Giám sát & lệnh | 7 | 0 | 3 | 0 | 0 | 4 |
+| Giám sát & lệnh | 7 | 3 | 2 | 0 | 0 | 2 |
 | Sự cố | 4 | 0 | 4 | 0 | 0 | 0 |
 | Phiên, đối soát, T72 | 15 | 0 | 3 | 9 | 2 | 1 |
 | Biểu giá & khuyến mãi | 6 | 0 | 0 | 0 | 0 | 6 |
@@ -458,7 +460,7 @@ với BE-31: +1 refresh (T125), +2 giao dịch Admin (T108).
 | Thẻ RFID | 3 | 0 | 0 | 0 | 0 | 3 |
 | Tổng quan nền tảng | 5 | 0 | 5 | 0 | 0 | 0 |
 | Ngoại lệ thanh toán | 8 | 0 | 0 | 0 | 0 | 8 |
-| **Cộng** | **76** | **9** | **16** | **11** | **2** | **38** |
+| **Cộng** | **76** | **13** | **15** | **11** | **2** | **35** |
 
 ## 4. Doanh thu theo BR-P46
 
