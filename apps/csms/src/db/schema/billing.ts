@@ -13,6 +13,7 @@
 import { sql } from 'drizzle-orm';
 import {
   bigint,
+  boolean,
   check,
   index,
   integer,
@@ -348,8 +349,10 @@ export const refunds = pgTable(
     lastErrorKind: eInvoiceErrorKindEnum('last_error_kind'),
     lastErrorMessage: text('last_error_message'),
     lastAttemptAt: timestamp('last_attempt_at', { withTimezone: true }),
-    /** Mã hoàn VNPay trả về; bắt buộc khi done, UNIQUE. */
+    /** Mã hoàn trong response của lệnh refund; UNIQUE. Done qua querydr thì NULL (0028). */
     gatewayRefundNo: varchar('gateway_refund_no', { length: 20 }),
+    /** Done nhờ querydr thấy lệnh hoàn, không có mã lệnh hoàn (0028, D1). */
+    confirmedViaQuery: boolean('confirmed_via_query').notNull().default(false),
     nextAttemptAt: timestamp('next_attempt_at', { withTimezone: true }).defaultNow(),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true })
@@ -358,7 +361,7 @@ export const refunds = pgTable(
       .$onUpdate(() => new Date()),
     /** Có giá trị ⇔ status = done. */
     completedAt: timestamp('completed_at', { withTimezone: true }),
-    /** Lần giữ chỗ liên tiếp chưa ra kết quả (0027, D7); xử lý khi vượt giới hạn: Phần 9. */
+    /** Lần giữ chỗ liên tiếp chưa ra kết quả (0027, D7); > 1 thì phải querydr trước (Phần 9a). */
     unfinishedClaims: integer('unfinished_claims').notNull().default(0),
   },
   (t) => [
@@ -379,7 +382,11 @@ export const refunds = pgTable(
     check('refunds_completed_check', sql`(${t.status} = 'done') = (${t.completedAt} IS NOT NULL)`),
     check(
       'refunds_gateway_refund_no_check',
-      sql`${t.status} <> 'done' OR ${t.gatewayRefundNo} IS NOT NULL`,
+      sql`${t.status} <> 'done' OR ${t.gatewayRefundNo} IS NOT NULL OR ${t.confirmedViaQuery}`,
+    ),
+    check(
+      'refunds_confirmed_via_query_check',
+      sql`NOT ${t.confirmedViaQuery} OR (${t.status} = 'done' AND ${t.gatewayRefundNo} IS NULL)`,
     ),
     check(
       'refunds_last_error_check',
