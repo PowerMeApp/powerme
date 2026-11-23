@@ -2,7 +2,6 @@ import '../../auth/domain/auth_scope.dart';
 
 const minTopUpVnd = 50000;
 const maxTopUpVnd = 2000000;
-const minRedeemPoints = 500;
 
 int? parseTopUpInteger(String input) {
   final text = input.trim();
@@ -16,16 +15,14 @@ typedef TopUpQuote = ({int pointsAvailable, int maxPoints, int maxDiscountVnd});
 
 int? topUpPayableEstimate(int amount, int points, TopUpQuote quote) {
   if (points == 0) return amount;
-  final maxPoints = quote.maxPoints;
-  final maxDiscount = quote.maxDiscountVnd;
-  if (points < minRedeemPoints ||
-      points > maxPoints ||
-      maxDiscount <= 0 ||
-      maxDiscount > amount ~/ 2 ||
-      maxDiscount % maxPoints != 0) {
+  // The quote prices only its maximum selection, not arbitrary point amounts.
+  if (points <= 0 ||
+      points != quote.maxPoints ||
+      quote.maxDiscountVnd <= 0 ||
+      quote.maxDiscountVnd >= amount) {
     return null;
   }
-  return amount - points * (maxDiscount ~/ maxPoints);
+  return amount - quote.maxDiscountVnd;
 }
 
 typedef TopUpRequest = ({String key, int amountVnd, int points});

@@ -10,6 +10,9 @@ import '../../features/charging/application/charge_session_controller.dart';
 import '../../features/charging/application/charge_start_controller.dart';
 import '../../features/charging/data/api_charge_session_repository.dart';
 import '../../features/charging/data/api_charge_start_repository.dart';
+import '../../features/loyalty/application/loyalty_controller.dart';
+import '../../features/loyalty/data/api_loyalty_repository.dart';
+import '../../features/payments/domain/credit_top_up.dart';
 import '../../features/payments/application/charging_credit_controller.dart';
 import '../../features/payments/application/credit_top_up_controller.dart';
 import '../../features/payments/data/api_charging_credit_repository.dart';
@@ -76,6 +79,12 @@ class ApiApp extends StatelessWidget {
       ),
       creditTopUpRepositoryProvider.overrideWith(
         (ref) => ApiCreditTopUpRepository(ref.watch(_apiSessionProvider)),
+      ),
+      loyaltyBalanceRepositoryProvider.overrideWith(
+        (ref) => ApiLoyaltyRepository(
+          ref.watch(_apiSessionProvider),
+          probeAmountVnd: minTopUpVnd,
+        ),
       ),
       openVnpayCheckoutProvider.overrideWithValue(openVnpayCheckout),
       connectorFaultReportRepositoryProvider.overrideWith(

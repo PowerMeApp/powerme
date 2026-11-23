@@ -63,14 +63,20 @@ void main() {
       expect(find.byKey(const Key('auth-email')), findsOneWidget);
       expect(find.text('Minh Nguyễn'), findsNothing);
       await tap(tester, find.byKey(const Key('auth-submit')));
-      expect(find.text('Nhập email hợp lệ.'), findsOneWidget);
+      expect(
+        find.text('Nhập email hoặc số điện thoại hợp lệ.'),
+        findsOneWidget,
+      );
       await tester.enterText(
         find.byKey(const Key('auth-email')),
         'minh@powerme.local',
       );
       await tester.enterText(find.byKey(const Key('auth-password')), 'wrong');
       await tap(tester, find.byKey(const Key('auth-submit')));
-      expect(find.text('Email hoặc mật khẩu chưa đúng.'), findsOneWidget);
+      expect(
+        find.text('Email, số điện thoại hoặc mật khẩu chưa đúng.'),
+        findsOneWidget,
+      );
       await signIn(tester);
       expect(
         router.routeInformationProvider.value.uri.path,
