@@ -1,5 +1,37 @@
 # @powerme/mobile — App tài xế PowerMe (WP3)
 
+## Phone login — BE-30, 21/11
+
+Phone + password is implemented in the existing login form alongside email. Registration keeps required email and adds an optional phone; blank phone is omitted. The app preserves raw nonblank phone/password values, checks BE-30's original 32-character phone limit and accepted local/international shapes, and leaves normalization to the backend. Duplicate phone, locked account and rate-limit errors have helpful messages. Existing session guards, shared refresh and profile bootstrap are retained. No Google/OTP, dependency/config/native/backend change or staging write.
+
+Accounts without a stored phone still use email; this slice does not infer a phone association. See [API notes](docs/t96-driver-api.md#phone-login--be-30-2111), [trace](docs/screens.md#phone-login--be-30-2111) and [architecture/research](docs/architecture.md#phone-login--be-30-2111). Evidence directory: `E:/Project/PowerMe/.review/phone-auth`. The earlier 229-test/build claims below belong to T145, not this slice.
+
+Verified on installed Flutter 3.44.2 / Dart 3.12.2, existing cache, no pub get/install:
+
+- `dart format --output=none --set-exit-if-changed` over the auth directory, session and four touched test files: **12 files, 0 changed** (`format-final.log`). `flutter analyze --no-pub`: **No issues found**, 10.3s (`analyze-final.log`).
+- Focused auth/profile/API/vehicle regression: **80/80 pass**, 33s (`focused-confirmed.log`), including **26 new transport/domain/controller tests + 8 new widget cases**. New coverage checks exclusive identifier payloads, optional-phone omission/raw values, 32-character boundary before trim, duplicate-phone 400/409, locked/429, no principal before valid `/me`, shared refresh, duplicate/keyboard submits, cancellation and A→logout→B. Existing email/profile/vehicle regressions remain.
+- One full regression after focused checks: `flutter test --no-pub --concurrency=1 --reporter expanded`: **267/267 pass**, 03:09 (`full-tests.log`). No further suite/build repetition.
+- Bounded visual check: first batch + one confirmation, **24 final PNGs** under `E:/Project/PowerMe/.review/phone-auth/captures-confirmed/{390-1x,320-2x}-{vietnamese,english}/`, six frames per combination. Final contact sheet `contact-sheet-confirmed.jpg`; final widget/capture assertions are part of the 80-test focused log. The first batch exposed a stale phone validation message; identifier/phone fields now revalidate on interaction, with a regression assertion. No third visual round.
+
+Publication screenshots, copied byte-for-byte from the reviewed PNGs: [optional phone registration — Vietnamese, 390px/100%](docs/images/t96-phone-register.png) and [phone already in use — Vietnamese, 320px/200%](docs/images/t96-phone-error.png). Both are offscreen Flutter fixture renders with SDK fonts and a simulated 220px keyboard inset; they are not staging or native-device evidence.
+
+Coordinator accepted the changed phone fields/errors and 320px/200% layouts. The 390px login-top master-lockup region was observed blank in a capture; decode/paint timing is suspected, not proven. This slice does not claim logo capture verification and did not alter branding or run a third visual round. These are offscreen Flutter renders with SDK fonts and a simulated 220px keyboard inset, not device screenshots or real keyboard/TalkBack/VoiceOver verification.
+
+Earlier runs found test-harness accessor/merged-label/semantics-handle cleanup errors and analyzer lint/unused-import issues; corrected without removing accessibility coverage. Initial `focused-tests.log` (76 pass/4 harness-cleanup failures), `analyze.log` and first captures remain for audit. Final results above supersede those runs. Four original brand PNGs + BrandMark are byte-identical to HEAD (`brand-audit.json`); this is separate from image-paint verification.
+
+Start from `E:/Project/PowerMe/powerme/apps/mobile` with the existing public API/Vietmap config files and the authorized backend/tunnel described in [the API guide](docs/t96-driver-api.md). Stop/Run the app to load this code; use a phone already associated with the account, or use email. No OAuth setup is required. Commands below are instructions, not live auth/staging checks performed by this slice:
+
+```powershell
+Set-Location E:/Project/PowerMe/powerme/apps/mobile
+& E:/MobileDev/Flutter/bin/flutter.bat run --no-pub -t lib/main.dart
+# After stopping the app, run the new auth tests:
+& E:/MobileDev/Flutter/bin/flutter.bat test --no-pub --concurrency=1 --reporter expanded test/phone_auth_test.dart test/phone_auth_widget_test.dart
+```
+
+Successful API login/registration uses the existing **Discover** destination. Integration/live phone login/register, native autofill/IME/accessibility-service behavior and device/staging acceptance remain pending. Native builds were not run for this phone slice. Exact implementation-stage file hashes, log/capture paths and limitations: `E:/Project/PowerMe/.review/phone-auth/handoff.json`. Publication backup and PR description: `E:/Project/PowerMe/.review/phone-auth-publish`.
+
+
+
 ## T145 — bằng chứng giao diện cho PR, 20/11
 
 Ảnh Flutter offscreen với fixture, sao chép nguyên PNG đã duyệt: [Tài khoản](docs/images/t145-profile.png), [nạp tín dụng có nút (?)](docs/images/t145-topup-points.png), [trợ giúp với minimum 500 điểm hiện tại](docs/images/t145-points-help.png). Không phải ảnh thiết bị hoặc staging. Hai ảnh nạp/trợ giúp lấy từ slice 500 mới nhất; mô tả ZIP6 bên dưới là lịch sử trước khi bổ sung hướng dẫn minimum. Một số frame state/cuộn cũ thiếu header; ba ảnh được chọn đã kiểm trực quan. Lịch sử/hết hạn chờ T149; chưa nghiệm thu đầy đủ FR-17 hoặc thanh toán thật.

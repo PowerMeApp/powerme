@@ -85,7 +85,10 @@ void main() {
 
     firstLogin.complete(reply(401, {'error': 'invalid_credentials'}));
     await tester.pumpAndSettle();
-    expect(find.text('Email hoặc mật khẩu chưa đúng.'), findsOneWidget);
+    expect(
+      find.text('Email, số điện thoại hoặc mật khẩu chưa đúng.'),
+      findsOneWidget,
+    );
 
     await tester.ensureVisible(submit);
     await tester.tap(submit);
