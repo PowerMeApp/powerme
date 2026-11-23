@@ -1,4 +1,7 @@
 import '../../auth/domain/auth_scope.dart';
+import '../../loyalty/domain/loyalty.dart';
+
+export '../../loyalty/domain/loyalty.dart' show minRedemptionPoints;
 
 const minTopUpVnd = 50000;
 const maxTopUpVnd = 2000000;
@@ -10,6 +13,10 @@ int? parseTopUpInteger(String input) {
 
 bool validTopUpAmount(int? amount) =>
     amount != null && amount >= minTopUpVnd && amount <= maxTopUpVnd;
+
+bool validTopUpPoints(int? points, int maxPoints) =>
+    points != null &&
+    (points == 0 || (points >= minRedemptionPoints && points <= maxPoints));
 
 typedef TopUpQuote = ({int pointsAvailable, int maxPoints, int maxDiscountVnd});
 
@@ -46,6 +53,7 @@ enum TopUpIssue {
   rejected,
   balanceLimit,
   quoteChanged,
+  pointsBelowMinimum,
   accountClosed,
   keyConflict,
   paymentUnavailable,

@@ -37,6 +37,111 @@ const _quote = {
 };
 
 void main() {
+  testWidgets('redemption boundaries block invalid points without a write', (
+    tester,
+  ) async {
+    final launches = _recordLaunches();
+    var writes = 0;
+    await _openQuotedTopUp(
+      tester,
+      _topUpFixture(
+        create: (_) async {
+          writes++;
+          return reply(201, _order('pending'));
+        },
+        status: () async => reply(200, _order('pending')),
+      ),
+      points: 0,
+    );
+    final container = ProviderScope.containerOf(
+      tester.element(find.byType(MaterialApp)),
+    );
+    final controller = container.read(creditTopUpProvider.notifier);
+    for (final (input, allowed) in [
+      ('', true),
+      ('0', true),
+      ('1', false),
+      ('499', false),
+      ('500', true),
+      ('1700', true),
+      ('1701', false),
+    ]) {
+      await _visible(tester, _key('top-up-points'));
+      await tester.enterText(_key('top-up-points'), input);
+      await tester.pumpAndSettle();
+      expect(
+        container.read(creditTopUpProvider).canCreate,
+        allowed,
+        reason: input,
+      );
+      expect(
+        tester.widget<FilledButton>(_key('top-up-create')).onPressed != null,
+        allowed,
+      );
+      if (input == '1' || input == '499') {
+        expect(find.text('Dùng 0 điểm hoặc từ 500 điểm.'), findsOneWidget);
+      }
+      if (!allowed) {
+        await controller.create(
+          shownPayableVnd: null,
+          isSourceVisible: () => true,
+        );
+        await tester.pumpAndSettle();
+      }
+    }
+    expect(writes, 0);
+    expect(launches, isEmpty);
+  });
+
+  for (final code in [
+    'points_below_minimum',
+    'points_unavailable',
+    'points_exceed_cap',
+  ]) {
+    testWidgets('422 $code preserves requote without financial effect', (
+      tester,
+    ) async {
+      final launches = _recordLaunches();
+      var statusReads = 0;
+      final fixture = _topUpFixture(
+        create: (_) async => reply(422, {'error': code}),
+        status: () async {
+          statusReads++;
+          return reply(200, _order('pending'));
+        },
+      );
+      await _openQuotedTopUp(tester, fixture, points: 500);
+      await _tap(tester, _key('top-up-create'));
+      final view = ProviderScope.containerOf(
+        tester.element(find.byType(MaterialApp)),
+      ).read(creditTopUpProvider);
+      expect(
+        view.issue,
+        code == 'points_below_minimum'
+            ? TopUpIssue.pointsBelowMinimum
+            : TopUpIssue.quoteChanged,
+      );
+      expect(view.pointsText, isEmpty);
+      expect(view.quote, isNotNull);
+      expect(view.tracking, isFalse);
+      expect(view.retryCreate, isFalse);
+      expect(
+        fixture.requests.where((r) => r.path == 'billing/top-ups/quote'),
+        hasLength(2),
+      );
+      expect(
+        find.textContaining(
+          code == 'points_below_minimum'
+              ? 'Mỗi lần đổi cần ít nhất 500 điểm.'
+              : 'Hãy xem lại báo giá',
+        ),
+        findsOneWidget,
+      );
+      expect(statusReads, 0);
+      expect(launches, isEmpty);
+    });
+  }
+
   test('VNPay permits the signed checkout URL unchanged', () {
     expect(validatedVnpayCheckoutUrl(_checkout), _checkout);
     for (final url in [
@@ -262,7 +367,7 @@ void main() {
       final launches = _recordLaunches();
       var writes = 0;
       final order = {
-        ..._order('pending', points: 1),
+        ..._order('pending', points: 600),
         'points_discount_vnd': 11200,
         'amount_paid_vnd': 188800,
       };
@@ -271,24 +376,27 @@ void main() {
         _topUpFixture(
           quote: {
             'points_available': 6000,
-            'max_points': 30,
+            'max_points': 2500,
             'max_discount_vnd': 150001,
           },
           create: (request) async {
             writes++;
-            expect(request.data, {'amount_vnd': 200000, 'points_to_redeem': 1});
+            expect(request.data, {
+              'amount_vnd': 200000,
+              'points_to_redeem': 600,
+            });
             return reply(201, order);
           },
           status: () async => reply(200, order),
         ),
-        points: 31,
+        points: 2501,
       );
       await tester.pump();
       expect(
         tester.widget<FilledButton>(_key('top-up-create')).onPressed,
         null,
       );
-      await tester.enterText(_key('top-up-points'), '1');
+      await tester.enterText(_key('top-up-points'), '600');
       await _visible(tester, _key('top-up-create'));
       expect(find.text('Tổng thanh toán dự kiến'), findsNothing);
       expect(
@@ -399,7 +507,7 @@ void main() {
         );
       }
       await _visible(tester, _key('top-up-points'));
-      await tester.enterText(_key('top-up-points'), '123');
+      await tester.enterText(_key('top-up-points'), '600');
       await tester.pumpAndSettle();
       expect(find.byKey(const Key('top-up-payable')), findsNothing);
       expect(

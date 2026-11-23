@@ -620,7 +620,7 @@ void main() {
           tester.widget<Text>(find.byKey(const Key('top-up-payable'))).data,
           language == AppLanguage.english ? '175,000 VND' : '175.000 đ',
         );
-        await type('top-up-points', '123');
+        await type('top-up-points', '600');
         expect(find.byKey(const Key('top-up-payable')), findsNothing);
         expect(find.byKey(const Key('top-up-payable-unknown')), findsOneWidget);
         await capture(
@@ -708,7 +708,7 @@ void main() {
         }
         await tester.pumpAndSettle();
         scenario = 'available';
-        await type('top-up-points', '123');
+        await type('top-up-points', '600');
         await tap('top-up-create');
         expect(launches, isEmpty);
         expect(

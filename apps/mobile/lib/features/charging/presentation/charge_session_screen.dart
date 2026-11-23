@@ -247,6 +247,28 @@ class _ChargeSessionViewState extends ConsumerState<_ChargeSessionView>
               _returnToScan();
             }
           },
+          action: canStop || canRetry
+              ? FilledButton.tonalIcon(
+                  key: Key(
+                    canRetry ? 'retry-stop-charging' : 'request-stop-charging',
+                  ),
+                  style: canRetry ? null : chargeStopButtonStyle(context),
+                  icon: Icon(
+                    canRetry
+                        ? Icons.refresh_rounded
+                        : Icons.stop_circle_outlined,
+                  ),
+                  onPressed: () => _requestStop(retry: canRetry),
+                  label: Text(
+                    canRetry
+                        ? copy.text(
+                            'Gửi lại yêu cầu dừng',
+                            'Retry stop request',
+                          )
+                        : copy.text('Dừng sạc', 'Stop charging'),
+                  ),
+                )
+              : null,
           children: [
             if (progress != null &&
                 (waitingForStop || progress.closed || progress.confirmsEnd))
@@ -313,30 +335,6 @@ class _ChargeSessionViewState extends ConsumerState<_ChargeSessionView>
                   vehicle: attempt.vehicleLabel,
                 ),
             ],
-            if (canStop || canRetry)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 8),
-                child: FilledButton.tonalIcon(
-                  key: Key(
-                    canRetry ? 'retry-stop-charging' : 'request-stop-charging',
-                  ),
-                  style: canRetry ? null : chargeStopButtonStyle(context),
-                  icon: Icon(
-                    canRetry
-                        ? Icons.refresh_rounded
-                        : Icons.stop_circle_outlined,
-                  ),
-                  onPressed: () => _requestStop(retry: canRetry),
-                  label: Text(
-                    canRetry
-                        ? copy.text(
-                            'Gửi lại yêu cầu dừng',
-                            'Retry stop request',
-                          )
-                        : copy.text('Dừng sạc', 'Stop charging'),
-                  ),
-                ),
-              ),
             if (issue != null ||
                 progress?.inReview == true ||
                 awaitingStopMeter ||

@@ -17,10 +17,12 @@ class ChargeFlowPage extends StatelessWidget {
     this.backTooltip = 'Quay lại',
     this.backLocation = '/',
     this.onBack,
+    this.action,
   });
 
   final String title;
   final List<Widget> children;
+  final Widget? action;
   final bool showBack;
   final String backTooltip;
   final String backLocation;
@@ -41,6 +43,7 @@ class ChargeFlowPage extends StatelessWidget {
         backTooltip: backTooltip,
         backLocation: backLocation,
         onBack: onBack,
+        action: action,
         children: children,
       ),
     );

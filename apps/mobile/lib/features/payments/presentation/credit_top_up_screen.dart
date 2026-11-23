@@ -91,7 +91,7 @@ class _CreditTopUpScreenState extends ConsumerState<CreditTopUpScreen>
         view.amountText.isNotEmpty && !validTopUpAmount(amount);
     final invalidPoints =
         view.pointsText.isNotEmpty &&
-        (points == null || points < 0 || points > (quote?.maxPoints ?? 0));
+        !validTopUpPoints(points, quote?.maxPoints ?? 0);
     final credit = ref.watch(chargingCreditProvider);
     final payable = validTopUpAmount(amount) && !invalidPoints
         ? view.expectedPayableVnd
@@ -209,13 +209,14 @@ class _CreditTopUpScreenState extends ConsumerState<CreditTopUpScreen>
                         MediaQuery.textScalerOf(context).scale(14) <= 16
                     ? 4
                     : (MediaQuery.textScalerOf(context).scale(14) > 19 ? 1 : 2);
-                return Wrap(
+                return EqualHeightRows(
+                  columns: columns,
                   spacing: 8,
                   runSpacing: 8,
                   children: [
                     for (final preset in [50000, 100000, 200000, 500000])
-                      SizedBox(
-                        width: (box.maxWidth - (columns - 1) * 8) / columns,
+                      ConstrainedBox(
+                        constraints: const BoxConstraints(minHeight: 48),
                         child: OutlinedButton(
                           key: Key('top-up-preset-$preset'),
                           style: OutlinedButton.styleFrom(
@@ -317,12 +318,19 @@ class _CreditTopUpScreenState extends ConsumerState<CreditTopUpScreen>
                       'Optional · limited by the current quote',
                     ),
                     helperMaxLines: 3,
-                    errorMaxLines: 3,
+                    errorMaxLines: 8,
                     errorText: invalidPoints
-                        ? copy.text(
-                            'Kiểm tra lại số điểm.',
-                            'Check the number of points.',
-                          )
+                        ? points != null &&
+                                  points > 0 &&
+                                  points < minRedemptionPoints
+                              ? copy.text(
+                                  'Dùng 0 điểm hoặc từ $minRedemptionPoints điểm.',
+                                  'Use 0 points or at least $minRedemptionPoints points.',
+                                )
+                              : copy.text(
+                                  'Kiểm tra lại số điểm theo báo giá hiện tại.',
+                                  'Check your points against the current quote.',
+                                )
                         : null,
                   ),
                   onChanged: _controller.changePoints,
@@ -714,13 +722,7 @@ class _CreditTopUpScreenState extends ConsumerState<CreditTopUpScreen>
   }
 }
 
-String _money(int amount, AppCopy copy) {
-  final value = vnd(amount);
-  return copy.text(
-    value,
-    value.replaceAll('.', ',').replaceFirst(' đ', ' VND'),
-  );
-}
+String _money(int amount, AppCopy copy) => vnd(amount, copy: copy);
 
 String _issueCopy(TopUpIssue issue, AppCopy copy) => switch (issue) {
   TopUpIssue.uncertain => copy.text(
@@ -734,6 +736,10 @@ String _issueCopy(TopUpIssue issue, AppCopy copy) => switch (issue) {
   TopUpIssue.balanceLimit => copy.text(
     'Số dư sau khi nạp vượt giới hạn. Hãy nhập số tiền thấp hơn.',
     'This would exceed the balance limit. Enter a lower amount.',
+  ),
+  TopUpIssue.pointsBelowMinimum => copy.text(
+    'Mỗi lần đổi cần ít nhất $minRedemptionPoints điểm. Hãy chọn lại điểm theo báo giá mới hoặc không dùng điểm.',
+    'Each redemption needs at least $minRedemptionPoints points. Choose points from the refreshed quote or use no points.',
   ),
   TopUpIssue.quoteChanged => copy.text(
     'Hãy xem lại báo giá và chọn lại số điểm muốn dùng.',

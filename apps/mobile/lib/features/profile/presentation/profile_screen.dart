@@ -68,12 +68,7 @@ class ProfileScreen extends ConsumerWidget {
                               'Chưa có tài khoản tín dụng',
                               'No credit account yet',
                             )
-                          : copy.text(
-                              vnd(summary.availableVnd),
-                              vnd(
-                                summary.availableVnd,
-                              ).replaceAll('.', ',').replaceFirst(' đ', ' VND'),
-                            ),
+                          : vnd(summary.availableVnd, copy: copy),
                       style: text.titleLarge?.copyWith(
                         color: PowerMeColors.gold,
                       ),
@@ -214,7 +209,7 @@ class ProfileScreen extends ConsumerWidget {
                 ),
                 icon: Icons.explore_outlined,
                 accent: PowerMeColors.teal,
-                onTap: () => context.push('/discover'),
+                onTap: () => context.go('/discover'),
               ),
             ],
           ),

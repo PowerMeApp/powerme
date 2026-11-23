@@ -1,6 +1,30 @@
-String vnd(int? value) => value == null
-    ? 'Chưa xác định'
-    : '${value.toString().replaceAllMapped(RegExp(r'(\d)(?=(\d{3})+(?!\d))'), (m) => '${m[1]}.')} đ';
+import 'l10n/app_copy.dart';
+
+String estimatedMinutes(num? value, AppCopy copy) {
+  if (value == null || !value.isFinite || value < 0) {
+    return copy.text('Chưa xác định', 'Unknown');
+  }
+  final whole = value.ceil();
+  return copy.text('$whole phút', '$whole min');
+}
+
+String vnd(int? value, {AppCopy? copy, bool signed = false}) {
+  if (value == null) {
+    return copy?.text('Chưa xác định', 'Unknown') ?? 'Chưa xác định';
+  }
+  final separator = copy?.text('.', ',') ?? '.';
+  final amount = value.abs().toString().replaceAllMapped(
+    RegExp(r'(\d)(?=(\d{3})+(?!\d))'),
+    (match) => '${match[1]}$separator',
+  );
+  final sign = value < 0
+      ? '−'
+      : signed && value > 0
+      ? '+'
+      : '';
+  return '$sign$amount${copy?.text(' đ', ' VND') ?? ' đ'}';
+}
+
 String minutes(int? seconds) =>
     seconds == null ? 'Chưa xác định' : '${(seconds / 60).ceil()} phút';
 String ict(DateTime at) {

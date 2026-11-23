@@ -1,5 +1,8 @@
 import '../../auth/domain/auth_scope.dart';
 
+// Driver API §14 / BR-P35; the live quote still limits redemption.
+const minRedemptionPoints = 500;
+
 class LoyaltyBalance {
   const LoyaltyBalance({required this.scope, required this.availablePoints});
 
