@@ -17,6 +17,10 @@
  *   b2 priced 30/11 17:00:00Z (00:00 VN 01/12) → 01/12, 2 000 VND
  *   b3 no priced time, cp stop 16:30Z (30/11 VN), received 17:30Z (01/12 VN) → 30/11, 4 000 VND
  *   b4 `review`, cp stop 16:30Z, received 17:30Z → pending on 01/12
+ * T108b additions (no T108a number changes): promotion `FE16-KM10` on the promotion_unsupported
+ * session, `delivered_offline` on one billed session, every session id in `ids`, and Operator A
+ * October: billed 8 000 VND with no CSMS stop and no meter reading (energy_wh null), billed
+ * 6 000 VND 1 200 Wh, and a closed session without CSMS stop (in no period).
  */
 import type { Db } from '../../src/db/db.module.js';
 
@@ -50,7 +54,22 @@ export interface SessionSpec {
   debit?: number;
   /** Settlement job after insert: the 0005 trigger creates `pending stop_observed`. */
   job?: { state: 'pending' | 'posted' | 'ineligible'; reason: string } | 'none';
+  /** T108b: `sessions.promotion_id` (ids key). */
+  promotion?: string;
+  deliveredOffline?: boolean;
+  /** cp / CSMS start time; default 2026-11-01T00:00:00Z. */
+  startedAt?: string;
 }
+
+/** T108b: Operator A, October 2026 — one billed session without meter reading or CSMS stop time. */
+export const OPERATOR_A_OCTOBER = {
+  csms_billed_session_count: 2,
+  csms_billed_energy_wh: 1200,
+  csms_billed_revenue_vnd: 14000,
+  unattributed_session_count: 0,
+  unattributed_energy_wh: 0,
+};
+export const PROMOTION_CODE = 'FE16-KM10';
 
 export async function buildRevenueFixture(db: Db, passwordHash: string) {
   const ids: Record<string, string> = {};
@@ -137,9 +156,10 @@ export async function buildRevenueFixture(db: Db, passwordHash: string) {
     const id = await one(
       `INSERT INTO sessions(charge_point_id,connector_id,connector_no,id_tag,driver_id,origin,
          payment_mode,status,cp_started_at,received_started_at,cp_stopped_at,received_stopped_at,
-         meter_start_wh,meter_stop_wh,energy_wh,priced_clock,priced_ended_at)
-       VALUES($1,$2,1,$3,$4,$5,$6,$7,'2026-11-01T00:00:00Z','2026-11-01T00:00:00Z',$8,$9,
-         0,$10,$10,CASE WHEN $11::timestamptz IS NULL THEN NULL ELSE 'cp' END,$11)
+         meter_start_wh,meter_stop_wh,energy_wh,priced_clock,priced_ended_at,promotion_id,
+         delivered_offline)
+       VALUES($1,$2,1,$3,$4,$5,$6,$7,$14,$14,$8,$9,
+         0,$10,$10,CASE WHEN $11::timestamptz IS NULL THEN NULL ELSE 'cp' END,$11,$12,$13)
        RETURNING id`,
       [
         ids[`cp${s.cp}`],
@@ -153,6 +173,9 @@ export async function buildRevenueFixture(db: Db, passwordHash: string) {
         stop,
         stop === null ? null : energy,
         priced,
+        s.promotion ? ids[s.promotion] : null,
+        s.deliveredOffline ?? false,
+        s.startedAt ?? '2026-11-01T00:00:00Z',
       ],
     );
     if (s.debit !== undefined) await ledger('session_debit', -s.debit, id);
@@ -167,14 +190,38 @@ export async function buildRevenueFixture(db: Db, passwordHash: string) {
     return id;
   }
 
+  // T108b: a promotion of Operator A, on the session held as `promotion_unsupported` (K6).
+  ids['promo'] = await one(
+    `INSERT INTO promotions(promotion_code,operator_id,discount_type,discount_value,valid_from,valid_to)
+     VALUES($1,$2,'percent',10,'2026-10-01T00:00:00Z','2027-01-01T00:00:00Z') RETURNING id`,
+    [PROMOTION_CODE, ids['opA']],
+  );
+
   // ---- Operator A, November ------------------------------------------------------------------
   ids['A.billed1'] = await session({ cp: 'A1', status: 'reconciled', debit: 10000 });
-  await session({ cp: 'A1', status: 'reconciled', debit: 20000 });
-  await session({ cp: 'A1', status: 'reconciled', debit: 30000 });
-  await session({ cp: 'A2', status: 'reconciled', debit: 40000, energy: 2000 });
-  await session({ cp: 'A3', status: 'reconciled', origin: 'rfid', debit: 5000, energy: 500 });
-  await session({ cp: 'A1', status: 'closed', mode: 'unattributed', energy: 700 });
-  await session({
+  ids['A.billed2'] = await session({ cp: 'A1', status: 'reconciled', debit: 20000 });
+  ids['A.billed3'] = await session({ cp: 'A1', status: 'reconciled', debit: 30000 });
+  ids['A.billed4'] = await session({
+    cp: 'A2',
+    status: 'reconciled',
+    debit: 40000,
+    energy: 2000,
+    deliveredOffline: true,
+  });
+  ids['A.billedCard'] = await session({
+    cp: 'A3',
+    status: 'reconciled',
+    origin: 'rfid',
+    debit: 5000,
+    energy: 500,
+  });
+  ids['A.unknownCard'] = await session({
+    cp: 'A1',
+    status: 'closed',
+    mode: 'unattributed',
+    energy: 700,
+  });
+  ids['A.free'] = await session({
     cp: 'A1',
     status: 'reconciled',
     mode: 'unattributed',
@@ -186,16 +233,26 @@ export async function buildRevenueFixture(db: Db, passwordHash: string) {
     status: 'review',
     receivedStop: '2026-11-15T03:00:00Z',
   });
-  await session({
+  ids['A.promo'] = await session({
     cp: 'A3',
     status: 'reconciled',
     job: { state: 'pending', reason: 'promotion_unsupported' },
+    promotion: 'promo',
   });
-  await session({ cp: 'A3', status: 'reconciled', origin: 'rfid', job: 'none' });
-  await session({ cp: 'A3', status: 'reconciled', job: { state: 'posted', reason: 'posted' } });
-  await session({ cp: 'A1', status: 'active', receivedStop: null, cpStop: null });
-  await session({ cp: 'A1', status: 'orphaned' });
-  await session({ cp: 'A1', status: 'failed', debit: 99000 });
+  ids['A.ineligible'] = await session({
+    cp: 'A3',
+    status: 'reconciled',
+    origin: 'rfid',
+    job: 'none',
+  });
+  ids['A.postedNoDebit'] = await session({
+    cp: 'A3',
+    status: 'reconciled',
+    job: { state: 'posted', reason: 'posted' },
+  });
+  ids['A.active'] = await session({ cp: 'A1', status: 'active', receivedStop: null, cpStop: null });
+  ids['A.orphaned'] = await session({ cp: 'A1', status: 'orphaned' });
+  ids['A.failed'] = await session({ cp: 'A1', status: 'failed', debit: 99000 });
   // Not revenue: an adjustment tied to a billed session and a top-up of the same driver.
   await ledger('adjustment', 5000, ids['A.billed1']);
   const topUp = await one(
@@ -207,9 +264,14 @@ export async function buildRevenueFixture(db: Db, passwordHash: string) {
   await ledger('top_up', 100000, null, topUp);
 
   // ---- Operator B ----------------------------------------------------------------------------
-  await session({ cp: 'B1', status: 'reconciled', debit: 70000, energy: 3000 });
-  await session({ cp: 'B1', status: 'closed', mode: 'unattributed', energy: 400 });
-  await session({
+  ids['B.billed'] = await session({ cp: 'B1', status: 'reconciled', debit: 70000, energy: 3000 });
+  ids['B.unknownCard'] = await session({
+    cp: 'B1',
+    status: 'closed',
+    mode: 'unattributed',
+    energy: 400,
+  });
+  ids['B.b1'] = await session({
     cp: 'B1',
     status: 'reconciled',
     debit: 1000,
@@ -217,7 +279,7 @@ export async function buildRevenueFixture(db: Db, passwordHash: string) {
     pricedEndedAt: '2026-11-30T16:59:59Z',
     receivedStop: '2026-11-30T17:05:00Z',
   });
-  await session({
+  ids['B.b2'] = await session({
     cp: 'B1',
     status: 'reconciled',
     debit: 2000,
@@ -225,7 +287,7 @@ export async function buildRevenueFixture(db: Db, passwordHash: string) {
     pricedEndedAt: '2026-11-30T17:00:00Z',
     receivedStop: '2026-11-30T17:00:00Z',
   });
-  await session({
+  ids['B.b3'] = await session({
     cp: 'B1',
     status: 'reconciled',
     debit: 4000,
@@ -234,11 +296,41 @@ export async function buildRevenueFixture(db: Db, passwordHash: string) {
     cpStop: '2026-11-30T16:30:00Z',
     receivedStop: '2026-11-30T17:30:00Z',
   });
-  await session({
+  ids['B.b4'] = await session({
     cp: 'B1',
     status: 'review',
     cpStop: '2026-11-30T16:30:00Z',
     receivedStop: '2026-11-30T17:30:00Z',
+  });
+
+  // ---- T108b: Operator A, October (no T108a test reads October) -------------------------------
+  // Reconciled and billed, but no CSMS stop time and no meter reading: in the period through
+  // priced_ended_at (K3), energy_wh null (not 0 Wh).
+  ids['A.oct.nullEnergy'] = await session({
+    cp: 'A1',
+    status: 'reconciled',
+    debit: 8000,
+    startedAt: '2026-10-15T01:00:00Z',
+    receivedStop: null,
+    cpStop: null,
+    pricedEndedAt: '2026-10-15T03:00:00Z',
+  });
+  ids['A.oct.billed'] = await session({
+    cp: 'A2',
+    status: 'reconciled',
+    debit: 6000,
+    energy: 1200,
+    startedAt: '2026-10-20T01:00:00Z',
+    receivedStop: '2026-10-20T03:00:00Z',
+  });
+  // closed without a CSMS stop time: in no period at all.
+  ids['A.oct.closedNoStop'] = await session({
+    cp: 'A1',
+    status: 'closed',
+    mode: 'unattributed',
+    startedAt: '2026-10-21T01:00:00Z',
+    receivedStop: null,
+    cpStop: '2026-10-21T03:00:00Z',
   });
   return { ids, session, ledger };
 }
