@@ -6,6 +6,7 @@ import '../../../core/api/driver_api_exception.dart';
 import '../../../core/api/idempotency_key.dart';
 import '../../auth/application/auth_controller.dart';
 import '../../auth/domain/auth_scope.dart';
+import '../../loyalty/application/loyalty_controller.dart';
 import '../domain/credit_top_up.dart';
 import 'charging_credit_controller.dart';
 
@@ -109,8 +110,7 @@ class CreditTopUpController extends Notifier<TopUpView> {
         _submitted == null &&
         quote != null &&
         points != null &&
-        (points == 0 ||
-            (points >= minRedeemPoints && points <= quote.maxPoints));
+        (points >= 0 && points <= quote.maxPoints);
   }
 
   bool get _hasLiveLink =>
@@ -346,7 +346,11 @@ class CreditTopUpController extends Notifier<TopUpView> {
       if (order.paymentUrl != null && remaining > Duration.zero) {
         _checkoutExpiry = Timer(remaining, _publish);
       }
-      if (order.status == TopUpStatus.credited) {
+      if (order.status == TopUpStatus.credited ||
+          order.status == TopUpStatus.refunded) {
+        if (ref.exists(loyaltyControllerProvider)) {
+          ref.read(loyaltyControllerProvider.notifier).refresh();
+        }
         ref.invalidate(chargingCreditProvider);
         ref.invalidate(creditLedgerProvider);
       }

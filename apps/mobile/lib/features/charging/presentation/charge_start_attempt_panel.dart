@@ -11,7 +11,7 @@ import '../../stations/application/station_discovery_controller.dart';
 import '../application/charge_session_controller.dart';
 import '../application/charge_start_controller.dart';
 import '../domain/charge_start.dart';
-import 'charge_energy_label.dart';
+import 'charge_mode_widgets.dart';
 import 'charge_flow_visuals.dart';
 
 class ChargeStartAttemptPanel extends ConsumerStatefulWidget {
@@ -127,7 +127,7 @@ class _ChargeStartAttemptPanelState
     final attempt = view.attempt;
     final snapshot = view.snapshot;
     final request = attempt.request;
-    final cap = snapshot?.maxEnergyWh;
+    final cap = snapshot?.maxLimitValue;
     final sameVehicle =
         ref.watch(discoveryVehicleProvider) == request.vehicleId;
     final showPending = view.recoverable;
@@ -182,7 +182,7 @@ class _ChargeStartAttemptPanelState
                         'Xem phiên đã kết thúc',
                         'View completed session',
                       )
-                    : copy.text('Theo dõi phiên', 'Track session'),
+                    : copy.text('Mở lại phiên sạc', 'Resume session'),
               ),
             ),
           ),
@@ -203,8 +203,12 @@ class _ChargeStartAttemptPanelState
           vehicle: attempt.vehicleLabel,
         ),
         ValueLine(
+          copy.text('Chế độ đã chọn', 'Selected mode'),
+          chargeModeLabel(request.mode, copy),
+        ),
+        ValueLine(
           copy.text('Hạn mức đã chọn', 'Requested limit'),
-          chargeEnergyLabel(request.limitValue!, copy),
+          chargeTargetLabel(request.mode, request.limitValue, copy),
         ),
         if (snapshot?.started == true)
           ValueLine(
@@ -212,34 +216,99 @@ class _ChargeStartAttemptPanelState
             snapshot!.sessionId!,
             showDivider: false,
           ),
-        if (cap != null && cap > 0) ...[
-          ValueLine(
-            copy.text('Hạn mức tối đa', 'Maximum limit'),
-            chargeEnergyLabel(cap, copy),
-            showDivider: false,
-          ),
-          if (sameVehicle)
-            FilledButton(
-              key: const Key('qr-accept-charge-limit'),
-              onPressed: view.busy
-                  ? null
-                  : () => controller.acceptLimit(request),
-              child: Text(
-                copy.text('Đồng ý và bắt đầu sạc', 'Accept and start charging'),
+        if (cap != null) ...[
+          const SizedBox(height: 16),
+          Container(
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              color: PowerMeColors.graphite,
+              borderRadius: const BorderRadius.vertical(
+                top: Radius.circular(28),
+                bottom: Radius.circular(12),
               ),
-            )
-          else
-            Text(
-              copy.text(
-                'Chọn lại xe ban đầu để chấp nhận hạn mức này.',
-                'Select the original vehicle to accept this limit.',
+              border: Border.all(
+                color: PowerMeColors.gold.withValues(alpha: .35),
               ),
             ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              spacing: 12,
+              children: [
+                Center(
+                  child: Container(
+                    width: 40,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: PowerMeColors.outline,
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                  ),
+                ),
+                const Icon(
+                  Icons.account_balance_wallet_outlined,
+                  color: PowerMeColors.gold,
+                ),
+                Text(
+                  copy.text(
+                    'Tín dụng không đủ cho mục tiêu đã chọn',
+                    'Credit does not cover the selected target',
+                  ),
+                  style: Theme.of(context).textTheme.titleLarge,
+                ),
+                ValueLine(
+                  copy.text('Mục tiêu được đề xuất', 'Suggested target'),
+                  chargeTargetLabel(request.mode, cap, copy),
+                  showDivider: false,
+                ),
+                if (sameVehicle && cap > 0)
+                  FilledButton(
+                    key: const Key('qr-accept-charge-limit'),
+                    onPressed: view.busy
+                        ? null
+                        : () => controller.acceptLimit(request),
+                    child: Text(
+                      copy.text(
+                        'Đồng ý và bắt đầu sạc',
+                        'Accept and start charging',
+                      ),
+                    ),
+                  )
+                else if (!sameVehicle)
+                  Text(
+                    copy.text(
+                      'Chọn lại xe ban đầu để chấp nhận hạn mức này.',
+                      'Select the original vehicle to accept this limit.',
+                    ),
+                  ),
+                OutlinedButton(
+                  onPressed: () => context.push('/credit/top-up'),
+                  child: Text(copy.text('Nạp thêm tín dụng', 'Top up credit')),
+                ),
+                if (view.canEdit && sameVehicle)
+                  TextButton(
+                    key: const Key('qr-edit-charge'),
+                    onPressed: controller.edit,
+                    child: Text(
+                      copy.text('Quay lại chỉnh sửa', 'Edit charging target'),
+                    ),
+                  ),
+              ],
+            ),
+          ),
         ],
         if (snapshot?.started == true) ...[
           const SizedBox(height: 12),
           _startMilestones(view, copy),
         ],
+        if (view.canClear)
+          if (view.canEdit && sameVehicle && cap == null)
+            OutlinedButton(
+              key: const Key('qr-edit-charge'),
+              onPressed: controller.edit,
+              child: Text(
+                copy.text('Quay lại chỉnh sửa', 'Edit charging target'),
+              ),
+            ),
         if (view.canClear)
           TextButton(
             key: const Key('qr-clear-charge'),
@@ -346,6 +415,14 @@ String _startMessage(ChargeStartState view, AppCopy copy) {
         'Không thể dùng xe đã chọn với cổng sạc này.',
         'The selected vehicle cannot use this connector.',
       ),
+      ChargeStartIssue.modeUnavailable => copy.text(
+        'Chế độ này chưa khả dụng. Hãy quay lại và chọn chế độ khác.',
+        'This mode is not available yet. Go back and choose another mode.',
+      ),
+      ChargeStartIssue.powerUnavailable => copy.text(
+        'Chưa có thông tin công suất để sạc theo thời gian. Hãy chọn chế độ khác.',
+        'Power information is unavailable for timed charging. Choose another mode.',
+      ),
       ChargeStartIssue.invalidRequest => copy.text(
         'Yêu cầu sạc không hợp lệ. Hãy kiểm tra hạn mức và thử lại.',
         'The charging request was invalid. Check the limit and try again.',
@@ -357,10 +434,10 @@ String _startMessage(ChargeStartState view, AppCopy copy) {
       'Tín dụng sạc dưới mức tối thiểu. Hãy nạp thêm trước khi thử lại.',
       'Charging credit is below the minimum. Top up before trying again.',
     ),
-    ChargeStartOutcome.requiresConfirmation when snapshot?.maxEnergyWh == 0 =>
+    ChargeStartOutcome.requiresConfirmation when snapshot?.maxLimitValue == 0 =>
       copy.text(
         'Tín dụng hiện tại không đủ cho hạn mức dương.',
-        'Current credit cannot cover a positive energy limit.',
+        'Current credit cannot cover a positive target.',
       ),
     ChargeStartOutcome.requiresConfirmation => copy.text(
       'Tín dụng sạc chỉ đủ cho hạn mức thấp hơn. Xác nhận để dùng hạn mức bên dưới.',

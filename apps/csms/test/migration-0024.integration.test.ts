@@ -148,7 +148,11 @@ describeDb('migration 0024 — top_up_payment_conflicts (T32 Phần 8b)', () => 
     expect(before.length).toBeGreaterThan(0);
 
     expect(await migrate(db.$client)).toEqual([M0024, ...AFTER]);
-    expect(await q('SELECT * FROM top_ups ORDER BY id')).toEqual(before);
+    // Cột do migration sau 0024 thêm (0027: unfinished_claims) không thuộc phạm vi test này.
+    const after = (await q('SELECT * FROM top_ups ORDER BY id')).map((r) =>
+      Object.fromEntries(Object.entries(r).filter(([k]) => k in before[0]!)),
+    );
+    expect(after).toEqual(before);
     expect(await q('SELECT count(*)::int AS n FROM top_up_payment_conflicts')).toEqual([{ n: 0 }]);
     expect(await migrate(db.$client)).toEqual([]);
   });

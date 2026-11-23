@@ -6,7 +6,16 @@ import { CONFIG, CsmsConfig } from '../config.js';
 import { ConnectionRegistry } from '../ocpp-gateway/connection-registry.js';
 import type { InboundContext } from '../ocpp-gateway/inbound-context.js';
 import { CHARGE_POLICY, ChargeSettlementService } from './charge-settlement.service.js';
-import { ChargePolicy, startCreditPolicy, validateChargePolicy } from './charge-start-policy.js';
+import { ChargePolicy, validateChargePolicy } from './charge-start-policy.js';
+import {
+  chargeLimit,
+  modeCreditPolicy,
+  scaledInteger,
+  validateChargeStart,
+  type ChargeStartInput,
+  type ChargeMode,
+} from './charge-mode-policy.js';
+export type { ChargeStartInput, EnergyStartInput } from './charge-mode-policy.js';
 import { chargeTransaction } from './charge-sql.js';
 import { SessionStateMachine, SessionStatus } from './session-state-machine.js';
 
@@ -19,12 +28,6 @@ import {
 } from './station-search.js';
 export { ChargingError } from './charging-error.js';
 
-export interface EnergyStartInput {
-  connectorId: number;
-  vehicleId: number;
-  energyLimitWh: number;
-  mode: 'energy_kwh';
-}
 export interface ChargeSnapshot {
   intentId: number;
   commandId: number | null;
@@ -33,6 +36,9 @@ export interface ChargeSnapshot {
   effectConfirmed: boolean;
   version: number;
   maxEnergyWh: number | null;
+  mode: ChargeMode;
+  maxDurationMinutes: number | null;
+  maxAmountVnd: number | null;
 }
 interface Intent {
   id: string;
@@ -43,6 +49,12 @@ interface Intent {
   request_hash: string;
   rejection_reason: string | null;
   max_energy_wh: string | null;
+  mode: ChargeMode;
+  energy_limit_wh: string | null;
+  duration_minutes: string | null;
+  amount_limit_vnd: string | null;
+  max_duration_minutes: string | null;
+  max_amount_vnd: string | null;
   session_status?: string | null;
 }
 
@@ -80,11 +92,18 @@ export class DriverChargingService {
     const pending = (
       await this.db.$client.query<{
         available_vnd: string;
-        energy_limit_wh: string;
+        connector_id: string;
+        vehicle_id: string;
+        mode: ChargeMode;
+        energy_limit_wh: string | null;
+        duration_minutes: string | null;
+        amount_limit_vnd: string | null;
+        power_w: string | null;
         reserved_vnd: string;
         price: string | null;
       }>(
-        `SELECT i.energy_limit_wh,i.reserved_vnd,
+        `SELECT i.connector_id,i.vehicle_id,i.mode,i.energy_limit_wh,i.duration_minutes,i.amount_limit_vnd,i.reserved_vnd,
+        CASE WHEN c.max_power_kw>0 THEN least(c.max_power_kw,m.max_dc_kw)*1000 END AS power_w,
         a.balance_vnd-coalesce((SELECT sum(other.reserved_vnd) FROM driver_charge_intents other
           WHERE other.driver_id=i.driver_id AND other.id<>i.id
           AND other.state NOT IN ('rejected','settled','released')),0) AS available_vnd,
@@ -97,7 +116,7 @@ export class DriverChargingService {
       JOIN sites st ON st.id=cp.site_id JOIN operators o ON o.id=st.operator_id
       JOIN users u ON u.id=i.driver_id JOIN drivers d ON d.user_id=u.id
       JOIN credit_accounts a ON a.driver_id=i.driver_id
-      JOIN vehicles v ON v.id=i.vehicle_id AND v.driver_id=i.driver_id
+      JOIN vehicles v ON v.id=i.vehicle_id AND v.driver_id=i.driver_id AND v.removed_at IS NULL
       JOIN vehicle_models m ON m.id=v.vehicle_model_id AND m.connector_type=c.connector_type
       WHERE i.id_tag=$1 AND i.session_id IS NULL AND i.state IN ('sent','accepted','unknown')
         AND i.connector_released_at IS NULL AND NOT i.billing_review_required
@@ -116,31 +135,29 @@ export class DriverChargingService {
     ).rows[0];
     if (!pending || pending.price === null) return 'Invalid';
     // WP3/T72: keep this intent's own hold available; subtracting it again would reject valid credit.
-    const decision = startCreditPolicy(
+    const decision = modeCreditPolicy(
       Number(pending.available_vnd),
-      Number(pending.energy_limit_wh),
+      intentInput(pending),
       Number(pending.price),
+      watts(pending.power_w),
       this.requirePolicy(),
     );
-    return decision.outcome === 'eligible' && Number(pending.reserved_vnd) >= decision.reserveVnd
+    return decision.outcome === 'eligible' &&
+      (pending.mode === 'full'
+        ? Number(pending.reserved_vnd) <= Number(pending.available_vnd)
+        : Number(pending.reserved_vnd) >= decision.reserveVnd)
       ? 'Accepted'
       : 'Invalid';
   }
 
-  // WP3/T31: energy-only start; oversized requests require explicit consent to the offered cap.
-  async start(driverId: number, key: string, input: EnergyStartInput): Promise<ChargeSnapshot> {
+  // WP3: mode-specific caps require explicit consent through a new key and payload.
+  async start(driverId: number, key: string, input: ChargeStartInput): Promise<ChargeSnapshot> {
     this.validateKey(key);
-    if (!input || typeof input !== 'object') throw new ChargingError('invalid_input');
-    if (input.mode !== 'energy_kwh') throw new ChargingError('unsupported_mode');
-    if (
-      ![driverId, input.connectorId, input.vehicleId, input.energyLimitWh].every(
-        (v) => Number.isSafeInteger(v) && v > 0,
-      )
-    )
-      throw new ChargingError('invalid_input');
+    validateChargeStart(input);
+    this.validateIds(driverId);
     const policy = this.requirePolicy();
     const hash = createHash('sha256')
-      .update(JSON.stringify([input.connectorId, input.vehicleId, input.mode, input.energyLimitWh]))
+      .update(JSON.stringify([input.connectorId, input.vehicleId, input.mode, chargeLimit(input)]))
       .digest('hex');
     const prepared = await chargeTransaction(this.db, async (c) => {
       await this.driver(c, driverId);
@@ -166,6 +183,7 @@ export class DriverChargingService {
           is_online: boolean;
           status: string;
           last_message_at: Date | null;
+          max_power_kw: string | null;
         }>(
           `SELECT c.*,cp.serial_number,cp.lifecycle,cp.is_online,cp.last_message_at,st.operator_id,o.status AS operator_status FROM connectors c
         JOIN charge_points cp ON cp.id=c.charge_point_id JOIN sites st ON st.id=cp.site_id JOIN operators o ON o.id=st.operator_id
@@ -198,12 +216,12 @@ export class DriverChargingService {
         await c.query(
           // BE-34: xe đã gỡ (removed_at) không dùng được; FOR SHARE để route gỡ xe (khoá FOR UPDATE)
           // chờ intent này commit rồi mới đếm yêu cầu sạc đang mở → 409 vehicle_in_use.
-          `SELECT 1 FROM vehicles v JOIN vehicle_models m ON m.id=v.vehicle_model_id
+          `SELECT m.max_dc_kw FROM vehicles v JOIN vehicle_models m ON m.id=v.vehicle_model_id
         JOIN connectors c ON c.connector_type=m.connector_type
         WHERE v.id=$1 AND v.driver_id=$2 AND v.removed_at IS NULL AND c.id=$3 FOR SHARE OF v`,
           [input.vehicleId, driverId, input.connectorId],
         )
-      ).rowCount;
+      ).rows[0];
       if (!vehicle) throw new ChargingError('vehicle_not_owned_or_incompatible');
       const connection = this.registry.get(connector.serial_number);
       if (
@@ -241,10 +259,11 @@ export class DriverChargingService {
         )
       ).rows[0]?.price;
       if (price === null || price === undefined) throw new ChargingError('tariff_unavailable');
-      const decision = startCreditPolicy(
+      const decision = modeCreditPolicy(
         Number(account.balance_vnd) - Number(held.held),
-        input.energyLimitWh,
+        input,
         Number(price),
+        effectiveWatts(connector.max_power_kw, vehicle.max_dc_kw),
         policy,
       );
       const tag = 'P3' + randomBytes(9).toString('hex');
@@ -267,8 +286,8 @@ export class DriverChargingService {
       const intent = (
         await c.query<Intent>(
           `INSERT INTO driver_charge_intents(driver_id,connector_id,vehicle_id,idempotency_key,request_hash,id_tag,
-        energy_limit_wh,reserved_vnd,command_id,state,rejection_reason,max_energy_wh)
-        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING *`,
+        energy_limit_wh,reserved_vnd,command_id,state,rejection_reason,max_energy_wh,mode,duration_minutes,amount_limit_vnd,max_duration_minutes,max_amount_vnd)
+        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17) RETURNING *`,
           [
             driverId,
             input.connectorId,
@@ -276,12 +295,19 @@ export class DriverChargingService {
             key,
             hash,
             tag,
-            input.energyLimitWh,
+            input.mode === 'energy_kwh' ? input.energyLimitWh : null,
             decision.outcome === 'eligible' ? decision.reserveVnd : 0,
             commandId,
             decision.outcome === 'eligible' ? 'sent' : 'rejected',
             decision.outcome === 'eligible' ? null : decision.outcome,
-            decision.outcome === 'requiresconfirmation' ? decision.maxEnergyWh : null,
+            decision.outcome === 'requiresconfirmation' ? (decision.maxEnergyWh ?? null) : null,
+            input.mode,
+            input.mode === 'timed' ? input.durationMinutes : null,
+            input.mode === 'amount_vnd' ? input.amountLimitVnd : null,
+            decision.outcome === 'requiresconfirmation'
+              ? (decision.maxDurationMinutes ?? null)
+              : null,
+            decision.outcome === 'requiresconfirmation' ? (decision.maxAmountVnd ?? null) : null,
           ],
         )
       ).rows[0]!;
@@ -635,15 +661,18 @@ export class DriverChargingService {
           serial_number: string;
           charge_point_id: string;
           connector_no: number;
+          current_epoch: number;
+          is_online: boolean;
         }>(
           `
-        SELECT s.*,cp.serial_number FROM sessions s JOIN charge_points cp ON cp.id=s.charge_point_id
+        SELECT s.*,cp.serial_number,cp.current_epoch,cp.is_online FROM sessions s JOIN charge_points cp ON cp.id=s.charge_point_id
         JOIN driver_charge_intents i ON i.session_id=s.id AND i.driver_id=s.driver_id
         WHERE s.id=$1 AND s.driver_id=$2 FOR UPDATE OF s`,
           [sessionId, driverId],
         )
       ).rows[0];
       if (!session) throw new ChargingError('not_found');
+      const connection = this.registry.get(session.serial_number);
       if (automatic && !(await this.cutoffReached(c, sessionId)))
         throw new ChargingError('session_not_stoppable');
       const prior = (
@@ -665,19 +694,25 @@ export class DriverChargingService {
           JOIN driver_stop_attempts a ON a.command_id=r.id
           JOIN sessions s ON s.id=$2 JOIN charge_points cp ON cp.id=s.charge_point_id
           WHERE r.id=$1 AND r.status='rejected' AND cp.is_online
-          AND EXISTS(SELECT 1 FROM meter_values m WHERE m.session_id=s.id AND NOT m.replayed
+          AND (s.billing_mode='timed' AND now()>=r.responded_at+least(30,power(2,least(a.attempt_no-1,5))) * interval '1 second'
+          OR EXISTS(SELECT 1 FROM meter_values m WHERE m.session_id=s.id AND NOT m.replayed
             AND m.epoch=cp.current_epoch AND m.received_at>=cp.online_changed_at
             AND m.cp_timestamp>=cp.online_changed_at AND m.cp_timestamp<=now()
             AND m.measurand='Energy.Active.Import.Register' AND m.phase IS NULL
             AND (m.unit IN ('Wh','kWh') OR m.unit IS NULL)
             AND m.received_at>r.responded_at+least(30,power(2,least(a.attempt_no-1,5))) * interval '1 second'
-            AND m.received_at<=now() AND m.received_at>=now()-($3::bigint*interval '1 millisecond'))`,
+            AND m.received_at<=now() AND m.received_at>=now()-($3::bigint*interval '1 millisecond')))`,
             [prior.command_id, sessionId, this.requirePolicy().stationStaleAfterMs],
           )
         ).rowCount;
         if (!eligible) return { commandId: Number(prior.command_id), dispatch: false, session };
       }
       if (!['active', 'paused', 'orphaned'].includes(session.status))
+        throw new ChargingError('session_not_stoppable');
+      if (
+        automatic &&
+        (!session.is_online || !connection || connection.epoch !== session.current_epoch)
+      )
         throw new ChargingError('session_not_stoppable');
       if (
         (
@@ -718,9 +753,15 @@ export class DriverChargingService {
           [prior.id, command.id],
         );
       await c.query(
-        `INSERT INTO driver_stop_attempts(command_id,intent_id,attempt_no,kind,previous_command_id)
-        SELECT $1,$2,coalesce(max(attempt_no),0)+1,$3,$4 FROM driver_stop_attempts WHERE intent_id=$2`,
-        [command.id, intent.id, prior ? 'auto_retry' : 'initial', prior?.command_id ?? null],
+        `INSERT INTO driver_stop_attempts(command_id,intent_id,attempt_no,kind,previous_command_id,connection_epoch)
+        SELECT $1,$2,coalesce(max(attempt_no),0)+1,$3,$4,$5 FROM driver_stop_attempts WHERE intent_id=$2`,
+        [
+          command.id,
+          intent.id,
+          prior ? 'auto_retry' : 'initial',
+          prior?.command_id ?? null,
+          connection?.epoch ?? null,
+        ],
       );
       if (session.status !== 'orphaned') {
         const next = new SessionStateMachine().apply(
@@ -745,6 +786,7 @@ export class DriverChargingService {
         prepared.session.serial_number,
         'RemoteStopTransaction',
         { transactionId: prepared.session.transaction_no },
+        prepared.session.current_epoch,
       );
     return this.commandSnapshot(driverId, prepared.commandId);
   }
@@ -1111,15 +1153,7 @@ export class DriverChargingService {
       )
     ).rows[0];
     if (!row) return;
-    try {
-      await this.stopCommand(Number(row.driver_id), `limit:${row.id}`, Number(row.id), true);
-    } catch (error) {
-      if (!(
-        error instanceof ChargingError &&
-        ['stop_pending_or_unknown', 'session_not_stoppable'].includes(error.code)
-      ))
-        throw error;
-    }
+    await this.automaticStop(Number(row.driver_id), Number(row.id));
   }
 
   // WP3/T72: a heartbeat cannot promote an Available snapshot from an older connection.
@@ -1153,47 +1187,99 @@ export class DriverChargingService {
   private async cutoffReached(c: PoolClient, sessionId: number): Promise<boolean> {
     const row = (
       await c.query<{
-        consumed: string;
-        energy_limit_wh: string;
+        billing_mode: ChargeMode;
+        limit_value: string | null;
+        elapsed_ms: string;
         available: string;
         price: string | null;
         serial_number: string;
         current_epoch: number;
       }>(
-        `
-      SELECT i.energy_limit_wh,cp.serial_number,cp.current_epoch,m.wh-s.meter_start_wh AS consumed,
+        `SELECT s.billing_mode,s.limit_value,
+        floor(extract(epoch FROM (now()-s.received_started_at))*1000)::text AS elapsed_ms,
+        cp.serial_number,cp.current_epoch,
         a.balance_vnd-coalesce((SELECT sum(reserved_vnd) FROM driver_charge_intents other
           WHERE other.driver_id=s.driver_id AND other.id<>i.id
           AND other.state NOT IN ('rejected','settled','released')),0) AS available,
         (SELECT max(price_per_kwh_vnd) FROM tariff_periods t WHERE t.operator_id=st.operator_id
           AND effective_from<=(now() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date
           AND (effective_to IS NULL OR effective_to>=(now() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date)) AS price
-      FROM sessions s JOIN driver_charge_intents i ON i.session_id=s.id AND i.driver_id=s.driver_id
-      JOIN credit_accounts a ON a.driver_id=s.driver_id JOIN charge_points cp ON cp.id=s.charge_point_id
-      JOIN sites st ON st.id=cp.site_id JOIN LATERAL (
-        SELECT CASE WHEN unit='kWh' THEN value*1000 ELSE value END AS wh
-        FROM meter_values WHERE session_id=s.id AND NOT replayed AND epoch=cp.current_epoch
-          AND measurand='Energy.Active.Import.Register' AND phase IS NULL
-          AND (unit IN ('Wh','kWh') OR unit IS NULL)
-          AND received_at BETWEEN cp.online_changed_at AND now()
-          AND received_at>=now()-($2::bigint*interval '1 millisecond')
-          AND cp_timestamp BETWEEN cp.online_changed_at AND now()
-        ORDER BY cp_timestamp DESC,received_at DESC,id DESC LIMIT 1) m ON true
-      WHERE s.id=$1 AND s.status IN ('active','paused') AND s.received_stopped_at IS NULL
-        AND s.origin='app_qr' AND s.payment_mode='csms_billed' AND s.billing_mode='energy_kwh'
-        AND cp.is_online AND cp.last_message_at BETWEEN now()-($2::bigint*interval '1 millisecond') AND now()`,
+       FROM sessions s JOIN driver_charge_intents i ON i.session_id=s.id AND i.driver_id=s.driver_id
+       JOIN credit_accounts a ON a.driver_id=s.driver_id JOIN charge_points cp ON cp.id=s.charge_point_id
+       JOIN sites st ON st.id=cp.site_id
+       WHERE s.id=$1 AND s.status IN ('active','paused') AND s.received_stopped_at IS NULL
+         AND s.origin='app_qr' AND s.payment_mode='csms_billed' AND s.billing_mode=i.mode
+         AND cp.is_online AND cp.last_message_at<=now()
+         AND extract(epoch FROM (now()-cp.last_message_at))*1000<=$2::numeric`,
         [sessionId, this.requirePolicy().stationStaleAfterMs],
       )
     ).rows[0];
     if (!row || this.registry.get(row.serial_number)?.epoch !== row.current_epoch) return false;
-    const consumed = Number(row.consumed);
-    if (!Number.isSafeInteger(consumed) || consumed < 0) return false;
-    return (
-      consumed >= Number(row.energy_limit_wh) ||
-      (row.price !== null &&
-        BigInt(row.available) * 1000n - BigInt(consumed) * BigInt(row.price) <=
-          BigInt(this.requirePolicy().cutoffReserveVnd) * 1000n)
+    // WP3: the balance itself can prove credit exhaustion without inventing missing energy.
+    if (BigInt(row.available) <= BigInt(this.requirePolicy().cutoffReserveVnd)) return true;
+    // WP3: elapsed CSMS time includes pauses; BigInt avoids duration and interval overflow.
+    if (
+      row.billing_mode === 'timed' &&
+      row.limit_value !== null &&
+      BigInt(row.elapsed_ms) >= BigInt(row.limit_value) * 60000n
+    )
+      return true;
+    const meter = await this.settlement.meteredProgress(
+      c,
+      sessionId,
+      this.requirePolicy().stationStaleAfterMs,
     );
+    if (!meter) return false;
+    if (
+      row.billing_mode === 'energy_kwh' &&
+      row.limit_value !== null &&
+      meter.consumedMilliWh >= BigInt(row.limit_value) * 1000n
+    )
+      return true;
+    if (
+      row.billing_mode === 'amount_vnd' &&
+      row.limit_value !== null &&
+      meter.estimateVnd !== null &&
+      BigInt(meter.estimateVnd) >= BigInt(row.limit_value)
+    )
+      return true;
+    // WP3: only credit protection uses the conservative maximum-tariff estimate (BR-P19).
+    return (
+      row.price !== null &&
+      BigInt(row.available) * 1000000n - meter.consumedMilliWh * BigInt(row.price) <=
+        BigInt(this.requirePolicy().cutoffReserveVnd) * 1000000n
+    );
+  }
+
+  // WP3: persisted sessions drive this sweep after restart and without new meter frames.
+  async sweepDueModes(): Promise<number> {
+    const rows = (
+      await this.db.$client.query<{ id: string; driver_id: string }>(
+        `SELECT s.id,s.driver_id FROM sessions s JOIN driver_charge_intents i ON i.session_id=s.id
+       JOIN charge_points cp ON cp.id=s.charge_point_id
+       WHERE s.status IN ('active','paused') AND s.received_stopped_at IS NULL
+         AND s.billing_mode='timed' AND s.driver_id=i.driver_id
+         AND cp.is_online AND cp.last_message_at<=now()
+         AND extract(epoch FROM (now()-cp.last_message_at))*1000<=$1::numeric
+         AND extract(epoch FROM (now()-s.received_started_at))*1000>=s.limit_value::numeric*60000
+       ORDER BY s.received_started_at,s.id LIMIT 50`,
+        [this.requirePolicy().stationStaleAfterMs],
+      )
+    ).rows;
+    for (const row of rows) await this.automaticStop(Number(row.driver_id), Number(row.id));
+    return rows.length;
+  }
+
+  private async automaticStop(driverId: number, sessionId: number): Promise<void> {
+    try {
+      await this.stopCommand(driverId, `limit:${sessionId}`, sessionId, true);
+    } catch (error) {
+      if (!(
+        error instanceof ChargingError &&
+        ['stop_pending_or_unknown', 'session_not_stoppable'].includes(error.code)
+      ))
+        throw error;
+    }
   }
 
   async onStopped(transactionNo: number): Promise<void> {
@@ -1304,10 +1390,7 @@ export class DriverChargingService {
       const row = (
         await c.query(
           `SELECT s.id,s.status,s.updated_at,s.energy_wh,s.meter_start_wh,s.meter_stop_wh,
-        s.limit_value,coalesce(i.billing_review_required,false) AS billing_review_required,j.state AS settlement_state,j.reason AS settlement_reason,j.next_attempt_at AS settlement_retry_at,i.reserved_vnd,cp.lifecycle,cp.is_online,cp.online_changed_at,cp.last_message_at,
-        (SELECT CASE WHEN unit='kWh' THEN value*1000 ELSE value END FROM meter_values m
-          WHERE m.session_id=s.id AND measurand='Energy.Active.Import.Register' AND phase IS NULL
-          AND (unit IN ('Wh','kWh') OR unit IS NULL) ORDER BY cp_timestamp DESC LIMIT 1) AS latest_wh,
+        s.billing_mode,s.limit_value,greatest(0,floor(extract(epoch FROM (coalesce(s.received_stopped_at,now())-s.received_started_at))))::bigint AS elapsed_seconds,coalesce(i.billing_review_required,false) AS billing_review_required,j.state AS settlement_state,j.reason AS settlement_reason,j.next_attempt_at AS settlement_retry_at,i.reserved_vnd,cp.lifecycle,cp.is_online,cp.online_changed_at,cp.last_message_at,
         (SELECT max(t.price_per_kwh_vnd) FROM tariff_periods t WHERE t.operator_id=st.operator_id
           AND t.effective_from<=(now() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date
           AND (t.effective_to IS NULL OR t.effective_to>=(now() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date)) AS price_per_kwh_vnd
@@ -1320,13 +1403,35 @@ export class DriverChargingService {
         )
       ).rows[0];
       if (!row) throw new ChargingError('not_found');
-      const delta =
-        row.latest_wh === null ? null : Number(row.latest_wh) - Number(row.meter_start_wh);
-      const valid = delta !== null && Number.isSafeInteger(delta) && delta >= 0;
+      const meter = await this.settlement.meteredProgress(
+        c,
+        sessionId,
+        this.requirePolicy().stationStaleAfterMs,
+        row.is_online === false,
+      );
+      const displayedWh = meter ? meter.consumedMilliWh / 1000n : null;
+      const consumed =
+        row.energy_wh ??
+        (displayedWh !== null && displayedWh <= BigInt(Number.MAX_SAFE_INTEGER)
+          ? String(displayedWh)
+          : null);
+      const exactConsumed =
+        row.energy_wh !== null ? BigInt(row.energy_wh) * 1000n : (meter?.consumedMilliWh ?? null);
+      const upper =
+        exactConsumed !== null && row.price_per_kwh_vnd !== null
+          ? (exactConsumed * BigInt(row.price_per_kwh_vnd) + 999999n) / 1000000n
+          : null;
       return {
         ...row,
-        consumed_wh: row.energy_wh ?? (valid ? String(delta) : null),
-        telemetry_quality: valid ? 'observed' : 'unknown',
+        consumed_wh: consumed,
+        estimated_cost_vnd:
+          upper !== null && upper <= BigInt(Number.MAX_SAFE_INTEGER) ? Number(upper) : null,
+        telemetry_quality: row.energy_wh !== null ? 'observed' : meter ? 'observed' : 'unknown',
+        metered_cost_vnd_min: meter?.bounds?.minVnd ?? null,
+        metered_cost_vnd_max: meter?.bounds?.maxVnd ?? null,
+        metered_cost_quality: meter?.costQuality ?? 'unknown',
+        metered_cost_vnd_estimate: meter?.estimateVnd ?? null,
+        metered_cost_clock: meter?.pricingClock ?? null,
       };
     });
   }
@@ -1469,7 +1574,10 @@ export class DriverChargingService {
       outcome: i.rejection_reason ?? i.session_status ?? i.state,
       effectConfirmed: i.session_id !== null,
       version: i.version,
-      maxEnergyWh: i.max_energy_wh === null ? null : Number(i.max_energy_wh),
+      maxEnergyWh: i.max_energy_wh == null ? null : Number(i.max_energy_wh),
+      mode: i.mode,
+      maxDurationMinutes: i.max_duration_minutes == null ? null : Number(i.max_duration_minutes),
+      maxAmountVnd: i.max_amount_vnd == null ? null : Number(i.max_amount_vnd),
     };
   }
   private async readStart(c: PoolClient, driverId: number, key: string) {
@@ -1513,4 +1621,38 @@ export class DriverChargingService {
     if (typeof key !== 'string' || !/^[A-Za-z0-9:._-]{1,100}$/.test(key))
       throw new ChargingError('invalid_idempotency_key');
   }
+}
+
+// WP3: legacy intents default to energy mode in migration 0026; no unit conversion occurs.
+function intentInput(row: {
+  connector_id: string;
+  vehicle_id: string;
+  mode: ChargeMode;
+  energy_limit_wh: string | null;
+  duration_minutes: string | null;
+  amount_limit_vnd: string | null;
+}): ChargeStartInput {
+  const identity = { connectorId: Number(row.connector_id), vehicleId: Number(row.vehicle_id) };
+  switch (row.mode) {
+    case 'full':
+      return { ...identity, mode: 'full' };
+    case 'timed':
+      return { ...identity, mode: 'timed', durationMinutes: Number(row.duration_minutes) };
+    case 'amount_vnd':
+      return { ...identity, mode: 'amount_vnd', amountLimitVnd: Number(row.amount_limit_vnd) };
+    case 'energy_kwh':
+      return { ...identity, mode: 'energy_kwh', energyLimitWh: Number(row.energy_limit_wh) };
+  }
+}
+function watts(raw: string | null): number | null {
+  const value = raw === null ? null : scaledInteger(raw, 0);
+  return value === null || value <= 0n || value > BigInt(Number.MAX_SAFE_INTEGER)
+    ? null
+    : Number(value);
+}
+function effectiveWatts(connectorKw: string | null, vehicleKw: string | null): number | null {
+  const connector = connectorKw === null ? null : scaledInteger(connectorKw);
+  const vehicle = vehicleKw === null ? null : scaledInteger(vehicleKw);
+  if (connector === null || connector <= 0n || (vehicle !== null && vehicle <= 0n)) return null;
+  return watts(String(vehicle !== null && vehicle < connector ? vehicle : connector));
 }

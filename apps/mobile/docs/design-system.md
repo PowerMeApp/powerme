@@ -1,5 +1,25 @@
 # Thiết kế và thương hiệu
 
+## Tài khoản, điểm và nạp tín dụng — Stitch ZIP (6), 20/11
+
+Nguồn visual là ba HTML/PNG và DESIGN từ ZIP6 người dùng cung cấp, hash/source path ở README/architecture. Chỉ đọc reference, không execute HTML, tải CDN/ảnh/font hoặc đưa policy screenshot vào app. Dùng native Flutter, brand **#D4AF37 / #00E0C2 / #0A0A0A / #141414**, original PNG byte/font theme giữ nguyên; logout lấy semantic error của theme, không thêm hex palette.
+
+- Tài khoản: logo/identity thật, hai summary tín dụng/xe mặc định, nhóm finance/rewards và vehicle/discovery; history ghi Phiên sạc và bảng kê. Garage count có xe/vehicle(s), trailing badge ở normal, stack cùng label/description ở narrow/large text; credit row không lặp Xem. Logout error outline/tint giữ confirmation. Không copy VIP/NFC/Autocharge/tier, claim chứng nhận hoặc dữ liệu identity/credit/vehicle giả.
+- Loyalty: hero vàng lớn, teal CTA và info inset theo ZIP; read-only available balance 6000 không biến thành redeem maximum 2500. Header normal 390 giữ badge + refresh; narrow/200% dùng full-width badge rồi refresh riêng để PowerMe không tách ký tự, giữ key/48dp và không giảm text scale. Loading/error/retry/zero là state thật; zero CTA vẫn nạp không dùng điểm. Không tạo ledger/history/expiry/reserved khi T149 chưa có.
+- Top-up: hiển thị tín dụng VND, số tiền/preset, live quote/max/clear và summary. Minimum 50.000/maximum 2.000.000 dùng constants hiện có; không dùng 20k, minimum 500 điểm, rate 10, 50% hay khóa 5 phút trong ZIP. Exact maximum lấy server max discount, partial không suy payable; CTA **Xem số tiền thanh toán / Review payment amount** trước authoritative GET, rồi status disclosure/continue VNPay như cũ. Không auto-open khi số tiền chưa hiển thị/không khớp; Return URL không paid.
+
+Một correction batch theo coordinator gồm đúng bốn sửa nêu trên, một confirmation batch, đã được coordinator xác nhận đạt phạm vi đó; không thêm polish/capture. 390×844/100% và 320×844/200%, VI/EN, 4 capture cases/174 PNG; normal pages phủ outer list, biến thể có first/header và vùng nội dung. Preview `E:/Project/PowerMe/.review/t145-stitch6/preview-3-screens-390-vi.png` dùng ba ảnh UI normal first-frame thực tế có logo, coordinator đã duyệt; không ghép header, không so ZIP hoặc retouch.
+
+**Giới hạn bằng chứng:** Một số ảnh state/cuộn vẫn thiếu chrome app bar: `390-1x-vietnamese/loyalty-zero-01.png` và `390-1x-vietnamese/top-up-partial-unknown-summary-02.png`; zero đã có body title, pending GET/normal frames có logo. Decoded asset và các assertion lấy mẫu pixel pass không chứng minh mọi header PNG đã paint. Coordinator xác nhận bốn sửa UI đã đạt; không thêm vòng UI/capture. Chưa kiểm device/emulator/iOS, API đăng nhập staging, thanh toán thật hoặc NFR. Đây là offscreen render dùng SDK Roboto + transport/localized-profile fixture, không chứng minh font/device native hay screenshot mọi state hoàn hảo. Các assertions RawImage/decoded/sample pixel chỉ là diagnostics; `capture-confirmation-audit.json` ghi `all_state_header_painting_verified=false`. Full regression 229/229 và offline Android debug **30s** là functional/build checks, tách khỏi giới hạn ảnh; logs/trace ở README/screens/architecture.
+
+## Charging theo Stitch ZIP (5) — 19/11
+
+Đã đọc năm HTML/PNG M06, M07, M08, M09, M09-A cùng DESIGN trong ZIP. Native Flutter giữ hierarchy thẻ cổng/xe, 2×2 chế độ có teal selected, preset/custom và tóm tắt; M07 có vòng chờ, timeline và panel quyết định tín dụng bo góc trên với Apply/Top up/Edit. M08 dùng ring lớn theo mode, nhãn mode chỉ đọc, ba số điện năng/thời gian/tạm tính và context trạm/xe. M09 có bốn pha adaptive trên cùng; M09-A là bottom sheet Material với một mode/mục tiêu của phiên. Ở 320px/200%, nhãn và số liệu xếp dọc/cuộn, không giảm cỡ chữ hoặc vùng chạm 48dp. Ring lớn chữ lớn tách readout ra ngoài, không animate số giả nên Remove animations không tạo timer giả.
+
+Điều chỉnh bắt buộc so với ZIP: bỏ Demo/Live CSMS/Backend Limit/OCPP 2.0.1, số đo kW/V/A, đồ thị mẫu, SoC/BMS%, 100% tương thích, thông số/giá/địa chỉ cổng chưa có trong lookup. Ảnh xe dùng hồ sơ, credit hoặc fallback có sẵn; không hardcode xe/350kW hay tải ảnh HTML. Full không hứa mobile dừng tại 100%; không khẳng định chốt mở, 0A, an toàn rút cáp, VAT đã phát hành hoặc trừ tín dụng bằng điểm. Chỉ giữ số và trạng thái có bằng chứng API.
+
+Giá trị actual có thể vượt target; chỉ nét vòng clamp, không clip số. Timed lấy elapsed server, money lấy estimate T134; maximum tariff hiển thị riêng, statement vẫn authoritative debit. M09 bốn pha quan sát được là yêu cầu / phản hồi trụ / nhận chỉ số chốt / ghi sổ; trường hợp app không gửi stop ghi “Theo trạng thái phiên”. Không mô phỏng relay/lock. M07 tự chuyển sau effect thay nút Theo dõi; nút mở lại chỉ phục vụ Back hoặc quay về phiên đã có. Màu/logo/byte assets và font theme/fallback hiện có giữ nguyên.
+
 Giữ nhận diện khách hàng. UI cũ/Stitch là tham khảo hình ảnh; [SRS](../../../docs/requirements/report3-srs.md) và [screens](screens.md) quyết định nội dung. Ghi sai khác để review.
 
 | Token | Giá trị |

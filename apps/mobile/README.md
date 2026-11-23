@@ -1,5 +1,101 @@
 # @powerme/mobile — App tài xế PowerMe (WP3)
 
+## Phone login — BE-30, 21/11
+
+Phone + password is implemented in the existing login form alongside email. Registration keeps required email and adds an optional phone; blank phone is omitted. The app preserves raw nonblank phone/password values, checks BE-30's original 32-character phone limit and accepted local/international shapes, and leaves normalization to the backend. Duplicate phone, locked account and rate-limit errors have helpful messages. Existing session guards, shared refresh and profile bootstrap are retained. No Google/OTP, dependency/config/native/backend change or staging write.
+
+Accounts without a stored phone still use email; this slice does not infer a phone association. See [API notes](docs/t96-driver-api.md#phone-login--be-30-2111), [trace](docs/screens.md#phone-login--be-30-2111) and [architecture/research](docs/architecture.md#phone-login--be-30-2111). Evidence directory: `E:/Project/PowerMe/.review/phone-auth`. The earlier 229-test/build claims below belong to T145, not this slice.
+
+Verified on installed Flutter 3.44.2 / Dart 3.12.2, existing cache, no pub get/install:
+
+- `dart format --output=none --set-exit-if-changed` over the auth directory, session and four touched test files: **12 files, 0 changed** (`format-final.log`). `flutter analyze --no-pub`: **No issues found**, 10.3s (`analyze-final.log`).
+- Focused auth/profile/API/vehicle regression: **80/80 pass**, 33s (`focused-confirmed.log`), including **26 new transport/domain/controller tests + 8 new widget cases**. New coverage checks exclusive identifier payloads, optional-phone omission/raw values, 32-character boundary before trim, duplicate-phone 400/409, locked/429, no principal before valid `/me`, shared refresh, duplicate/keyboard submits, cancellation and A→logout→B. Existing email/profile/vehicle regressions remain.
+- One full regression after focused checks: `flutter test --no-pub --concurrency=1 --reporter expanded`: **267/267 pass**, 03:09 (`full-tests.log`). No further suite/build repetition.
+- Bounded visual check: first batch + one confirmation, **24 final PNGs** under `E:/Project/PowerMe/.review/phone-auth/captures-confirmed/{390-1x,320-2x}-{vietnamese,english}/`, six frames per combination. Final contact sheet `contact-sheet-confirmed.jpg`; final widget/capture assertions are part of the 80-test focused log. The first batch exposed a stale phone validation message; identifier/phone fields now revalidate on interaction, with a regression assertion. No third visual round.
+
+Publication screenshots, copied byte-for-byte from the reviewed PNGs: [optional phone registration — Vietnamese, 390px/100%](docs/images/t96-phone-register.png) and [phone already in use — Vietnamese, 320px/200%](docs/images/t96-phone-error.png). Both are offscreen Flutter fixture renders with SDK fonts and a simulated 220px keyboard inset; they are not staging or native-device evidence.
+
+Coordinator accepted the changed phone fields/errors and 320px/200% layouts. The 390px login-top master-lockup region was observed blank in a capture; decode/paint timing is suspected, not proven. This slice does not claim logo capture verification and did not alter branding or run a third visual round. These are offscreen Flutter renders with SDK fonts and a simulated 220px keyboard inset, not device screenshots or real keyboard/TalkBack/VoiceOver verification.
+
+Earlier runs found test-harness accessor/merged-label/semantics-handle cleanup errors and analyzer lint/unused-import issues; corrected without removing accessibility coverage. Initial `focused-tests.log` (76 pass/4 harness-cleanup failures), `analyze.log` and first captures remain for audit. Final results above supersede those runs. Four original brand PNGs + BrandMark are byte-identical to HEAD (`brand-audit.json`); this is separate from image-paint verification.
+
+Start from `E:/Project/PowerMe/powerme/apps/mobile` with the existing public API/Vietmap config files and the authorized backend/tunnel described in [the API guide](docs/t96-driver-api.md). Stop/Run the app to load this code; use a phone already associated with the account, or use email. No OAuth setup is required. Commands below are instructions, not live auth/staging checks performed by this slice:
+
+```powershell
+Set-Location E:/Project/PowerMe/powerme/apps/mobile
+& E:/MobileDev/Flutter/bin/flutter.bat run --no-pub -t lib/main.dart
+# After stopping the app, run the new auth tests:
+& E:/MobileDev/Flutter/bin/flutter.bat test --no-pub --concurrency=1 --reporter expanded test/phone_auth_test.dart test/phone_auth_widget_test.dart
+```
+
+Successful API login/registration uses the existing **Discover** destination. Integration/live phone login/register, native autofill/IME/accessibility-service behavior and device/staging acceptance remain pending. Native builds were not run for this phone slice. Exact implementation-stage file hashes, log/capture paths and limitations: `E:/Project/PowerMe/.review/phone-auth/handoff.json`. Publication backup and PR description: `E:/Project/PowerMe/.review/phone-auth-publish`.
+
+
+
+## T145 — bằng chứng giao diện cho PR, 20/11
+
+Ảnh Flutter offscreen với fixture, sao chép nguyên PNG đã duyệt: [Tài khoản](docs/images/t145-profile.png), [nạp tín dụng có nút (?)](docs/images/t145-topup-points.png), [trợ giúp với minimum 500 điểm hiện tại](docs/images/t145-points-help.png). Không phải ảnh thiết bị hoặc staging. Hai ảnh nạp/trợ giúp lấy từ slice 500 mới nhất; mô tả ZIP6 bên dưới là lịch sử trước khi bổ sung hướng dẫn minimum. Một số frame state/cuộn cũ thiếu header; ba ảnh được chọn đã kiểm trực quan. Lịch sử/hết hạn chờ T149; chưa nghiệm thu đầy đủ FR-17 hoặc thanh toán thật.
+
+## T145 — trợ giúp sử dụng điểm, 20/11
+
+Thêm nút (?) teal cạnh **Sử dụng điểm PowerMe** ở Nạp tín dụng và Điểm, dùng chung hướng dẫn VI/EN có drag handle, cuộn, SafeArea và **Đã hiểu / Got it**. Đầu help nêu rõ BR-P35 hiện tại: cần ít nhất 500 điểm còn hạn và mỗi lần đổi tối thiểu 500 điểm; dưới 500 vẫn nạp không dùng điểm. Đây chỉ là thông tin; quote động/server vẫn quyết định validation. Không đổi controller/policy/route; đóng help giữ draft/quote, có thể refresh theo visibility guard hiện có. Trace/copy ở [screens](docs/screens.md#t145--trợ-giúp-sử-dụng-điểm-2011), native source pin ở [architecture](docs/architecture.md#t145--presentation-trợ-giúp-điểm-2011).
+
+Correction copy 500 điểm: format 1 file/0 changed, analyze sạch, existing loyalty/top-up 35/35 và một batch capture 4/4 (11 PNG) tại `E:/Project/PowerMe/.review/t145-points-help-500`; đã xem sheet VI/EN 390px và toàn bộ scroll 320px/200%, không sửa UI sau capture. Chỉ offscreen fixtures/font SDK; chưa kiểm device/API/thanh toán thật, không full suite/APK hoặc thêm/sửa test.
+
+Focused `flutter test --no-pub --concurrency=1 --reporter expanded test/driver_loyalty_test.dart test/driver_top_up_fault_test.dart`: **35/35 pass**; `flutter analyze --no-pub`: **No issues found**. Capture một batch `tool/capture_points_help_test.dart`: **4/4 pass, 10 PNG**, VI/EN tại 390px và 320px/200%, normal hai heading; contact sheets đã xem, không sửa UI sau capture. Widget tests giữ draft/quote, no financial POST/native launch, close/Back; capture kiểm barrier/swipe. Lần focused đầu 33 pass/2 lỗi finder do copy unexpired cùng có trên page và sheet; chỉ scope finder vào sheet, không sửa production để xử lý test. Analyzer đầu báo một lint braces trong capture helper, đã sửa.
+
+Baseline affected files, lib/assets SHA-256, logs `format-final.log`, `analyze-final.log`, `focused-tests-final.log`, `capture.log`, PNG/contact sheets và `handoff.json` tại `E:/Project/PowerMe/.review/t145-points-help`. Chỉ Flutter offscreen fixture + font SDK, không device/emulator/iOS, staging hoặc thanh toán thật; English dùng localized profile fixture, không thêm runtime language switch. Parent/coordinator đã duyệt hai contact sheets, không cần correction/recapture. Không full suite/APK mới cho slice nhỏ; kết quả 229 test/build ZIP6 dưới đây là baseline lịch sử. Không dependency/install, backend/root docs/diagram/config/logo, commit/push/rebase/reset/stash. Giữ nguyên WIP T145/ZIP6 và unrelated T139.
+
+## T145 — restyle Stitch ZIP (6), 20/11
+
+Mục này cập nhật trạng thái giao diện/kiểm thử mới nhất cho ba màn `/profile`, `/loyalty`, `/credit/top-up`; phần T145 baseline bên dưới giữ làm lịch sử. Nguồn người dùng: `stitch_powerme_ev_app_ui_design (6).zip` (3 HTML/PNG và DESIGN), SHA-256 `992a01cda61d5cbf501dbf5f06e496bc505a5ae3373ae9af02cc7db3165f8355`; chỉ đọc nội dung, không chạy HTML/remote assets. Trace tại [screens](docs/screens.md#t145--stitch-zip-6-2011), ranh giới tại [architecture](docs/architecture.md#t145--stitch-zip-6-2011), sai khác tại [design-system](docs/design-system.md).
+
+Tài khoản dùng identity thật, hai ô tín dụng/xe mặc định và nhóm menu; nhà xe có đơn vị `1 xe`/`1 vehicle` (số nhiều theo dữ liệu), badge trailing ở normal width, xếp cùng nội dung ở narrow/large text. Bỏ nhãn Xem dư ở dòng tín dụng. Đăng xuất dùng error color của theme, giữ xác nhận và guard scope. Điểm dùng hero vàng/CTA teal/info inset; 320px/200% tách refresh khỏi badge để giữ nguyên từ PowerMe và vùng chạm 48dp. Với điểm tùy chọn có payable chưa biết nhưng đủ điều kiện gửi, CTA là **Xem số tiền thanh toán / Review payment amount**; GET xác minh rồi mới hiển thị số tiền và nút tiếp tục VNPay như trước. Bốn sửa theo coordinator đã được xác nhận trong đúng một batch + một confirmation; không redesign thêm.
+
+Khác nghiệp vụ ZIP: giữ 5 tab gồm QR giữa; màu/logo/font gốc; không VIP/NFC/Autocharge/tier/chứng nhận/lịch sử/hết hạn giả. Điểm khả dụng từ quote khác maximum đổi (fixture 6000/2500); CTA 0 điểm vẫn mở nạp. Top-up là tín dụng VND, giới hạn hiện có 50.000–2.000.000; không copy 20k, minimum 500 điểm, rate 10, cap 50% hoặc khóa 5 phút. Maximum dùng max discount server; arbitrary partial không suy tiền. 422 requote/clear, 409 resume, UUID/body qua timeout, route/auth/cancel, refresh credited/refunded và Return URL ≠ paid giữ nguyên. T149 chưa có trên main mới, không thêm API lịch sử/expiry/reserved.
+
+Kiểm thực tế bằng Flutter 3.44.2 / Dart 3.12.2 / Python 3.10, cache hiện có, TMP/TEMP `E:/Project/PowerMe/.review/t145-stitch6/tmp`; không install/pub get/upgrade:
+
+- `dart format --output=none --set-exit-if-changed lib test tool`: **180 file, 0 changed**; `flutter analyze --no-pub`: **No issues found**.
+- Focused loyalty/top-up/vehicle/credit/navigation **50/50**; API widget suite sau sửa helper **5/5**. Full `flutter test --no-pub --concurrency=1 --reporter expanded`: **229/229 pass**. Lần full đầu **228 pass / 1 fail** vì `driver_api_widget_test` giả định add-vehicle ở viewport; helper nay cuộn lazy list + flush frame trước assertion/tap, giữ mọi auth/private-route/business assertion. Log đầu `full-tests-initial.log`, confirmation `full-tests-final.log`; không thêm production fix hoặc capture round cho lỗi test này.
+- Capture confirmation **4/4 ca pass / 174 PNG**, 18 scenario mỗi tổ hợp 390×844/100% và 320×844/200%, Việt/Anh. Manifest ở `captures-confirmation/{390-1x,320-2x}-{vietnamese,english}/manifest.json` ghi offset/viewport/bounds và target; normal pages phủ toàn bộ outer AppPage ListView, biến thể có header + vùng thay đổi. Đây là Flutter offscreen render với font SDK và transport/localized-profile fixture; English chỉ kiểm copy/layout hiện có, ApiApp chưa hỗ trợ đổi ngôn ngữ runtime.
+- Android: `android/gradlew.bat -p android --offline --no-daemon -Pkotlin.incremental=false :app:assembleDebug`: **BUILD SUCCESSFUL in 30s**; APK `build/app/outputs/apk/debug/app-debug.apk`, chưa cài. Cảnh báo Kotlin/KGP/Vietmap/Gradle hiện hữu giữ nguyên; không đổi dependencies/SDK.
+
+**Giới hạn capture:** Một số ảnh state/cuộn vẫn thiếu chrome app bar: `390-1x-vietnamese/loyalty-zero-01.png` và `390-1x-vietnamese/top-up-partial-unknown-summary-02.png`; zero đã có body title, pending GET/normal frames có logo. Decoded asset và các assertion lấy mẫu pixel pass không chứng minh mọi header PNG đã paint. Coordinator xác nhận bốn sửa UI đã đạt; không thêm vòng UI/capture. Chưa kiểm device/emulator/iOS, API đăng nhập staging, thanh toán thật hoặc NFR.
+
+Preview 3 màn normal 390px tiếng Việt: `E:/Project/PowerMe/.review/t145-stitch6/preview-3-screens-390-vi.png`, đã được coordinator duyệt, dùng đúng ba first-frame có logo gốc, không ghép header. Logs `format-final.log`, `analyze-final.log`, `focused-tests-final.log`, `focused-api-final.log`, `full-tests-final.log`, `capture-confirmation.log`, `android-debug-final.log`; audit `capture-confirmation-audit.json`, manifest/hashes/APK trong `finalhandoff.json`, cùng thư mục evidence. 9 lib controller/domain/adapter/composition files match baseline và 4 PNG match asset nguồn; không đổi backend/root docs/diagrams. `origin/main` đã được coordinator fresh-fetch và local xác minh `86285d0ce3cc5ec485b46c630bef501d8f45248d`: HEAD/main diff cho mobile và Driver API contract rỗng theo coordinator, mobile đã kiểm lại; không rebase/reset trên WIP, không commit/push/stage.
+
+## T145 — Điểm PowerMe (20/11)
+
+**Tài khoản → Điểm PowerMe** mở số điểm còn hiệu lực từ Driver API quote read-only. Không cần xe. Có số 0/loading/error/thử lại, refresh khi resume hoặc quay từ nạp tín dụng. CTA **Đổi điểm khi nạp** mở `/credit/top-up`; không có thao tác đổi điểm độc lập. Không giữ/trừ điểm trên app. Tỷ lệ/minimum/cap seeded không hardcode: live quote và 422 server quyết định. Với số điểm khác maximum, app hiển thị tiền phải trả từ GET trước khi cho tiếp tục VNPay; auto-open 0 điểm và maximum vẫn giữ đủ safety guards.
+
+Lịch sử và điểm sắp hết hạn chờ API T149; đảo điểm khi sửa/hoàn phiên còn thiếu nghiệp vụ backend riêng. T149 chỉ bổ sung route riêng xem số dư, lịch sử và điểm sắp hết hạn; không hứa field lots/reserved. Quote chỉ đọc, không giữ điểm; mô hình reserved cũ chỉ dùng trong legacy test fixtures. Không hiển thị dữ liệu thay thế hoặc các trường thiếu thành 0. `earned_points` trên bảng kê giữ nguyên từ server. Full FR-17/UC-PAY-04 chưa được tuyên bố Done. Xem trace và pinned research/license ở [screens](docs/screens.md#t145--view-13-điểm-khả-dụng-2011) / [architecture](docs/architecture.md#t145--điểm-khả-dụng-qua-báo-giá-2011).
+
+Đã kiểm với SDK/cache hiện có, không pub get/upgrade:
+
+- `dart format --output=none --set-exit-if-changed` trên **21 file Dart thay đổi: 0 changed**; `flutter analyze --no-pub`: **No issues found** (4,3 s).
+- Focused loyalty/top-up **30/30 pass** (10 s); vehicle regression **8/8 pass** (7 s); full `flutter test --no-pub --concurrency=1 --reporter expanded`: **228/228 pass** (1 phút 38 s), baseline 212 + 16 ca mới. Lần full đầu 227/228: menu thêm điểm đẩy nút thêm xe ngoài lazy viewport ở 320×640; helper test nay cuộn trước khi ensureVisible, không đổi nghiệp vụ xe hoặc bỏ assertions. Log đầu được giữ riêng.
+- Capture: batch đầu + đúng một confirmation round; confirmation **4/4 pass, 32 PNG**, đủ available/zero/error/loading cho Việt/Anh ở 390×844 và 320px/200%. Sửa timing scroll/tap và thêm state assertions/fatal missed taps trong capture harness; không sửa UI sau review. Hai contact sheet hiện tại đã được review đạt: `E:/Project/PowerMe/.review/t145-loyalty/contact-states.jpg`, `contact-scroll.jpg`. Final manifests ở `captures-confirmed/{390-1x,320-2x}-{vietnamese,english}/manifest.json`; có offset của từng khung cuộn. Đây là Flutter render với font SDK và transport/localized-profile fixture, không là ảnh device/staging. ApiApp chưa hỗ trợ đổi ngôn ngữ; kiểm Anh chỉ kiểm copy/layout có sẵn.
+- Android: `android/gradlew.bat --offline --no-daemon '-Pkotlin.incremental=false' :app:assembleDebug` **BUILD SUCCESSFUL in 1m 2s**, 125 task (23 executed/102 up-to-date). APK `build/app/outputs/apk/debug/app-debug.apk`; chưa cài. Cảnh báo Kotlin/KGP Vietmap và Gradle deprecation hiện hữu; không thay dependencies/SDK/cấu hình để xử lý.
+
+Logs, changed-file list, APK SHA-256 và handoff ở `E:/Project/PowerMe/.review/t145-loyalty/handoff.json`. Không chạy thanh toán/ghi API thật, authenticated read trên staging, device/emulator/iOS hoặc nghiệm thu NFR. Chỉ có tunnel health 200, không là smoke T145. Guide T145 ngày 19/11 ghi VNPay staging chưa gọi được từ VM (T140); chưa xác minh lại hạn chế đó hoặc chạy thanh toán thật. Không commit/push/deploy.
+
+## T96 — Stitch ZIP (5), bốn chế độ sạc, 19/11
+
+Mobile nối `full`/`timed`/`energy_kwh`/`amount_vnd` theo Driver API 0.14 §17. Sau khi API xác nhận mã phiên và effect, M07 tự chuyển M08; accepted vẫn chờ. Cap dùng đúng phút/Wh/VND và cần đồng ý với key mới. Chỉnh sửa sau từ chối/cap giữ cổng, xe và draft; gửi lại kết quả chưa rõ giữ nguyên key/body. Back, background/resume, rời QR, đổi xe và logout giữ các guard của phiên. M08 hiển thị số đo/elapsed server và estimate T134, tách maximum tariff; không có timer tự dừng trên mobile. M09-A/4 pha/bảng kê giữ stop ACK, chỉ số chốt và quyết toán độc lập.
+
+Staging hiện vẫn API 0.13 vì PR #193 chưa merge/deploy. Energy legacy thiếu các field mới vẫn đọc được; elapsed thiếu hiển thị “—”. Mode lạ/null không được suy thành kWh. Khi staging từ chối mode mới, UI báo chế độ chưa khả dụng và cho chỉnh sửa, không fallback fixture. Chưa xác minh bốn chế độ trên staging, camera/charger thật, iOS hoặc NFR latency.
+
+Kiểm thực tế bằng Flutter 3.44.2 / Dart 3.12.2, dependency/cache hiện có, TMP/TEMP trong `apps/mobile/.cache/tmp`:
+
+- `dart format lib test tool`: 172 file, kiểm cuối **0 changed** với `--output=none --set-exit-if-changed`; log `.cache/four-mode-format-verify.log`.
+- `flutter analyze --no-pub`: **No issues found** (2,4 giây), `.cache/four-mode-analyze.log`.
+- `flutter test --no-pub --reporter expanded`: **212/212 pass** (30 giây), gồm 189 baseline và 23 ca mới; `.cache/four-mode-full-tests.log`. Hai test start/session đã cập nhật bàn giao tự động và giữ các ca stable-key/lifecycle/settlement. Bộ mới kiểm bốn wire shape, full null, caps 0/sai kiểu/mode binding, đơn vị progress, money unknown/maximum, overshoot 10,23 kWh, draft/edit, mode defaults/presets, auto-nav/Back/background/late/logout và không tự POST stop.
+- Capture batch đầu: **2/2 pass** (9 giây), **121 PNG / 17 scenario cho mỗi kích thước**, gồm M06 bốn mode, M07 pending/cap/zero, M08 bốn mode, M09-A, stopping/final-meter/posted. [390×844, 38 khung](build/previews/stitch-charging-zip5/390-1x/manifest.json) · [320px/200%, 83 khung](build/previews/stitch-charging-zip5/320-2x/manifest.json). Mỗi manifest có offset cuộn; `-01.png` là khung đầu, số cuối là đáy, các khung giữa có overlap. Đây là Flutter render với SDK fonts và transport/scanner fixture trong test, không phải screenshot emulator/device. Giao diện 390px và các form/xác nhận 320px/200% đã được review đạt, không cần chỉnh UI. Công cụ capture đã bổ sung unfocus trước khi chụp; bộ PNG đã review là batch đầu, chưa render lại chỉ để dọn caret. Log `.cache/four-mode-capture.log`.
+- Android debug: `android/gradlew.bat --offline --no-daemon "-Pkotlin.incremental=false" :app:assembleDebug` **BUILD SUCCESSFUL in 47s**, 125 task (19 executed/106 up-to-date). APK `build/app/outputs/apk/debug/app-debug.apk`; log `.cache/four-mode-apk.log`. Gradle có cảnh báo deprecation hiện hữu. Chưa cài/chạy APK trên thiết bị.
+
+Thay đổi chỉ ở `lib/features/charging`, adapter tối thiểu `lib/core/api/driver_api_session.dart`, test/support/tool và bốn tài liệu mobile. Logo, dependency, config, backend và diagrams giữ nguyên. Phạm vi phát hành: chỉ phần mobile; PR phụ thuộc API #193, chưa xác minh staging. Việc bàn giao source sang checkout Run dùng backup bytes, manifest SHA-256 và stash giữ lại. Branch `wp3/t96-mobile-bon-che-do-sac` từ `4ce6124`. Nguồn nghiên cứu, licenses và mapping kiến trúc ở [architecture](docs/architecture.md#t96--bốn-chế-độ-stitch-zip-5-1911); các sai khác nghiệp vụ với ZIP ở [design-system](docs/design-system.md#charging-theo-stitch-zip-5--1911).
+
 | | |
 |---|---|
 | Chủ sở hữu | WP3 — Mobile Developer (Sơn) |
@@ -42,7 +138,7 @@ Bản đóng gói T96 ngày 19/11 kiểm lại: `dart format --output=none --set
 
 ## Ràng buộc
 
-- Backend hiện chỉ nhận **một chế độ bắt đầu phiên: hạn mức kWh** (`mode: energy_kwh`, hợp đồng #69, D4). Mock trong app có thêm `autoFull`, `timed`, `cost`; ba chế độ này chưa có backend và phải được xem là hướng phát triển cho tới khi hợp đồng đổi.
+- Driver API 0.14 định nghĩa bốn chế độ `full`, `timed`, `energy_kwh`, `amount_vnd` (§17). Mobile đã nối bốn shape trong slice ZIP (5). Staging hiện vẫn 0.13, chỉ hỗ trợ energy vì PR #193 chưa merge/deploy. Response energy cũ tiếp tục đọc được; chế độ chưa hỗ trợ báo lỗi nghiệp vụ và cho chỉnh sửa, không chuyển sang fixture.
 - Có hai đường bắt đầu phiên **không đi qua app** (quẹt thẻ RFID, thao tác trên trụ). App phải xử lý được việc thấy một phiên mà nó không tạo ra; hợp đồng mô tả ở `DRIVER-API-HOP-DONG.md` §5.
 - Ngưỡng M3: SoC và kWh cập nhật **trong vòng vài giây** kể từ khi simulator gửi `MeterValues`. Giai đoạn mock: polling 5 s theo hợp đồng; SSE dự kiến tuần 10.
 - Các luồng chưa tích hợp dùng dữ liệu mock trong kiểm thử. Giao diện tài xế không hiển thị nhãn demo/mock.

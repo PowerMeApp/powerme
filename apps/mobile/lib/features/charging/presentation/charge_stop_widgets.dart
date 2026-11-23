@@ -6,9 +6,9 @@ import '../../../core/widgets/flow_page.dart';
 import '../application/charge_session_controller.dart';
 import '../application/charge_start_controller.dart';
 import '../domain/charge_session.dart';
-import '../domain/charging.dart';
 import 'charge_flow_visuals.dart';
 import 'charge_session_readout.dart';
+import 'charge_mode_widgets.dart';
 
 ButtonStyle chargeStopButtonStyle(BuildContext context) {
   final colors = Theme.of(context).colorScheme;
@@ -36,11 +36,11 @@ bool isChargeStopUnconfirmed(ChargeStopOutcome? outcome) => switch (outcome) {
 };
 
 Widget chargeStopMilestones(
-  ChargeStopAttempt attempt,
+  ChargeStopAttempt? attempt,
   ChargeProgress progress,
   AppCopy copy,
 ) {
-  final outcome = attempt.outcome;
+  final outcome = attempt?.outcome;
   final recorded = switch (outcome) {
     ChargeStopOutcome.pending ||
     ChargeStopOutcome.sent ||
@@ -50,24 +50,40 @@ Widget chargeStopMilestones(
     ChargeStopOutcome.failed => true,
     _ => false,
   };
-  final accepted = outcome == ChargeStopOutcome.accepted;
+  final ended = progress.confirmsEnd;
+  final accepted = outcome == ChargeStopOutcome.accepted || ended;
   final unconfirmed = copy.text('Chưa xác nhận', 'Unconfirmed');
   return ChargeMilestones(
+    compact: true,
     title: copy.text('Tiến trình dừng', 'Stop request progress'),
     steps: [
       (
-        label: copy.text('Gửi yêu cầu dừng', 'Send stop request'),
-        state: recorded
+        label: attempt == null
+            ? copy.text('Kết thúc phiên', 'Session end')
+            : copy.text('Gửi yêu cầu dừng', 'Send stop request'),
+        state: attempt == null
+            ? copy.text('Theo trạng thái phiên', 'From session status')
+            : recorded
             ? copy.text('Đã ghi nhận', 'Recorded')
             : outcome == null
             ? copy.text('Đang gửi', 'Sending')
             : unconfirmed,
-        icon: recorded ? Icons.check_rounded : Icons.send_outlined,
-        color: recorded ? PowerMeColors.teal : PowerMeColors.gold,
+        icon: attempt == null
+            ? Icons.remove_rounded
+            : recorded
+            ? Icons.check_rounded
+            : Icons.send_outlined,
+        color: attempt == null
+            ? PowerMeColors.muted
+            : recorded
+            ? PowerMeColors.teal
+            : PowerMeColors.gold,
       ),
       (
         label: copy.text('Trụ phản hồi', 'Charger acknowledges'),
-        state: accepted
+        state: ended
+            ? copy.text('Đã báo dừng', 'Stop reported')
+            : accepted
             ? copy.text('Đã chấp nhận', 'Accepted')
             : outcome == ChargeStopOutcome.effectReported
             ? copy.text('Đã báo dừng', 'Stop reported')
@@ -76,12 +92,24 @@ Widget chargeStopMilestones(
         color: accepted ? PowerMeColors.teal : PowerMeColors.muted,
       ),
       (
-        label: copy.text('Chốt điện năng', 'Record final energy'),
-        state: progress.status == SessionState.stopping
-            ? copy.text('Phiên đang dừng', 'Session is stopping')
+        label: copy.text('Nhận chỉ số chốt', 'Final reading received'),
+        state: ended ? copy.text('Đã nhận', 'Received') : unconfirmed,
+        icon: ended ? Icons.check_rounded : Icons.bolt_outlined,
+        color: ended ? PowerMeColors.teal : PowerMeColors.muted,
+      ),
+      (
+        label: copy.text('Quyết toán tín dụng', 'Credit settlement'),
+        state: progress.statementEligible
+            ? copy.text('Đã ghi sổ', 'Posted')
+            : progress.inReview
+            ? copy.text('Đang kiểm tra', 'Under review')
             : unconfirmed,
-        icon: Icons.bolt_outlined,
-        color: PowerMeColors.muted,
+        icon: progress.statementEligible
+            ? Icons.check_rounded
+            : Icons.receipt_long_outlined,
+        color: progress.statementEligible
+            ? PowerMeColors.teal
+            : PowerMeColors.muted,
       ),
     ],
   );
@@ -141,6 +169,19 @@ class ChargeStopSheet extends StatelessWidget {
             ],
             if (current != null) ...[
               const SizedBox(height: 12),
+              ValueLine(
+                copy.text('Chế độ sạc', 'Charging mode'),
+                chargeModeLabel(current.billingMode, copy),
+              ),
+              ValueLine(
+                copy.text('Mục tiêu', 'Target'),
+                chargeTargetLabel(
+                  current.billingMode,
+                  current.limitValue,
+                  copy,
+                ),
+                showDivider: false,
+              ),
               ChargeSessionMetrics(
                 copy: copy,
                 progress: current,
@@ -171,7 +212,8 @@ class ChargeStopSheet extends StatelessWidget {
             const SizedBox(height: 8),
             OutlinedButton(
               onPressed: () => Navigator.of(context).pop(false),
-              child: Text(copy.text('Hủy', 'Cancel')),
+              key: const Key('continue-charging'),
+              child: Text(copy.text('Tiếp tục sạc', 'Continue charging')),
             ),
           ],
         ),

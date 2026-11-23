@@ -9,7 +9,7 @@ import 'preview_report_screen.dart';
 import 'package:driver_app/features/charging/presentation/charging_screens.dart';
 import 'preview_payment_screens.dart';
 import 'package:driver_app/features/history/presentation/history_screens.dart';
-import 'package:driver_app/features/loyalty/presentation/loyalty_screen.dart';
+import 'preview_loyalty_screen.dart';
 import 'package:driver_app/features/charging/presentation/qr_connect_screen.dart';
 import 'package:driver_app/features/profile/presentation/profile_screen.dart';
 import 'package:flutter/material.dart';

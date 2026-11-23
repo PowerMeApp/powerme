@@ -67,8 +67,13 @@ class AuthController extends Notifier<AuthState> {
     }
   }
 
-  Future<void> signIn(String email, String password) => _authenticate(
-    () => ref.read(authRepositoryProvider).signIn(email.trim(), password),
+  Future<void> signIn(String identifier, String password) => _authenticate(
+    () => ref
+        .read(authRepositoryProvider)
+        .signIn(
+          identifier.contains('@') ? identifier.trim() : identifier,
+          password,
+        ),
   );
   Future<void> register(Registration registration) => _authenticate(
     () => ref.read(authRepositoryProvider).register(registration),
