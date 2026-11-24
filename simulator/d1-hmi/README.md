@@ -25,10 +25,17 @@ node simulator/d1-hmi/server.mjs
 
 Để CSMS chấp nhận, cần có sẵn trụ `RH24D1-00001` và các `idTag` mẫu: `DEMO-CARD-0001` (thẻ hợp lệ), `DEMO-CARD-0002` (thẻ hợp lệ 2, tài xế mẫu 2; thay thẻ ví `DEMO-WALLET-0001` đã bỏ ở T110 — PowerMe không hỗ trợ thẻ RFID ví). `DEMO-UNKNOWN-999` cố tình không đăng ký. Mật khẩu HMI mẫu: `123456` (giả).
 
+## Đầu đọc RFID USB (T146, phase 1)
+
+Đầu đọc USB dạng bàn phím đã được người dùng xác nhận xuất 10 chữ số + Enter trong Notepad. Cắm súng, chờ online, bấm ô **Đầu đọc RFID USB** của đúng súng rồi quẹt. HMI giữ nguyên chuỗi (kể cả số 0 đầu), gửi OCPP Authorize thật và chỉ yêu cầu Start khi được Accepted và súng/kết nối vẫn hợp lệ. Thẻ lạ/offline không dùng danh sách thẻ mẫu. Thẻ mẫu vẫn có lối riêng.
+
+**Chưa retest capture bằng đầu đọc vật lý trên HMI/điện thoại.** Các phase tiếp theo đã thêm API 0.15 và nối Flutter local để tìm/theo dõi phiên RFID chỉ đọc và hiển thị Lịch sử mọi nguồn; kiểm chứng hiện là transport/widget, không là staging hay đầu đọc thật. Backend 0.15 chưa triển khai staging, cấu hình app không đổi; cần liên kết thẻ đúng chủ qua quy trình Admin được cho phép và retest HMI/điện thoại sau khi API sẵn sàng. Không tự đăng ký thẻ và chưa hoàn tất tính tiền RFID (T148 hoãn). Xem [nghiên cứu, kiểm thử và giới hạn đầu đọc](docs/t146-rfid-usb.md) và [handoff API/Flutter](../../docs/tasks/t146-driver-session-discovery.md).
+
 ## Kiểm thử
 
 ```bash
 node simulator/d1-hmi/smoke.mjs
+node --test simulator/d1-hmi/rfid-reader.test.mjs simulator/d1-hmi/rfid-loopback.test.mjs simulator/d1-hmi/rfid-ui.test.mjs
 ```
 
 Dựng một CSMS ocpp-rpc tối thiểu trong chính script, chạy `server.mjs` trỏ vào đó, điều khiển qua HTTP như HMI thật và khẳng định chuỗi bản tin OCPP (Boot → Status ×3 → Authorize → Start → MeterValues → rớt mạng → nối lại không Boot → phát bù với timestamp cũ → RemoteStop/Stop → lỗi → half-open → reboot). In PASS/FAIL từng dòng, exit code ≠ 0 nếu có FAIL. Không nằm trong CI.
