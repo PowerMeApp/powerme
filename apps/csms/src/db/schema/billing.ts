@@ -337,6 +337,7 @@ export const refunds = pgTable(
     kind: refundKindEnum('kind').notNull(),
     /** VND > 0; không vượt số đã trả của top-up (RefundService kiểm, DB không kiểm chéo bảng). */
     amountVnd: bigint('amount_vnd', { mode: 'number' }).notNull(),
+    /** `done` = VNPay đã nhận yêu cầu hoàn, không có nghĩa tiền đã về tài xế (D1). */
     status: refundStatusEnum('status').notNull().default('requested'),
     /** Số lần đã gọi VNPay refund; tối đa 4, Admin retry không reset. */
     attemptCount: integer('attempt_count').notNull().default(0),

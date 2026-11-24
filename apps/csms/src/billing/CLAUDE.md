@@ -38,7 +38,7 @@ Decisions khác diagram thì theo diagram và sửa decisions. Diagram mâu thu�
 - `credit_accounts.balance_vnd` = Σ `credit_transactions.amount_vnd`. Snapshot được cập nhật cùng transaction với dòng sổ cái.
 - `credit_transactions` là append-only. Trong billing, **chỉ `CreditLedgerService.post`** được INSERT; không UPDATE, không DELETE. (Ngoại lệ hiện tại: `charge-settlement.service.ts` của WP3 ghi `session_debit` trực tiếp, chờ nhóm chốt.) Mọi nơi ghi sổ phải khoá `credit_accounts ... FOR UPDATE` trước khi tính `entry_no` và `balance_after_vnd`.
 - Mọi chuyển trạng thái top-up đi qua `TopUpStateMachine`. Chuyển không hợp lệ → ném `InvalidTransition`.
-- **VNPay refund chỉ được gọi từ `RefundService.send`** (do worker refund gọi), không gọi trong DB transaction. Lượt nào không phải lượt đầu thật sự thì querydr trước; querydr thấy 01 / 00 chỉ được gửi ở lượt ngay sau Admin retry (`planRound`, D1).
+- **VNPay refund chỉ được gọi từ `RefundService.send`** (do worker refund gọi), không gọi trong DB transaction. Lượt nào không phải lượt đầu thật sự thì querydr trước; querydr thấy 01 / 00 chỉ được gửi ở lượt ngay sau Admin retry (`planRound`, D1). Refund `done` = VNPay đã nhận yêu cầu hoàn (RC 00 + TS 00 / 05 / 06, hoặc querydr thấy lệnh hoàn); không có nghĩa tiền đã về tài khoản tài xế (VNPay / ngân hàng chuyển sau, ta không có kênh báo về).
 - Việc nền (e-invoice, gửi refund, realtime emit): **tạo dòng việc trong transaction** của quyết định (hoá đơn cùng transaction cộng tiền — T32 Phần 7; refund cùng transaction quyết định hoàn — D1), **gọi bên ngoài chỉ sau khi commit** (worker / `kick`). Không INSERT dòng việc sau commit: sập giữa commit và việc sau commit thì mất việc mà không gì quét lại. Việc nền chạy bằng **quét DB** (`status` + `next_attempt_at`, `FOR UPDATE SKIP LOCKED`), `Scheduler` chỉ để chạy sớm; không thêm BullMQ (decisions D7).
 - **Việc nền gọi bên ngoài đi theo lease, không giữ transaction qua HTTP** (T32 Phần 12):
   - cài `BackgroundWork.runDue(limit, signal)` (`background-work.ts`); bảng có `next_attempt_at` dùng `runLeasedBatch` (`due-rows.ts`): tx ngắn giữ chỗ một dòng → gọi ngoài tx → tx2 `lockLeased` (trả `null` = mất lease, bỏ kết quả) rồi ghi qua state machine;
@@ -70,7 +70,7 @@ Decisions khác diagram thì theo diagram và sửa decisions. Diagram mâu thu�
 | `AccountClosureService` | `credit_accounts.status`: `active → closed`, `closed_at`, `closure_refunded_at` (khi không tạo refund nào) |
 | `LoyaltyService` | `loyalty_accounts`, `loyalty_transactions` |
 | `EInvoiceService` | `e_invoices`, `invoice_adjustments` |
-| `RefundService` | `refunds`; `top_ups.late_refunded_at` và `credit_accounts.closure_refunded_at` khi refund chuyển `done` (Phần 9a, cùng tx2) |
+| `RefundService` | `refunds`; `top_ups.late_refunded_at` và `credit_accounts.closure_refunded_at` khi refund chuyển `done` (= VNPay đã nhận yêu cầu hoàn, chưa chắc tiền đã về tài xế; Phần 9a, cùng tx2) |
 
 ## Ranh giới module
 

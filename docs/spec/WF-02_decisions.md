@@ -1,6 +1,6 @@
 # WF-02 – Quyết định thiết kế
 
-> Đặt tại `docs/spec/WF-02_decisions.md`. Cập nhật: 23/11/2026 (D1, D7, "Còn mở" theo T32 Phần 9a; "Còn mở": VNPay trả lời 18/11, giả định vnp_Amount khi khuyến mãi); 17/11/2026 (D3, D5, D7, "Còn mở" theo T32 Phần 7); 14/11/2026 (D2, D3, D4, D7, "Còn mở" theo T32 Phần 8; D3, D4, D7, D8 theo T32 Phần 6 13/11; D2 theo T32 Phần 5, 12/11).
+> Đặt tại `docs/spec/WF-02_decisions.md`. Cập nhật: 24/11/2026 (D1 nghĩa `done`; "Còn mở": điều kiện của Ân, kết quả querydr sandbox, Phần 10 dự kiến 25/11); 23/11/2026 (D1, D7, "Còn mở" theo T32 Phần 9a; "Còn mở": VNPay trả lời 18/11, giả định vnp_Amount khi khuyến mãi); 17/11/2026 (D3, D5, D7, "Còn mở" theo T32 Phần 7); 14/11/2026 (D2, D3, D4, D7, "Còn mở" theo T32 Phần 8; D3, D4, D7, D8 theo T32 Phần 6 13/11; D2 theo T32 Phần 5, 12/11).
 > **Nguồn chính là diagram trong `diagrams/report4/class/CD-2/` + `diagrams/report4/sequence/SD-2a…2f/`** (CD-2, SD-2a…2f v2.0, 01/11/2026, bản đã chia sẻ vào tài liệu chung của nhóm). File này chỉ ghi lại:
 > (1) những điểm trong diagram mà code phải bám, viết ra cho dễ tra;
 > (2) cách khớp diagram với repo hiện tại;
@@ -63,7 +63,7 @@ STM-4 TopUp, STM-5 CreditAccount, STM-7 EInvoice (cũng dùng cho InvoiceAdjustm
   | RC 94 (có hay không có chữ ký) | `in_progress` | lỗi tạm thời (#2, hoặc #4 khi hết lượt); không gửi lại |
   | RC 99, lỗi mạng, timeout, HTTP ≠ 200, JSON hỏng, sai / thiếu chữ ký, sai TmnCode / TxnRef / số tiền, thiếu mã hoàn, RC 00 mà TS khác | `unknown` | lỗi tạm thời |
 
-  RC 00 + TS 05 / 06 coi là `done`: VNPay đã nhận yêu cầu và chịu trách nhiệm chuyển sang ngân hàng, ta không có kênh nào báo về sau.
+  **Nghĩa của `done`:** refund `done` = VNPay đã nhận yêu cầu hoàn (RC 00 + TS 00 / 05 / 06, hoặc querydr thấy lệnh hoàn); không có nghĩa tiền đã về tài khoản tài xế (VNPay / ngân hàng chuyển sau, ta không có kênh báo về). `late_refunded_at` / `closure_refunded_at` là lúc refund chuyển `done` theo nghĩa này.
 - **Truy vấn trước khi gửi lại.** Mỗi lượt theo `planRound`:
 
   | Lượt | Cách chạy |
@@ -114,9 +114,9 @@ Ràng buộc / index đề xuất cho migration:
 - Index `(status, next_attempt_at)` cho worker; index `(top_up_id)`.
 
 Nghĩa của cột đã có:
-- `top_ups.late_refunded_at` = lúc refund `late_payment` chuyển `done`.
+- `top_ups.late_refunded_at` = lúc refund `late_payment` chuyển `done` (VNPay đã nhận yêu cầu hoàn, xem "Nghĩa của `done`" ở trên).
 - `credit_accounts.closure_refunded_at` = lúc tài khoản `closed` không còn refund `account_closure` nào chưa `done` (chốt 09/11, D6). Có hai trường hợp:
-  - refund `account_closure` cuối cùng chuyển `done`;
+  - refund `account_closure` cuối cùng chuyển `done` (cùng nghĩa `done` ở trên);
   - lúc đóng không tạo refund nào (số dư 0, hoặc toàn bộ là phần dư) → `= closed_at`, ghi trong transaction đóng.
   - NULL chỉ còn nghĩa "chưa hoàn xong". COMMENT của 0015 còn ghi "NULL = … không có gì để hoàn" → sửa ở migration Phần 6 (mục "Còn mở").
 
@@ -540,12 +540,33 @@ Chốt 09/11: WP5 làm job hết hạn điểm.
 - **Refund (T32 Phần 9a) chưa thử được trên sandbox** (xem "VNPay trả lời email 18/11", ý (2)). Khang chốt 23/11: chấp nhận chỉ kiểm bằng test tự động với VNPay giả lập. Các giả định cần đối chiếu khi có tài khoản đủ quyền:
   - `vnp_Amount` của refund là VND × 100 (như lệnh trả, IPN, querydr);
   - trường thiếu trong response refund đưa vào chuỗi ký là chuỗi rỗng;
-  - RC 00 + TS 05 / 06 coi là `done` (D1).
+  - RC 00 + TS 00 / 05 / 06 coi là `done`, nghĩa là VNPay đã nhận yêu cầu hoàn (D1).
+
+  Ân chấp nhận 3 giả định 24/11, điều kiện: (a) done = VNPay đã nhận yêu cầu hoàn (đã ghi ở D1); (b) thử querydr trùng vnp_TxnRef trên sandbox (kết quả ở mục Khoản trễ và querydr).
 - **Cách nhận lệnh hoàn qua querydr là suy luận từ tài liệu** (T32 Phần 9a): trang chỉ liệt kê `vnp_TransactionType` 02 / 03, không ghi khi nào xuất hiện, không ghi `vnp_TransactionNo` là của giao dịch gốc hay lệnh hoàn.
   - Nếu là mã của lệnh hoàn: so với mã gốc không khớp → lỗi tạm thời → `failed`, Admin xem (an toàn, không hoàn hai lần).
   - Nếu querydr vẫn trả 01 / 00 sau khi hoàn: lượt tự động không gửi; chỉ lượt ngay sau Admin retry mới gửi, nên Admin phải kiểm trên cổng VNPay trước khi retry (D1).
 - **`gateway_refund_no` khi done qua querydr** (Khang chốt 23/11): querydr không có trường mã lệnh hoàn, nên để NULL và đánh dấu `confirmed_via_query = true` (0028). Đối soát các dòng này với sao kê VNPay theo `vnp_TxnRef` và số tiền.
-- **Khoản trễ và querydr** (T32 Phần 9a): khoản trễ dùng cùng `vnp_TxnRef` với top-up gốc, nên querydr có thể trả giao dịch đầu thay vì khoản trễ → mã khác → lỗi tạm thời, hết lượt thành `failed`. Trang VNPay ghi `vnp_TransactionNo` là trường request **tuỳ chọn** của querydr nhưng **không có trong chuỗi ký**; chưa gửi trường này. Nếu thử được trên sandbox mà nó giúp chọn đúng giao dịch thì cân nhắc thêm.
+- **Khoản trễ và querydr** (T32 Phần 9a): khoản trễ dùng cùng `vnp_TxnRef` với top-up gốc, nên querydr có thể trả giao dịch đầu thay vì khoản trễ → mã khác → lỗi tạm thời, hết lượt thành `failed`. Trang VNPay ghi `vnp_TransactionNo` là trường request **tuỳ chọn** của querydr nhưng **không có trong chuỗi ký**; chưa gửi trường này.
+
+  **Kết quả thử trên sandbox 24/11 (production chưa kiểm).** Thẻ NCB test, querydr gọi từ máy local:
+
+  | Ca | Thao tác trên VNPay | querydr |
+  |---|---|---|
+  | A | Trả thành công (`15747269`), mở lại cùng URL bị chặn (`code=01`) | Không gửi / gửi mã A1 → A1, RC 00, TS 00 |
+  | B (đường khoản trễ thật) | Lần 1 huỷ (RC 24, TS 02, mã `0`), lần 2 trả thành công (`15747271`) | Không gửi / gửi `0` / gửi mã B2 → B2, RC 00, TS 00 |
+  | Hai tab | Tab 1 dừng ở OTP, tab 2 mở cùng URL bị chặn (`code=01`); về tab 1 nhập OTP báo "Đơn hàng không tồn tại hoặc đã được xử lý" | Không gửi → `15747275`, RC 00, **TS 01** (chưa hoàn tất) |
+
+  Mọi response đều 01 (loại giao dịch), 50.000 VND, chữ ký khớp.
+
+  - **Ca B đã kiểm:** querydr trả đúng giao dịch thành công, không trả lần huỷ trước đó.
+  - **`vnp_TransactionNo` gửi `0` vẫn được nhận** và trả B2, nên field này có thể bị bỏ qua. Chưa chứng minh được nó chọn đúng giao dịch.
+  - **Không tạo được hai giao dịch thành công cùng `vnp_TxnRef` qua cùng URL**, nên chưa biết querydr trả giao dịch đầu hay cuối trong ca đó. Nếu trả nhầm, mã không khớp → lỗi tạm thời → `failed`, Admin xem; không gửi hoàn thêm.
+  - **Ca TS 01:** `classifyQuerydrResponse` xếp vào `unresolved`, không cộng tiền.
+  - **Giới hạn:** hai tab dùng chung một phiên ẩn danh, chưa thử hai trình duyệt / thiết bị. Refund không chạy được trên sandbox, nên chưa biết querydr hiển thị gì sau khi hoàn.
+
+  **Khang quyết định 24/11:** không thêm `vnp_TransactionNo` vào `queryRefundState`, giữ nguyên code.
+- **Phần 10** (route retry refund của Admin, đường xử lý duy nhất cho refund `failed`) dự kiến 25/11/2026.
 - Cách tạo `CreditAccount` + `LoyaltyAccount` khi tài xế đăng ký (WF-05 gọi billing hay billing nghe event).
 - Chiều gọi `session_debit` và loyalty `earn` từ WF-01/03.
 - **Đóng tài khoản khi còn phiên chưa quyết toán** (phát hiện ở T32 Phần 3): định nghĩa "chưa xong" ở D6 (c) — intent chưa kết thúc (gồm `pending` của BE-18), phiên (kể cả phiên thẻ RFID) chưa ở trạng thái cuối về tiền (kể cả `review` do hard cap), hoặc `charge_settlement_jobs.state = 'pending'`. Không chặn thì job quyết toán chạy sau khi đóng bị `CreditLedgerService.post` từ chối (`account_closed`) và kẹt `pending`. Thống nhất `SessionQuery.hasUnsettledSession(driverId)` với Sơn / Trí trước Phần 11.

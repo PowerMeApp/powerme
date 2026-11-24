@@ -21,7 +21,7 @@
 - Response querydr của giao dịch gốc **không có trường riêng cho mã lệnh hoàn** (trang VNPay đọc 23/11), trong khi 0015 bắt buộc `gateway_refund_no` khi `done`.
 - Hai cách không cần migration đều bị loại:
   - ghi mã giao dịch gốc vào cột "mã hoàn": sai nghĩa khi đối soát, và UNIQUE lỗi nếu hai refund `account_closure` cùng một top-up;
-  - để refund `failed` dù tiền đã hoàn: STM-10 không có `failed → done`, nên dòng nằm `failed` mãi và `closure_refunded_at` không bao giờ được ghi.
+  - để refund `failed` dù VNPay đã nhận yêu cầu hoàn: STM-10 không có `failed → done`, nên dòng nằm `failed` mãi và `closure_refunded_at` không bao giờ được ghi.
 
 ## 3. Dữ liệu có sẵn
 

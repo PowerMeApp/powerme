@@ -468,8 +468,8 @@ export function classifyQuerydrResponse(
 //   - `vnp_Amount` = VND × 100, như lệnh trả, IPN và querydr;
 //   - luôn gửi `vnp_TransactionNo`, nên không gặp ca trường này vắng trong chuỗi ký;
 //   - trường thiếu trong response đưa vào chuỗi ký là chuỗi rỗng, như querydr;
-//   - RC 00 + TS 05 / 06 = done: VNPay đã nhận yêu cầu và chịu trách nhiệm chuyển sang ngân hàng,
-//     ta không có kênh nào báo về sau.
+//   - RC 00 + TS 00 / 05 / 06 = done: VNPay đã nhận yêu cầu hoàn; không có nghĩa tiền đã về tài
+//     khoản tài xế (VNPay / ngân hàng chuyển sau, ta không có kênh báo về).
 // ---------------------------------------------------------------------------------------------
 
 /** Thứ tự chuỗi ký request refund (tài liệu VNPay). */
