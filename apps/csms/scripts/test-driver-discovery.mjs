@@ -17,6 +17,7 @@ const suites = [
   'test/driver-smart.integration.test.ts',
   'test/driver-auth.integration.test.ts',
   'test/driver-charges.integration.test.ts',
+  'test/driver-sessions.integration.test.ts',
   'test/driver-vehicles.integration.test.ts',
 ];
 for (const suite of suites) {

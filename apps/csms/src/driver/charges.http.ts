@@ -12,6 +12,7 @@ import type { Db } from '../db/db.module.js';
 import type { ChargeStartInput } from '../sessions/charge-mode-policy.js';
 import type { ChargeSnapshot, DriverChargingService } from '../sessions/driver-charging.service.js';
 import { creditSummary, creditTransactions } from './driver-credit.js';
+import { driverSessions } from './driver-sessions.js';
 import { databaseId, DriverApiError } from './driver-auth.js';
 
 const BASE = '/api/driver/v1';
@@ -22,12 +23,13 @@ type Route =
   | { name: 'start' }
   | { name: 'start_status'; key: string }
   | { name: 'progress' | 'stop' | 'statement'; sessionId: string }
-  | { name: 'credit' | 'credit_transactions' };
+  | { name: 'credit' | 'credit_transactions' | 'sessions' };
 
 const METHOD: Record<Route['name'], 'GET' | 'POST'> = {
   start: 'POST',
   start_status: 'GET',
   progress: 'GET',
+  sessions: 'GET',
   stop: 'POST',
   statement: 'GET',
   credit: 'GET',
@@ -39,6 +41,7 @@ export function isChargePath(path: string): boolean {
   return (
     path === `${BASE}/charges` ||
     path.startsWith(`${BASE}/charges/`) ||
+    path === `${BASE}/sessions` ||
     path.startsWith(`${BASE}/sessions/`) ||
     path === `${BASE}/credit` ||
     path === `${BASE}/credit/transactions`
@@ -56,6 +59,7 @@ export function chargeRouteMethod(path: string): 'GET' | 'POST' | null {
 
 function matchRoute(path: string): Route {
   if (path === `${BASE}/charges`) return { name: 'start' };
+  if (path === `${BASE}/sessions`) return { name: 'sessions' };
   if (path === `${BASE}/credit`) return { name: 'credit' };
   if (path === `${BASE}/credit/transactions`) return { name: 'credit_transactions' };
   const charge = new RegExp(`^${BASE}/charges/([^/]+)$`).exec(path);
@@ -136,6 +140,10 @@ function progressJson(row: Record<string, any>) {
   return {
     session_id: String(row['id']),
     status: row['status'],
+    origin: row['origin'],
+    payment_mode: row['payment_mode'],
+    can_stop: row['can_stop'] === true,
+    statement_available: row['statement_available'] === true,
     updated_at: row['updated_at'],
     meter_start_wh: intOrNull(row['meter_start_wh']),
     meter_stop_wh: intOrNull(row['meter_stop_wh']),
@@ -247,6 +255,8 @@ export async function handleChargeRoute(
     ctx.setAllow(`${method}, OPTIONS`);
     throw new DriverApiError(405, 'method_not_allowed');
   }
+  if (route.name === 'sessions')
+    return { status: 200, body: await driverSessions(ctx.db, ctx.driverId, ctx.q) };
   noQuery(ctx.q, route.name === 'credit_transactions' ? ['page', 'page_size'] : []);
   const driver = safeId(ctx.driverId);
   switch (route.name) {

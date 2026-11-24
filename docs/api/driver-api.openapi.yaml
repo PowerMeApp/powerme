@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: PowerMe CSMS — Driver API
-  version: 0.14.0
+  version: 0.15.0
   summary: Hợp đồng REST cho app tài xế (T77, phiếu v1.3 §3.2g)
   description: |
     Hợp đồng giữa CSMS (WP2) và app tài xế Flutter (WP3) cho trạng thái súng sạc, thời gian còn lại,
@@ -19,7 +19,7 @@ info:
       đường `sessions/*` trả cả phiên đó nếu `driver_id` khớp; `charges/*` chỉ có với phiên bắt đầu
       từ app.
   x-owner: Trí (WP2) — hợp đồng; Sơn (WP3) — route và client Dart
-  x-status: MB03 — brief 07/11 smart station search, address search and canonical road routes implemented locally; BE-21 email/password register, login and refresh implemented; BE-30 login by email or phone number (E.164); BE-22 charges, sessions (progress/stop/statement) and credit implemented; BE-34 vehicle models and add/set-default/remove vehicles (soft delete) implemented; T32 Phần 5 billing/top-ups implemented but not for app use until T32 Phần 8 merges (IPN and return page since T32 Phần 6); time-left remains planned
+  x-status: MB03 — brief 07/11 smart station search, address search and canonical road routes implemented locally; BE-21 email/password register, login and refresh implemented; BE-30 login by email or phone number (E.164); BE-22 charges, sessions (progress/stop/statement) and credit implemented; T146 owned-session list and origin/payment/capabilities implemented; Flutter discovery/history locally integrated and fixture-verified, pending deployment/device proof; T148 deferred; BE-34 vehicle models and add/set-default/remove vehicles (soft delete) implemented; T32 Phần 5 billing/top-ups implemented but not for app use until T32 Phần 8 merges (IPN and return page since T32 Phần 6); time-left remains planned
 servers:
   - url: http://localhost:3000/api/driver/v1
     description: CSMS cục bộ (cùng tiến trình với console /api/admin)
@@ -768,6 +768,63 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
         '405': { $ref: '#/components/responses/MethodNotAllowed' }
 
+  /sessions:
+    get:
+      tags: [sessions]
+      operationId: listDriverSessions
+      x-status: implemented — T146 backend and local Flutter discovery/history integration fixture-verified; API deployment/device proof pending; T148 deferred
+      summary: Các phiên thuộc tài xế, kể cả RFID chưa có bảng kê
+      description: |
+        Principal chỉ từ bearer và DB active-driver check; không nhận driver_id/id_tag filter.
+        Mọi origin có driver_id khớp đều được đọc, không phụ thuộc intent hay ledger.
+        view=active yêu cầu meter_stop_wh null và status pending/active/paused/stopping/orphaned/review.
+        view=all gồm phiên đã dừng/chưa quyết toán. Sắp received_started_at DESC, id DESC.
+        Một SQL snapshot cho cả items và total; trang vượt cuối trả items rỗng, total giữ đúng.
+        Chỉ nhận view/page/page_size, mỗi key đúng một lần. Từ chối key lạ, trùng, số không nguyên,
+        khoảng trắng/control, quá giới hạn hoặc SQL-shaped input với 400 invalid_input.
+        can_stop là eligibility; POST stop vẫn kiểm lại. Không tạo billing, statement hay OCPP command.
+        amount_vnd chỉ từ bảng kê thực sự thuộc tài xế; không dùng ước tính hay sessions.total_cost_vnd.
+        Không trả UID/id_tag/card ID/credential. Wh/VND phải là số nguyên JS an toàn hoặc null.
+      parameters:
+        - name: view
+          in: query
+          schema: { type: string, enum: [active, all], default: all }
+        - name: page
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100000, default: 1 }
+        - name: page_size
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+      responses:
+        '200':
+          description: Một trang phiên thuộc tài xế
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DriverSessionPage' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '405':
+          description: method_not_allowed
+          headers:
+            Allow: { schema: { type: string, const: 'GET, OPTIONS' } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '500': { $ref: '#/components/responses/InternalError' }
+        '503': { $ref: '#/components/responses/AuthUnavailable' }
+    options:
+      tags: [sessions]
+      operationId: optionsDriverSessions
+      security: []
+      summary: Preflight theo cơ chế CORS local hiện có
+      responses:
+        '204':
+          description: Preflight không cần bearer
+          headers:
+            Access-Control-Allow-Methods: { schema: { type: string, const: 'GET, OPTIONS' } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
   /sessions/{sessionId}/progress:
     get:
       tags: [sessions]
@@ -781,6 +838,7 @@ paths:
         là `unknown` khi chưa có mẫu hoặc mẫu không hợp lệ.
         Ngưỡng M3 của WP3: SoC và kWh lên app trong vài giây sau MeterValues → app **poll mỗi 5 s**
         cho đến khi có kênh realtime (Tuần 10, ngoài hợp đồng này).
+        T146: origin/payment_mode/can_stop/statement_available cùng ngữ nghĩa với GET /sessions.
         BE-22: phiên không do app tạo có `reserved_vnd = null`. Ngừng poll khi `status` là
         `closed`/`reconciled` và `settlement_state = posted` (khi đó gọi statement), hoặc `review`.
       parameters:
@@ -1857,11 +1915,59 @@ components:
           type: boolean
           description: true khi phiên đã có `meter_stop_wh`, tức trụ đã gửi StopTransaction
 
-    SessionProgress:
+    SessionOrigin:
+      type: string
+      enum: [app_qr, rfid, hmi_password, free_vend]
+    SessionPaymentMode:
+      type: string
+      enum: [csms_billed, unattributed]
+    DriverSession:
       type: object
-      required: [session_id, status, updated_at, meter_start_wh, consumed_wh, telemetry_quality, charge_point, billing_mode, limit_value, elapsed_seconds]
+      additionalProperties: false
+      required: [session_id, status, origin, payment_mode, can_stop, statement_available, started_at, stopped_at, updated_at, energy_wh, amount_vnd, settlement_state, connector_id, connector_no, charge_point_display_code, site_id, site_name, vehicle_id, vehicle_label]
       properties:
         session_id: { $ref: '#/components/schemas/Id' }
+        status: { type: string, enum: [pending, active, paused, stopping, closed, review, reconciled, orphaned, failed] }
+        origin: { $ref: '#/components/schemas/SessionOrigin' }
+        payment_mode: { $ref: '#/components/schemas/SessionPaymentMode' }
+        can_stop:
+          type: boolean
+          description: Chỉ app_qr có intent cùng driver, meter_stop_wh null và status active/paused/orphaned; không bảo đảm lệnh dừng sẽ thành công
+        statement_available:
+          type: boolean
+          description: payment_mode csms_billed và có charging_statements đúng session/driver; không tạo bảng kê
+        started_at: { $ref: '#/components/schemas/Timestamp' }
+        stopped_at: { oneOf: [{ $ref: '#/components/schemas/Timestamp' }, { type: 'null' }] }
+        updated_at: { $ref: '#/components/schemas/Timestamp' }
+        energy_wh: { type: [integer, 'null'], minimum: -9007199254740991, maximum: 9007199254740991, description: energy_wh chốt đã lưu; null là chưa biết, không thay bằng 0 }
+        amount_vnd: { type: [integer, 'null'], minimum: 0, maximum: 9007199254740991, description: Chỉ charging_statements.amount_vnd thực sự thuộc tài xế và csms_billed; null khi chưa có bảng kê }
+        settlement_state: { type: [string, 'null'], description: charge_settlement_jobs.state hoặc null }
+        connector_id: { $ref: '#/components/schemas/Id' }
+        connector_no: { type: integer }
+        charge_point_display_code: { type: [string, 'null'], description: Null được giữ nguyên nếu trụ chưa có display_code }
+        site_id: { oneOf: [{ $ref: '#/components/schemas/Id' }, { type: 'null' }] }
+        site_name: { type: [string, 'null'] }
+        vehicle_id: { oneOf: [{ $ref: '#/components/schemas/Id' }, { type: 'null' }] }
+        vehicle_label: { type: [string, 'null'], description: plate_number của xe cùng chủ; không dùng xe mặc định và không lộ xe chủ khác }
+    DriverSessionPage:
+      type: object
+      additionalProperties: false
+      required: [items, total, page, page_size]
+      properties:
+        items: { type: array, maxItems: 100, items: { $ref: '#/components/schemas/DriverSession' } }
+        total: { type: integer, minimum: 0, maximum: 9007199254740991 }
+        page: { type: integer, minimum: 1, maximum: 100000 }
+        page_size: { type: integer, minimum: 1, maximum: 100 }
+
+    SessionProgress:
+      type: object
+      required: [session_id, status, origin, payment_mode, can_stop, statement_available, updated_at, meter_start_wh, consumed_wh, telemetry_quality, charge_point, billing_mode, limit_value, elapsed_seconds]
+      properties:
+        session_id: { $ref: '#/components/schemas/Id' }
+        origin: { $ref: '#/components/schemas/SessionOrigin' }
+        payment_mode: { $ref: '#/components/schemas/SessionPaymentMode' }
+        can_stop: { type: boolean, description: Cùng eligibility như DriverSession.can_stop; POST stop vẫn kiểm lại }
+        statement_available: { type: boolean, description: Cùng điều kiện có bảng kê thuộc tài xế như DriverSession.statement_available }
         status:
           type: string
           enum: [pending, active, paused, stopping, closed, review, reconciled, orphaned, failed]
