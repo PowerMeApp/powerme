@@ -1,3 +1,5 @@
+import 'package:driver_app/features/charging/application/owned_sessions_controller.dart';
+import 'package:driver_app/features/charging/data/api_owned_session_repository.dart';
 import 'package:dio/dio.dart';
 import 'package:driver_app/app/powerme_app.dart';
 import 'package:driver_app/app/router.dart';
@@ -93,6 +95,9 @@ Future<ProviderContainer> mountConsistencyApp(
       ),
       chargeStartRepositoryProvider.overrideWithValue(
         ApiChargeStartRepository(session),
+      ),
+      ownedSessionRepositoryProvider.overrideWithValue(
+        ApiOwnedSessionRepository(session),
       ),
       chargeSessionRepositoryProvider.overrideWithValue(
         ApiChargeSessionRepository(session),

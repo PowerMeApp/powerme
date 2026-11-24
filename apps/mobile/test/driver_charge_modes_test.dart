@@ -382,12 +382,17 @@ void main() {
         );
         fixture.cap = 0;
         await tapChargeKey(tester, 'qr-accept-charge-limit');
-        expect(fixture.adapter.requests.last.data, {
-          'connector_id': '31',
-          'vehicle_id': '9',
-          'mode': wireChargeMode(mode),
-          chargeLimitField(mode)!: cap,
-        });
+        expect(
+          fixture.adapter.requests
+              .lastWhere((r) => r.method == 'POST' && r.path == 'charges')
+              .data,
+          {
+            'connector_id': '31',
+            'vehicle_id': '9',
+            'mode': wireChargeMode(mode),
+            chargeLimitField(mode)!: cap,
+          },
+        );
         expect(find.byKey(const Key('qr-accept-charge-limit')), findsNothing);
         expect(_container(tester).read(chargeStartProvider)!.canEdit, isTrue);
         expect(tester.takeException(), isNull);
@@ -451,7 +456,9 @@ void main() {
       await tapChargeKey(tester, 'qr-submit-start');
       await tester.pump(const Duration(milliseconds: 1500));
       await tester.pump();
-      final read = fixture.adapter.requests.last;
+      final read = fixture.adapter.requests.lastWhere(
+        (r) => r.method == 'GET' && r.path.startsWith('charges/'),
+      );
       tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
       await tester.pumpAndSettle();
       expect(read.cancelToken!.isCancelled, isTrue);

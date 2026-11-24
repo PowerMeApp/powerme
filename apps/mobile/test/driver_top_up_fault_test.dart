@@ -904,6 +904,7 @@ DriverApiFixture _fixture(
   (request) async => switch (request.path) {
     'auth/login' => reply(200, tokens(accessA)),
     'me' => reply(200, account()),
+    'sessions' => emptyActiveSessions(request),
     'stations' => reply(200, page([])),
     _ => handler(request),
   },

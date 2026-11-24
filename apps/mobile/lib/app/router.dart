@@ -19,6 +19,7 @@ import '../features/charging/presentation/charge_session_screen.dart';
 import '../features/charging/presentation/qr_connect_screen.dart';
 import '../features/loyalty/presentation/loyalty_screen.dart';
 import '../features/payments/presentation/charging_credit_screen.dart';
+import '../features/history/presentation/owned_session_history_screen.dart';
 import '../features/payments/presentation/credit_top_up_screen.dart';
 import '../features/support/application/connector_fault_report_controller.dart';
 import '../features/support/presentation/connector_fault_report_screen.dart';
@@ -137,8 +138,7 @@ final routerProvider = Provider<GoRouter>((ref) {
             ),
             GoRoute(
               path: '/history',
-              builder: (context, state) =>
-                  const ChargingCreditScreen(historyOnly: true),
+              builder: (context, state) => const OwnedSessionHistoryScreen(),
             ),
             GoRoute(
               path: '/credit',
