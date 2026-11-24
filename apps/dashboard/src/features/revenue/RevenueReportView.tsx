@@ -33,6 +33,7 @@ import {
   periodDays,
   rowLabel,
 } from './revenueModel';
+import { saveCsv } from './saveCsv';
 
 export const REVENUE_PAGE_SIZE = 20;
 
@@ -84,21 +85,6 @@ function searchFields(groupBy: RevenueGroupBy, inStation: boolean): SearchField[
         },
       ];
   }
-}
-
-/** CSV keeps its UTF-8 BOM so Excel reads Vietnamese (fetch's text() drops it). */
-function saveCsv(text: string, filename: string) {
-  const blob = new Blob([text.startsWith('\uFEFF') ? text : `\uFEFF${text}`], {
-    type: 'text/csv;charset=utf-8',
-  });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = filename;
-  document.body.append(a);
-  a.click();
-  a.remove();
-  URL.revokeObjectURL(url);
 }
 
 const GROUPS: Record<RevenueScope, readonly RevenueGroupBy[]> = {
