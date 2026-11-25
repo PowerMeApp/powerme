@@ -126,8 +126,9 @@ describeDb('FE-14 admin platform summary (screen 27, UC-ADM-07)', () => {
     const credited = await topUp(account, 'credited', true); // second payment on credited (T116)
     const other = await topUp(account, 'credited');
     await q(
-      `INSERT INTO e_invoices(top_up_id,amount_vnd,vat_amount_vnd,status,invoice_no,issued_at) VALUES
-         ($1,100000,8000,'needs_review',NULL,NULL),($2,100000,8000,'issued','FE14-INV-1',now())`,
+      // vat_rate is NOT NULL since migration 0025 (#168, after this test was written).
+      `INSERT INTO e_invoices(top_up_id,amount_vnd,vat_amount_vnd,vat_rate,status,invoice_no,issued_at) VALUES
+         ($1,100000,8000,8,'needs_review',NULL,NULL),($2,100000,8000,8,'issued','FE14-INV-1',now())`,
       [credited, other],
     );
     await q(
@@ -187,6 +188,51 @@ describeDb('FE-14 admin platform summary (screen 27, UC-ADM-07)', () => {
       rfid_cards: { active: 2, blocked: 1, unlinked: 1 },
       billing_exceptions: { late_payments: 2, invoices_needs_review: 1, failed_refunds: 1 },
     });
+  });
+
+  it('review #169: lab data (LOADTEST01, @load / @rq1 drivers) is not counted; online = in service only', async () => {
+    const before = (await get('/summary', tokens['admin'])).body;
+    // NFR-03 / RQ1 lab data as lab/nfr03/load-data.mjs and lab/rq1/adapters/powerme.mjs leave it.
+    const [labOp] = await q(
+      "INSERT INTO operators(tax_code,legal_name,status) VALUES('LOADTEST01','Lab','suspended') RETURNING id",
+    );
+    const [labSite] = await q(
+      `INSERT INTO sites(site_code,operator_id,site_name,address,latitude,longitude)
+       VALUES('LOAD-TEST-01',$1,'Lab','x',-48.9,-123.4) RETURNING id`,
+      [labOp.id],
+    );
+    await q(
+      `INSERT INTO charge_points(serial_number,site_id,lifecycle,is_online,last_message_at)
+       VALUES('LOAD-0001',$1,'in_service',true,now()),('RQ1-T1-P-1',$1,'disabled',false,NULL)`,
+      [labSite.id],
+    );
+    for (const email of ['load-0001@load.powerme.test', 'card1@rq1.powerme.test']) {
+      const d = await user(email, 'driver', 'suspended');
+      await q(
+        "INSERT INTO drivers(user_id,consent_version,consent_given_at) VALUES($1,'v1',now())",
+        [d],
+      );
+      await q(
+        "INSERT INTO rfid_cards(card_identifier,card_kind,driver_id,status) VALUES($1,'online',$2,'blocked')",
+        [`LAB-${d}`, d],
+      );
+      const acc = (
+        await q('INSERT INTO credit_accounts(driver_id) VALUES($1) RETURNING id::text AS id', [d])
+      )[0].id as string;
+      await topUp(acc, 'expired', true);
+    }
+    expect((await get('/summary', tokens['admin'])).body).toEqual(before);
+
+    // A real charge point that talks but is not in service is not "online" (only in_service is).
+    await q(
+      `INSERT INTO charge_points(serial_number,lifecycle,is_online,last_message_at)
+       VALUES('FE14-TALKING','awaiting_connection',true,now())`,
+    );
+    const after = (await get('/summary', tokens['admin'])).body;
+    expect(after.charge_points.online).toBe(before.charge_points.online);
+    expect(after.charge_points.by_lifecycle.awaiting_connection).toBe(
+      before.charge_points.by_lifecycle.awaiting_connection + 1,
+    );
   });
 
   it('admin only: no token 401, staff 403, driver 403; no query, GET only', async () => {

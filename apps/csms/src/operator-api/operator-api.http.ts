@@ -201,7 +201,7 @@ export function createOperatorApiListener(
         toTransactionsCsv(await exportTransactions(db, txRoute)),
       );
     }
-    const adminRoute = surface === 'admin' ? matchAdminRoute(rest ?? '', url.searchParams) : null;
+    const adminRoute = surface === 'admin' ? matchAdminRoute(rest ?? '') : null;
     if (adminRoute) {
       allow(req, res, 'GET');
       send(res, 200, await runAdminSummary(db, monitoring.thresholds));
