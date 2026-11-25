@@ -158,6 +158,7 @@ export class ConsoleServer implements OnModuleInit, OnModuleDestroy {
               offlineAfterMs: chargePolicy.stationOfflineAfterMs ?? 900_000,
             },
             registry: this.queries.registry,
+            onboarding: this.onboarding,
           },
           // FE-12 (screen 23): the same service instances the console uses.
           { review: this.commands.review, unattributed: this.commands.unattributed },

@@ -1,3 +1,4 @@
+import { SESSION_CAPABILITIES_SQL } from './session-capabilities.js';
 import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { createHash, randomBytes } from 'node:crypto';
 import type { PoolClient } from 'pg';
@@ -1389,7 +1390,7 @@ export class DriverChargingService {
       await this.driver(c, driverId);
       const row = (
         await c.query(
-          `SELECT s.id,s.status,s.updated_at,s.energy_wh,s.meter_start_wh,s.meter_stop_wh,
+          `SELECT s.id,s.status,s.origin,s.payment_mode,${SESSION_CAPABILITIES_SQL},s.updated_at,s.energy_wh,s.meter_start_wh,s.meter_stop_wh,
         s.billing_mode,s.limit_value,greatest(0,floor(extract(epoch FROM (coalesce(s.received_stopped_at,now())-s.received_started_at))))::bigint AS elapsed_seconds,coalesce(i.billing_review_required,false) AS billing_review_required,j.state AS settlement_state,j.reason AS settlement_reason,j.next_attempt_at AS settlement_retry_at,i.reserved_vnd,cp.lifecycle,cp.is_online,cp.online_changed_at,cp.last_message_at,
         (SELECT max(t.price_per_kwh_vnd) FROM tariff_periods t WHERE t.operator_id=st.operator_id
           AND t.effective_from<=(now() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date

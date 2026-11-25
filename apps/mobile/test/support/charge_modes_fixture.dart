@@ -128,6 +128,8 @@ class ChargeModesFixture {
       case ('GET', final path) when path.startsWith('charges/'):
         if (pendingRead != null) return pendingRead!;
         return reply(200, chargeModeSnapshot(mode, started: confirmed));
+      case ('GET', 'sessions'):
+        return emptyActiveSessions(request);
       case ('GET', 'sessions/78/progress'):
         return reply(200, progress ?? chargeModeProgress(mode, limit));
       case ('POST', 'sessions/78/stop'):

@@ -37,7 +37,7 @@ Hội đồng Review 2 (29/10) hỏi: *"nhóm cần một simulation bắn tín 
 
 Tình huống chuỗi phải chạy được ở Review 3: HMI trụ đổi súng A sang `Charging` → CSMS ghi StatusNotification và MeterValues → trong **5 giây** app tài xế hiện "đang sạc · 1,2 kWh · còn khoảng 18–26 phút".
 
-## 2. Tám đường dẫn và hàm đã có
+## 2. Đường dẫn và hàm đã có
 
 | Đường dẫn | Hàm trong `DriverChargingService` | UC / BR | Trạng thái route |
 |---|---|---|---|
@@ -46,15 +46,16 @@ Tình huống chuỗi phải chạy được ở Review 3: HMI trụ đổi sún
 | `GET /connectors/{id}/time-left` | **chưa có** | FR-03; BR-P32, P40 | chưa — hình dạng chốt ở đây |
 | `POST /charges` | `start` | UC-CHG-02; D4; BR-P18, P19 | có (BE-22) |
 | `GET /charges/{key}` | `getStart` | UC-CHG-02 (mất mạng giữa chừng) | có (BE-22) |
+| `GET /sessions` | — (`driver/driver-sessions.ts`) | UC-CHG-04; UC-PAY-02 | có (T146), xem §5; không phụ thuộc ledger |
 | `GET /sessions/{id}/progress` | `progress` | UC-CHG-04 | có (BE-22); `estimated_cost_vnd` cận trên, `time_left` luôn null |
 | `POST /sessions/{id}/stop` | `stop` → `commandSnapshot` | UC-CHG-03; BR-P01 | có (BE-22) |
 | `GET /sessions/{id}/statement` | `statement` | BR-P45, P34 | có (BE-22) |
 | `GET /credit` | — (đọc `credit_accounts`, `driver/driver-credit.ts`) | UC-PAY-02; BR-P18 | có (BE-22) |
 | `GET /credit/transactions` | — (đọc `credit_transactions`) | UC-PAY-02 | có (BE-22) |
 | `GET /vehicle-models`, `POST /vehicles`, `PATCH`/`DELETE /vehicles/{id}` | — (`driver/vehicles.http.ts`) | UC-ACC-03; BR-P03, BR-P17 | có (BE-34), §13 |
-| `GET /billing/top-ups/quote` | `TopUpService.quote` (billing) | UC-PAY-01; BR-P35 | có (T32 Phần 5), **chưa dùng cho app** (§14) |
-| `POST /billing/top-ups` | `TopUpService.create` (billing) | UC-PAY-01; BR-P22, P35; WF-02 D2 | có (T32 Phần 5), **chưa dùng cho app** (§14) |
-| `GET /billing/top-ups/{id}` | `TopUpService.get` (billing) | UC-PAY-01 | có (T32 Phần 5), **chưa dùng cho app** (§14) |
+| `GET /billing/top-ups/quote` | `TopUpService.quote` (billing) | UC-PAY-01; BR-P35 | có (T32 Phần 5), dùng được cho app từ T32 Phần 8 (§14) |
+| `POST /billing/top-ups` | `TopUpService.create` (billing) | UC-PAY-01; BR-P22, P35; WF-02 D2 | có (T32 Phần 5), dùng được cho app từ T32 Phần 8 (§14) |
+| `GET /billing/top-ups/{id}` | `TopUpService.get` (billing) | UC-PAY-01 | có (T32 Phần 5), dùng được cho app từ T32 Phần 8 (§14) |
 | `POST /connectors/{id}/fault-reports` | `FaultService.reportFromDriver` | UC-CHG-05; BR-P42 | có (FE-17) — xem §15 |
 
 Route tài xế nằm **cùng tiến trình/cổng HTTP** với console `/api/admin/*` (mặc định 3000),
@@ -90,11 +91,21 @@ Tình huống: tài xế bấm "Bắt đầu", app mất 4G ngay sau khi gửi. 
 
 Dừng tương tự: `POST /sessions/{id}/stop` trả 202 với `command_status`; phiên chỉ `closed` khi trụ gửi StopTransaction (BR-P01). `timeout` không phải thất bại: operator có đường khôi phục T72.
 
-## 5. Phiên không do app tạo
+## 5. Phiên không do app tạo — T146, OpenAPI 0.15.0 (24/11/2026)
 
-README WP3 ghi: app phải xử lý được phiên nó không tạo ra (thẻ RFID online, mật khẩu HMI). Hợp đồng: `sessions/*` trả mọi phiên có `driver_id` là tài xế gọi, bất kể `origin`; `charges/*` chỉ có với phiên bắt đầu từ app. Thẻ ví (`station_wallet`) không gắn tài xế nên không xuất hiện trong app, đúng BR-P08.
+Tài xế đọc mọi phiên có driver_id khớp principal, bất kể origin và có/không có intent hoặc ledger. Phiên không gắn tài xế không xuất hiện. Card management thuộc Admin. Nội dung cũ về thẻ ví/station_wallet tại mục này đã được thay thế: PowerMe đã bỏ thẻ ví theo BR-P08/T110; T146 không thêm lại và T148 quyết toán RFID vẫn chưa triển khai.
 
-Câu trả lời một dòng cho hội đồng về RFID: **thẻ online** để tài xế bắt đầu phiên không cần điện thoại, tiền trừ từ credit như app; **thẻ ví** là trụ tự thu, CSMS chỉ ghi nhận để đối soát.
+GET /api/driver/v1/sessions?view=active|all&page=1&page_size=20 trả {items,total,page,page_size}. Mặc định all/1/20; page 1–100000, page_size 1–100. Chỉ ba key này, mỗi key một lần; key lạ/trùng (kể cả driver_id/id_tag), enum sai, khoảng trắng/control, số âm/0/phân số/quá giới hạn/SQL-shaped đều 400 invalid_input. Bearer và active-driver DB check chạy trước validation/method; method khác trả 405 với Allow: GET, OPTIONS. OPTIONS theo preflight CORS hiện có (204, không cần bearer).
+
+view=active: meter_stop_wh IS NULL và status thuộc pending, active, paused, stopping, orphaned, review. failed/closed/reconciled và mọi phiên đã có meter_stop_wh bị loại. view=all gồm cả RFID đã dừng nhưng chưa có ledger/bảng kê. Sắp received_started_at DESC, id DESC; total và items từ cùng SQL snapshot, trang vượt cuối items=[] nhưng total vẫn đúng.
+
+Mỗi item luôn có: session_id, status, origin, payment_mode, can_stop, statement_available, started_at, stopped_at, updated_at, energy_wh, amount_vnd, settlement_state, connector_id, connector_no, charge_point_display_code, site_id, site_name, vehicle_id, vehicle_label. ID là chuỗi bigint, thời gian ISO UTC. started_at/stopped_at dùng received_started_at/received_stopped_at. energy_wh là Wh chốt đã lưu, có thể null; tiến trình thực dùng GET progress. Wh/VND phải là số nguyên JS an toàn hoặc null, không làm tròn số vượt giới hạn. amount_vnd chỉ lấy charging_statements.amount_vnd đúng session/chủ và payment_mode=csms_billed; không có bảng kê thì null, không dùng estimate hay sessions.total_cost_vnd.
+
+site_id/site_name/vehicle_id/vehicle_label giữ null khi chưa biết. charge_point_display_code cũng giữ null nếu DB chưa gán mã. vehicle_label là plate_number của xe gắn phiên và cùng chủ; không điền xe mặc định cho RFID và không lộ xe của chủ khác. Không trả id_tag, UID, card ID, serial/credential riêng của trụ.
+
+Progress thêm origin, payment_mode, can_stop, statement_available; giữ các field cũ. can_stop chỉ true khi app_qr + intent cùng driver + meter_stop_wh null + status active/paused/orphaned. RFID/HMI/free-vend false; POST stop hiện vẫn 404 cho phiên không có intent, không đổi hành vi. Đây là eligibility, server luôn kiểm lại khi POST. statement_available chỉ true khi payment_mode=csms_billed và có charging_statements đúng session/driver; GET không tạo bảng kê hay gửi lệnh sạc.
+
+Flutter đã nối local với API 0.15.0 cho phát hiện phiên đang sạc, theo dõi chỉ đọc RFID và Lịch sử mọi nguồn, qua adapter thật và kiểm thử transport/widget. Đây chưa là bằng chứng API staging/đầu đọc/điện thoại thật; backend 0.15 chưa triển khai staging và cấu hình app giữ nguyên. T148, ghi nợ credit, loyalty và quy trình Admin đăng ký thẻ không thay đổi. Xem [plan, research và bằng chứng kiểm thử](../tasks/t146-driver-session-discovery.md) và [kiểm chứng Flutter/giới hạn](../../apps/mobile/README.md#t146--owned-session-discovery-and-rfid-observation-2411).
 
 ## 6. Xác thực
 
@@ -321,13 +332,15 @@ Content-Type: application/json
 
 ## 14. Top-up (WF-02) — nạp Charging Credit qua VNPay (T32 Phần 5)
 
-> **Dùng được cho app từ T32 Phần 8 (14/11).** Từ T32 Phần 6 (13/11) đã có IPN
-> (`/billing/vnpay/ipn`, cộng tiền) và trang return `/billing/vnpay/return` (chỉ báo "đang xác
-> nhận", app poll `GET /billing/top-ups/{id}`). Từ Phần 8, top-up `pending` quá `expires_at` được
-> vòng quét hỏi VNPay (querydr) từ `expires_at + 2 phút`, hỏi lại tới tối đa `expires_at + 60 phút`
-> khi VNPay chưa trả lời dứt khoát, rồi chuyển `credited` / `failed` / `expired`; trong lúc đó tạo
-> top-up mới bị chặn `pending_top_up_confirming`. Còn thiếu: e-invoice (Phần 7), chưa thử sandbox
-> VNPay thật.
+> **Dùng được cho app từ T32 Phần 8 (14/11).** IPN `/billing/vnpay/ipn` và trang return
+> `/billing/vnpay/return` có từ Phần 6 (13/11); return chỉ báo "đang xác nhận", app poll
+> `GET /billing/top-ups/{id}`. Top-up `pending` quá `expires_at` được hỏi VNPay (querydr) theo lịch
+> T32 Phần 8c (#194, 19/11): `expires_at` + 2 / 15 / 30 / 45 / 60 phút, thêm +75 chỉ khi lần +60
+> trả RC 94; hết lịch → `expired`. Trong lúc chờ, tạo top-up mới bị chặn
+> `pending_top_up_confirming`. Hoá đơn điện tử có từ Phần 7 (17/11), hiện dùng stub
+> (`StubEInvoiceProvider`); chưa có route xem hoá đơn cho app. Sandbox VNPay: querydr đã thử từ máy
+> dev ở Việt Nam (16/11); staging VM không gọi ra được `sandbox.vnpayment.vn` (xem
+> `infra/staging/README.md`, mục VNPay sandbox).
 
 Route ở `driver/top-ups.http.ts`, luật ở `billing/top-up.service.ts`; ánh xạ lỗi ở `topUpErrorJson`.
 Luật: WF-02 decisions D2, BR-P22 theo ADR-0013, BR-P35.
@@ -349,8 +362,8 @@ Luật: WF-02 decisions D2, BR-P22 theo ADR-0013, BR-P35.
    - `top_up_pending` → hỏi "Bạn còn giao dịch nạp chưa thanh toán, tiếp tục?" và mở lại
      `payment_url` trong body lỗi;
    - `pending_top_up_confirming` → báo "Giao dịch trước đang được xác nhận, thử lại sau ít phút"
-     (thường ~2 phút sau `expires_at`, tối đa ~1 giờ khi ngân hàng xác nhận chậm). Không có
-     `payment_url`.
+     (thường ~2 phút sau `expires_at`; khi ngân hàng xác nhận chậm tối đa ~1 giờ, ~1 giờ 15 khi
+     VNPay trả RC 94). Không có `payment_url`.
 4. **Kết quả.** Return URL chỉ để hiển thị — **không** coi là đã nạp. Poll
    `GET /billing/top-ups/{top_up_id}` tới khi `status` rời `pending` (`credited` → đọc lại
    `GET /credit`; `failed` / `expired` → báo chưa nạp được). Tiền chỉ được cộng khi VNPay báo qua
@@ -377,7 +390,7 @@ Luật (WF-04-PLAN Q75–Q81, 11/11/2026):
 - Súng (hoặc cả trụ) đang có sự cố mở → báo cáo gắn vào sự cố đó.
 - **2 tài xế khác nhau trong 2 giờ**, hoặc **1 tài xế khi súng `Faulted` / `Unavailable` hoặc trụ Offline** → CSMS tạo sự cố `driver_report`, báo Operator, **ẩn súng** khỏi `/stations` (cả `sort=smart`) và gắn mọi báo cáo chờ trong 2 giờ.
 - Cùng một tài xế báo nhiều lần chỉ tính một. Ở đường một tài xế, trong 2 giờ một tài xế chỉ tự mở được **một** sự cố trên một trụ; báo cáo ở súng khác vẫn `201`, `reported_issue: false`, chờ tài xế thứ hai (T131).
-- Nhãn hiện ở `GET /connectors/by-code/{code}/{no}` (`reported_issue`). Nhãn xoá khi Operator đóng sự cố, hoặc **một phiên trên súng hoàn tất bình thường** (bắt đầu sau khi có sự cố theo giờ trụ đã đối soát, > 0 Wh, không dừng vì EmergencyStop / PowerLoss / Other). Súng đổi trạng thái (kể cả `Available`) **không** xoá nhãn (BR-P42, D-G 14/11) — ADR-0019.
+- Nhãn hiện ở `GET /connectors/by-code/{code}/{no}` (`reported_issue`). Nhãn xoá khi Operator đóng sự cố, hoặc **một phiên trên súng hoàn tất bình thường** (bắt đầu sau khi có sự cố theo giờ trụ đã đối soát, > 0 Wh, không dừng vì EmergencyStop / PowerLoss / Other). Súng đổi trạng thái (kể cả `Available`) **không** xoá nhãn (BR-P42, D-G 14/11); báo cáo gắn vào một sự cố của trụ (Faulted / Offline) cũng giữ nhãn khi sự cố đó tự đóng — chuyển sang một sự cố `driver_report` (T141, D-X 17/11) — ADR-0019.
 
 ## 16. T96 — xếp hạng gợi ý theo đường bộ Vietmap
 

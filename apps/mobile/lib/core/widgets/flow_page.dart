@@ -15,9 +15,11 @@ class FlowPage extends StatelessWidget {
     this.backTooltip = 'Quay lại',
     this.onBack,
     this.backLocation = '/',
+    this.action,
   });
   final String title;
   final List<Widget> children;
+  final Widget? action;
   final bool showBack;
   final String backTooltip;
   final String backLocation;
@@ -39,7 +41,27 @@ class FlowPage extends StatelessWidget {
             )
           : null,
     ),
-    body: AppPage(children: children),
+    body: action == null
+        ? AppPage(children: children)
+        : Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Expanded(child: AppPage(children: children)),
+              if (action != null)
+                SafeArea(
+                  top: false,
+                  child: Center(
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 560),
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(20, 8, 20, 8),
+                        child: SizedBox(width: double.infinity, child: action),
+                      ),
+                    ),
+                  ),
+                ),
+            ],
+          ),
   );
 }
 

@@ -35,6 +35,20 @@ export const STOPPED_SQL = `s.status IN ('closed','review','reconciled')`;
 export const UNSETTLED_REASON_SQL = `(CASE WHEN j.state='pending' THEN j.reason
   WHEN j.state='posted' THEN 'posted_without_debit' ELSE 'ineligible' END)`;
 
+/** Vietnam calendar day of `PERIOD_AT_SQL`. */
+export const PERIOD_DAY_SQL = `(${PERIOD_AT_SQL} AT TIME ZONE 'Asia/Ho_Chi_Minh')::date`;
+
+/**
+ * Sessions with their charge point, site (inner: no site → no bucket), Operator, `session_debit`
+ * (`d`) and settlement job (`j`). Shared by the revenue report and T108b `transactions`.
+ */
+export const STOPPED_FROM_SQL = `FROM sessions s
+       JOIN charge_points cp ON cp.id=s.charge_point_id
+       JOIN sites st ON st.id=cp.site_id
+       JOIN operators o ON o.id=st.operator_id
+       LEFT JOIN credit_transactions d ON d.session_id=s.id AND d.transaction_type='session_debit'
+       LEFT JOIN charge_settlement_jobs j ON j.session_id=s.id`;
+
 /** [from 00:00, to + 1 day 00:00) Vietnam time, from two `date` parameters. */
 export const periodBoundsSql = (from: string, to: string) =>
   `${PERIOD_AT_SQL} >= (${from}::date::timestamp AT TIME ZONE 'Asia/Ho_Chi_Minh')
@@ -82,7 +96,8 @@ const GROUPS: Record<RevenueGroupBy, { cols: RowField[]; key: RowField; order: s
 const OPERATOR_GROUPS: readonly RevenueGroupBy[] = ['charge_point', 'site', 'day'];
 const ADMIN_GROUPS: readonly RevenueGroupBy[] = ['operator', 'site', 'charge_point', 'day'];
 const MAX_DAYS = 366;
-const ID = /^[1-9][0-9]{0,18}$/;
+/** Contract `Id`: bigint as a decimal string. */
+export const ID = /^[1-9][0-9]{0,18}$/;
 const DAY = /^[1-9][0-9]{3}-[0-9]{2}-[0-9]{2}$/;
 
 export interface RevenueQuery {
@@ -114,27 +129,32 @@ export function matchRevenueRoute(
   const groups = surface === 'operator' ? OPERATOR_GROUPS : ADMIN_GROUPS;
   const groupBy = query.get('group_by') ?? groups[0]!;
   const id = query.get(filter);
-  const from = query.get('from');
-  const to = query.get('to');
-  const fromMs = dayMs(from);
-  const toMs = dayMs(to);
-  if (
-    !(groups as readonly string[]).includes(groupBy) ||
-    (id !== null && !ID.test(id)) ||
-    fromMs === null ||
-    toMs === null
-  )
+  if (!(groups as readonly string[]).includes(groupBy) || (id !== null && !ID.test(id)))
     throw new AuthError(400, 'invalid_input');
-  if (fromMs > toMs || (toMs - fromMs) / 86_400_000 + 1 > MAX_DAYS)
-    throw new AuthError(400, 'invalid_period');
+  const { from, to } = parsePeriod(query);
   return {
     format: m[1] ? 'csv' : 'json',
-    from: from!,
-    to: to!,
+    from,
+    to,
     groupBy: groupBy as RevenueGroupBy,
     siteId: surface === 'operator' ? id : null,
     operatorId: surface === 'admin' ? id : null,
   };
+}
+
+/**
+ * `from` and `to`: real days, required → else 400 `invalid_input`; from > to or longer than 366
+ * days (both ends counted) → 400 `invalid_period`. Shared with T108b `transactions`.
+ */
+export function parsePeriod(query: URLSearchParams): { from: string; to: string } {
+  const from = query.get('from');
+  const to = query.get('to');
+  const fromMs = dayMs(from);
+  const toMs = dayMs(to);
+  if (fromMs === null || toMs === null) throw new AuthError(400, 'invalid_input');
+  if (fromMs > toMs || (toMs - fromMs) / 86_400_000 + 1 > MAX_DAYS)
+    throw new AuthError(400, 'invalid_period');
+  return { from: from!, to: to! };
 }
 
 /** A real calendar day `YYYY-MM-DD` → its UTC midnight in ms; null otherwise. */
@@ -205,15 +225,10 @@ export async function revenueReport(db: Db, p: RevenueParams): Promise<RevenueRe
     `WITH k AS (
        SELECT o.id AS operator_id,o.legal_name AS operator_name,st.id AS site_id,st.site_name,
          cp.id AS charge_point_id,cp.serial_number,
-         (${PERIOD_AT_SQL} AT TIME ZONE 'Asia/Ho_Chi_Minh')::date AS day,
+         ${PERIOD_DAY_SQL} AS day,
          ${KIND_SQL} AS kind,${UNSETTLED_REASON_SQL} AS reason,
          s.energy_wh,abs(d.amount_vnd) AS amount_vnd
-       FROM sessions s
-       JOIN charge_points cp ON cp.id=s.charge_point_id
-       JOIN sites st ON st.id=cp.site_id
-       JOIN operators o ON o.id=st.operator_id
-       LEFT JOIN credit_transactions d ON d.session_id=s.id AND d.transaction_type='session_debit'
-       LEFT JOIN charge_settlement_jobs j ON j.session_id=s.id
+       ${STOPPED_FROM_SQL}
        WHERE ${STOPPED_SQL}
          AND ($3::bigint IS NULL OR st.operator_id=$3)
          AND ($4::bigint IS NULL OR st.id=$4)
@@ -257,7 +272,7 @@ export async function revenueReport(db: Db, p: RevenueParams): Promise<RevenueRe
   };
 }
 
-function bucket(r: {
+export function bucket(r: {
   csms_billed_session_count: number;
   csms_billed_energy_wh: string;
   csms_billed_revenue_vnd: string;
@@ -274,7 +289,7 @@ function bucket(r: {
 }
 
 /** Contract: VND and Wh are JSON integers; a sum past 2^53 − 1 is a 500, never a rounded number. */
-function safe(text: string): number {
+export function safe(text: string): number {
   const n = Number(text);
   if (!Number.isSafeInteger(n)) throw new Error('revenue_out_of_range');
   return n;

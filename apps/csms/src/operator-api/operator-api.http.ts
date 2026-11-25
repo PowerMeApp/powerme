@@ -9,8 +9,11 @@
  *   GET  /api/operator/v1/sessions?queue=, POST …/sessions/{id}/assign|close|resolve  (FE-12, screen 23,
  *        operator-sessions.ts; logic in Trí's SessionReviewService / UnattributedSessionService)
  *   GET  /api/operator/v1/revenue[.csv], GET /api/admin/v1/revenue[.csv]  (T108a, revenue-report.ts)
+ *   GET  /api/admin/v1/transactions[.csv]  (T108b, admin-transactions.ts)
  *   GET  /api/admin/v1/me     admin
  *   GET  /api/admin/v1/summary  admin  (FE-14, screen 27, admin-platform.ts)
+ *   POST /api/operator/v1/charge-points/onboard, GET|POST /api/admin/v1/charge-points  (BE-44, WF-05,
+ *        charge-point-onboarding.ts → ChargePointOnboardingService)
  * RolesGuard runs before route matching, so an unknown path without a valid token is 401, not 404.
  * CORS: localhost origins only (Vite dev server). JSON: snake_case, string ids, `{ error, detail }`.
  */
@@ -22,6 +25,8 @@ import { AuthError, StaffAccounts, type DashboardAuthConfig } from '../users/aut
 import { rolesGuard, type Principal } from '../users/roles-guard.js';
 import type { ConnectionRegistry } from '../ocpp-gateway/connection-registry.js';
 import { matchAdminRoute, runAdminSummary } from './admin-platform.js';
+import type { ChargePointOnboardingService } from '../stations/charge-point-onboarding.service.js';
+import { matchOnboardingRoute, runOnboardingRoute } from './charge-point-onboarding.js';
 import { matchFaultRoute, runFaultRoute } from './operator-faults.js';
 import { matchSessionRoute, runSessionRoute, type SessionQueueDeps } from './operator-sessions.js';
 import {
@@ -29,14 +34,22 @@ import {
   runMonitoringRoute,
   type MonitoringThresholds,
 } from './operator-monitoring.js';
+import {
+  exportTransactions,
+  listTransactions,
+  matchTransactionsRoute,
+} from './admin-transactions.js';
 import { toRevenueCsv } from './revenue-csv.js';
 import { matchRevenueRoute, revenueReport } from './revenue-report.js';
+import { toTransactionsCsv } from './transactions-csv.js';
 
 /** FE-03: what the monitoring routes need besides the DB. */
 export interface MonitoringDeps {
   thresholds: MonitoringThresholds;
   /** `connected` is true only when this process holds the socket. */
   registry?: ConnectionRegistry;
+  /** BE-44 (WF-05). Missing → onboarding POST routes answer 503 `onboarding_unavailable`. */
+  onboarding?: ChargePointOnboardingService;
 }
 
 /** Same thresholds as the Driver API (`loadChargePolicy`): 2 × heartbeat, 900 s. */
@@ -50,7 +63,7 @@ export const OPERATOR_API_PATH = /^\/api\/(auth|operator|admin)\/v1(?:\/|\?|$)/;
 
 /** Paths that take a query string (contract §2.2a: RolesGuard runs first, then the parameters). */
 const QUERY_PATHS =
-  /^\/api\/(?:operator\/v1\/(?:faults|charge-points|sessions|revenue(?:\.csv)?)|admin\/v1\/revenue(?:\.csv)?)$/;
+  /^\/api\/(?:operator\/v1\/(?:faults|charge-points|sessions|revenue(?:\.csv)?)|admin\/v1\/(?:revenue|transactions)(?:\.csv)?)$/;
 const LOCAL_ORIGIN = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/;
 const BODY_LIMIT = 16 * 1024;
 
@@ -95,8 +108,27 @@ export function createOperatorApiListener(
       return;
     }
     const url = new URL(req.url ?? '', 'http://operator-api.local');
+    // BE-44 (WF-05): own block, RolesGuard first, then method, body and query (contract §2.2a).
+    const onboardingRoute = matchOnboardingRoute(url.pathname, req.method);
+    if (onboardingRoute) {
+      const principal = await rolesGuard(req, onboardingRoute.role, db, config, driverConfig);
+      if (!(onboardingRoute.methods as readonly string[]).includes(req.method ?? '')) {
+        res.setHeader('Allow', `${onboardingRoute.methods.join(', ')}, OPTIONS`);
+        throw new AuthError(405, 'method_not_allowed');
+      }
+      const body = req.method === 'POST' ? await readJsonObject(req, res) : undefined;
+      const result = await runOnboardingRoute(
+        onboardingRoute,
+        principal,
+        db,
+        url.searchParams,
+        monitoring.onboarding,
+        body,
+      );
+      return send(res, result.status, result.body);
+    }
     const [, surface, rest] = /^\/api\/(auth|operator|admin)\/v1(\/.*)?$/.exec(url.pathname) ?? [];
-    // Only the fault, charge point, session and revenue routes take a query; everywhere else a query is 400.
+    // Only the fault, charge point, session, revenue and transactions routes take a query; elsewhere it is 400.
     if (url.search && !QUERY_PATHS.test(url.pathname)) throw new AuthError(400, 'invalid_input');
 
     if (surface === 'auth') {
@@ -167,6 +199,19 @@ export function createOperatorApiListener(
         res,
         `revenue_${revenueRoute.from}_${revenueRoute.to}.csv`,
         toRevenueCsv(report),
+      );
+    }
+    const txRoute =
+      surface === 'admin' ? matchTransactionsRoute(rest ?? '', url.searchParams) : null;
+    if (txRoute) {
+      allow(req, res, 'GET');
+      if (txRoute.format === 'json')
+        return send(res, 200, await listTransactions(db, txRoute, txRoute.page, txRoute.pageSize));
+      // Over the row cap the service throws 400 `export_too_large` before any byte is sent (K10).
+      return sendCsv(
+        res,
+        `transactions_${txRoute.from}_${txRoute.to}.csv`,
+        toTransactionsCsv(await exportTransactions(db, txRoute)),
       );
     }
     const adminRoute = surface === 'admin' ? matchAdminRoute(rest ?? '', url.searchParams) : null;

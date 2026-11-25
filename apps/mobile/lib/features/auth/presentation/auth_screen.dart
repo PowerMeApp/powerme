@@ -3,58 +3,114 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../../core/theme/powerme_theme.dart';
+import '../../../core/l10n/app_copy.dart';
+import '../../profile/domain/driver_profile.dart';
+import '../domain/auth_input.dart';
 import '../../../core/widgets/brand_mark.dart';
 import '../../../core/widgets/flow_page.dart';
 import '../application/auth_controller.dart';
 import '../domain/auth_repository.dart';
 
-String authFailureText(AuthFailure failure) => switch (failure) {
-  AuthFailure.invalidCredentials => 'Email hoặc mật khẩu chưa đúng.',
-  AuthFailure.emailInUse =>
-    'Email này đã được đăng ký. Hãy đăng nhập hoặc dùng email khác.',
-  AuthFailure.consentRequired => 'Vui lòng đồng ý xử lý dữ liệu để tiếp tục.',
-  AuthFailure.invalidRegistration =>
-    'Vui lòng kiểm tra thông tin tài khoản và xe.',
-  AuthFailure.expired => 'Phiên đăng nhập đã kết thúc. Vui lòng đăng nhập lại.',
-  AuthFailure.unavailable => 'Chưa thể đăng nhập. Vui lòng thử lại.',
-  AuthFailure.accessDenied => 'Tài khoản hiện không có quyền truy cập.',
-  AuthFailure.connection => 'Không kết nối được PowerMe. Vui lòng thử lại.',
-  AuthFailure.rateLimited => 'Bạn đã thử quá nhiều lần. Vui lòng thử lại sau.',
-  AuthFailure.profileUnavailable =>
-    'Chưa tải được thông tin tài khoản. Vui lòng đăng nhập lại.',
-  AuthFailure.registrationUnavailable => 'Đăng ký hiện chưa khả dụng.',
-  AuthFailure.registrationUnconfirmed =>
-    'Chưa xác nhận được kết quả đăng ký. Hãy thử đăng nhập trước khi đăng ký lại.',
-};
+String authFailureText(
+  AuthFailure failure, [
+  AppCopy copy = const AppCopy(AppLanguage.vietnamese),
+]) {
+  final (vi, en) = switch (failure) {
+    AuthFailure.invalidCredentials => (
+      'Email, số điện thoại hoặc mật khẩu chưa đúng.',
+      'Email, phone number or password is incorrect.',
+    ),
+    AuthFailure.emailInUse => (
+      'Email này đã được đăng ký. Hãy đăng nhập hoặc dùng email khác.',
+      'This email is already registered. Sign in or use another email.',
+    ),
+    AuthFailure.phoneInUse => (
+      'Số điện thoại này đã được đăng ký. Hãy đăng nhập bằng số này hoặc dùng số khác.',
+      'This phone number is already registered. Sign in with it or use another number.',
+    ),
+    AuthFailure.accountLocked => (
+      'Tài khoản đã bị khóa. Vui lòng liên hệ hỗ trợ PowerMe.',
+      'Your account is locked. Please contact PowerMe support.',
+    ),
+    AuthFailure.consentRequired => (
+      'Vui lòng đồng ý xử lý dữ liệu để tiếp tục.',
+      'Please consent to data processing to continue.',
+    ),
+    AuthFailure.invalidRegistration => (
+      'Vui lòng kiểm tra thông tin tài khoản và xe.',
+      'Please check your account and vehicle details.',
+    ),
+    AuthFailure.expired => (
+      'Phiên đăng nhập đã kết thúc. Vui lòng đăng nhập lại.',
+      'Your session has ended. Please sign in again.',
+    ),
+    AuthFailure.unavailable => (
+      'Chưa thể đăng nhập. Vui lòng thử lại.',
+      'Unable to sign in. Please try again.',
+    ),
+    AuthFailure.accessDenied => (
+      'Tài khoản hiện không có quyền truy cập.',
+      'Your account does not have access.',
+    ),
+    AuthFailure.connection => (
+      'Không kết nối được PowerMe. Vui lòng thử lại.',
+      'Unable to connect to PowerMe. Please try again.',
+    ),
+    AuthFailure.rateLimited => (
+      'Bạn đã thử quá nhiều lần. Vui lòng thử lại sau.',
+      'Too many attempts. Please try again later.',
+    ),
+    AuthFailure.profileUnavailable => (
+      'Chưa tải được thông tin tài khoản. Vui lòng đăng nhập lại.',
+      'Unable to load your account. Please sign in again.',
+    ),
+    AuthFailure.registrationUnavailable => (
+      'Đăng ký hiện chưa khả dụng.',
+      'Registration is currently unavailable.',
+    ),
+    AuthFailure.registrationUnconfirmed => (
+      'Chưa xác nhận được kết quả đăng ký. Hãy thử đăng nhập trước khi đăng ký lại.',
+      'Registration is unconfirmed. Try signing in before registering again.',
+    ),
+  };
+  return copy.text(vi, en);
+}
 
 class AuthScreen extends ConsumerStatefulWidget {
-  const AuthScreen({super.key});
+  const AuthScreen({
+    super.key,
+    this.copy = const AppCopy(AppLanguage.vietnamese),
+  });
+  final AppCopy copy;
   @override
   ConsumerState<AuthScreen> createState() => _AuthScreenState();
 }
 
 class _AuthScreenState extends ConsumerState<AuthScreen> {
   final _form = GlobalKey<FormState>();
-  final _email = TextEditingController();
+  final _identifier = TextEditingController();
   final _password = TextEditingController();
   bool _visible = false;
   @override
   void dispose() {
-    _email.dispose();
+    _identifier.dispose();
     _password.dispose();
     super.dispose();
   }
 
   void _submit() {
+    final auth = ref.read(authControllerProvider);
+    if (auth.busy || auth.restoring) return;
     if (_form.currentState!.validate()) {
       ref
           .read(authControllerProvider.notifier)
-          .signIn(_email.text, _password.text);
+          .signIn(_identifier.text, _password.text);
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    final copy = widget.copy;
     final auth = ref.watch(authControllerProvider);
     final registration = ref.watch(registrationOptionsProvider);
     final text = Theme.of(context).textTheme;
@@ -80,13 +136,16 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
                     Semantics(
                       header: true,
                       child: Text(
-                        'Chào mừng trở lại',
+                        copy.text('Chào mừng trở lại', 'Welcome back'),
                         style: text.headlineLarge,
                       ),
                     ),
                     const SizedBox(height: 8),
                     Text(
-                      'Đăng nhập để tiếp tục hành trình của bạn.',
+                      copy.text(
+                        'Đăng nhập để tiếp tục hành trình của bạn.',
+                        'Sign in to continue your journey.',
+                      ),
                       style: mutedBody,
                     ),
                     const SizedBox(height: 24),
@@ -97,29 +156,41 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
                           crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
                             _LoginField(
-                              label: 'Email',
+                              label: copy.text(
+                                'Email hoặc số điện thoại',
+                                'Email or phone number',
+                              ),
                               child: TextFormField(
                                 key: const Key('auth-email'),
-                                controller: _email,
+                                autovalidateMode:
+                                    AutovalidateMode.onUserInteraction,
+                                controller: _identifier,
                                 enabled: !auth.busy,
-                                keyboardType: TextInputType.emailAddress,
+                                keyboardType: TextInputType.text,
+                                autocorrect: false,
+                                enableSuggestions: false,
                                 autofillHints: const [AutofillHints.username],
                                 textInputAction: TextInputAction.next,
                                 decoration: _loginInput(
-                                  hint: 'email@example.com',
+                                  hint: copy.text(
+                                    'Email / 0901 234 567',
+                                    'Email / +84 901 234 567',
+                                  ),
                                   icon: Icons.alternate_email_rounded,
                                 ),
                                 validator: (value) =>
-                                    RegExp(
-                                      r'^[^\s@]+@[^\s@]+\.[^\s@]+$',
-                                    ).hasMatch(value?.trim() ?? '')
+                                    isEmailInput(value ?? '') ||
+                                        isPhoneNumberInput(value ?? '')
                                     ? null
-                                    : 'Nhập email hợp lệ.',
+                                    : copy.text(
+                                        'Nhập email hoặc số điện thoại hợp lệ.',
+                                        'Enter a valid email or phone number.',
+                                      ),
                               ),
                             ),
                             const SizedBox(height: 16),
                             _LoginField(
-                              label: 'Mật khẩu',
+                              label: copy.text('Mật khẩu', 'Password'),
                               child: TextFormField(
                                 key: const Key('auth-password'),
                                 controller: _password,
@@ -128,16 +199,26 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
                                 autocorrect: false,
                                 enableSuggestions: false,
                                 autofillHints: const [AutofillHints.password],
+                                textInputAction: TextInputAction.done,
                                 onFieldSubmitted: (_) => _submit(),
                                 decoration: _loginInput(
                                   hint: '••••••••',
                                   icon: Icons.lock_outline_rounded,
                                   suffixIcon: IconButton(
                                     tooltip: _visible
-                                        ? 'Ẩn mật khẩu'
-                                        : 'Hiện mật khẩu',
-                                    onPressed: () =>
-                                        setState(() => _visible = !_visible),
+                                        ? copy.text(
+                                            'Ẩn mật khẩu',
+                                            'Hide password',
+                                          )
+                                        : copy.text(
+                                            'Hiện mật khẩu',
+                                            'Show password',
+                                          ),
+                                    onPressed: auth.busy
+                                        ? null
+                                        : () => setState(
+                                            () => _visible = !_visible,
+                                          ),
                                     icon: Icon(
                                       _visible
                                           ? Icons.visibility_off_outlined
@@ -148,14 +229,23 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
                                 ),
                                 validator: (value) =>
                                     value == null || value.isEmpty
-                                    ? 'Nhập mật khẩu.'
+                                    ? copy.text(
+                                        'Nhập mật khẩu.',
+                                        'Enter your password.',
+                                      )
                                     : null,
                               ),
                             ),
                             if (auth.failure != null)
-                              FailureNotice(authFailureText(auth.failure!)),
+                              FailureNotice(
+                                authFailureText(auth.failure!, copy),
+                              ),
                             const SizedBox(height: 24),
-                            _LoginSubmit(busy: auth.busy, onPressed: _submit),
+                            _LoginSubmit(
+                              busy: auth.busy,
+                              onPressed: _submit,
+                              copy: copy,
+                            ),
                           ],
                         ),
                       ),
@@ -166,7 +256,13 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
                         alignment: WrapAlignment.center,
                         crossAxisAlignment: WrapCrossAlignment.center,
                         children: [
-                          Text('Chưa có tài khoản?', style: mutedBody),
+                          Text(
+                            copy.text(
+                              'Chưa có tài khoản?',
+                              'Don’t have an account?',
+                            ),
+                            style: mutedBody,
+                          ),
                           TextButton(
                             key: const Key('auth-register'),
                             style: TextButton.styleFrom(
@@ -183,13 +279,18 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
                                         .clearFailure();
                                     context.go('/register');
                                   },
-                            child: const Text('Đăng ký ngay'),
+                            child: Text(
+                              copy.text('Đăng ký ngay', 'Register now'),
+                            ),
                           ),
                         ],
                       )
                     else
                       Text(
-                        'Đăng ký hiện chưa khả dụng.',
+                        copy.text(
+                          'Đăng ký hiện chưa khả dụng.',
+                          'Registration is currently unavailable.',
+                        ),
                         textAlign: TextAlign.center,
                         style: mutedBody,
                       ),
@@ -251,7 +352,13 @@ InputDecoration _loginInput({
 );
 
 class _LoginSubmit extends StatelessWidget {
-  const _LoginSubmit({required this.busy, required this.onPressed});
+  const _LoginSubmit({
+    required this.busy,
+    required this.onPressed,
+    required this.copy,
+  });
+
+  final AppCopy copy;
 
   final bool busy;
   final VoidCallback onPressed;
@@ -267,8 +374,10 @@ class _LoginSubmit extends StatelessWidget {
           child: Semantics(
             liveRegion: busy,
             child: Text(
-              busy ? 'Đang đăng nhập…' : 'ĐĂNG NHẬP',
-              semanticsLabel: busy ? null : 'Đăng nhập',
+              busy
+                  ? copy.text('Đang đăng nhập…', 'Signing in…')
+                  : copy.text('ĐĂNG NHẬP', 'SIGN IN'),
+              semanticsLabel: busy ? null : copy.text('Đăng nhập', 'Sign in'),
               textAlign: TextAlign.center,
             ),
           ),

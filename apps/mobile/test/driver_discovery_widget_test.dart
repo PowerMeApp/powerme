@@ -495,6 +495,7 @@ void main() {
           201,
           (vehicles..add(leafVehicle())).single,
         ),
+        ('GET', 'sessions') => emptyActiveSessions(r),
         ('GET', 'stations') => reply(200, page([])),
         _ => throw StateError('Unexpected route'),
       },
@@ -945,6 +946,7 @@ void main() {
           ('GET', 'stations') when query['q'] == 'old' => oldQuery.future,
           ('GET', 'stations') when query['q'] == 'old vehicle' =>
             oldVehicle.future,
+          ('GET', 'sessions') => emptyActiveSessions(r),
           ('GET', 'stations') => reply(
             200,
             page([station('31', 'Kết quả ${query['vehicle_id']}')]),

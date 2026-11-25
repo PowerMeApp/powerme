@@ -33,6 +33,10 @@ class ChargeProgress {
     required this.quality,
     required this.updatedAt,
     required this.limitValue,
+    this.origin,
+    this.paymentMode,
+    this.serverCanStop,
+    this.statementAvailable,
     this.billingMode,
     this.billingModeMissing = false,
     this.elapsedSeconds,
@@ -46,6 +50,10 @@ class ChargeProgress {
     required this.billingReviewRequired,
   });
 
+  final SessionOrigin? origin;
+  final PaymentMode? paymentMode;
+  final bool? serverCanStop;
+  final bool? statementAvailable;
   final SessionState status;
   final SettlementState settlement;
   final ConnectionState connection;
@@ -65,8 +73,16 @@ class ChargeProgress {
   final bool billingReviewRequired;
 
   ChargeProgress withStartContext(StartRequest? request) {
-    if (!billingModeMissing || request == null) return this;
+    if (!billingModeMissing ||
+        request == null ||
+        (origin != null && origin != SessionOrigin.appQr)) {
+      return this;
+    }
     return ChargeProgress(
+      origin: origin,
+      paymentMode: paymentMode,
+      serverCanStop: serverCanStop,
+      statementAvailable: statementAvailable,
       status: status,
       settlement: settlement,
       connection: connection,
@@ -102,14 +118,26 @@ class ChargeProgress {
       status == SessionState.review ||
       settlement == SettlementState.review ||
       billingReviewRequired;
+
+  /// Chỉ phiên khởi động từ app mới được CSMS tính tiền vào Charging Credit;
+  /// phiên RFID/HMI/free-vend không có tạm tính để hiển thị.
+  bool get billedThroughApp => origin == null || origin == SessionOrigin.appQr;
   bool get canStop =>
-      !inReview && meterStopWh == null && isStoppableStatus(status);
+      (origin == null || origin == SessionOrigin.appQr) &&
+      serverCanStop != false &&
+      !inReview &&
+      meterStopWh == null &&
+      isStoppableStatus(status);
   bool get statementEligible =>
       closed &&
       !inReview &&
       meterStopWh != null &&
-      settlement == SettlementState.posted;
+      settlement == SettlementState.posted &&
+      statementAvailable != false;
   bool get keepPolling =>
+      !(origin != null &&
+          origin != SessionOrigin.appQr &&
+          meterStopWh != null) &&
       !inReview &&
       status != SessionState.failed &&
       !(closed &&

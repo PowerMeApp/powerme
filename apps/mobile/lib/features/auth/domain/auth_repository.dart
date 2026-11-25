@@ -5,6 +5,8 @@ enum AuthFailure {
   invalidRegistration,
   consentRequired,
   emailInUse,
+  phoneInUse,
+  accountLocked,
   unavailable,
   expired,
   accessDenied,
@@ -25,19 +27,21 @@ class Registration {
     required this.displayName,
     required this.email,
     required this.password,
+    this.phoneNumber,
     this.vehicle,
     required this.consent,
   });
   final String displayName;
   final String email;
   final String password;
+  final String? phoneNumber;
   final VehicleDraft? vehicle;
   final bool consent;
 }
 
 abstract interface class AuthRepository {
   Future<String?> restore();
-  Future<String> signIn(String email, String password);
+  Future<String> signIn(String identifier, String password);
   Future<String> register(Registration registration);
   void signOut();
 }

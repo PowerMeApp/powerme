@@ -13,7 +13,7 @@ import 'package:driver_app/features/auth/application/auth_controller.dart';
 import 'package:driver_app/features/charging/application/charging_controller.dart';
 import 'mock_charging_repository.dart';
 import 'package:driver_app/features/history/application/history_controller.dart';
-import 'package:driver_app/features/loyalty/application/loyalty_controller.dart';
+import 'preview_loyalty_controller.dart';
 import 'package:driver_app/features/payments/application/payments_controller.dart';
 import 'mock_payments_repository.dart';
 import 'package:driver_app/features/profile/application/profile_controller.dart';

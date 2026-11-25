@@ -116,7 +116,7 @@ class ChargeStatementCard extends StatelessWidget {
               ),
               const SizedBox(height: 4),
               Text(
-                vnd(posted.amountVnd),
+                vnd(posted.amountVnd, copy: copy),
                 style: type.headlineSmall?.copyWith(color: PowerMeColors.gold),
               ),
               const Divider(height: 24),

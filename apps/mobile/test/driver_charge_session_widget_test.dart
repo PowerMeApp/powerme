@@ -239,7 +239,9 @@ void main() {
       await _tick(tester);
       await _tick(tester);
       expect(reads, 2);
-      final backgroundRead = fixture.requests.last.cancelToken!;
+      final backgroundRead = fixture.requests
+          .lastWhere((r) => r.path == _progressPath)
+          .cancelToken!;
       tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
       await _tick(tester, const Duration(seconds: 20));
       expect(backgroundRead.isCancelled, isTrue);
@@ -735,6 +737,7 @@ DriverApiFixture _fixture(
     ('POST', 'auth/login') => reply(200, tokens(accessA)),
     ('POST', 'auth/refresh') => reply(200, tokens(accessB, login: false)),
     ('GET', 'me') => reply(200, account(id: _driver)),
+    ('GET', 'sessions') => emptyActiveSessions(r),
     ('GET', 'stations') => reply(200, page([])),
     ('GET', _connectorPath) => reply(200, {
       'connector_id': '31',
