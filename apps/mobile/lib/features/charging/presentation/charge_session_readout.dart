@@ -108,6 +108,14 @@ class ChargeSessionReadout extends StatelessWidget {
   }
 }
 
+/// Phiên RFID/HMI/free-vend không trừ Charging Credit: không hiện tạm tính (tránh tài xế tưởng bị tính tiền).
+String _estimateLabel(ChargeProgress progress, AppCopy copy) =>
+    !progress.billedThroughApp
+    ? copy.text('Không tính qua app', 'Not billed in app')
+    : progress.costEstimateVnd == null
+    ? copy.text('Chưa xác định', 'Unknown')
+    : vnd(progress.costEstimateVnd, copy: copy);
+
 String _observedEnergy(ChargeProgress progress, AppCopy copy) =>
     progress.measuredEnergyWh == null
     ? copy.text('Chưa có số đo', 'No reading yet')
@@ -145,14 +153,12 @@ class ChargeSessionMetrics extends StatelessWidget {
           ),
           MetricItem(
             copy.text('Tạm tính', 'Estimate'),
-            progress.costEstimateVnd == null
-                ? copy.text('Chưa xác định', 'Unknown')
-                : vnd(progress.costEstimateVnd, copy: copy),
+            _estimateLabel(progress, copy),
             Icons.payments_outlined,
           ),
         ],
       ),
-      if (progress.estimatedCostVnd != null) ...[
+      if (progress.billedThroughApp && progress.estimatedCostVnd != null) ...[
         const SizedBox(height: 12),
         ValueLine(
           copy.text('Chi phí (tạm tính, tối đa)', 'Estimated cost (maximum)'),
@@ -162,7 +168,7 @@ class ChargeSessionMetrics extends StatelessWidget {
       ],
       if (!summary) ...[
         const SizedBox(height: 12),
-        if (progress.costEstimateVnd != null)
+        if (progress.billedThroughApp && progress.costEstimateVnd != null)
           Text(switch (progress.costQuality) {
             ChargeCostQuality.interpolated => copy.text(
               'Tạm tính có nội suy giữa các mốc biểu giá.',
@@ -297,9 +303,7 @@ class ChargeProgressCard extends StatelessWidget {
         ),
         ValueLine(
           copy.text('Chi phí tạm tính', 'Estimated cost'),
-          progress.costEstimateVnd == null
-              ? copy.text('Chưa xác định', 'Unknown')
-              : vnd(progress.costEstimateVnd, copy: copy),
+          _estimateLabel(progress, copy),
         ),
         ValueLine(
           stopped
@@ -309,7 +313,7 @@ class ChargeProgressCard extends StatelessWidget {
               ? copy.text('Chưa có số đo', 'No reading yet')
               : chargeEnergyLabel(energy, copy),
         ),
-        if (progress.estimatedCostVnd != null)
+        if (progress.billedThroughApp && progress.estimatedCostVnd != null)
           ValueLine(
             copy.text('Chi phí (tạm tính, tối đa)', 'Estimated cost (maximum)'),
             vnd(progress.estimatedCostVnd, copy: copy),

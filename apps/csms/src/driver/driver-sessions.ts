@@ -71,6 +71,8 @@ export async function driverSessions(db: Db, driverId: string, q: URLSearchParam
       LEFT JOIN charging_statements st ON st.session_id=s.id AND st.driver_id=s.driver_id
         AND s.payment_mode='csms_billed'
       WHERE s.driver_id=$1 AND ($2::text='all' OR (s.meter_stop_wh IS NULL
+        -- StopTransaction đã nhận nhưng meterStop < meterStart (meter_stop_wh bị để NULL): không còn sạc.
+        AND s.received_stopped_at IS NULL
         AND s.status IN ('pending','active','paused','stopping','orphaned','review')))
     )
     SELECT totals.total,p.* FROM (SELECT count(*)::text AS total FROM owned) totals

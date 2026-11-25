@@ -66,6 +66,24 @@ void main() {
                   : 'Unknown vehicle',
             ),
           );
+          // RFID không trừ Charging Credit: tạm tính của CSMS không được hiện như tiền phải trả.
+          snapshot = externalProgress(energy: 1800, costEstimate: 45000);
+          await tick(tester);
+          final notBilled = find.text(
+            language == AppLanguage.vietnamese
+                ? 'Không tính qua app'
+                : 'Not billed in app',
+            skipOffstage: false,
+          );
+          final list = find.byType(Scrollable).last;
+          tester.state<ScrollableState>(list).position.jumpTo(0);
+          await tester.pump();
+          for (var i = 0; i < 40 && notBilled.evaluate().isEmpty; i++) {
+            await tester.drag(list, const Offset(0, -250));
+            await tester.pump();
+          }
+          expect(notBilled, findsWidgets);
+          expect(find.textContaining('45', skipOffstage: false), findsNothing);
           snapshot = externalProgress(energy: 2500);
           await tick(tester);
           await reveal(
