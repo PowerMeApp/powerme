@@ -1,5 +1,6 @@
 (() => {
-  window.bindRfidReader = (input, clear, message, connector) => {
+  // endpoint: trang từng trụ truyền '/api/<cpId>/swipeReader' (QA-03); mặc định đường cũ → trụ đầu.
+  window.bindRfidReader = (input, clear, message, connector, endpoint = '/api/swipeReader') => {
     let pending = false,
       enabled = false,
       context = null;
@@ -43,7 +44,7 @@
       apply();
       say('Đang chờ CSMS xác thực thẻ. Không quẹt lại.');
       try {
-        const response = await fetch('/api/swipeReader', {
+        const response = await fetch(endpoint, {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({ connector, idTag }),

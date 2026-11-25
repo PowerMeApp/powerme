@@ -44,7 +44,7 @@ async function setup(t, overrides = {}) {
     }));
     client.handle('Heartbeat', () => ({ currentTime: new Date().toISOString() }));
     client.handle('Authorize', ({ params }) => {
-      rx.push({ action: 'Authorize', params });
+      rx.push({ action: 'Authorize', params, identity: client.identity });
       return overrides.authorize
         ? overrides.authorize(params, client)
         : {
@@ -54,7 +54,7 @@ async function setup(t, overrides = {}) {
           };
     });
     client.handle('StartTransaction', ({ params }) => {
-      rx.push({ action: 'StartTransaction', params });
+      rx.push({ action: 'StartTransaction', params, identity: client.identity });
       return overrides.start
         ? overrides.start(params, client)
         : { transactionId: 1234567890 + params.connectorId, ...accepted };
@@ -268,4 +268,87 @@ test('loopback: physical HTTP route is bounded JSON and same-origin only', async
   assert.equal(result.status, 200);
   assert.equal((await result.json()).code, 'started');
   assert.equal(h.count('Authorize'), 1);
+});
+
+// QA-03: một server nhiều trụ — đầu đọc theo trụ qua /api/<cpId>/swipeReader, cùng kiểm tra bảo mật.
+async function spawnServer(t, env) {
+  const child = spawn(
+    process.execPath,
+    [new URL('./server.mjs', import.meta.url).pathname.replace(/^\/(\w:)/, '$1')],
+    {
+      env: { ...process.env, HMI_HOST: '127.0.0.1', HMI_PORT: '0', ...env },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    },
+  );
+  t.after(async () => {
+    const exit = once(child, 'exit');
+    child.kill();
+    await exit;
+  });
+  let output = '';
+  child.stdout.on('data', (data) => {
+    output += data;
+  });
+  await until(() => /http:\/\/127\.0\.0\.1:\d+/.test(output));
+  return output.match(/http:\/\/127\.0\.0\.1:\d+/)[0];
+}
+
+test('multi-station: reader on second station starts only that station', async (t) => {
+  const h = await setup(t);
+  const base = await spawnServer(t, { CSMS_URL: h.csmsUrl, CP_IDS: 'RFID-A,RFID-B' });
+  const state = async (cp) => (await fetch(base + '/api/' + cp + '/state')).json();
+  await until(async () => (await state('RFID-A')).net.booted && (await state('RFID-B')).net.booted);
+  for (const cp of ['RFID-A', 'RFID-B'])
+    await fetch(base + '/api/' + cp + '/plug', {
+      method: 'POST',
+      body: JSON.stringify({ connector: 1 }),
+    });
+  const result = await fetch(base + '/api/RFID-B/swipeReader', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', origin: base, 'sec-fetch-site': 'same-origin' },
+    body: JSON.stringify({ connector: 1, idTag: TAG }),
+  });
+  assert.equal(result.status, 200);
+  assert.equal((await result.json()).code, 'started');
+  const starts = h.rx.filter((m) => m.action === 'StartTransaction');
+  assert.deepEqual(
+    starts.map((m) => m.identity),
+    ['RFID-B'],
+  );
+  assert.deepEqual(
+    h.rx.filter((m) => m.action === 'Authorize').map((m) => m.identity),
+    ['RFID-B'],
+  );
+  const a = await state('RFID-A'),
+    b = await state('RFID-B');
+  assert.equal(a.connectors[0].txActive, false);
+  assert.equal(b.connectors[0].txActive, true);
+  assert.equal(b.connectors[0].source, 'rfid');
+  assert.equal(JSON.stringify(b).includes(TAG), false);
+  const steps = b.connectors[0].journeys.at(-1).steps;
+  assert.ok(steps.some((st) => st.kind === 'authorize' && st.reader && st.status === 'Accepted'));
+  assert.ok(steps.some((st) => st.kind === 'startSent' && st.reader === true));
+});
+
+test('multi-station: per-station reader route keeps same-origin, JSON and size checks', async (t) => {
+  const h = await setup(t);
+  const base = await spawnServer(t, { CSMS_URL: h.csmsUrl, CP_IDS: 'RFID-A,RFID-B' });
+  const send = (path, body, headers = {}) =>
+    fetch(base + path, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', ...headers },
+      body: typeof body === 'string' ? body : JSON.stringify(body),
+    });
+  const frame = { connector: 1, idTag: TAG };
+  const route = '/api/RFID-B/swipeReader';
+  assert.equal((await send(route, frame, { origin: 'https://other.example' })).status, 403);
+  assert.equal((await send(route, frame, { origin: 'http://localhost:1' })).status, 403);
+  assert.equal((await send(route, frame, { 'sec-fetch-site': 'cross-site' })).status, 403);
+  assert.equal((await send(route, frame, { 'sec-fetch-site': 'same-site' })).status, 403);
+  assert.equal((await send(route, frame, { 'content-type': 'text/plain' })).status, 415);
+  assert.equal((await send(route, 'x'.repeat(513))).status, 413);
+  assert.equal((await send(route, { ...frame, card: 'valid' })).status, 400);
+  assert.equal((await send('/api/NOPE/swipeReader', frame)).status, 404);
+  assert.equal((await send('/api/RFID-B/x/swipeReader', frame)).status, 404);
+  assert.equal(h.count('Authorize'), 0);
 });

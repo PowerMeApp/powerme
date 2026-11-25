@@ -1,0 +1,285 @@
+<!doctype html>
+<!--
+  tong.html — trang tổng của server trụ giả lập D1 (QA-03), mở tại "/".
+
+  LÀM GÌ: liệt kê mọi trụ chạy trong tiến trình (CP_ID hoặc CP_IDS): online/offline, tốc độ mô
+    phỏng, hàng đợi buffer, trạng thái từng súng (kW, kWh, SoC, transactionId) và link sang trang
+    từng trụ /tru/<cpId> (nơi có HMI bấm được). Dữ liệu qua SSE /tong/events, không polling.
+  VÌ SAO TÁCH: người test app tài xế cần thấy nhanh "trụ nào đang làm gì" trước khi mở một trụ.
+  GIẢ ĐỊNH: mọi chữ đến từ OCPP/CSMS qua esc() trước khi vào HTML. Màu trạng thái giống tru.html.
+-->
+<html lang="vi">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Trụ giả lập D1</title>
+    <style>
+      :root {
+        --bg: #eef1f5;
+        --panel: #ffffff;
+        --panel-2: #f4f6f9;
+        --line: #d5dbe4;
+        --text: #14202e;
+        --muted: #5b6b7e;
+        --accent: #0a6cd6;
+        --accent-text: #ffffff;
+        --danger: #c0262d;
+        --ok: #1a7f42;
+        --warn: #a86400;
+        --st-Available: #1a7f42;
+        --st-Preparing: #0a6cd6;
+        --st-Charging: #0b8f8f;
+        --st-SuspendedEVSE: #8a5a00;
+        --st-SuspendedEV: #8a5a00;
+        --st-Finishing: #6b46c1;
+        --st-Reserved: #a14d9b;
+        --st-Unavailable: #5b6b7e;
+        --st-Faulted: #c0262d;
+        font-size: 15px;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root:not([data-theme='light']) {
+          --bg: #0d141c;
+          --panel: #16202b;
+          --panel-2: #1d2a38;
+          --line: #2c3b4d;
+          --text: #e8eef5;
+          --muted: #93a4b8;
+          --accent: #4aa3ff;
+          --accent-text: #04121f;
+          --danger: #ff6b72;
+          --ok: #4fd18b;
+          --warn: #f0b04a;
+          --st-Available: #4fd18b;
+          --st-Preparing: #4aa3ff;
+          --st-Charging: #3fd6d6;
+          --st-SuspendedEVSE: #f0b04a;
+          --st-SuspendedEV: #f0b04a;
+          --st-Finishing: #b497ff;
+          --st-Reserved: #e08bd8;
+          --st-Unavailable: #93a4b8;
+          --st-Faulted: #ff6b72;
+        }
+      }
+      :root[data-theme='dark'] {
+        --bg: #0d141c;
+        --panel: #16202b;
+        --panel-2: #1d2a38;
+        --line: #2c3b4d;
+        --text: #e8eef5;
+        --muted: #93a4b8;
+        --accent: #4aa3ff;
+        --accent-text: #04121f;
+        --danger: #ff6b72;
+        --ok: #4fd18b;
+        --warn: #f0b04a;
+        --st-Available: #4fd18b;
+        --st-Preparing: #4aa3ff;
+        --st-Charging: #3fd6d6;
+        --st-SuspendedEVSE: #f0b04a;
+        --st-SuspendedEV: #f0b04a;
+        --st-Finishing: #b497ff;
+        --st-Reserved: #e08bd8;
+        --st-Unavailable: #93a4b8;
+        --st-Faulted: #ff6b72;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--text);
+        font-family: 'Segoe UI', system-ui, sans-serif;
+        min-height: 100vh;
+        padding-bottom: 2.6rem;
+      }
+      header {
+        padding: 0.7rem 1rem;
+        background: var(--panel);
+        border-bottom: 1px solid var(--line);
+      }
+      header h1 {
+        font-size: 1.25rem;
+        margin: 0;
+      }
+      header .sub {
+        color: var(--muted);
+        font-size: 0.85rem;
+      }
+      main {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(min(100%, 30rem), 1fr));
+        gap: 0.8rem;
+        padding: 0.8rem 1rem;
+      }
+      .cp {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        padding: 0.8rem;
+        min-width: 0;
+      }
+      .cp-head {
+        display: flex;
+        align-items: center;
+        gap: 0.6rem;
+        flex-wrap: wrap;
+        margin-bottom: 0.5rem;
+      }
+      .cp-head h2 {
+        font-size: 1.1rem;
+        margin: 0;
+        flex: 1;
+        overflow-wrap: anywhere;
+      }
+      .chip {
+        display: inline-block;
+        padding: 0.12rem 0.6rem;
+        border-radius: 999px;
+        font-weight: 700;
+        font-size: 0.85rem;
+        color: var(--accent-text);
+        background: var(--st-Unavailable);
+      }
+      .meta {
+        font-size: 0.8rem;
+        color: var(--muted);
+        margin-bottom: 0.5rem;
+      }
+      .guns {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+        gap: 0.5rem;
+      }
+      .gun {
+        background: var(--panel-2);
+        border-radius: 8px;
+        padding: 0.5rem 0.6rem;
+        border-left: 5px solid var(--st-Unavailable);
+      }
+      .gun .name {
+        font-weight: 700;
+        margin-bottom: 0.2rem;
+      }
+      .gun .nums {
+        font-variant-numeric: tabular-nums;
+        font-size: 0.9rem;
+      }
+      .gun .hint {
+        font-size: 0.78rem;
+        color: var(--muted);
+        margin-top: 0.2rem;
+      }
+      a.open {
+        display: inline-block;
+        margin-top: 0.6rem;
+        padding: 0.4rem 0.8rem;
+        border-radius: 7px;
+        background: var(--accent);
+        color: var(--accent-text);
+        font-weight: 600;
+        text-decoration: none;
+      }
+      a.open:focus-visible {
+        outline: 3px solid var(--accent);
+        outline-offset: 2px;
+      }
+      #err {
+        margin: 0.8rem 1rem 0;
+        color: var(--danger);
+        font-weight: 600;
+      }
+      footer {
+        position: fixed;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        padding: 0.4rem 1rem;
+        background: var(--warn);
+        color: var(--accent-text);
+        font-weight: 700;
+        text-align: center;
+        font-size: 0.95rem;
+      }
+      @media (max-width: 520px) {
+        .guns {
+          grid-template-columns: minmax(0, 1fr);
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>Trụ sạc giả lập D1 — <span id="count">...</span></h1>
+      <div class="sub">
+        CSMS <span id="csms">...</span> · bấm "Mở trang trụ" để xem phiên sạc, kWh, nhật ký OCPP và
+        bảng điều khiển của từng trụ
+      </div>
+    </header>
+    <div id="err" hidden></div>
+    <main id="list"></main>
+    <footer>Mô phỏng — hành vi chưa xác nhận bằng firmware Ruihua</footer>
+    <script>
+      const $ = (id) => document.getElementById(id);
+      const q = new URLSearchParams(location.search);
+      if (q.get('theme')) document.documentElement.dataset.theme = q.get('theme');
+      const esc = (v) =>
+        String(v ?? '').replace(
+          /[&<>"']/g,
+          (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch],
+        );
+      const NET = {
+        online: ['Online', 'var(--ok)'],
+        connecting: ['Đang nối...', 'var(--warn)'],
+        offline: ['OFFLINE', 'var(--danger)'],
+      };
+      function gunHint(st, c) {
+        if (st.net.state !== 'online') return 'trụ offline — lệnh từ app không tới trụ';
+        if (c.remoteWaitSec != null)
+          return `đã nhận RemoteStart, chờ cắm súng (còn ${c.remoteWaitSec} s)`;
+        if (c.txActive && c.txId == null) return 'chờ CSMS cấp transactionId';
+        if (c.txActive) return `đang sạc · tx ${c.txId} · ${c.idTag}`;
+        if (c.status === 'Finishing') return 'phiên xong, chờ rút súng';
+        if (c.status === 'Faulted') return `lỗi ${c.errorCode}`;
+        return c.plugged ? 'đã cắm súng, chờ lệnh' : 'chờ RemoteStart';
+      }
+      function render(d) {
+        $('err').hidden = true;
+        $('csms').textContent = d.csmsUrl;
+        $('count').textContent = `${d.stations.length} trụ`;
+        $('list').innerHTML = d.stations
+          .map((st) => {
+            const [nl, nc] = NET[st.net.state] ?? NET.offline;
+            const net = nl + (st.net.halfOpen ? ' (half-open)' : '');
+            const guns = st.connectors
+              .map(
+                (c) => `<div class="gun" style="border-left-color:var(--st-${esc(c.status)})">
+                  <div class="name">Súng ${esc(c.label)} · <span class="chip" style="background:var(--st-${esc(c.status)})">${esc(c.status)}</span></div>
+                  <div class="nums">${c.kw.toFixed(1)} kW · ${c.kwh.toFixed(2)} kWh · SoC ${c.soc == null ? '—' : c.soc.toFixed(1) + ' %'}</div>
+                  <div class="hint">${esc(gunHint(st, c))}</div></div>`,
+              )
+              .join('');
+            return `<section class="cp" aria-label="Trụ ${esc(st.cpId)}">
+              <div class="cp-head"><h2>${esc(st.cpId)}</h2>
+                <span class="chip" style="background:${nc}">${esc(net)}</span></div>
+              <div class="meta">Tốc độ mô phỏng ×${esc(st.speed)} · hàng đợi buffer ${esc(st.queue)}${
+                Math.abs(st.clockAheadSec) > 300
+                  ? ' · <b>đồng hồ trụ lệch giờ thật &gt; 300 s</b>'
+                  : ''
+              }</div>
+              <div class="guns">${guns}</div>
+              <a class="open" href="/tru/${encodeURIComponent(st.cpId)}">Mở trang trụ ${esc(st.cpId)} →</a>
+            </section>`;
+          })
+          .join('');
+      }
+      const es = new EventSource('/tong/events');
+      es.addEventListener('tong', (ev) => render(JSON.parse(ev.data)));
+      es.onerror = () => {
+        $('err').hidden = false;
+        $('err').textContent = 'Mất kết nối tới server trụ giả lập — đang thử lại...';
+      };
+    </script>
+  </body>
+</html>

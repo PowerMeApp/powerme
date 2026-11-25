@@ -27,14 +27,44 @@ export function registerHandlers(c, s) {
     applyAvailability,
     scheduleHeartbeat,
     reboot,
+    jStep,
   } = s;
   const connOf = (id) => conns.get(id);
+  // Vì sao súng không nhận RemoteStart — chỉ để ghi vào hành trình phiên trên trang từng trụ.
+  const busyWhy = (x) =>
+    x.tx
+      ? 'súng đang có phiên'
+      : x.fault
+        ? `súng đang lỗi ${x.fault}`
+        : x.inoperative
+          ? 'súng Unavailable'
+          : x.status === 'Finishing'
+            ? 'súng đang Finishing, chờ rút súng'
+            : null;
   c.handle('RemoteStartTransaction', async ({ params }) => {
     const cand = params.connectorId ? [connOf(params.connectorId)] : [...conns.values()];
     const target = cand.find(
       (x) => x && !x.tx && !x.fault && !x.inoperative && x.status !== 'Finishing',
     );
-    if (!target) return { status: 'Rejected' };
+    if (!target) {
+      for (const x of cand)
+        if (x)
+          jStep(
+            x,
+            'remoteStart',
+            { idTag: params.idTag, result: 'Rejected', why: busyWhy(x) },
+            { close: !x.tx },
+          );
+      if (!cand.some(Boolean))
+        tl('warn', `RemoteStart tới connector ${params.connectorId} không có`);
+      return { status: 'Rejected' };
+    }
+    jStep(target, 'remoteStart', {
+      idTag: params.idTag,
+      result: 'Accepted',
+      waitPlug: !target.plugged,
+      timeoutSec: cfgNum('ConnectionTimeOut'),
+    });
     if (target.plugged) setImmediate(() => startTx(target, params.idTag, 'remote').catch(() => {}));
     else {
       target.remoteWait = {
@@ -51,7 +81,14 @@ export function registerHandlers(c, s) {
   });
   c.handle('RemoteStopTransaction', async ({ params }) => {
     const t = [...conns.values()].find((x) => x.tx && x.tx.id === params.transactionId);
-    if (!t) return { status: 'Rejected' };
+    if (!t) {
+      tl(
+        'warn',
+        `RemoteStop transactionId ${params.transactionId} không khớp phiên nào → Rejected`,
+      );
+      return { status: 'Rejected' };
+    }
+    jStep(t, 'remoteStop', { txId: params.transactionId, result: 'Accepted' });
     setImmediate(() => stopTx(t, 'Remote').catch(() => {}));
     return { status: 'Accepted' };
   });

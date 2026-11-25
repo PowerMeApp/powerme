@@ -29,7 +29,8 @@ function harness(authorize = async () => accepted) {
     [2, make(2)],
   ]);
   const sent = [],
-    starts = [];
+    starts = [],
+    steps = [];
   const net = { state: 'online', epoch: 1, booted: true, halfOpen: false };
   const actions = makeHmiActions({
     conns,
@@ -37,6 +38,9 @@ function harness(authorize = async () => accepted) {
     opt: {},
     changed() {},
     tl() {},
+    jStep(c, kind, info, opts) {
+      steps.push({ connector: c.id, kind, ...info, close: !!opts?.close });
+    },
     idleStatus: (c) => (c.plugged ? 'Preparing' : 'Available'),
     async setStatus(c, status) {
       c.status = status;
@@ -57,7 +61,7 @@ function harness(authorize = async () => accepted) {
     },
   });
   const scan = (body = {}) => actions.swipeReader({ connector: 1, idTag: TAG, ...body });
-  return { actions, conns, sent, starts, net, scan };
+  return { actions, conns, sent, starts, steps, net, scan };
 }
 
 test('device profile accepts only exact ASCII strings without normalization', () => {
@@ -256,4 +260,32 @@ test('masking preserves transaction ids, meter readings and timestamps', () => {
   assert.equal(masked.meterStop, 9999999999);
   assert.equal(masked.timestamp, '2026-11-24T00:00:00Z');
   assert.equal(masked.parentIdTag, '[reader identifier]');
+});
+
+test('reader journey steps never carry the raw identifier and mark the reader source', async () => {
+  const h = harness(async (payload) =>
+    payload.idTag === TAG ? accepted : { idTagInfo: { status: 'Invalid' } },
+  );
+  assert.equal((await h.scan()).code, 'started');
+  h.conns.get(2).tx = null;
+  assert.equal((await h.scan({ connector: 2, idTag: '0000099999' })).code, 'rejected');
+  assert.deepEqual(h.steps, [
+    {
+      connector: 1,
+      kind: 'authorize',
+      idTag: '[reader identifier]',
+      status: 'Accepted',
+      reader: true,
+      close: false,
+    },
+    {
+      connector: 2,
+      kind: 'authorize',
+      idTag: '[reader identifier]',
+      status: 'Invalid',
+      reader: true,
+      close: true,
+    },
+  ]);
+  assert.equal(JSON.stringify(h.steps).includes(TAG), false);
 });

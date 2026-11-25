@@ -1,17 +1,18 @@
 // hmi-actions.mjs — hành động người dùng bấm trên HMI: cắm/rút súng, quẹt thẻ, mật khẩu,
-//   chế độ sạc, dừng, gây/xoá lỗi, tốc độ mô phỏng. Mỗi hàm trả { ok, message }.
+//   chế độ sạc, dừng, gây/xoá lỗi, tốc độ mô phỏng (×1/×10/×20), đưa đồng hồ về giờ thật.
+//   Mỗi hàm trả { ok, message }.
 // VÌ SAO TÁCH: station.mjs giữ mạng + phiên + điện; file này chỉ là "bàn phím" của trụ.
 // GIẢ ĐỊNH: free vend (mật khẩu HMI) gửi thẳng StartTransaction idTag "HMI-FREEVEND", không
 //   Authorize; offline chấp nhận hai thẻ hợp lệ theo danh sách cục bộ; pin đầy/lỗi → "Other".
 
 import { CARDS, ERROR_CODES, FREE_VEND_TAG } from './model.mjs';
-import { isReaderFrame } from './rfid-reader.mjs';
+import { isReaderFrame, READER_MASK } from './rfid-reader.mjs';
 
 export const fail = (message) => ({ ok: false, message });
 export const done = (message = 'ok') => ({ ok: true, message });
 
 export function makeHmiActions(s) {
-  const { conns, opt, net, emit, setStatus, idleStatus, startTx, stopTx, tl, changed } = s;
+  const { conns, opt, net, emit, setStatus, idleStatus, startTx, stopTx, tl, changed, jStep } = s;
   const conn = (a) => conns.get(Number(a?.connector));
   const authorize = (idTag) => emit('Authorize', { idTag }, { buffer: false });
   const readerFail = (code, message) => ({ ok: false, code, message });
@@ -25,6 +26,9 @@ export function makeHmiActions(s) {
     c.errorCode === 'NoError' &&
     c.status === 'Preparing' &&
     !c.remoteWait;
+  // Hành trình phiên (QA-03): bước Authorize của đầu đọc; idTag bị che trong station (jAdd).
+  const readerStep = (c, status, close) =>
+    jStep(c, 'authorize', { idTag: READER_MASK, status, reader: true }, { close });
   return {
     async swipeReader(a) {
       if (
@@ -57,12 +61,14 @@ export function makeHmiActions(s) {
         try {
           response = await authorize(a.idTag);
         } catch {
+          readerStep(c, null, true);
           return readerFail(
             'network',
             'Chưa nhận được kết quả Authorize từ CSMS. Chưa gửi StartTransaction; kiểm tra mạng rồi quẹt lại.',
           );
         }
         const status = response?.idTagInfo?.status;
+        readerStep(c, status ?? null, status !== 'Accepted');
         if (['Invalid', 'Blocked', 'Expired', 'ConcurrentTx'].includes(status))
           return readerFail(
             'rejected',
@@ -78,11 +84,13 @@ export function makeHmiActions(s) {
           net.epoch !== epoch ||
           !readerReady(c) ||
           c.readerGeneration !== generation
-        )
+        ) {
+          jStep(c, 'readerStale', {}, { close: true });
           return readerFail(
             'stale',
             'Súng hoặc kết nối đã thay đổi trong lúc chờ. Chưa gửi StartTransaction; kiểm tra súng rồi quẹt lại.',
           );
+        }
         let confirmed;
         try {
           confirmed = await startTx(c, a.idTag, 'rfid');
@@ -137,10 +145,12 @@ export function makeHmiActions(s) {
       if (net.state === 'online') {
         const r = await authorize(idTag).catch(() => null);
         accepted = r?.idTagInfo?.status === 'Accepted';
-        if (!accepted)
-          return fail(`CSMS từ chối thẻ: ${r?.idTagInfo?.status ?? 'lỗi gửi Authorize'}`);
+        const status = r?.idTagInfo?.status ?? null;
+        jStep(c, 'authorize', { idTag, status }, { close: !accepted });
+        if (!accepted) return fail(`CSMS từ chối thẻ: ${status ?? 'lỗi gửi Authorize'}`);
       } else {
         accepted = a.card !== 'unknown'; // offline: danh sách cục bộ (giả định)
+        jStep(c, 'authorize', { idTag, offline: true, local: accepted }, { close: !accepted });
         if (!accepted) return fail('Offline: thẻ không có trong danh sách cục bộ');
         tl('info', `Offline — chấp nhận thẻ ${idTag} theo danh sách cục bộ`);
       }
@@ -192,12 +202,22 @@ export function makeHmiActions(s) {
       await setStatus(c, idleStatus(c));
       return done('Đã xoá lỗi');
     },
+    // Tốc độ đồng hồ mô phỏng của RIÊNG trụ này (QA-03): ×1, ×10, ×20.
     async speed(a) {
-      const s = Number(a.value);
-      if (![1, 10].includes(s)) return fail('Chỉ hỗ trợ ×1 hoặc ×10');
-      opt.speed = s;
-      changed();
-      return done(`Tốc độ ×${s}`);
+      const v = Number(a.value);
+      if (![1, 10, 20].includes(v)) return fail('Chỉ hỗ trợ ×1, ×10 hoặc ×20');
+      opt.speed = v;
+      tl('info', `Tốc độ mô phỏng ×${v}`);
+      return done(`Tốc độ ×${v}`);
+    },
+    // Đưa đồng hồ mô phỏng về giờ thật (sau khi chạy ×10/×20 đồng hồ trụ đi trước giờ thật).
+    // Chỉ khi không súng nào đang sạc, để timestamp trong một phiên không nhảy lùi.
+    async syncclock() {
+      if ([...conns.values()].some((c) => c.tx))
+        return fail('Đang có phiên — dừng phiên rồi mới chỉnh đồng hồ');
+      s.syncClock();
+      tl('info', 'Đồng hồ trụ đã đưa về giờ thật');
+      return done('Đã đưa đồng hồ trụ về giờ thật');
     },
   };
 }
