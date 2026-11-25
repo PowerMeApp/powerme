@@ -449,67 +449,12 @@
   }
 }
 
-/* ── Hình 3D (tru-3d.js, QA-03) ─────────────────────────────────────────── */
-/* Khi 3D bật thì ẩn SVG 2D; tắt hoạt ảnh / không có WebGL → không có lớp has3d → SVG hiện lại. */
+/* ── Hình 3D (tru-3d.js + bundle tru3d/, QA-04) ───────────────────────── */
+/* Khi 3D bật thì ẩn SVG 2D; tắt hoạt ảnh / không có WebGL / chưa build bundle → không có lớp has3d →
+   SVG hiện lại. Kiểu dáng khung 3D và lớp chữ phủ nằm trong bundle (tru3d/src/tru3d.css). */
 #tru.has3d .tru-svg {
   display: none;
 }
-#tru .tru-3d {
-  position: relative;
-  max-width: 1040px;
-  margin: 0.3rem auto 0;
-  border-radius: 10px;
-  overflow: hidden;
-  background: radial-gradient(ellipse at 50% 35%, var(--panel-2), var(--panel));
-}
 #tru .tru-3d[hidden] {
   display: none;
-}
-#tru .tru-3d canvas {
-  display: block;
-  cursor: grab;
-}
-#tru .tru-3d canvas:active {
-  cursor: grabbing;
-}
-#tru .tru-3d-ov {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  font-size: 0.85rem;
-}
-#tru .tru-3d-ov > div {
-  position: absolute;
-  background: var(--panel);
-  color: var(--text);
-  border: 1px solid var(--line);
-  border-left: 6px solid var(--line);
-  border-radius: 8px;
-  padding: 0.2rem 0.5rem;
-  max-width: 40%;
-}
-#tru .tru-3d-ov .ov-a {
-  left: 0.6rem;
-  top: 0.6rem;
-}
-#tru .tru-3d-ov .ov-b {
-  right: 0.6rem;
-  top: 0.6rem;
-}
-#tru .tru-3d-ov .ov-net {
-  left: 50%;
-  transform: translateX(-50%);
-  bottom: 0.5rem;
-  border-left-width: 1px;
-}
-#tru .tru-3d-ov .ov-hint {
-  right: 0.6rem;
-  bottom: 0.5rem;
-  border: 0;
-  background: transparent;
-  color: var(--muted);
-  font-size: 0.75rem;
-}
-:root.big #tru .tru-3d {
-  max-width: 100%;
 }

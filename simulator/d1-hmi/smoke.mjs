@@ -13,6 +13,7 @@
 
 import { spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
+import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import ocpp from 'ocpp-rpc';
 
@@ -393,6 +394,30 @@ try {
     'Vendor: file ngoài danh sách / có ".." → 404',
     vendCodes.every((c) => c === 404),
     vendCodes.join(','),
+  );
+  // Bundle hình 3D React (QA-04): đúng một file tên cố định; chưa build thì 404 (trang về 2D)
+  const built = existsSync(new URL('./tru3d/dist/tru3d.js', import.meta.url));
+  const t3 = await get('/tru3d/tru3d.js');
+  check(
+    `Tru3d: /tru3d/tru3d.js → ${built ? '200 JS (đã build)' : '404 (chưa build → hình 2D)'}`,
+    built
+      ? t3.status === 200 && (t3.headers.get('content-type') ?? '').startsWith('text/javascript')
+      : t3.status === 404,
+    String(t3.status),
+  );
+  const t3Codes = [];
+  for (const p of [
+    '/tru3d/index.html',
+    '/tru3d/..%2fvite.config.mjs',
+    '/tru3d/..%2f..%2fpackage.json',
+    '/tru3d/src/main.jsx',
+    '/tru3d/dist/tru3d.js',
+  ])
+    t3Codes.push((await get(p)).status);
+  check(
+    'Tru3d: file ngoài danh sách / có ".." / thư mục con → 404',
+    t3Codes.every((c) => c === 404),
+    t3Codes.join(','),
   );
 
   // 2. Cắm súng A, quẹt thẻ hợp lệ
