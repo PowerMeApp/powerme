@@ -31,10 +31,11 @@ Hạ tầng staging theo kiến trúc ARCH-2 (Report 4, Figure 2): **một VPS U
 ```
 internet ──443/80──▶ Caddy ──/ocpp/*──▶ csms:9000 (OCPP-J, Basic Auth kiểm lúc upgrade) ──▶ postgres:5432
                        │──/health──▶ csms:3000/health            (chỉ đường dẫn này)
+                       │──/api/driver/v1/*──▶ csms:3000           (BE-45: Driver API, JWT tài xế)
                        └── còn lại: một dòng chữ
 VPS 127.0.0.1:3000 ──▶ console vận hành (KHÔNG ra internet; xem bằng SSH tunnel)
 VPS 127.0.0.1:8100 ──▶ HMI simulator   (profile sim; cũng chỉ qua SSH tunnel)
-VPS 127.0.0.1:3000/api/driver/v1 ──▶ Driver API cho app tài xế (cùng listener console; dev vào bằng tunnel, DEV-ACCESS.md)
+VPS 127.0.0.1:3000/api/driver/v1 ──▶ Driver API cho app tài xế (cùng listener console; từ BE-45 cũng ra internet qua Caddy)
 VPS 127.0.0.1:3000/api/{auth,operator,admin}/v1 ──▶ đăng nhập dashboard (T128, FE-01a; cùng listener, chỉ qua tunnel)
 VPS 127.0.0.1:5432 ──▶ postgres     (BE-27; chỉ loopback, dev vào bằng tunnel với role app_dev)
 ```
@@ -276,7 +277,7 @@ curl -s http://127.0.0.1:3000/api/operator/v1/me -H "authorization: Bearer $TOKE
 ## Rủi ro và giới hạn thật
 
 1. **Console vận hành không xác thực.** Ai có SSH vào VPS (hoặc chạy được container trong mạng compose) là ngắt được kết nối trụ và gửi RemoteStop. Chỉ chấp nhận được vì không ra internet.
-2. **Chưa host dashboard.** Đăng nhập dashboard (FE-01a, T128) chỉ có ở API và chỉ qua tunnel; bản build dashboard chưa có dịch vụ/route Caddy. Driver API cho app có (BE-21/22) nhưng **không** ra internet: cùng listener với console chưa xác thực, nên chỉ vào bằng SSH tunnel (DEV-ACCESS.md). Ra internet cho app thật cần tách listener hoặc xác thực console trước.
+2. **Chưa host dashboard.** Đăng nhập dashboard (FE-01a, T128) chỉ có ở API và chỉ qua tunnel; bản build dashboard chưa có dịch vụ/route Caddy. Driver API ra internet từ BE-45 (mục "Driver API ra internet"); console vẫn chung listener và vẫn không ra internet.
 3. **Một máy, không HA.** Postgres và CSMS cùng VPS; VPS chết là staging chết. CSMS giữ trạng thái kết nối trong RAM nên mỗi lần restart trụ nối lại (ân hạn `OFFLINE_GRACE_S`).
 4. **Sao lưu chỉ nằm trên cùng VPS** (`backups/`, 10 bản, chụp trước mỗi deploy). Mất VPS là mất cả dữ liệu lẫn sao lưu. Chưa có sao lưu định kỳ hay ngoài máy.
 5. **Chưa có giám sát/cảnh báo.** `/health` công khai cho phép gắn dịch vụ giám sát ngoài (ví dụ UptimeRobot) — chưa gắn. Chưa gom log; Docker giữ 5×10 MB mỗi dịch vụ.
@@ -312,3 +313,17 @@ curl -s http://127.0.0.1:3000/api/operator/v1/me -H "authorization: Bearer $TOKE
 ## Khi WP4 có dashboard
 
 Thêm lại: Dockerfile cho `apps/dashboard`, dịch vụ `dashboard` trong compose, `handle` mặc định trong Caddyfile proxy tới nó, dòng matrix trong workflow, và (chỉ khi đã có xác thực) route `/api/*` / `/realtime*`.
+
+## Driver API ra internet (BE-45, 25/11/2026)
+
+App tài xế trên điện thoại thật dùng bản release, chỉ nhận `https`, nên không gọi được Driver API qua tunnel. Caddy mở **đúng** tiền tố `https://<DOMAIN>/api/driver/v1/*` (quyết định của Trí theo uỷ quyền của Ân). Cấu hình app: `API_BASE_URL = https://<DOMAIN>/api/driver/v1`.
+
+Vì sao không mở luôn console dù chung listener cổng 3000:
+
+- Caddy chỉ khớp `/api/driver/v1/*` (sau khi chuẩn hoá đường dẫn); mọi đường khác vẫn rơi về dòng chữ mặc định. **Vẫn không thêm `/api/*`.**
+- CSMS (`console.server.ts`) chuyển MỌI URL bắt đầu `/api/driver/` sang listener Driver API; listener này khớp route chính xác, nên không bao giờ rơi vào console.
+- Lớp chặn ở Caddy: URI gốc chứa `..`, `%2e`, `%2f` hoặc `%5c` → 400 trước khi proxy. Ca nguy hiểm `/api/admin/../driver/v1/x` (chuẩn hoá thì khớp Driver API nhưng URI gốc là đường vòng) bị chặn. Đã thử trên Caddy 2.11.7 cùng bản staging: đường hợp lệ qua; `../` và `%2e%2e` rơi về dòng chữ; `%2F`, `%5c` và `/api/admin/../driver/…` → 400.
+- Mọi route trừ `/auth/*` cần JWT tài xế; CORS chỉ nhận origin localhost nên trang web lạ bị 403 `forbidden_origin` (app native không gửi `Origin`).
+- `DRIVER_API_TRUST_PROXY: 'true'` cố định trong compose: bộ khoá đăng nhập theo IP (20 lần sai / 60 s → khoá 15 phút) và `vnp_IpAddr` lấy IP client từ giá trị cuối của `X-Forwarded-For` do Caddy thêm. Thiếu dòng này mọi tài xế chung IP của Caddy và một người lạ khoá được đăng nhập của cả nhóm.
+
+Giới hạn: đăng ký tài khoản (`/auth/register`) cũng ra internet — ai biết URL đều tạo được tài khoản tài xế trên staging (có giới hạn theo IP). Chấp nhận cho demo; muốn khoá thì chặn `/api/driver/v1/auth/register` ở Caddy.
