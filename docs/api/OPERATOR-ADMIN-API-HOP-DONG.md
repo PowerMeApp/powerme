@@ -326,11 +326,11 @@ tách theo bề mặt — refresh token không mang `role`, role đọc lại t�
 | Endpoint | Role | UC / FR / BR | Trạng thái · người làm | Ghi chú |
 |---|---|---|---|---|
 | `GET /operator/v1/sites` | operator_staff | UC-OPS-01, BR-P11 | planned · Ân | ô chọn site trong sheet onboarding |
-| `POST /operator/v1/charge-points` | operator_staff | UC-OPS-01, FR-09, STM-3 #2, SD-5a | **console (interim, T119)** `POST /api/operator/charge-points/onboard` · Ân | 201, mật khẩu hiện **một lần**, `no-store`; gọi lại → 409 `already_onboarded` |
+| `POST /operator/v1/charge-points/onboard` | operator_staff | UC-OPS-01, FR-09, STM-3 #2, SD-5a | **done** BE-44 · `charge-point-onboarding.ts` → `ChargePointOnboardingService.onboard` · Trí (route) / Ân (service) | body như console T119 (`OnboardRequest`); actor = staff của token (manager và technician đều được); site phải thuộc operator của token (DB) → khác 403 `site_of_other_operator`, không có 404 `site_not_found`; 201, mật khẩu hiện **một lần**, `no-store`, không log; 409 `serial_not_registered` / `already_onboarded`. Đường dẫn có `/onboard` (giống console) thay cho `POST /operator/v1/charge-points` bản nháp, để không chung đường dẫn với `GET` giám sát. Console `/api/operator/charge-points/onboard` vẫn giữ cho demo |
 | `POST /operator/v1/charge-points/{id}/disable` | operator_staff | STM-3 #4, ADR-0016 | planned · Ân | chỉ có `ChargePointLifecyclePolicy`, chưa có service ghi DB |
 | `POST /operator/v1/charge-points/{id}/enable` | operator_staff | STM-3 #5 | planned · Ân | |
-| `GET /admin/v1/charge-points` | admin | UC-ADM-03, UC-ADM-07, FR-15 | **console** (một phần) · Ân | console thiếu model, firmware, bảo hành, operator |
-| `POST /admin/v1/charge-points` | admin | UC-ADM-03, FR-15, STM-3 #1 | **console (interim, T119)** `POST /api/admin/charge-points` · Ân | 409 `serial_already_registered` |
+| `GET /admin/v1/charge-points` | admin | UC-ADM-03, UC-ADM-07, FR-15 | **partial** BE-44 · `charge-point-onboarding.ts` · Trí | đã làm: `lifecycle`, `page`/`page_size`, mới nhất trước, `RegistryChargePoint` (kèm operator, site; không bao giờ có băm/mật khẩu); chưa làm: `operator_id`, `q` (→ 400 `invalid_input`) |
+| `POST /admin/v1/charge-points` | admin | UC-ADM-03, FR-15, STM-3 #1 | **done** BE-44 · `charge-point-onboarding.ts` → `ChargePointOnboardingService.registerDevice` · Trí (route) / Ân (service) | body như console T119 (`RegisterDeviceRequest`); actor = admin của token; 201 `RegistryChargePoint`; 409 `serial_already_registered`. Console `POST /api/admin/charge-points` vẫn giữ cho demo |
 | `GET /admin/v1/charge-points/{id}` | admin | UC-ADM-03 | planned · Ân | |
 | `PATCH /admin/v1/charge-points/{id}` | admin | UC-ADM-03 | planned · Ân | model, firmware, kW, bảo hành; không đổi serial |
 | `PUT /admin/v1/charge-points/{id}/free-vend-tag` | admin | UC-ADM-05, BR-P09, ADR-0012 | planned · Ân | null = tắt; chỉ áp cho phiên bắt đầu sau đó (BR-P08) |
@@ -442,6 +442,7 @@ nên `credit-accounts/{id}/closure-refund` trong mock dashboard bỏ.
 ### 3.10 Số liệu
 
 Cập nhật 23/11/2026 theo x-status của YAML sau T108b (#200) và FE-07: đã chạy 9 → 13 (auth +1, giám sát +3).
+BE-44 (25/11): 13 → 16 (onboard, đăng ký serial, sổ trụ — `GET` mới làm một phần bộ lọc).
 
 **76 endpoint** (bản 10/11: 76; bản BE-31 12/11: 73): 2 dưới `/api/auth/v1` (đăng nhập và refresh,
 công khai — hai route công khai duy nhất), 39 dưới `/api/operator/v1`, 35 dưới `/api/admin/v1`. So
@@ -450,7 +451,7 @@ với BE-31: +1 refresh (T125), +2 giao dịch Admin (T108).
 | Nhóm | Tổng | đã chạy | console | service | in progress | planned |
 |---|---|---|---|---|---|---|
 | Đăng nhập, refresh & `/me` | 4 | 4 | 0 | 0 | 0 | 0 |
-| Onboarding & sổ trụ | 10 | 0 | 1 | 2 | 0 | 7 |
+| Onboarding & sổ trụ | 10 | 3 | 0 | 0 | 0 | 7 |
 | Giám sát & lệnh | 7 | 3 | 2 | 0 | 0 | 2 |
 | Sự cố | 4 | 0 | 4 | 0 | 0 | 0 |
 | Phiên, đối soát, T72 | 15 | 0 | 3 | 9 | 2 | 1 |
@@ -460,7 +461,7 @@ với BE-31: +1 refresh (T125), +2 giao dịch Admin (T108).
 | Thẻ RFID | 3 | 0 | 0 | 0 | 0 | 3 |
 | Tổng quan nền tảng | 5 | 0 | 5 | 0 | 0 | 0 |
 | Ngoại lệ thanh toán | 8 | 0 | 0 | 0 | 0 | 8 |
-| **Cộng** | **76** | **13** | **15** | **11** | **2** | **35** |
+| **Cộng** | **76** | **16** | **14** | **9** | **2** | **35** |
 
 ## 4. Doanh thu theo BR-P46
 
@@ -776,13 +777,13 @@ trạng thái (2xx/4xx nghiệp vụ khác với 401/403). Ba điều kiện c�
 | 4 | `GET /api/admin/v1/me` | 401 | 403 | 403 | ✓ | implemented |
 | 5 | `GET /api/operator/v1/sites` | 401 | 403 | ✓ | 403 | planned |
 | 6 | `GET /api/operator/v1/charge-points` | 401 | 403 | ✓ | 403 | implemented (FE-03) |
-| 7 | `POST /api/operator/v1/charge-points` | 401 | 403 | ✓ | 403 | service |
+| 7 | `POST /api/operator/v1/charge-points/onboard` | 401 | 403 | ✓ | 403 | implemented (BE-44) |
 | 8 | `GET /api/operator/v1/charge-points/{chargePointId}` | 401 | 403 | ✓ | 403 | implemented (FE-05) |
 | 9 | `GET /api/operator/v1/charge-points/{chargePointId}/metrics` | 401 | 403 | ✓ | 403 | planned |
 | 10 | `POST /api/operator/v1/charge-points/{chargePointId}/disable` | 401 | 403 | ✓ | 403 | planned |
 | 11 | `POST /api/operator/v1/charge-points/{chargePointId}/enable` | 401 | 403 | ✓ | 403 | planned |
-| 12 | `GET /api/admin/v1/charge-points` | 401 | 403 | 403 | ✓ | console |
-| 13 | `POST /api/admin/v1/charge-points` | 401 | 403 | 403 | ✓ | service |
+| 12 | `GET /api/admin/v1/charge-points` | 401 | 403 | 403 | ✓ | partial (BE-44) |
+| 13 | `POST /api/admin/v1/charge-points` | 401 | 403 | 403 | ✓ | implemented (BE-44) |
 | 14 | `GET /api/admin/v1/charge-points/{chargePointId}` | 401 | 403 | 403 | ✓ | planned |
 | 15 | `PATCH /api/admin/v1/charge-points/{chargePointId}` | 401 | 403 | 403 | ✓ | planned |
 | 16 | `PUT /api/admin/v1/charge-points/{chargePointId}/free-vend-tag` | 401 | 403 | 403 | ✓ | planned |
