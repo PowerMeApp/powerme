@@ -4,9 +4,9 @@
 # Biến ${...} đọc từ infra/staging/.env (xem .env.example). Mỗi dịch vụ nhận CHỈ những biến nó cần
 # qua `environment:` — không dùng `env_file`, để secret của Postgres/simulator không lọt sang
 # dịch vụ khác. Dashboard (BE-46) là file tĩnh trong image riêng, Caddy phục vụ ở https://DOMAIN/.
-# Khác với kit ban đầu, KHÔNG có: redis (apps/csms không dùng), JWT_SECRET/e-invoice (code không đọc;
+# Khác với kit ban đầu, KHÔNG có: redis (apps/csms không dùng), JWT_SECRET (code không đọc;
 # JWT của app tài xế là DRIVER_API_JWT_*, của dashboard là DASHBOARD_JWT_*, cả hai ở dịch vụ csms).
-# VNPay (VNPAY_*) ở dịch vụ csms từ T32 Phần 6.
+# VNPay (VNPAY_*) ở dịch vụ csms từ T32 Phần 6; hoá đơn điện tử (EINVOICE_PROVIDER, SEPAY_EINVOICE_*) từ T144.
 name: powerme
 
 x-logging: &default-logging
@@ -115,6 +115,19 @@ services:
       # T32 Phần 8: querydr (gọi ra ngoài, Caddy không đổi). Trống → sandbox / 127.0.0.1.
       VNPAY_API_URL: ${VNPAY_API_URL:-}
       VNPAY_SERVER_IP: ${VNPAY_SERVER_IP:-}
+      # T144 (WF-02 D5): hoá đơn điện tử. EINVOICE_PROVIDER trống = stub; sepay = SePay eInvoice, mã
+      # chỉ nằm trong .env trên VM. Thiếu / sai biến khi sepay → CSMS không khởi động.
+      EINVOICE_PROVIDER: ${EINVOICE_PROVIDER:-}
+      SEPAY_EINVOICE_API_URL: ${SEPAY_EINVOICE_API_URL:-}
+      SEPAY_EINVOICE_USERNAME: ${SEPAY_EINVOICE_USERNAME:-}
+      SEPAY_EINVOICE_PASSWORD: ${SEPAY_EINVOICE_PASSWORD:-}
+      SEPAY_EINVOICE_PROVIDER_ACCOUNT_ID: ${SEPAY_EINVOICE_PROVIDER_ACCOUNT_ID:-}
+      SEPAY_EINVOICE_TEMPLATE_CODE: ${SEPAY_EINVOICE_TEMPLATE_CODE:-}
+      SEPAY_EINVOICE_INVOICE_SERIES: ${SEPAY_EINVOICE_INVOICE_SERIES:-}
+      SEPAY_EINVOICE_REF_PREFIX: ${SEPAY_EINVOICE_REF_PREFIX:-}
+      SEPAY_EINVOICE_ITEM_CODE: ${SEPAY_EINVOICE_ITEM_CODE:-}
+      SEPAY_EINVOICE_UNIT: ${SEPAY_EINVOICE_UNIT:-}
+      SEPAY_EINVOICE_BUYER_NAME: ${SEPAY_EINVOICE_BUYER_NAME:-}
       # MB-03: khoá Vietmap phía server cho /places/* và /stations/{id}/route (khác khoá tile của app).
       # Secret: chỉ nằm trong .env trên VM. Trống → các route đó báo lỗi nhà cung cấp, phần còn lại vẫn chạy.
       VIETMAP_SEARCH_API_KEY: ${VIETMAP_SEARCH_API_KEY:-}

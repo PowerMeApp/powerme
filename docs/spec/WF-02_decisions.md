@@ -1,6 +1,6 @@
 # WF-02 – Quyết định thiết kế
 
-> Đặt tại `docs/spec/WF-02_decisions.md`. Cập nhật: 24/11/2026 (D1 nghĩa `done`; "Còn mở": điều kiện của Ân, kết quả querydr sandbox, Phần 10 dự kiến 25/11); 23/11/2026 (D1, D7, "Còn mở" theo T32 Phần 9a; "Còn mở": VNPay trả lời 18/11, giả định vnp_Amount khi khuyến mãi); 17/11/2026 (D3, D5, D7, "Còn mở" theo T32 Phần 7); 14/11/2026 (D2, D3, D4, D7, "Còn mở" theo T32 Phần 8; D3, D4, D7, D8 theo T32 Phần 6 13/11; D2 theo T32 Phần 5, 12/11).
+> Đặt tại `docs/spec/WF-02_decisions.md`. Cập nhật: 25/11/2026 (D5, "Còn mở" theo T144: nhà cung cấp SePay eInvoice); 24/11/2026 (D1 nghĩa `done`; "Còn mở": điều kiện của Ân, kết quả querydr sandbox, Phần 10 dự kiến 25/11); 23/11/2026 (D1, D7, "Còn mở" theo T32 Phần 9a; "Còn mở": VNPay trả lời 18/11, giả định vnp_Amount khi khuyến mãi); 17/11/2026 (D3, D5, D7, "Còn mở" theo T32 Phần 7); 14/11/2026 (D2, D3, D4, D7, "Còn mở" theo T32 Phần 8; D3, D4, D7, D8 theo T32 Phần 6 13/11; D2 theo T32 Phần 5, 12/11).
 > **Nguồn chính là diagram trong `diagrams/report4/class/CD-2/` + `diagrams/report4/sequence/SD-2a…2f/`** (CD-2, SD-2a…2f v2.0, 01/11/2026, bản đã chia sẻ vào tài liệu chung của nhóm). File này chỉ ghi lại:
 > (1) những điểm trong diagram mà code phải bám, viết ra cho dễ tra;
 > (2) cách khớp diagram với repo hiện tại;
@@ -349,6 +349,38 @@ Cộng tiền, dòng sổ cái và điểm nằm trong **một** DB transaction,
 - **Admin retry** `EInvoiceService.adminRetry(invoiceId, adminId)` (route Phần 10): chỉ `needs_review` → `requested` (`ADMIN_RETRY`, #7), `next_attempt_at = now()`, giữ `attempt_count`, sau commit `kickIssue`. Không có hoá đơn → `EInvoiceNotFound` (404); trạng thái khác → `InvalidTransition('STM-7', …)` (409). Repo chưa có bảng audit nên `adminId` chỉ ghi vào log `e_invoice_admin_retry`.
 - Gửi hoá đơn cho tài xế (STM-7 #2 "/ send invoice to Driver"): chưa có kênh, không làm.
 
+⊕ **T144 (25/11): nhà cung cấp thật là SePay eInvoice** (nhà cung cấp gốc của tài khoản là Mắt Bão; tài liệu https://developer.sepay.vn/vi/einvoice-api/v1/tong-quan). Code: `billing/sepay-einvoice.provider.ts`, `sepay-einvoice.config.ts`.
+- **Chọn bằng `EINVOICE_PROVIDER`** = `stub` (mặc định, kể cả rỗng) | `sepay`; giá trị khác → `invalid_einvoice_config` lúc khởi động. `sepay` bắt buộc `SEPAY_EINVOICE_USERNAME`, `_PASSWORD`, `_PROVIDER_ACCOUNT_ID`, `_TEMPLATE_CODE`, `_INVOICE_SERIES`, `_REF_PREFIX`; tuỳ chọn `_API_URL` (mặc định sandbox, chỉ `https:`), `_ITEM_CODE` (`TOPUP`), `_UNIT` (`Lần`), `_BUYER_NAME` (`Khách hàng cá nhân`). Thiếu / sai → không khởi động; message chỉ nêu tên biến. `_TEMPLATE_CODE` phải là mẫu hoá đơn GTGT: mẫu "2" (bán hàng) bỏ qua thuế suất.
+- **`reference_code` = `<SEPAY_EINVOICE_REF_PREFIX>-<e_invoices.id>`** (PM-DEV, PM-STG, …): máy dev và staging dùng chung một tài khoản sandbox mà `e_invoices.id` của hai DB trùng nhau; `PM-TEST-0001` cũng đã dùng. SePay bắt `reference_code` duy nhất (gửi lại → 409 `EINVOICE_DOCUMENT_EXISTED`) nên đây là lớp chống trùng hoá đơn.
+- **`invoice_no` = `<ký hiệu>-<số hoá đơn>`** (vd. `C26TSE-357431`): số chỉ duy nhất trong một ký hiệu, ký hiệu đổi theo năm. Ký hiệu lấy từ response nếu có, không thì từ cấu hình. Quá 20 ký tự → `callProvider` trả `data`.
+- **Một lượt `createInvoice`** (trong 10 s của `callProvider`, ngân sách riêng 8,5 s):
+  1. tra `GET /v1/invoices/{ref}`: issued và có số → trả số (idempotent khi lượt trước mất lease ở tx2); có mà chưa xong → `transient sepay_pending`; 404 → bước 2;
+  2. `POST /v1/invoices/create`, `is_draft: false` (tạo và phát hành một bước), `payment_method` `CK`, gửi đúng `amount_vnd` / `vat_rate` / `vat_amount_vnd` đã lưu (`unit_price = amount − vat`, `total_amount = amount`; SePay dùng số gửi, không tính lại); 409 → theo dõi bằng tra theo ref, không gửi lại;
+  3. hỏi trạng thái sau 1 / 1,5 / 2 / 2 s (tối đa ~6,5 s, dừng khi còn < khoảng chờ + 1 s): xong = `invoice.status = "issued"` và `invoice_number` khác "0"; vẫn chờ → `transient sepay_pending`, lượt sau của worker vào thẳng bước 1. SePay có thể chờ tới ~2 giờ (tự thử 8 lần ~33 phút); lịch +5 phút / +30 phút / +2 giờ của ta phủ đủ, quá nữa thì `needs_review`.
+- **Token** `POST /v1/token` (Basic Auth, sống 86400 s): cache trong adapter, xin lại khi còn < 5 phút hoặc gặp 401 (gọi lại đúng một lần).
+- **Phân loại:**
+
+  | Tình huống | Kết quả |
+  |---|---|
+  | mạng lỗi, huỷ, timeout; 429; 5xx không mã hoặc mã hệ thống; đang chờ / số "0" / sau 409 tra ra 404 | `transient` |
+  | 400 `ISSUED_DATE_INVALID` / `INVALID_ISSUED_DATE` (đồng hồ máy chủ nhanh hơn SePay vài giây → "ngày ở tương lai"; lượt sau gửi giờ mới là qua) | `transient` |
+  | 401 sau khi đã xin token mới một lần, hoặc `/v1/token` 401 (sai mật khẩu?) | `transient` + log error `sepay_einvoice_unauthorized` (sửa `.env` + khởi động lại trong ~2,5 giờ thì hoá đơn tự đi tiếp, không phải Admin retry từng cái) |
+  | JSON hỏng, sai dạng | `transient` |
+  | 400 khác (vd. `VALIDATION_ERROR`: sai ký hiệu năm), 405, 422, 4xx khác | `data` |
+  | 500 `QUOTA_HAS_BEEN_USERD_UP` (đúng chính tả của SePay), `REGISTRATION_NOT_COMPLETE`, `BILLING_IS_UNPAID`, `EINVOICE_ACCOUNT_NOT_FOUND` | `data` |
+  | trạng thái `Failed`, hoặc message "chưa xác nhận được kết quả phát hành" (tài liệu dặn không gửi lại: có thể trùng hoá đơn) | `data` |
+
+  Message gồm mã lỗi SePay + HTTP status + message SePay cắt 200 ký tự; không bao giờ có token, mật khẩu, header hay URL.
+- **Lệch so với trước:**
+  - ngày trên hoá đơn (`issued_date`) là **lúc phát hành** theo giờ Việt Nam, không phải `paidAt`: SePay chỉ nhận ngày hiện tại, nên retry vắt qua ngày thì ngày hoá đơn khác ngày thu. Thuế suất vẫn theo `completed_at` như cũ;
+  - người mua chỉ có tên (`{type: 'personal', name: <cấu hình>}`): adapter không nhận thông tin người mua (lệch CD-2 đã ghi ở trên).
+- **Thử sandbox thật 25/11** (Khang, live test `test/sepay-einvoice.live.test.ts`, ref `PM-DEV-live1795605092338`):
+  - `is_draft: false` tạo và phát hành **một bước**;
+  - người mua chỉ có `name` (không email) được chấp nhận;
+  - phát hành xong trong khoảng 5 s: lượt 1 ra `issued`, `C26TSE-358973`;
+  - tra chi tiết ngay sau đó → HTTP 200, `status` `issued`, `invoice_number` 358973;
+  - gọi lại cùng khoá → cùng `C26TSE-358973`, không tạo hoá đơn thứ hai.
+
 - `EInvoiceService.issue(invoiceId)` chạy nền; `EInvoiceProviderAdapter.createInvoice(...)` timeout 10 s.
   - Có `invoiceNo` → `requested → issued`.
   - Lỗi tạm thời, chưa hết 4 lượt → `requested → failed`, attempt + 1, hẹn 5 phút / 30 phút / 2 giờ. Đến hạn: `failed → requested` rồi thử lại.
@@ -357,7 +389,7 @@ Cộng tiền, dòng sổ cái và điểm nằm trong **một** DB transaction,
 - Top-up luôn giữ `credited`, dù hoá đơn ra sao.
 - **InvoiceAdjustment**: EInvoice 1 – 0..* InvoiceAdjustment; Refund 1 – 0..1 InvoiceAdjustment. Tạo bởi `adjustForRefund` **sau khi refund `done`**; trạng thái `requested · issued · failed · needs_review` và retry giống EInvoice. Hoàn khoản trễ không có điều chỉnh hoá đơn (không có hoá đơn gốc).
 - Cột thêm cho `invoice_adjustments` (khớp repo): `refund_id` (FK, unique), `status`, `attempt_count`, `last_error_kind`, `last_error_message`, `last_attempt_at`, `next_attempt_at`, `provider_adjustment_no` [0..1]; `issued_at` thành [0..1].
-- Provider là **stub**: không gọi HTTP; trả `invoiceNo` / `adjustmentNo` giả theo định dạng ổn định; cấu hình được để giả lập thành công, lỗi `transient`, lỗi `data`, độ trễ; viết qua interface để sau thay provider thật.
+- Provider là **stub** (T144: thêm SePay eInvoice cho `createInvoice`, xem ⊕ T144 ở trên; điều chỉnh vẫn chưa có bản thật): không gọi HTTP; trả `invoiceNo` / `adjustmentNo` giả theo định dạng ổn định; cấu hình được để giả lập thành công, lỗi `transient`, lỗi `data`, độ trễ; viết qua interface để sau thay provider thật.
 
 ## D6. Đóng tài khoản (SD-2f; SRS UC-ACC-02)
 
@@ -539,7 +571,12 @@ Chốt 09/11: WP5 làm job hết hạn điểm.
 - **Thuế suất hoá đơn** (T32 Phần 7): Đã đối chiếu Phụ lục I–II NĐ 174/2025 (17/11, xem căn cứ ở D5): dịch vụ sạc xe điện không bị loại trừ, áp 8% tới hết 31/12/2026. Còn lại: người lập hoá đơn thật (kế toán / công ty khách hàng) xác nhận mã ngành đăng ký; nếu có nghị quyết gia hạn hoặc đổi mức thì sửa `vatRateAt`.
 - ~~**Lease không đếm lần thử, cả với `e_invoices`** (T32 Phần 7 ghi lại): giống mục "Lỗi lặp ở tx2" của top-up. Dòng làm tiến trình sập, hoặc gặp lỗi lặp ở tx2, được thử lại sau mỗi lease mà không bị đếm, nên nhà cung cấp bị gọi lặp. Ví dụ lỗi lặp: nhà cung cấp trả `invoice_no` đã có ở dòng khác → 23505 UNIQUE. PR 8c sửa chung trong `due-rows.ts`, bao cả `e_invoices`.~~ → thay bởi T32 Phần 8c 19/11: lần thứ 6 → `needs_review` (D7).
 - **Top-up `credited` trước khi deploy Phần 7** (sandbox trên staging) không có hoá đơn và không tạo bù (T32 Phần 7).
-- **Thông tin người bán** (MST, mẫu số, ký hiệu hoá đơn) và biến môi trường của nhà cung cấp thật (MISA): chốt khi làm provider thật; stub không dùng (T32 Phần 7).
+- ~~**Thông tin người bán** (MST, mẫu số, ký hiệu hoá đơn) và biến môi trường của nhà cung cấp thật (MISA): chốt khi làm provider thật; stub không dùng (T32 Phần 7).~~ Đã chốt ở T144 (25/11): SePay eInvoice, cấu hình `SEPAY_EINVOICE_*` (D5). SRS còn ghi "MISA meInvoice": Ân sửa, PR T144 không sửa SRS.
+- **SePay eInvoice — còn mở (T144):**
+  - `pdf_url`, `tracking_code` chưa lưu (không migration trong T144); chưa có route cho tài xế xem hoá đơn.
+  - Ký hiệu hoá đơn theo năm: `SEPAY_EINVOICE_INVOICE_SERIES` (vd. `C26TSE`) phải đổi cấu hình trên mọi môi trường **trước 01/01/2027**, nếu không SePay trả `VALIDATION_ERROR` → `needs_review`.
+  - Chưa rõ một `reference_code` đang chờ / `Failed` thì tra chi tiết trả 404 hay trả bản ghi. Nếu 404 thì lượt sau POST lại và dựa vào 409 `EINVOICE_DOCUMENT_EXISTED` để không tạo trùng (sau 409 mà tra vẫn 404 → `transient`, không gửi thêm). Thử 25/11 chưa quan sát được: lúc tra chi tiết thì hoá đơn đã `issued`, chưa gặp trạng thái đang chờ.
+  - **Phát hành lại sau `Failed` có thể cần mã mới:** nếu SePay đã giữ `reference_code` của hoá đơn `Failed` thì Admin retry sẽ POST → 409 → tra mãi không ra, lặp tới `needs_review`. Hướng xử lý: thêm hậu tố (vd. `-R1`) cho lần phát hành lại; làm khi gặp thật.
 - **Đánh thức trễ quá +60 phút** (worker dừng lâu): vòng quét chỉ hỏi querydr một lần rồi hết lịch (`expired`). Đề xuất cho sau (chưa làm): cho Admin "Kiểm tra lại" cả top-up `expired` hết lịch không `exception_kind` (ca lỗi mạng / TS `01`).
 - **Billing Exceptions thêm mục lỗi sổ điểm (`loyalty_error`) và ca 04 / 07 chưa ngã ngũ (`unresolved_04` / `unresolved_07`)**: UC-ADM-08 hiện có 3 tab (Ân / Nghĩa).
 - **Nghĩa `vnp_TransactionStatus` 01 / 04 / 07** (coi là chưa ngã ngũ ở D3): trang tài liệu VNPay đọc được không có bảng mã này nguyên văn; đối chiếu trên sandbox.
