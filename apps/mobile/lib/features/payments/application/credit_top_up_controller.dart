@@ -109,8 +109,8 @@ class CreditTopUpController extends Notifier<TopUpView> {
         !_creating &&
         _submitted == null &&
         quote != null &&
-        points != null &&
-        (points >= 0 && points <= quote.maxPoints);
+        validTopUpAmount(_amount) &&
+        validTopUpPoints(points, quote.maxPoints);
   }
 
   bool get _hasLiveLink =>
@@ -451,6 +451,7 @@ TopUpIssue _createIssue(DriverApiException error) =>
     switch ((error.problem, error.status, error.code)) {
       (_, 503, 'payment_unconfigured') => TopUpIssue.paymentUnavailable,
       (_, 422, 'balance_limit_exceeded') => TopUpIssue.balanceLimit,
+      (_, 422, 'points_below_minimum') => TopUpIssue.pointsBelowMinimum,
       (_, 422, _) => TopUpIssue.quoteChanged,
       (_, 409, 'idempotency_conflict') => TopUpIssue.keyConflict,
       (_, 409, 'account_closed') => TopUpIssue.accountClosed,

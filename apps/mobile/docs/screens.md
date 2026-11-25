@@ -1,5 +1,48 @@
 # Coding reference 1 — màn hình và chức năng WP3
 
+## T146 — all-origin owned sessions, 24/11 (local implementation)
+
+This section supersedes the historical ledger-only History and app-start-only progress descriptions below. Views 5/6/7/9 → FR-04/05/08/16/17, UC-CHG-04/UC-PAY-02, BR-P08/15/17/34/45, NFR-SEC-01/US-01 → PKG-3 Charging/History, current CD-1/SD-1a/b intent/progress separation and the canonical Driver API §5/OpenAPI 0.15.0. The read-only discovery/selection extensions are documented in architecture.md; the diagrams' older planned/mock footers do not override today's API composition.
+
+- Scan/Charge entry and resume read owned active sessions under the actual auth scope, without a vehicle prerequisite. Polls run sequentially five seconds after completion, only on the foreground/current Scan route; leaving/logout/dispose cancels reads and rejects late generations. Exactly one fresh session may be adopted only when no known selection, own app intent, QR lookup or manual editing intervenes. Several sessions display an explicit picker with paging; returning from an external session suppresses immediate re-adoption.
+- Progress uses the existing readout/statement UI. Only matching ID **and** scope can reuse an app-start attempt/vehicle/mode. Server origin/capabilities gate Stop; a genuine app stop response loss retains same-key recovery even while `stopping` disallows a new stop. RFID/HMI/free-vend hide both Stop and Retry. Unknown external capabilities fail closed. App start intent survives viewing a different known owned session. Unresolved start/stop blocks switching, with a concise reason.
+- Physical stop retains status/final Wh; an ineligible/unbilled RFID session does not poll forever or invent a zero debit/points. Future actual posted statements use the existing owned statement reader. Lifecycle guards still require closed/reconciled, final stop and no review before showing a final statement.
+- History reads `view=all`, including unsettled RFID. Compact cards use source/status/date and actual energy/statement amount, with session details retaining unknown vehicle. Null is unavailable; actual zero remains zero. Final statement buttons require lifecycle eligibility as well as `statement_available`. Loading/empty/error/retry and previous/next pages are connected. Credit's ledger/money logic is unchanged.
+
+Acceptance evidence: the 27 new synthetic cases cover typed decoding, bigint strings/nulls/future enums/wrong JSON types, auth A→logout→B, explicit/automatic selection guards, target-scoped stop keys, 0/1/multiple/page discovery, cancellation/resume/5s/no-overlap, late QR/edit protection, no-vehicle RFID navigation with no charge/stop POST, physical stop bounds, future settled RFID and statement ownership failure. Existing QR/four-mode/stop/camera/navigation tests remain. VI/EN are tested at 390px/100% and 320px/200%, including 48dp actions. Final check results are in README; staging/Android device/accessibility certification/physical reader and T148 remain pending.
+
+## T96 — garage navigation runtime fix, 23/11
+
+Views 10/3 (garage/default vehicle → Discover) → FR-02/03, UC-ACC-03/UC-CHG-01, BR-P03/17, NFR-SEC-01 → PKG-3 Profile `_FindStationsButton` / Stations discovery through the existing API shell. Replace the vehicle CTA's push with destination `go('/discover')`; account Explore follows the same primary-tab semantics. No route/controller/repository or ownership/selected-vehicle guard change.
+
+Local acceptance: exact duplicate-page-key assertion reproduced from the garage before patch; five new real-`ApiApp` fixture cases plus existing affected checks **38/38 pass**, covering repeated visits, default/nondefault details, Discover selection, vehicle query, no writes, tab and platform-Back handling at normal/narrow-large-text profiles. Account pre-fix evidence is a destination/back-stack mismatch, not a duplicate-key crash. Optional new refresh-harness failures are retained in external logs and do not establish a runtime guard defect or new refresh proof. [README](../README.md#t96--garage-navigation-runtime-fix-2311) records scope/evidence and pending device/integration acceptance.
+
+## T96 — five UX review fixes, 23/11
+
+Local verified; primary accepted all 15 final fixture frames. Native/integration acceptance is pending. This current trace supersedes older client-minimum and formatting descriptions below; earlier implementation/check records are retained as history.
+
+| View/function → requirements | Class/package/dependencies | Acceptance/evidence |
+| --- | --- | --- |
+| 9/13 redemption → FR-07/17, UC-PAY-01/03, BR-P35 | Payments domain/controller → Loyalty `minRedemptionPoints`; existing API quote/create/status | Blank/0 none; 1/499 blocked without writes; 500/max valid; max+1 invalid. Specific minimum 422 and other point 422 errors clear points/requote without checkout or financial effect. |
+| 6/7 manual Stop → FR-04/05/08, UC-CHG-03/04, BR-P01/19/45 | Charging `ChargeSessionScreen` → Shared UI `ChargeFlowPage/FlowPage.action`; existing stop controller | Same confirmation/retry/ownership/lifecycle behavior; ≥48dp Stop hit-testable in the first viewport above tabs at both profiles/languages; action disappears after settlement/review. |
+| 4/5 station to QR → FR-03/04, UC-CHG-01/02, BR-P03/18/19 | Stations detail → existing guarded `/scan`, Charging lookup/start | Clear station QR CTA; no lookup or start from the CTA itself; selected-station/vehicle guard retained. |
+| 10 add vehicle → FR-02, UC-ACC-02/03, BR-P03/17 | Profile `VehicleAddScreen`; existing catalog/profile controller | Catalog collapses after selection; change/cancel preserves search/brand/plate/default; unknown/removed model clears selection and reopens. Keyboard-inset save remains reachable. |
+| 5–10 amount labels → FR-04/05/07/08, UC-CHG-02/03/04, UC-PAY-01/02, BR-P18/19/22/45 | Core `vnd` + Charging/Payments/Profile/Stations presentation | VI/EN integer currency, positive/negative/zero/null and legacy VI default; actual amount and upper cap remain distinct. |
+
+NFR-SEC-01 scope/auth/idempotency guards remain unchanged. `ui_review_fixes_test.dart`, existing top-up/session/modes/vehicle/loyalty tests and `ui_consistency_test.dart`: **101/101 focused**, **287/287 full**, clean analyzer, format **191/0**. One capture batch: **4 profiles / 15 PNGs**, primary accepted without a correction round. The QR helper restores the camera after checking the lazy manual-entry field; Stop's first-viewport proof is unchanged. [README](../README.md#t96--five-ux-review-fixes-2311) records exact logs, full file inventory, partial hash scope and offscreen/header/keyboard limits. Fixtures do not establish full FR/NFR or staging/device completion.
+
+## T96 — UI consistency polish, 23/11
+
+Authorized presentation-only slice; local verified, pending device/integration. Current source SRS/requirements index/API outrank historical diagram mock/planned footers and old Route-ranking restrictions; no requirement or business-policy revision.
+
+| View/function → requirements | Class/package/dependencies | Acceptance/evidence |
+| --- | --- | --- |
+| 3/4/15 road/suggestion estimates → FR-03/21, UC-CHG-01/07, BR-P03/33/39/41 | PKG-3 Stations presentation + core `estimatedMinutes`; existing search/repository untouched | Ceiling display in VI/EN, zero/unknown preserved; fractional fixture rendered as 6/17 whole minutes, no raw decimals; no ranking or consent changes. |
+| 5/6 start modes/presets/session metrics → FR-04/05, UC-CHG-02/03/04, BR-P18/19/39 | Charging presentation + Shared UI `EqualHeightRows`; existing start/session/stop interfaces untouched | Four 2×2 mode cards same size, row metrics aligned, targets/actions/selected semantics retained; measured seconds/overshoot remain real. |
+| 9/10 top-up presets/vehicle metrics → FR-02/07, UC-ACC-02/03, UC-PAY-01, BR-P03/13/18–23 | Payments/Profile presentation + shared grid; existing quote/profile repositories untouched | Same-row preset size ≥48dp, taps update original draft, default-vehicle metric grid consistent; existing account summary sizing preserved. |
+
+Cross-cutting visual acceptance: 390px/100% and 320px/200%, VI/EN; long labels/values, natural stacking, singleton rows and reachable taps. Final relevant tests 39/39, including 11 new checks; earlier affected tests 83/83; analyzer clean and full suite on final code 278/278. One visual correction changes normal charging presets to two columns so amount + unit fits one line; tests inspect actual paragraph line boxes and original draft callback. Seven bounded final fixture frames and partial-baseline/header limitations are recorded in README/manifest. No domain/application/data/API/router/composition/config/dependency/brand changes; no claim of staging, native-device or NFR acceptance.
+
 ## Phone login — BE-30, 21/11
 
 Views 1/2 → Must FR-01, UC-ACC-01/04/05, BR-P05/16, NFR-US-02/SEC-01 → PKG-3 Auth/domain/application/data/presentation + shared API transport. Existing login accepts **Email hoặc số điện thoại** + password; registration keeps required email/consent and adds an optional phone, without a third API onboarding step. `auth-email` remains the compatibility key. No OTP, Google button, backend or native dependency change.

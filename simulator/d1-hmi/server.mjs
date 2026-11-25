@@ -96,6 +96,42 @@ const server = http.createServer(async (req, res) => {
       res.writeHead(200, { 'content-type': 'application/json' });
       return res.end(JSON.stringify(station.snapshot()));
     }
+    if (req.method === 'POST' && url.pathname === '/api/swipeReader') {
+      const reject = (status, message) => {
+        res.writeHead(status, { 'content-type': 'application/json' });
+        return res.end(JSON.stringify({ ok: false, message }));
+      };
+      const localHost = new Set(['127.0.0.1', 'localhost', '[::1]']);
+      const host = new URL('http://' + req.headers.host);
+      const remote = req.socket.remoteAddress;
+      if (
+        !['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(remote) ||
+        !localHost.has(host.hostname) ||
+        host.port !== String(server.address().port) ||
+        (req.headers.origin && req.headers.origin !== host.origin) ||
+        (req.headers['sec-fetch-site'] &&
+          !['same-origin', 'none'].includes(req.headers['sec-fetch-site']))
+      )
+        return reject(403, 'Đầu đọc chỉ nhận yêu cầu cùng origin trên máy local.');
+      if (!/^application\/json(?:\s*;|$)/i.test(req.headers['content-type'] ?? ''))
+        return reject(415, 'Đầu đọc yêu cầu application/json.');
+      let body = '',
+        size = 0;
+      for await (const chunk of req) {
+        size += chunk.length;
+        if (size > 512) return reject(413, 'Khung đầu đọc quá dài.');
+        body += chunk;
+      }
+      let args;
+      try {
+        args = JSON.parse(body);
+      } catch {
+        return reject(400, 'Khung đầu đọc JSON không hợp lệ.');
+      }
+      const result = await station.act('swipeReader', args);
+      res.writeHead(result.ok ? 200 : 400, { 'content-type': 'application/json' });
+      return res.end(JSON.stringify(result));
+    }
     if (req.method === 'POST' && url.pathname.startsWith('/api/')) {
       let body = '';
       for await (const chunk of req) body += chunk;
@@ -115,7 +151,9 @@ const server = http.createServer(async (req, res) => {
 // cổng được publish riêng cho loopback của máy chủ (infra/staging/docker-compose.yml).
 const HOST = env.HMI_HOST || '127.0.0.1';
 server.listen(PORT, HOST, () => {
-  console.log(`HMI trụ D1 tại http://${HOST}:${PORT}  (CSMS ${station.snapshot().csmsUrl})`);
+  console.log(
+    `HMI trụ D1 tại http://${HOST}:${server.address().port}  (CSMS ${station.snapshot().csmsUrl})`,
+  );
   station.start();
 });
 

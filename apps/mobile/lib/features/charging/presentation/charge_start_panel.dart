@@ -221,24 +221,31 @@ class _ChargeStartFormState extends ConsumerState<_ChargeStartForm> {
           ),
           const SizedBox(height: 12),
           if (_mode != ChargingMode.autoFull) ...[
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                for (final value in presets)
-                  OutlinedButton(
-                    key: Key('charge-preset-$value'),
-                    onPressed: () => setState(() {
-                      _energy.text = value;
-                      _saveDraft();
-                    }),
-                    child: Text(
-                      _mode == ChargingMode.cost
-                          ? vnd(int.parse(value))
-                          : '$value $unit',
+            LayoutBuilder(
+              builder: (context, box) => EqualHeightRows(
+                columns:
+                    box.maxWidth < 300 ||
+                        MediaQuery.textScalerOf(context).scale(14) > 19
+                    ? 1
+                    : 2,
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  for (final value in presets)
+                    OutlinedButton(
+                      key: Key('charge-preset-$value'),
+                      onPressed: () => setState(() {
+                        _energy.text = value;
+                        _saveDraft();
+                      }),
+                      child: Text(
+                        _mode == ChargingMode.cost
+                            ? vnd(int.parse(value), copy: copy)
+                            : '$value $unit',
+                      ),
                     ),
-                  ),
-              ],
+                ],
+              ),
             ),
             const SizedBox(height: 12),
             Text(

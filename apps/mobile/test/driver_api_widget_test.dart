@@ -120,6 +120,7 @@ void main() {
         'auth/login' => reply(200, tokens(accessA)),
         'me' when forbidden => reply(403, {'error': 'forbidden'}),
         'me' => reply(200, account()),
+        'sessions' => emptyActiveSessions(request),
         'stations' => reply(200, page([])),
         _ => throw StateError('Unexpected path'),
       },
@@ -210,6 +211,7 @@ void main() {
               ],
             ),
           ),
+          ('GET', 'sessions') => emptyActiveSessions(r),
           ('GET', 'stations') => reply(200, page([])),
           ('GET', 'connectors/by-code/PM%20T96.1/2') => switch (++attempt) {
             1 => reply(503, {'error': 'auth_unavailable'}),
@@ -305,6 +307,7 @@ void main() {
             200,
             ownVehicle(id: vehicle = '10'),
           ),
+          ('GET', 'sessions') => emptyActiveSessions(r),
           ('GET', 'stations') => reply(200, page([])),
           ('GET', 'connectors/by-code/PM-T96/2')
               when r.uri.queryParameters['vehicle_id'] == '9' =>

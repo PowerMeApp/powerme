@@ -1,3 +1,4 @@
+import 't146_session_fixture.dart';
 import 'dart:async';
 
 import 'package:dio/dio.dart';
@@ -95,7 +96,7 @@ void main() {
   );
 
   testWidgets(
-    'settled history pages through top-ups and reads owned statements',
+    'owned history pages independently from credit and reads owned statements',
     (tester) async {
       var reads = 0;
       final fixture = DriverApiFixture(
@@ -104,6 +105,28 @@ void main() {
           'me' => reply(200, account(id: '7')),
           'stations' => reply(200, page([])),
           'credit' => reply(200, _credit(balance: 5000, available: 5000)),
+          'sessions' when r.queryParameters['page'] == 1 => reply(
+            200,
+            ownedPageJson([], total: 23),
+          ),
+          'sessions' => reply(
+            200,
+            ownedPageJson(
+              [
+                ownedSessionJson(
+                  id: '9223372036854775807',
+                  origin: 'app_qr',
+                  status: 'closed',
+                  stopped: true,
+                  statement: true,
+                  amount: 45000,
+                ),
+                ownedSessionJson(id: '79', status: 'closed', stopped: true),
+              ],
+              total: 23,
+              page: 2,
+            ),
+          ),
           'credit/transactions' when r.queryParameters['page'] == 1 => reply(
             200,
             _ledger(1, 23, List.generate(20, (i) => _entry(23 - i, 20000))),
@@ -130,15 +153,15 @@ void main() {
 
       await _signIn(tester, fixture);
       await _tap(tester, find.byKey(const Key('nav-history')));
-      expect(find.text('Phiên đã quyết toán'), findsOneWidget);
-      expect(
-        find.text('Trang này không có phiên đã quyết toán.'),
-        findsOneWidget,
-      );
+      expect(find.text('Các phiên sạc của bạn'), findsOneWidget);
+      expect(find.text('Trang này không có phiên sạc.'), findsOneWidget);
       expect(find.text('Nạp tín dụng'), findsNothing);
       expect(fixture.requests.where((r) => r.path == 'credit'), isEmpty);
       await _tap(tester, find.text('Trang sau'));
-      expect(find.text('Thanh toán phiên sạc'), findsNWidgets(2));
+      await _scrollTo(tester, find.text('RFID'));
+      expect(find.text('RFID'), findsOneWidget);
+      await tester.drag(find.byType(Scrollable).last, const Offset(0, 1500));
+      await tester.pumpAndSettle();
       expect(find.text('Nạp tín dụng'), findsNothing);
       expect(find.text('Xem bảng kê'), findsOneWidget);
       await _tap(tester, find.text('Xem bảng kê'));

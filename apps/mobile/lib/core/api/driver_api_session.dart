@@ -258,6 +258,18 @@ class DriverApiSession {
     );
   }
 
+  Future<Map<String, dynamic>> readOwnedSessions(
+    String principalId, {
+    required String view,
+    required int page,
+    required int pageSize,
+    required CancelToken cancel,
+  }) => _readForPrincipal(principalId, 'sessions', cancel, {
+    'view': view,
+    'page': page,
+    'page_size': pageSize,
+  });
+
   Future<Map<String, dynamic>> readChargeProgress(
     String principalId,
     String sessionId,
@@ -563,6 +575,7 @@ class DriverApiSession {
           'account_closed' => 'account_closed',
           'payment_unconfigured' => 'payment_unconfigured',
           'balance_limit_exceeded' => 'balance_limit_exceeded',
+          'points_below_minimum' => 'points_below_minimum',
           'invalid_description' => 'invalid_description',
           'duplicate_report' => 'duplicate_report',
           'stop_pending_or_unknown' => 'stop_pending_or_unknown',

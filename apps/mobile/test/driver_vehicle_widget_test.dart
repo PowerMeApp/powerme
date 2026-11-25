@@ -139,8 +139,9 @@ void main() {
       await _chooseModel(tester);
       expect(find.text(leafPhotoCredit), findsOneWidget);
       expect(find.text('Ảnh minh họa'), findsOneWidget);
+      await _tap(tester, 'change-vehicle-model');
       await _tap(tester, 'vehicle-model-${vf8['vehicle_model_id']}');
-      expect(find.text(leafPhotoCredit), findsOneWidget);
+      expect(find.text(leafPhotoCredit), findsNothing);
       expect(find.text('Ảnh minh họa'), findsOneWidget);
       expect(
         imageClient.urls.every((url) => url == Uri.parse(leafPhotoUrl)),
@@ -356,6 +357,8 @@ void main() {
     expect(find.text('GB/T'), findsOneWidget);
     expect(find.text('Chưa có dữ liệu'), findsNWidgets(3));
 
+    expect(search, findsNothing);
+    await _tap(tester, 'change-vehicle-model');
     await tester.ensureVisible(search);
     await tester.enterText(search, 'lEaF');
     await tester.pumpAndSettle();
@@ -365,6 +368,7 @@ void main() {
     expect(find.text('270 km'), findsOneWidget);
     expect(find.text('50 kW'), findsOneWidget);
     expect(find.text('CHAdeMO'), findsOneWidget);
+    await _tap(tester, 'change-vehicle-model');
     await chooseBrand('VinFast');
     expect(find.text('Không tìm thấy mẫu xe phù hợp.'), findsOneWidget);
     expect(leafCard, findsNothing);
@@ -530,6 +534,8 @@ void main() {
         expect(find.byKey(const Key(_save)), findsNothing);
       } else {
         expect(_canSave(tester), isTrue);
+        expect(search, findsNothing);
+        await _tap(tester, 'change-vehicle-model');
         expect(tester.widget<TextField>(search).controller!.text, 'Leaf');
         expect(
           tester

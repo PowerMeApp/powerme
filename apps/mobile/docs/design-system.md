@@ -1,5 +1,19 @@
 # Thiết kế và thương hiệu
 
+## T96 — five UX review fixes, 23/11
+
+Stop/Retry occupies a fixed, content-sized footer above the existing five tabs; ≥48dp targets remain visible without scrolling at 390px/100% and 320px/200% in VI/EN. Other FlowPages retain their existing body when no footer action is supplied. Confirmation and server lifecycle still determine behavior.
+
+Station detail uses the explicit QR-at-station action. Selected vehicle models collapse the catalog with Change model/Keep selected model controls, preserving the draft. Minimum-point validation stays inline, including with a simulated keyboard inset; blank/0 continues without points. Money uses shared integer VI/EN currency/sign formatting, with maximum and actual amounts separately labelled. No text shrinking, fixed clipping height or decorative financial calculation.
+
+Original gold `#D4AF37`, teal `#00E0C2`, black `#0A0A0A`, graphite `#141414`, logo bytes, theme/font fallback, 20dp gutters, 12dp radii and central Sạc remain. One bounded 15-frame batch was directly inspected and accepted by primary; no correction/recapture. The credit-ledger app-bar has offscreen white-block glyphs, and the 390px selected-model heading is partly scrolled/clipped at the top, not proof of a font defect. Those headers are not claimed visually verified. [README](../README.md#t96--five-ux-review-fixes-2311) records actual checks and fixture/native/keyboard limits; these renders do not certify device accessibility or performance.
+
+## T96 — UI consistency polish, 23/11
+
+Comparable cells now share width and content-driven row height: metric values sit at the bottom; an odd last metric fills the row. Selectable charging modes share a complete equal 2×2 rhythm at normal width, while narrow/200% text uses natural stacked cards. Preset rows use the same sizing; touch targets remain ≥48dp. No global fixed card height, aspect-ratio clipping or text shrinking; passive mode/status badges retain their compact sizing.
+
+Estimated duration labels use whole-minute ceiling in VI/EN, preserving zero and localized unknown; measured elapsed remains `HH:mm:ss`. Original gold/teal/black/graphite, gradients, 20dp gutters, 12dp cell radii, five tabs/central Sạc, font fallback and four logo PNG bytes remain. Existing account summary pair already meets row sizing and is unchanged. Final seven fixture frames and capture limitations are linked from README; this is refinement of the approved look, not a new design or device certification.
+
 ## Tài khoản, điểm và nạp tín dụng — Stitch ZIP (6), 20/11
 
 Nguồn visual là ba HTML/PNG và DESIGN từ ZIP6 người dùng cung cấp, hash/source path ở README/architecture. Chỉ đọc reference, không execute HTML, tải CDN/ảnh/font hoặc đưa policy screenshot vào app. Dùng native Flutter, brand **#D4AF37 / #00E0C2 / #0A0A0A / #141414**, original PNG byte/font theme giữ nguyên; logout lấy semantic error của theme, không thêm hex palette.

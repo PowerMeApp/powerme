@@ -8,6 +8,8 @@ import '../../features/auth/application/auth_controller.dart';
 import '../../features/auth/data/api_auth_repository.dart';
 import '../../features/charging/application/charge_session_controller.dart';
 import '../../features/charging/application/charge_start_controller.dart';
+import '../../features/charging/application/owned_sessions_controller.dart';
+import '../../features/charging/data/api_owned_session_repository.dart';
 import '../../features/charging/data/api_charge_session_repository.dart';
 import '../../features/charging/data/api_charge_start_repository.dart';
 import '../../features/loyalty/application/loyalty_controller.dart';
@@ -93,6 +95,9 @@ class ApiApp extends StatelessWidget {
       ),
       chargeStartRepositoryProvider.overrideWith(
         (ref) => ApiChargeStartRepository(ref.watch(_apiSessionProvider)),
+      ),
+      ownedSessionRepositoryProvider.overrideWith(
+        (ref) => ApiOwnedSessionRepository(ref.watch(_apiSessionProvider)),
       ),
       chargeSessionRepositoryProvider.overrideWith(
         (ref) => ApiChargeSessionRepository(ref.watch(_apiSessionProvider)),

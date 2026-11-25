@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../../core/l10n/app_copy.dart';
 import '../../../core/theme/powerme_theme.dart';
 import '../../../core/widgets/driver_task_page.dart';
+import '../domain/loyalty.dart';
 
 class PointsHelpHeading extends StatelessWidget {
   const PointsHelpHeading({
@@ -85,8 +86,8 @@ class _PointsHelpSheet extends StatelessWidget {
                 const SizedBox(height: 16),
                 Text(
                   copy.text(
-                    'Bạn cần ít nhất 500 điểm còn hạn và mỗi lần đổi phải dùng tối thiểu 500 điểm. Dưới 500 điểm, bạn vẫn có thể nạp tín dụng không dùng điểm.',
-                    'You need at least 500 unexpired points, and each redemption must use at least 500 points. With fewer than 500 points, you can still top up without using points.',
+                    'Bạn cần ít nhất $minRedemptionPoints điểm còn hạn và mỗi lần đổi phải dùng tối thiểu $minRedemptionPoints điểm. Dưới $minRedemptionPoints điểm, bạn vẫn có thể nạp tín dụng không dùng điểm.',
+                    'You need at least $minRedemptionPoints unexpired points, and each redemption must use at least $minRedemptionPoints points. With fewer than $minRedemptionPoints points, you can still top up without using points.',
                   ),
                 ),
                 const SizedBox(height: 16),

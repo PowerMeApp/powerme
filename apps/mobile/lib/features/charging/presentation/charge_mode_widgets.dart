@@ -34,7 +34,7 @@ String chargeTargetLabel(ChargingMode? mode, int? limit, AppCopy copy) {
   return switch (mode) {
     ChargingMode.timed => copy.text('$limit phút', '$limit min'),
     ChargingMode.energy => chargeEnergyLabel(limit, copy),
-    ChargingMode.cost => vnd(limit),
+    ChargingMode.cost => vnd(limit, copy: copy),
     ChargingMode.autoFull => '',
   };
 }
@@ -122,13 +122,15 @@ class ChargeModeChoices extends StatelessWidget {
         final single =
             box.maxWidth < 280 ||
             MediaQuery.textScalerOf(context).scale(14) > 20;
-        return Wrap(
+        return EqualHeightRows(
+          columns: single ? 1 : 2,
+          equalizeGroup: !single,
           spacing: 12,
           runSpacing: 12,
           children: [
             for (final mode in ChargingMode.values)
-              SizedBox(
-                width: single ? box.maxWidth : (box.maxWidth - 12) / 2,
+              ConstrainedBox(
+                constraints: const BoxConstraints(minHeight: 48),
                 child: Semantics(
                   selected: selected == mode,
                   child: Material(

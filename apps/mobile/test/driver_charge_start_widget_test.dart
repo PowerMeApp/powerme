@@ -459,6 +459,7 @@ DriverApiFixture _fixture(
         ],
       ),
     ),
+    ('GET', 'sessions') => emptyActiveSessions(r),
     ('GET', 'stations') => reply(200, page([])),
     _ => charges(r),
   };

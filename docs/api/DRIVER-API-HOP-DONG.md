@@ -37,7 +37,7 @@ Hội đồng Review 2 (29/10) hỏi: *"nhóm cần một simulation bắn tín 
 
 Tình huống chuỗi phải chạy được ở Review 3: HMI trụ đổi súng A sang `Charging` → CSMS ghi StatusNotification và MeterValues → trong **5 giây** app tài xế hiện "đang sạc · 1,2 kWh · còn khoảng 18–26 phút".
 
-## 2. Tám đường dẫn và hàm đã có
+## 2. Đường dẫn và hàm đã có
 
 | Đường dẫn | Hàm trong `DriverChargingService` | UC / BR | Trạng thái route |
 |---|---|---|---|
@@ -46,6 +46,7 @@ Tình huống chuỗi phải chạy được ở Review 3: HMI trụ đổi sún
 | `GET /connectors/{id}/time-left` | **chưa có** | FR-03; BR-P32, P40 | chưa — hình dạng chốt ở đây |
 | `POST /charges` | `start` | UC-CHG-02; D4; BR-P18, P19 | có (BE-22) |
 | `GET /charges/{key}` | `getStart` | UC-CHG-02 (mất mạng giữa chừng) | có (BE-22) |
+| `GET /sessions` | — (`driver/driver-sessions.ts`) | UC-CHG-04; UC-PAY-02 | có (T146), xem §5; không phụ thuộc ledger |
 | `GET /sessions/{id}/progress` | `progress` | UC-CHG-04 | có (BE-22); `estimated_cost_vnd` cận trên, `time_left` luôn null |
 | `POST /sessions/{id}/stop` | `stop` → `commandSnapshot` | UC-CHG-03; BR-P01 | có (BE-22) |
 | `GET /sessions/{id}/statement` | `statement` | BR-P45, P34 | có (BE-22) |
@@ -90,11 +91,21 @@ Tình huống: tài xế bấm "Bắt đầu", app mất 4G ngay sau khi gửi. 
 
 Dừng tương tự: `POST /sessions/{id}/stop` trả 202 với `command_status`; phiên chỉ `closed` khi trụ gửi StopTransaction (BR-P01). `timeout` không phải thất bại: operator có đường khôi phục T72.
 
-## 5. Phiên không do app tạo
+## 5. Phiên không do app tạo — T146, OpenAPI 0.15.0 (24/11/2026)
 
-README WP3 ghi: app phải xử lý được phiên nó không tạo ra (thẻ RFID online, mật khẩu HMI). Hợp đồng: `sessions/*` trả mọi phiên có `driver_id` là tài xế gọi, bất kể `origin`; `charges/*` chỉ có với phiên bắt đầu từ app. Thẻ ví (`station_wallet`) không gắn tài xế nên không xuất hiện trong app, đúng BR-P08.
+Tài xế đọc mọi phiên có driver_id khớp principal, bất kể origin và có/không có intent hoặc ledger. Phiên không gắn tài xế không xuất hiện. Card management thuộc Admin. Nội dung cũ về thẻ ví/station_wallet tại mục này đã được thay thế: PowerMe đã bỏ thẻ ví theo BR-P08/T110; T146 không thêm lại và T148 quyết toán RFID vẫn chưa triển khai.
 
-Câu trả lời một dòng cho hội đồng về RFID: **thẻ online** để tài xế bắt đầu phiên không cần điện thoại, tiền trừ từ credit như app; **thẻ ví** là trụ tự thu, CSMS chỉ ghi nhận để đối soát.
+GET /api/driver/v1/sessions?view=active|all&page=1&page_size=20 trả {items,total,page,page_size}. Mặc định all/1/20; page 1–100000, page_size 1–100. Chỉ ba key này, mỗi key một lần; key lạ/trùng (kể cả driver_id/id_tag), enum sai, khoảng trắng/control, số âm/0/phân số/quá giới hạn/SQL-shaped đều 400 invalid_input. Bearer và active-driver DB check chạy trước validation/method; method khác trả 405 với Allow: GET, OPTIONS. OPTIONS theo preflight CORS hiện có (204, không cần bearer).
+
+view=active: meter_stop_wh IS NULL và status thuộc pending, active, paused, stopping, orphaned, review. failed/closed/reconciled và mọi phiên đã có meter_stop_wh bị loại. view=all gồm cả RFID đã dừng nhưng chưa có ledger/bảng kê. Sắp received_started_at DESC, id DESC; total và items từ cùng SQL snapshot, trang vượt cuối items=[] nhưng total vẫn đúng.
+
+Mỗi item luôn có: session_id, status, origin, payment_mode, can_stop, statement_available, started_at, stopped_at, updated_at, energy_wh, amount_vnd, settlement_state, connector_id, connector_no, charge_point_display_code, site_id, site_name, vehicle_id, vehicle_label. ID là chuỗi bigint, thời gian ISO UTC. started_at/stopped_at dùng received_started_at/received_stopped_at. energy_wh là Wh chốt đã lưu, có thể null; tiến trình thực dùng GET progress. Wh/VND phải là số nguyên JS an toàn hoặc null, không làm tròn số vượt giới hạn. amount_vnd chỉ lấy charging_statements.amount_vnd đúng session/chủ và payment_mode=csms_billed; không có bảng kê thì null, không dùng estimate hay sessions.total_cost_vnd.
+
+site_id/site_name/vehicle_id/vehicle_label giữ null khi chưa biết. charge_point_display_code cũng giữ null nếu DB chưa gán mã. vehicle_label là plate_number của xe gắn phiên và cùng chủ; không điền xe mặc định cho RFID và không lộ xe của chủ khác. Không trả id_tag, UID, card ID, serial/credential riêng của trụ.
+
+Progress thêm origin, payment_mode, can_stop, statement_available; giữ các field cũ. can_stop chỉ true khi app_qr + intent cùng driver + meter_stop_wh null + status active/paused/orphaned. RFID/HMI/free-vend false; POST stop hiện vẫn 404 cho phiên không có intent, không đổi hành vi. Đây là eligibility, server luôn kiểm lại khi POST. statement_available chỉ true khi payment_mode=csms_billed và có charging_statements đúng session/driver; GET không tạo bảng kê hay gửi lệnh sạc.
+
+Flutter đã nối local với API 0.15.0 cho phát hiện phiên đang sạc, theo dõi chỉ đọc RFID và Lịch sử mọi nguồn, qua adapter thật và kiểm thử transport/widget. Đây chưa là bằng chứng API staging/đầu đọc/điện thoại thật; backend 0.15 chưa triển khai staging và cấu hình app giữ nguyên. T148, ghi nợ credit, loyalty và quy trình Admin đăng ký thẻ không thay đổi. Xem [plan, research và bằng chứng kiểm thử](../tasks/t146-driver-session-discovery.md) và [kiểm chứng Flutter/giới hạn](../../apps/mobile/README.md#t146--owned-session-discovery-and-rfid-observation-2411).
 
 ## 6. Xác thực
 

@@ -90,7 +90,7 @@ class ChargeSessionReadout extends StatelessWidget {
                   ChargingMode.cost =>
                     progress.costEstimateVnd == null
                         ? copy.text('Chưa xác định', 'Unknown')
-                        : vnd(progress.costEstimateVnd),
+                        : vnd(progress.costEstimateVnd, copy: copy),
                   _ => _observedEnergy(progress, copy),
                 },
           fraction: waitingForStop ? null : fraction,
@@ -147,7 +147,7 @@ class ChargeSessionMetrics extends StatelessWidget {
             copy.text('Tạm tính', 'Estimate'),
             progress.costEstimateVnd == null
                 ? copy.text('Chưa xác định', 'Unknown')
-                : vnd(progress.costEstimateVnd),
+                : vnd(progress.costEstimateVnd, copy: copy),
             Icons.payments_outlined,
           ),
         ],
@@ -156,7 +156,7 @@ class ChargeSessionMetrics extends StatelessWidget {
         const SizedBox(height: 12),
         ValueLine(
           copy.text('Chi phí (tạm tính, tối đa)', 'Estimated cost (maximum)'),
-          vnd(progress.estimatedCostVnd),
+          vnd(progress.estimatedCostVnd, copy: copy),
           showDivider: false,
         ),
       ],
@@ -209,12 +209,12 @@ class _ChargeMetricRow extends StatelessWidget {
           items.any((item) => item.value.length > 13)) {
         return MetricGrid(items: items);
       }
-      return Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      return EqualHeightRows(
+        columns: 3,
+        spacing: 8,
         children: [
-          for (final (index, item) in items.indexed) ...[
-            if (index > 0) const SizedBox(width: 8),
-            Expanded(
+          for (final item in items)
+            SizedBox(
               child: Container(
                 padding: const EdgeInsets.symmetric(
                   horizontal: 10,
@@ -226,6 +226,7 @@ class _ChargeMetricRow extends StatelessWidget {
                 ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
                     Icon(item.icon, size: 18, color: PowerMeColors.gold),
                     const SizedBox(height: 8),
@@ -245,7 +246,6 @@ class _ChargeMetricRow extends StatelessWidget {
                 ),
               ),
             ),
-          ],
         ],
       );
     },
@@ -299,7 +299,7 @@ class ChargeProgressCard extends StatelessWidget {
           copy.text('Chi phí tạm tính', 'Estimated cost'),
           progress.costEstimateVnd == null
               ? copy.text('Chưa xác định', 'Unknown')
-              : vnd(progress.costEstimateVnd),
+              : vnd(progress.costEstimateVnd, copy: copy),
         ),
         ValueLine(
           stopped
@@ -312,7 +312,7 @@ class ChargeProgressCard extends StatelessWidget {
         if (progress.estimatedCostVnd != null)
           ValueLine(
             copy.text('Chi phí (tạm tính, tối đa)', 'Estimated cost (maximum)'),
-            vnd(progress.estimatedCostVnd),
+            vnd(progress.estimatedCostVnd, copy: copy),
           ),
         ValueLine(
           copy.text('Cập nhật (ICT)', 'Updated (ICT)'),

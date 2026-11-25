@@ -27,6 +27,7 @@ class _VehicleAddScreenState extends ConsumerState<VehicleAddScreen> {
   String? _brand;
   String? _modelId;
   bool _modelRequired = false;
+  bool _editingModel = true;
   bool _makeDefault = false;
   ProfileFailure? _addFailure;
   bool _acceptedNeedsRefresh = false;
@@ -69,6 +70,11 @@ class _VehicleAddScreenState extends ConsumerState<VehicleAddScreen> {
               _acceptedNeedsRefresh =
                   failure == ProfileFailure.mutationNeedsRefresh;
               _addFailure = failure.needsRefresh ? null : failure;
+              if (failure == ProfileFailure.unknownModel) {
+                _modelId = null;
+                _modelRequired = true;
+                _editingModel = true;
+              }
             });
           },
         );
@@ -78,6 +84,7 @@ class _VehicleAddScreenState extends ConsumerState<VehicleAddScreen> {
   void _reloadModels() {
     setState(() {
       _modelId = null;
+      _editingModel = true;
       _addFailure = null;
     });
     ref.invalidate(vehicleModelsProvider);
@@ -112,6 +119,7 @@ class _VehicleAddScreenState extends ConsumerState<VehicleAddScreen> {
         setState(() {
           _modelId = null;
           _modelRequired = true;
+          _editingModel = true;
         });
       }
       if (_brand != null && !available.brands.contains(_brand)) {
@@ -176,8 +184,17 @@ class _VehicleAddScreenState extends ConsumerState<VehicleAddScreen> {
                           'The vehicle catalog is empty.',
                         ),
                 )
+              else if (selected == null || _editingModel)
+                _catalogPicker(copy, available, enabled: canSave)
               else
-                _catalogPicker(copy, available, enabled: canSave),
+                OutlinedButton.icon(
+                  key: const Key('change-vehicle-model'),
+                  onPressed: canSave
+                      ? () => setState(() => _editingModel = true)
+                      : null,
+                  icon: const Icon(Icons.edit_outlined),
+                  label: Text(copy.text('Đổi mẫu xe', 'Change model')),
+                ),
               if (failure != null)
                 FailureNotice(vehicleManagementMessage(copy, failure))
               else if (_checkVehiclesAfterRefresh)
@@ -251,6 +268,14 @@ class _VehicleAddScreenState extends ConsumerState<VehicleAddScreen> {
       key: const Key('vehicle-model-catalog'),
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
+        if (catalog.find(_modelId) != null)
+          TextButton(
+            key: const Key('cancel-vehicle-model-change'),
+            onPressed: enabled
+                ? () => setState(() => _editingModel = false)
+                : null,
+            child: Text(copy.text('Giữ mẫu xe đã chọn', 'Keep selected model')),
+          ),
         TextField(
           key: const Key('vehicle-model-search'),
           controller: _search,
@@ -332,6 +357,8 @@ class _VehicleAddScreenState extends ConsumerState<VehicleAddScreen> {
                     setState(() {
                       _modelId = model.id;
                       _modelRequired = false;
+                      _editingModel = false;
+                      _addFailure = null;
                     });
                   }
                 : null,

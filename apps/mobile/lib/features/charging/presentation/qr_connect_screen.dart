@@ -17,6 +17,7 @@ import '../application/charging_controller.dart';
 import '../application/qr_connection_controller.dart';
 import '../domain/charging.dart';
 import 'charge_flow_visuals.dart';
+import 'active_session_discovery.dart';
 import 'charge_start_attempt_panel.dart';
 import 'charge_start_panel.dart';
 import 'charging_screens.dart';
@@ -33,6 +34,8 @@ class QrConnectScreen extends ConsumerStatefulWidget {
 class _QrConnectScreenState extends ConsumerState<QrConnectScreen>
     with WidgetsBindingObserver {
   final _reference = TextEditingController();
+  final _referenceFocus = FocusNode();
+  int _editingGeneration = 0;
   GoRouter? _router;
   bool _foreground = true;
   bool _opening = false;
@@ -46,6 +49,7 @@ class _QrConnectScreenState extends ConsumerState<QrConnectScreen>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _reference.addListener(() => _editingGeneration++);
     _foreground =
         WidgetsBinding.instance.lifecycleState == null ||
         WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed;
@@ -62,6 +66,7 @@ class _QrConnectScreenState extends ConsumerState<QrConnectScreen>
           return;
         }
         if (!_isScanCurrent) return;
+        ref.read(selectedChargeSessionProvider.notifier).clear();
         _pendingAutoNavigation = next.attempt.request;
         _scheduleAutoNavigation();
       });
@@ -128,6 +133,7 @@ class _QrConnectScreenState extends ConsumerState<QrConnectScreen>
     _startController?.pauseStatusReads();
     WidgetsBinding.instance.removeObserver(this);
     _router?.routerDelegate.removeListener(_routeChanged);
+    _referenceFocus.dispose();
     _reference.dispose();
     super.dispose();
   }
@@ -180,7 +186,19 @@ class _QrConnectScreenState extends ConsumerState<QrConnectScreen>
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => widget.apiMode
+      ? ActiveSessionDiscovery(
+          editToken: () => (
+            _navigationGeneration,
+            _editingGeneration,
+            _referenceFocus.hasFocus,
+          ),
+          canAdopt: () => _reference.text.isEmpty && !_referenceFocus.hasFocus,
+          child: _buildScan(context),
+        )
+      : _buildScan(context);
+
+  Widget _buildScan(BuildContext context) {
     final profile = ref.watch(profileControllerProvider).profile;
     final copy = AppCopy(profile.language);
     final selection = widget.apiMode
@@ -426,6 +444,7 @@ class _QrConnectScreenState extends ConsumerState<QrConnectScreen>
             TextField(
               key: const Key('qr-manual-reference'),
               controller: _reference,
+              focusNode: _referenceFocus,
               enabled: !blocked && !busy,
               textInputAction: TextInputAction.go,
               decoration: InputDecoration(

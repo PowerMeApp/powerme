@@ -23,6 +23,8 @@ enum SettlementState { pending, posted, review, notApplicable, unknown }
 
 enum ConnectionState { online, offline, unknown }
 
+enum SessionOrigin { appQr, rfid, hmiPassword, freeVend, unknown }
+
 enum PaymentMode { csmsBilled, stationWallet, free, unattributed, unknown }
 
 class StartRequest {

@@ -1,5 +1,9 @@
 import 'package:flutter/material.dart';
+
 import '../theme/powerme_theme.dart';
+import 'equal_height_rows.dart';
+
+export 'equal_height_rows.dart';
 
 class HeroCard extends StatelessWidget {
   const HeroCard({
@@ -90,14 +94,13 @@ class MetricGrid extends StatelessWidget {
           box.maxWidth < 300 ||
           MediaQuery.sizeOf(context).width < 340 ||
           MediaQuery.textScalerOf(context).scale(14) / 14 > 1.3;
-      final width = stacked ? box.maxWidth : (box.maxWidth - 12) / 2;
-      return Wrap(
+      return EqualHeightRows(
+        columns: stacked ? 1 : 2,
         spacing: 12,
         runSpacing: 12,
         children: [
           for (final item in items)
             Container(
-              width: width,
               padding: const EdgeInsets.all(14),
               decoration: BoxDecoration(
                 color: PowerMeColors.black.withValues(alpha: .62),
@@ -108,6 +111,7 @@ class MetricGrid extends StatelessWidget {
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   Row(
                     children: [
@@ -171,13 +175,14 @@ class QuickActions extends StatelessWidget {
           : actions.length <= 4
           ? 4
           : 3;
-      return Wrap(
+      return EqualHeightRows(
+        columns: count,
         spacing: 8,
         runSpacing: 8,
         children: [
           for (final action in actions)
-            SizedBox(
-              width: (box.maxWidth - 8 * (count - 1)) / count,
+            ConstrainedBox(
+              constraints: const BoxConstraints(minHeight: 48),
               child: Material(
                 color: action.selected
                     ? PowerMeColors.teal.withValues(alpha: .12)
