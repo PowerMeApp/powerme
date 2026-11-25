@@ -167,6 +167,10 @@ export const eInvoiceErrorKindEnum = pgEnum('e_invoice_error_kind', ['transient'
  * đóng tài khoản (SD-2f); hai loại còn lại do Admin quyết (SD-2e).
  */
 export const refundKindEnum = pgEnum('refund_kind', ['top_up', 'late_payment', 'account_closure']);
+/**
+ * STM-10. `done` = VNPay đã nhận yêu cầu hoàn (RC 00 + TS 00 / 05 / 06, hoặc querydr thấy lệnh hoàn);
+ * không có nghĩa tiền đã về tài khoản tài xế (VNPay / ngân hàng chuyển sau, ta không có kênh báo về).
+ */
 export const refundStatusEnum = pgEnum('refund_status', ['requested', 'done', 'failed']);
 
 // ---- ops ----
