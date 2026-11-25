@@ -12,11 +12,11 @@
  *   POST /api/operator/v1/charge-points/onboard, GET|POST /api/admin/v1/charge-points  (BE-44, WF-05,
  *        charge-point-onboarding.ts → ChargePointOnboardingService)
  * RolesGuard runs before route matching, so an unknown path without a valid token is 401, not 404.
- * CORS: localhost origins only (Vite dev server). JSON: snake_case, string ids, `{ error, detail }`.
+ * CORS: localhost origins (Vite dev server) plus DASHBOARD_ALLOWED_ORIGINS (staging, BE-46). JSON: snake_case, string ids, `{ error, detail }`.
  */
 import type { IncomingMessage, RequestListener, ServerResponse } from 'node:http';
 import type { Db } from '../db/db.module.js';
-import type { DriverApiConfig } from '../driver/driver-auth.js';
+import { driverClientIp, type DriverApiConfig } from '../driver/driver-auth.js';
 import { FaultActionError, type FaultActions } from '../console/fault-actions.js';
 import { AuthError, StaffAccounts, type DashboardAuthConfig } from '../users/auth.js';
 import { rolesGuard, type Principal } from '../users/roles-guard.js';
@@ -90,7 +90,8 @@ export function createOperatorApiListener(
   async function handle(req: IncomingMessage, res: ServerResponse) {
     const origin = req.headers.origin;
     if (origin) {
-      if (!LOCAL_ORIGIN.test(origin)) throw new AuthError(403, 'forbidden_origin');
+      if (!LOCAL_ORIGIN.test(origin) && !config.allowedOrigins?.includes(origin))
+        throw new AuthError(403, 'forbidden_origin');
       res.setHeader('Access-Control-Allow-Origin', origin);
       res.setHeader('Vary', 'Origin');
     }
@@ -132,7 +133,7 @@ export function createOperatorApiListener(
         res,
         200,
         rest === '/login'
-          ? await accounts.login(body, req.socket.remoteAddress ?? 'unknown')
+          ? await accounts.login(body, driverClientIp(req, driverConfig ?? {}))
           : await accounts.refresh(body),
       );
       return;

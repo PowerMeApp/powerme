@@ -41,6 +41,30 @@ export interface DashboardAuthConfig {
   audience?: string;
   /** `DASHBOARD_JWT_REFRESH_TTL_S`; unset = {@link DEFAULT_DASHBOARD_REFRESH_TTL_S}. */
   refreshTtlS?: number;
+  /**
+   * BE-46: `DASHBOARD_ALLOWED_ORIGINS`, exact https origins (comma-separated) allowed besides
+   * localhost — the dashboard served by Caddy on staging sends `Origin: https://<DOMAIN>`.
+   */
+  allowedOrigins?: readonly string[];
+}
+
+/** Each entry must be exactly an https origin (no path, query or trailing slash). */
+export function parseAllowedOrigins(raw: string | undefined): readonly string[] {
+  if (raw === undefined || raw.trim() === '') return [];
+  return raw.split(',').map((value) => {
+    const v = value.trim();
+    let origin: string | null = null;
+    try {
+      origin = new URL(v).origin;
+    } catch {
+      /* invalid below */
+    }
+    if (!v.startsWith('https://') || origin !== v)
+      throw new Error(
+        'DASHBOARD_ALLOWED_ORIGINS must list exact https origins, e.g. https://example.com',
+      );
+    return v;
+  });
 }
 
 export class AuthError extends Error {
@@ -62,13 +86,15 @@ export function loadDashboardAuthConfig(env: NodeJS.ProcessEnv): DashboardAuthCo
   const issuer = env['DASHBOARD_JWT_ISSUER'];
   const audience = env['DASHBOARD_JWT_AUDIENCE'];
   const refreshRaw = env['DASHBOARD_JWT_REFRESH_TTL_S'];
-  let refresh: { refreshTtlS?: number } = {};
+  const allowedOrigins = parseAllowedOrigins(env['DASHBOARD_ALLOWED_ORIGINS']);
+  let refresh: { refreshTtlS?: number; allowedOrigins?: readonly string[] } = {};
   if (refreshRaw !== undefined && refreshRaw !== '') {
     const ttl = /^[1-9][0-9]{0,8}$/.test(refreshRaw) ? Number(refreshRaw) : NaN;
     if (!(ttl >= MIN_DASHBOARD_REFRESH_TTL_S && ttl <= MAX_DASHBOARD_REFRESH_TTL_S))
       throw new Error('DASHBOARD_JWT_REFRESH_TTL_S must be an integer between 3600 and 86400');
     refresh = { refreshTtlS: ttl };
   }
+  if (allowedOrigins.length) refresh = { ...refresh, allowedOrigins };
   if (!encoded && !issuer && !audience) return refresh;
   if (!encoded || !/^[A-Za-z0-9+/]+={0,2}$/.test(encoded) || !issuer?.trim() || !audience?.trim())
     throw new Error('Dashboard JWT requires DASHBOARD_JWT_SECRET_BASE64, _ISSUER and _AUDIENCE');
