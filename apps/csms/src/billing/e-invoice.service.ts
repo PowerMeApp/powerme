@@ -1,6 +1,10 @@
 /**
  * EInvoiceService — hoá đơn điện tử cho top-up `credited` (T32 Phần 7; SD-2c, STM-7, decisions D5).
  *
+ * T32 Phần 9b: `adjustForRefund(c, refundId)` tạo điều chỉnh giảm trong tx2 của refund `done`
+ * (gửi điều chỉnh là việc của `InvoiceAdjustmentService`, `kickAdjust` sau commit). Phần ghi kết quả
+ * STM-7 dùng chung với điều chỉnh nằm ở `e-invoice-rows.ts`.
+ *
  * Ba việc:
  *   1. `requestForTopUp(c, topUpId)`: tạo dòng `e_invoices` `requested` **trong transaction cộng tiền**
  *      của bên gọi (Khang chốt 17/11, thay "sau commit" của SD-2b): sập giữa commit và việc sau
@@ -42,16 +46,19 @@ import {
   EInvoiceProviderAdapter,
   EInvoiceResult,
 } from './e-invoice-provider.js';
+import {
+  adminRetryIssueRow,
+  applyIssueOutcome,
+  E_INVOICE_ISSUE_WORK,
+  exhaustIssueRow,
+  INVOICE_ADJUSTMENT_ISSUE_WORK,
+  IssueLog,
+} from './e-invoice-rows.js';
 import { EInvoiceStateMachine, EInvoiceStatus } from './e-invoice-state-machine.js';
 import { splitVat, vatRateAt } from './e-invoice.js';
-import { RETRY_LIMIT } from './refund-state-machine.js';
-import { nextRetry } from './retry-schedule.js';
 
-/** `BackgroundWork.name` của việc xuất hoá đơn (D7). */
-export const E_INVOICE_ISSUE_WORK = 'e-invoice-issue';
-
-/** `last_error_message` cắt còn chừng này ký tự (thông điệp của nhà cung cấp có thể dài). */
-export const LAST_ERROR_MESSAGE_MAX = 500;
+// Hằng chuyển sang e-invoice-rows.ts (T32 Phần 9b); export lại để nơi đang import từ đây giữ nguyên.
+export { E_INVOICE_ISSUE_WORK, LAST_ERROR_MESSAGE_MAX } from './e-invoice-rows.js';
 
 /** Kết quả `adminRetry`. */
 export interface AdminRetryResult {
@@ -75,9 +82,6 @@ type LockedInvoice = {
   status: EInvoiceStatus;
   attempt_count: number;
 };
-
-/** Log ghi SAU commit (kết quả bị rollback không được log). */
-type IssueLog = { level: 'log' | 'warn' | 'error'; event: string; fields: Record<string, unknown> };
 
 @Injectable()
 export class EInvoiceService implements BackgroundWork, OnModuleInit {
@@ -146,6 +150,82 @@ export class EInvoiceService implements BackgroundWork, OnModuleInit {
   /** Chạy sớm việc xuất hoá đơn (gọi SAU commit). Không có runner (test dựng tay) → bỏ qua. */
   kickIssue(): void {
     this.runner?.kick(this.name);
+  }
+
+  /**
+   * SD-2e / D5 (T32 Phần 9b): tạo điều chỉnh giảm `requested` cho refund vừa `done`, trong tx2 của
+   * worker `refund-send` (nhánh `done` của `RefundService.applyOutcome`), giống `requestForTopUp`
+   * trong transaction cộng tiền: sập sau commit không làm mất điều chỉnh. Không tự BEGIN/COMMIT.
+   *
+   * - `late_payment` → `skipped` (khoản trễ không có hoá đơn gốc, D5);
+   * - không có hoá đơn gốc (dữ liệu cũ / ghi ngoài API) → `skipped: 'no_original'`, bên gọi log warn;
+   * - có → khoá hoá đơn gốc `FOR UPDATE` (hai refund cùng hoá đơn done đồng thời: refund sau chờ, câu
+   *   `MAX` chạy sau khi có khoá nên thấy dòng đã commit → số kế tiếp, không vướng UNIQUE), rồi INSERT
+   *   `amount_vnd = −refunds.amount_vnd`, `adjustment_no = max + 1`. `ON CONFLICT (refund_id) DO
+   *   NOTHING`: một điều chỉnh mỗi refund.
+   *
+   * Thứ tự khoá (billing/CLAUDE.md): bên gọi đã khoá [`top_ups` | `credit_accounts`] → `refunds`;
+   * ở đây khoá `e_invoices` sau cùng. Không kiểm trần / trạng thái hoá đơn gốc ở đây (kiểm lúc gửi):
+   * refund đã được VNPay nhận không bao giờ rollback vì hoá đơn.
+   *
+   * @throws Error('invoice_adjustment_refund_not_done') chỉ cho lỗi lập trình (refund chưa `done`);
+   *   mọi ca dữ liệu trả `skipped`, không ném (ném trong tx2 làm refund không chuyển được sang done).
+   */
+  async adjustForRefund(
+    c: LedgerClient,
+    refundId: number,
+  ): Promise<
+    | { id: number; created: boolean }
+    | { skipped: 'late_payment' | 'no_original' | 'refund_not_found' }
+  > {
+    const refund = (
+      await c.query<{ kind: string; amount_vnd: string; status: string; top_up_id: string }>(
+        'SELECT kind, amount_vnd, status, top_up_id FROM refunds WHERE id = $1',
+        [refundId],
+      )
+    ).rows[0];
+    if (!refund) return { skipped: 'refund_not_found' };
+    if (refund.status !== 'done')
+      throw new Error(`invoice_adjustment_refund_not_done: ${refundId}`);
+    if (refund.kind === 'late_payment') return { skipped: 'late_payment' };
+    const original = (
+      await c.query<{ id: string }>('SELECT id FROM e_invoices WHERE top_up_id = $1 FOR UPDATE', [
+        refund.top_up_id,
+      ])
+    ).rows[0];
+    if (!original) return { skipped: 'no_original' };
+    const inserted = (
+      await c.query<{ id: string }>(
+        `INSERT INTO invoice_adjustments (e_invoice_id, adjustment_no, reason, amount_vnd, refund_id,
+           status)
+         SELECT $1, COALESCE(MAX(adjustment_no), 0) + 1, $2, $3, $4, $5::e_invoice_status
+         FROM invoice_adjustments WHERE e_invoice_id = $1
+         ON CONFLICT (refund_id) DO NOTHING
+         RETURNING id`,
+        [
+          original.id,
+          `Điều chỉnh giảm do hoàn tiền (refund ${refundId})`,
+          -Number(refund.amount_vnd),
+          refundId,
+          this.stm.initial(),
+        ],
+      )
+    ).rows[0];
+    if (inserted) return { id: Number(inserted.id), created: true };
+    const prev = (
+      await c.query<{ id: string }>('SELECT id FROM invoice_adjustments WHERE refund_id = $1', [
+        refundId,
+      ])
+    ).rows[0]!;
+    return { id: Number(prev.id), created: false };
+  }
+
+  /**
+   * Chạy sớm việc gửi điều chỉnh (gọi SAU commit; T32 Phần 9b). Worker là `InvoiceAdjustmentService`,
+   * cùng BillingModule. Không có runner (test dựng tay) → bỏ qua.
+   */
+  kickAdjust(): void {
+    this.runner?.kick(INVOICE_ADJUSTMENT_ISSUE_WORK);
   }
 
   /**
@@ -232,16 +312,11 @@ export class EInvoiceService implements BackgroundWork, OnModuleInit {
         )
       ).rows[0];
       if (!inv) throw new EInvoiceNotFound(invoiceId);
-      const step = this.stm.apply(inv.status, 'ADMIN_RETRY');
-      await c.query(
-        `UPDATE e_invoices SET status = $2::e_invoice_status, next_attempt_at = now(),
-           unfinished_claims = 0, updated_at = now() WHERE id = $1`,
-        [invoiceId, step.to],
-      );
+      const to = await adminRetryIssueRow(c, 'e_invoices', inv);
       return {
         eInvoiceId: invoiceId,
         topUpId: Number(inv.top_up_id),
-        status: step.to,
+        status: to,
         attemptCount: Number(inv.attempt_count),
       };
     });
@@ -281,94 +356,27 @@ export class EInvoiceService implements BackgroundWork, OnModuleInit {
     c: LedgerClient,
     locked: LockedInvoice & { unfinished_claims?: number },
   ): Promise<() => Promise<void>> {
-    const id = Number(locked.id);
-    const from: EInvoiceStatus =
-      locked.status === 'failed' ? this.stm.apply('failed', 'RETRY_DUE').to : locked.status;
-    const attemptCount = Math.max(Number(locked.attempt_count) + 1, RETRY_LIMIT);
-    const step = this.stm.apply(from, 'ATTEMPT_FAILED', { errorKind: 'transient', attemptCount });
-    await c.query(
-      `UPDATE e_invoices SET status = $2::e_invoice_status, attempt_count = $3,
-         last_error_kind = 'transient', last_error_message = 'unfinished_claims_exhausted',
-         last_attempt_at = now(), next_attempt_at = NULL, updated_at = now()
-       WHERE id = $1`,
-      [id, step.to, attemptCount],
-    );
-    const fields = {
-      e_invoice_id: id,
-      top_up_id: Number(locked.top_up_id),
-      attempt_count: attemptCount,
-      reason: 'unfinished_claims_exhausted',
-      unfinished_claims: locked.unfinished_claims ?? null,
-    };
+    const log = await exhaustIssueRow(c, 'e_invoices', {
+      ...locked,
+      parentId: Number(locked.top_up_id),
+    });
     return async () => {
-      this.logger.error(JSON.stringify({ event: 'e_invoice_needs_review', ...fields }));
+      this.logger[log.level](JSON.stringify({ event: log.event, ...log.fields }));
     };
   }
 
   /** tx2: áp kết quả một lượt gọi lên dòng đã khoá theo lease, ghi MỘT câu UPDATE. */
-  private async applyResult(
+  private applyResult(
     c: LedgerClient,
     locked: LockedInvoice,
     result: EInvoiceResult,
   ): Promise<IssueLog> {
-    const id = Number(locked.id);
-    // #6: failed đến hạn → requested, rồi áp kết quả lượt vừa gọi.
-    const from: EInvoiceStatus =
-      locked.status === 'failed' ? this.stm.apply('failed', 'RETRY_DUE').to : locked.status;
-    const attemptCount = Number(locked.attempt_count) + 1;
-    const base = {
-      e_invoice_id: id,
-      top_up_id: Number(locked.top_up_id),
-      attempt_count: attemptCount,
-    };
-
-    if (result.kind === 'issued') {
-      const step = this.stm.apply(from, 'PROVIDER_ISSUED');
-      await c.query(
-        `UPDATE e_invoices SET status = $2::e_invoice_status, invoice_no = $3, issued_at = now(),
-           next_attempt_at = NULL, attempt_count = $4, last_attempt_at = now(), updated_at = now()
-         WHERE id = $1`,
-        [id, step.to, result.invoiceNo, attemptCount],
-      );
-      return {
-        level: 'log',
-        event: 'e_invoice_issued',
-        fields: { ...base, invoice_no: result.invoiceNo },
-      };
-    }
-
-    const step = this.stm.apply(from, 'ATTEMPT_FAILED', {
-      errorKind: result.kind,
-      attemptCount,
-    });
-    const message = result.message.slice(0, LAST_ERROR_MESSAGE_MAX);
-    let delayMs: number | null = null;
-    if (step.retry) {
-      const r = nextRetry(attemptCount);
-      if (r.exhausted) throw new Error('e_invoice_retry_schedule_mismatch');
-      delayMs = r.delayMs;
-    }
-    const updated = (
-      await c.query<{ next_attempt_at: string | null }>(
-        `UPDATE e_invoices SET status = $2::e_invoice_status, attempt_count = $3,
-           last_error_kind = $4::e_invoice_error_kind, last_error_message = $5,
-           last_attempt_at = now(),
-           next_attempt_at = CASE WHEN $6::bigint IS NULL THEN NULL
-                                  ELSE now() + $6::bigint * interval '1 millisecond' END,
-           updated_at = now()
-         WHERE id = $1
-         RETURNING next_attempt_at::text AS next_attempt_at`,
-        [id, step.to, attemptCount, result.kind, message, delayMs],
-      )
-    ).rows[0]!;
-    const fields = { ...base, last_error_kind: result.kind, last_error_message: message };
-    return step.to === 'needs_review'
-      ? { level: 'error', event: 'e_invoice_needs_review', fields }
-      : {
-          level: 'warn',
-          event: 'e_invoice_attempt_failed',
-          fields: { ...fields, next_attempt_at: updated.next_attempt_at },
-        };
+    return applyIssueOutcome(
+      c,
+      'e_invoices',
+      { ...locked, parentId: Number(locked.top_up_id) },
+      result.kind === 'issued' ? { kind: 'issued', no: result.invoiceNo } : result,
+    );
   }
 
   private async transaction<T>(work: (c: PoolClient) => Promise<T>): Promise<T> {
