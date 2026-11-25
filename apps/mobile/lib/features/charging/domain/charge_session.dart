@@ -118,6 +118,10 @@ class ChargeProgress {
       status == SessionState.review ||
       settlement == SettlementState.review ||
       billingReviewRequired;
+
+  /// Chỉ phiên khởi động từ app mới được CSMS tính tiền vào Charging Credit;
+  /// phiên RFID/HMI/free-vend không có tạm tính để hiển thị.
+  bool get billedThroughApp => origin == null || origin == SessionOrigin.appQr;
   bool get canStop =>
       (origin == null || origin == SessionOrigin.appQr) &&
       serverCanStop != false &&

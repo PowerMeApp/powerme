@@ -60,6 +60,7 @@ Map<String, dynamic> externalProgress({
   bool statement = false,
   int energy = 1200,
   String origin = 'rfid',
+  int? costEstimate,
 }) => {
   'session_id': '78',
   'status': status,
@@ -82,6 +83,10 @@ Map<String, dynamic> externalProgress({
       : null,
   'billing_review_required': false,
   'estimated_cost_vnd': null,
+  if (costEstimate != null) ...{
+    'metered_cost_vnd_estimate': costEstimate,
+    'metered_cost_quality': 'exact',
+  },
 };
 ChargeProgress progress({
   SessionOrigin? origin = SessionOrigin.rfid,

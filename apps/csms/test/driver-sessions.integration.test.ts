@@ -213,6 +213,10 @@ describeDb('T146 owned sessions over real HTTP/JWT and isolated PostgreSQL', () 
     const wrong = await session('app-wrong-intent', 'active', 'app_qr');
     await intent(wrong, other);
     await session('app-stopped-active', 'active', 'app_qr', true);
+    // StopTransaction với meterStop < meterStart: CSMS ghi giờ dừng nhưng để meter_stop_wh NULL, status giữ orphaned.
+    const meterBack = await session('app-orphaned-meter-back', 'orphaned', 'app_qr', true);
+    await q('UPDATE sessions SET meter_stop_wh=NULL,energy_wh=NULL WHERE id=$1', [meterBack]);
+    await intent(meterBack);
     await intent(sessions['app-stopped-active']!);
     await session('rfid-with-intent', 'active');
     await intent(sessions['rfid-with-intent']!);
@@ -307,6 +311,7 @@ describeDb('T146 owned sessions over real HTTP/JWT and isolated PostgreSQL', () 
       'app-reconciled',
       'app-failed',
       'app-stopped-active',
+      'app-orphaned-meter-back',
     ])
       expect(ids).not.toContain(sessions[name]);
     for (const name of ['app-review', 'app-pending', 'app-stopping'])
