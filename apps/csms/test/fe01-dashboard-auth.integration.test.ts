@@ -244,6 +244,45 @@ describeDb('FE-01a dashboard login and RolesGuard (F-13, ADR-0018)', () => {
     expect((await fetch(`${base}/api/admin/stations`)).status).toBe(200);
   });
 
+  it('BE-46 staging: allows only the configured https origin and locks by the client IP Caddy forwards', async () => {
+    const origin = 'https://powerme-staging.example';
+    const proxied = createServer(
+      createOperatorApiListener(
+        db,
+        { ...DASH, allowedOrigins: [origin] },
+        { ...DRIVER, devAuth: false, trustProxy: true },
+      ),
+    );
+    await new Promise<void>((resolve) => proxied.listen(0, '127.0.0.1', resolve));
+    const url = `http://127.0.0.1:${(proxied.address() as AddressInfo).port}/api/auth/v1/login`;
+    const attempt = (headers: Record<string, string>, password = PASSWORD) =>
+      fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...headers },
+        body: JSON.stringify({ email: 'staffb@fe01.test', password }),
+      });
+    try {
+      const ok = await attempt({ Origin: origin, 'X-Forwarded-For': '203.0.113.7' });
+      expect(ok.status).toBe(200);
+      expect(ok.headers.get('access-control-allow-origin')).toBe(origin);
+      for (const bad of [
+        'https://evil.example',
+        `${origin}.evil.example`,
+        'http://powerme-staging.example',
+      ])
+        expect((await attempt({ Origin: bad })).status).toBe(403);
+      // Client-supplied first value is ignored; Caddy appends the real peer last.
+      for (let i = 0; i < 5; i++)
+        expect(
+          (await attempt({ 'X-Forwarded-For': '198.51.100.1, 203.0.113.9' }, WRONG)).status,
+        ).toBe(401);
+      expect((await attempt({ 'X-Forwarded-For': '203.0.113.9' })).status).toBe(429);
+      expect((await attempt({ 'X-Forwarded-For': '198.51.100.1, 203.0.113.10' })).status).toBe(200);
+    } finally {
+      await new Promise((resolve) => proxied.close(resolve));
+    }
+  });
+
   it('answers 503 auth_unavailable on every surface when DASHBOARD_JWT_* is not set', async () => {
     const bare = createServer(createOperatorApiListener(db, {}));
     await new Promise<void>((resolve) => bare.listen(0, '127.0.0.1', resolve));
