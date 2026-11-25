@@ -36,7 +36,7 @@ Request (`Content-Type: application/json`, at most 8 KB; unknown fields → 400)
 { "serial_number": "SIM-0005", "model": "D1-120", "rated_power_kw": 120 }
 ```
 
-`serial_number` matches `^[A-Za-z0-9._-]{3,48}$`; `model` at most 20 characters.
+`serial_number` matches `^[A-Za-z0-9._-]{3,25}$` (OCPP 1.6 CiString25, cột `varchar(25)`); `model` at most 20 characters.
 
 `201 Created`:
 

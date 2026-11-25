@@ -3037,7 +3037,7 @@ components:
       additionalProperties: false
       required: [serial_number, site_id, connectors]
       properties:
-        serial_number: { type: string, pattern: '^[A-Za-z0-9._-]{3,48}$' }
+        serial_number: { type: string, pattern: '^[A-Za-z0-9._-]{3,25}$' }
         site_id: { $ref: '#/components/schemas/Id' }
         connectors:
           type: array
@@ -3095,7 +3095,7 @@ components:
       additionalProperties: false
       required: [serial_number]
       properties:
-        serial_number: { type: string, pattern: '^[A-Za-z0-9._-]{3,48}$' }
+        serial_number: { type: string, pattern: '^[A-Za-z0-9._-]{3,25}$' }
         model: { type: [string, 'null'], maxLength: 20 }
         rated_power_kw: { type: [number, 'null'], exclusiveMinimum: 0 }
     RegistryChargePointPatch:

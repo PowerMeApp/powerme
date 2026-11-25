@@ -8,6 +8,8 @@
  */
 import { randomBytes } from 'node:crypto';
 import { Logger } from '@nestjs/common';
+import { CreditLedgerService } from '../src/billing/credit-ledger.service.js';
+import { LoyaltyService } from '../src/billing/loyalty.service.js';
 import { loadConfig, type CsmsConfig } from '../src/config.js';
 import { ConsoleCommands } from '../src/console/console.commands.js';
 import { ConsoleQueries } from '../src/console/console.queries.js';
@@ -15,6 +17,7 @@ import { ConsoleServer } from '../src/console/console.server.js';
 import { createDb, type Db } from '../src/db/db.module.js';
 import { ConnectionRegistry } from '../src/ocpp-gateway/connection-registry.js';
 import { ChargeSettlementService } from '../src/sessions/charge-settlement.service.js';
+import type { ChargePolicy } from '../src/sessions/charge-start-policy.js';
 import { SessionReviewService } from '../src/sessions/session-review.service.js';
 import { UnattributedSessionService } from '../src/sessions/unattributed-session.service.js';
 import { hashChargePointPassword } from '../src/stations/charge-point-credential.js';
@@ -145,7 +148,20 @@ describeDb('FE-12 operator session queues (screen 23; UC-OPS-05, F-12, STM-1 #17
       dashboardAuth: DASH,
     };
     const registry = new ConnectionRegistry(db);
-    const settlement = new ChargeSettlementService(db);
+    // T148 (#218): settlement needs the ledger, loyalty and charge policy (same fixture as BE-24).
+    const policy: ChargePolicy = {
+      minimumStartVnd: 50000,
+      cutoffReserveVnd: 10000,
+      pointsExpiryMonths: 12,
+      commandTimeoutMs: 150,
+      stationStaleAfterMs: 600000,
+    };
+    const settlement = new ChargeSettlementService(
+      db,
+      new CreditLedgerService(db),
+      new LoyaltyService(policy),
+      policy,
+    );
     commands = new ConsoleCommands(
       db,
       registry,
