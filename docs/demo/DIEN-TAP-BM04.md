@@ -17,6 +17,24 @@ Cách chạy từng kịch bản đã cam kết trong BM04 bằng công cụ có
 | **DS-09** onboard một serial đã đăng ký | Ân | `onboard-sim.mjs --serial <serial mới> --register` | Staging 16/11 (`review-20`): đạt với `SIM-0006` (Admin đăng ký → 201, onboard → 201 `awaiting_connection`, Boot → `in_service`, 2 súng Available). `SIM-0005` và `SIM-0006` đã `in_service`: mỗi lần tập lại dùng một serial mới, hoặc `./seed.sh --reset` |
 | **DS-10** sai mật khẩu trụ → 401; serial chưa đăng ký → 409 | Ân | cùng lệnh `onboard-sim.mjs` | Staging 16/11: đạt (`SIM-9999` → 409 `serial_not_registered`; `SIM-0006` sai mật khẩu → 401) |
 
+## T106 — chạy lại trên staging `review-28` (26/11/2026, 00:56–01:09 giờ VN)
+
+Chạy bằng các công cụ ở trên, qua SSH tunnel tới console; mật khẩu lấy từ `.env` trên VM, không in ra. Không reset dữ liệu (quyết định của Trí).
+
+| Kịch bản | Kết quả | Ghi chú |
+|---|---|---|
+| DS-01 | **Chưa chạy được — dữ liệu** | `app.ds01` còn 44.438 ₫ (< 50.000 ₫ tối thiểu) sau các lần nhóm thử; `app.ds02` 30.000 ₫, `app.ds03` 37.300 ₫. `seed.sh` không reset chỉ nạp số dư lần đầu → cần `./seed.sh --reset` trước buổi demo rồi chạy lại DS-01 ngay. Local 26/11: 11/11 |
+| DS-02 | **Đạt 4/4** | `topuprequired`, không có phiên, số dư 30.000 không đổi |
+| DS-03 / DS-04 | **Local đạt 9/9 và 8/8** (`--simulate-vnpay`) | T140: VM vẫn không tới được `sandbox.vnpayment.vn` (3/3 lần TCP time out 12 s; google.com 0,1 s) → demo local |
+| DS-05 | **Đạt** | tx 519: `active → orphaned (STATION_OFFLINE) → active (LIVE_MESSAGE) → closed → reconciled`, 680 Wh |
+| DS-06 | **Đạt** | tx 520 → `review`; bản ghi `conflict` (meterStop 510 vs chuỗi 1.530 Wh), `replay`, `late_sample`. Phiên để lại trong hàng đợi màn 23 để trình bày |
+| DS-07 | **Đạt qua Operator API (JWT)** | lần đầu qua đường dashboard: `raised → acknowledged → resetting → resolved`, Reset `Accepted` |
+| DS-08 | **Đạt qua Operator API (JWT)** | Reset `Rejected`, sự cố giữ `acknowledged`; sau đó đóng sự cố để súng 1 hiện lại |
+| DS-09 | **Đạt** | `SIM-0007`: Admin đăng ký 201 → onboard 201 (`PM-D1-HCM-1103`) → Boot → `in_service`, 2 súng Available. Lần sau dùng `SIM-0008` |
+| DS-10 | **Đạt** | `SIM-9999` → 409 `serial_not_registered`; sai mật khẩu → 401 |
+
+Lưu ý: `.env` trên VM dùng tên cũ `DEMO_PILLAR_PASSWORD` (compose vẫn đọc); script nào đọc `DEMO_CHARGE_POINT_PASSWORD` phải lấy giá trị của tên cũ.
+
 ## Chuẩn bị (local)
 
 ```bash
