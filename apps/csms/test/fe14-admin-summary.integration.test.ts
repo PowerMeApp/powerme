@@ -214,6 +214,60 @@ describeDb('FE-14 admin platform summary (screen 27, UC-ADM-07)', () => {
     });
   });
 
+  it('review #169: lab data (LOADTEST01, @load / @rq1 drivers) is not counted; online = in service only', async () => {
+    const before = (await get('/summary', tokens['admin'])).body;
+    // NFR-03 / RQ1 lab data as lab/nfr03/load-data.mjs and lab/rq1/adapters/powerme.mjs leave it.
+    const [labOp] = await q(
+      "INSERT INTO operators(tax_code,legal_name,status) VALUES('LOADTEST01','Lab','suspended') RETURNING id",
+    );
+    const [labSite] = await q(
+      `INSERT INTO sites(site_code,operator_id,site_name,address,latitude,longitude)
+       VALUES('LOAD-TEST-01',$1,'Lab','x',-48.9,-123.4) RETURNING id`,
+      [labOp.id],
+    );
+    await q(
+      `INSERT INTO charge_points(serial_number,site_id,lifecycle,is_online,last_message_at)
+       VALUES('LOAD-0001',$1,'in_service',true,now()),('RQ1-T1-P-1',$1,'disabled',false,NULL)`,
+      [labSite.id],
+    );
+    await q(
+      `INSERT INTO connectors(charge_point_id,connector_no,status,status_changed_at)
+       SELECT id,1,'Available',now() FROM charge_points WHERE serial_number='LOAD-0001'`,
+    );
+    await q(
+      `INSERT INTO fault_events(charge_point_id,source,error_code,status)
+       SELECT id,'ocpp','GroundFailure','raised' FROM charge_points WHERE serial_number='LOAD-0001'`,
+    );
+    for (const email of ['load-0001@load.powerme.test', 'card1@rq1.powerme.test']) {
+      const d = await user(email, 'driver', 'suspended');
+      await q(
+        "INSERT INTO drivers(user_id,consent_version,consent_given_at) VALUES($1,'v1',now())",
+        [d],
+      );
+      await q(
+        "INSERT INTO rfid_cards(card_identifier,card_kind,driver_id,status) VALUES($1,'online',$2,'blocked')",
+        [`LAB-${d}`, d],
+      );
+      const acc = (
+        await q('INSERT INTO credit_accounts(driver_id) VALUES($1) RETURNING id::text AS id', [d])
+      )[0].id as string;
+      await topUp(acc, 'expired', true);
+    }
+    expect((await get('/summary', tokens['admin'])).body).toEqual(before);
+
+    // A real charge point that talks but is not in service is not "online" (only in_service is).
+    await q(
+      `INSERT INTO charge_points(serial_number,lifecycle,is_online,last_message_at)
+       VALUES('FE14-TALKING','awaiting_connection',true,now())`,
+    );
+    const after = (await get('/summary', tokens['admin'])).body;
+    expect(after.charge_points.online).toBe(before.charge_points.online);
+    expect(after.charge_points.by_lifecycle.awaiting_connection).toBe(
+      before.charge_points.by_lifecycle.awaiting_connection + 1,
+    );
+    expect(after.network.in_service_online).toBe(before.network.in_service_online);
+  });
+
   it('admin only: no token 401, staff 403, driver 403; no query, GET only', async () => {
     expect((await get('/summary')).status).toBe(401);
     expect((await get('/summary', tokens['staff'])).status).toBe(403);
