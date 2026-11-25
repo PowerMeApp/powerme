@@ -151,6 +151,40 @@ export class LedgerEntryExists extends Error {
 }
 
 /**
+ * Lý do từ chối quyết định hoàn (T32 Phần 9a, D1). Chuỗi ổn định để route Phần 10 đổi sang HTTP.
+ */
+export type RefundRejectReason =
+  /** Không có top-up. */
+  | 'not_found'
+  /** Thiếu VNPAY_TMN_CODE / VNPAY_HASH_SECRET: từ chối trước khi đổi bất cứ gì. */
+  | 'payment_unconfigured'
+  /** Tài khoản đã đóng (D1). Hoàn khoản trễ vẫn được. */
+  | 'account_closed'
+  /** Top-up không ở `credited`. */
+  | 'not_refundable'
+  /** Số dư khả dụng < `amount_vnd`. */
+  | 'insufficient_available_balance'
+  /** Top-up không có khoản trễ. */
+  | 'no_late_payment'
+  /** Đã có refund `late_payment` của top-up này. */
+  | 'already_requested';
+
+export class RefundNotAllowed extends Error {
+  constructor(readonly reason: RefundRejectReason) {
+    super(`refund_not_allowed: ${reason}`);
+    this.name = 'RefundNotAllowed';
+  }
+}
+
+/** Admin retry một refund không có (T32 Phần 9a). Sai trạng thái thì STM-10 ném `InvalidTransition`. */
+export class RefundNotFound extends Error {
+  constructor(readonly refundId: number) {
+    super(`refund_not_found: ${refundId}`);
+    this.name = 'RefundNotFound';
+  }
+}
+
+/**
  * Admin retry một hoá đơn không có (T32 Phần 7, `EInvoiceService.adminRetry`). Route Phần 10 map sang
  * 404; sai trạng thái thì STM-7 ném `InvalidTransition` (→ 409).
  */
