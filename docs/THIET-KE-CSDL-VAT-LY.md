@@ -376,7 +376,7 @@ Thiếu account → pending/credit_account_missing; closed → pending/account_c
 in_shortfall được âm thêm theo BR-P20. Giữ các reason phục hồi/review hiện có.
 Statement thuộc phiên; e-invoice thuộc top-up.
 
-**Khôi phục RFID 0029 (đã áp local ở phase 3 sau backup/review; chưa staging):** chỉ job thiếu/ineligible của stopped RFID
+**Khôi phục RFID 0029 (sync 25/11 sau 0028 refund; chỉ kiểm DB test mới, chưa staging):** chỉ job thiếu/ineligible của stopped RFID
 có chủ, csms_billed, closed/review/reconciled, stop không sau thời điểm migration,
 chưa statement và chưa session debit → pending/t148_rfid_recovered. Giữ attempts,
 pending/posted và mọi tiền/loyalty/session; không đổi trigger 0005 (vẫn queue mọi

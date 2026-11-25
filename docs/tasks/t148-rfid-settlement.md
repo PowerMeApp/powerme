@@ -1,9 +1,73 @@
 # T148 — Quyết toán RFID, phase 1–3 local
 
-Ngày 24/11/2026. Nhánh `wp3/t148-quyet-toan-rfid`, nền T146
-`e76238fa494d73f90bc1fd36700a35693cdc2c7e`; `origin/main` sau fetch là
-`3138f859b4587f637b3b3f92516053d85d6fa34f`. Chưa commit/push/PR.
-Phase 3 local đã nâng sau backup và primary review; xem trạng thái hiện tại dưới đây.
+Ngày đồng bộ 25/11/2026, nhánh `wp3/t148-quyet-toan-rfid`: chỉ replay hai commit
+T148 từ nền cũ `e76238fa494d73f90bc1fd36700a35693cdc2c7e`, trước lên main
+`81b7433fadc68b93920695bc9f1b84ad89ad8110`, cuối lên
+`2272b13ea109d3e05c7de6625d5952adc11056dd` (#214 HMI/#215 onboarding).
+644 backend và 93 Flutter đã kiểm trên base 81b7433f; quality/smoke của base cuối
+được ghi riêng, không tuyên bố chạy lại toàn bộ. Migration T148 chưa công bố đổi
+thành **0029**, sau **0028 refund**; giữ nguyên migration/test/journal refund và
+không sửa DB runtime cũ. Sơn đã duyệt một PR T148 đầy đủ ngày 25/11, ngoại lệ
+400 dòng; đang chuẩn bị publication và chưa push/PR trước review cuối.
+
+Giữ #211: phiên đã có `received_stopped_at` không còn active/can_stop, kể cả meter
+cuối không hợp lệ. Flutter vẫn ẩn tạm tính RFID chưa được hỗ trợ; tên capability
+`supportsCostEstimate` và copy “Chưa có tạm tính” không phủ nhận khoản trừ thực tế.
+Bảng kê posted vẫn hiển thị debit/điểm do server trả về. Không thêm feature/dependency.
+
+Các kết quả phase 1–3 ngày 24/11 bên dưới là **lịch sử trên nền cũ**, không thay
+thế kiểm tra trên main mới. Phase 3 từng áp file T148 chưa công bố mang số **0028**;
+đổi tên code thành 0029 không sửa `_migrations`, không chạy lại migration hay tác
+động tài chính trên DB cũ. Không dùng DB local cũ, staging hoặc phần cứng trong
+lượt đồng bộ này. Trạng thái API/HMI ngày 24/11 không chứng minh hiện vẫn chạy.
+
+## Kiểm chứng base cuối 2272b13
+
+Sau final fetch/rebase, main #214/#215 không thêm migration hoặc đổi T148 code.
+`npm ci` exact lock mới exit 0; `three 0.187.0` là dependency đã có trong main
+(#214), không phải thay đổi package/lock của PR T148. Nest 12.6.0 và jose 6.2.18
+vẫn khớp lock. CSMS Prettier/typecheck/build chạy trên base cuối đều exit 0.
+
+Chỉ chạy lại smoke được yêu cầu: RFID settlement **20/20** + migration 0029
+**1/1**, exit 0, PostgreSQL mới loopback; official runner áp 30 migration rồi gọi
+lại không áp thêm, teardown báo dừng sạch. Không chạy lại 644/93; các số đó thuộc
+base 81b7433f ở mục sau. Tất cả 38 blob T148 giữ nguyên qua rebase; phần ghi kết
+quả verification này cập nhật sau đó, không sửa source/test/SQL/ảnh.
+
+Hai PNG hiện tại đã mở/kiểm chữ và statement, fixture/offscreen với SDK fonts,
+không phải native/hardware/staging. `git diff --check` và audit allowlist 38 paths,
+10 protected main blobs, garage/config hashes được ghi trong handoff ngoài Git.
+Gitleaks không có trong PATH; chỉ có targeted added-diff secret scan cục bộ,
+security CI remote vẫn chờ sau publication.
+
+## Kiểm chứng sync 25/11 trên base 81b7433f
+
+- MB03 **212/212**, 8 suites, exit 0: 191 existing + 20 RFID + 1 migration 0029.
+  Gồm invalid meterStop đã received stop không active/can_stop và unknown-route 404.
+- Shared regressions **432/432**, 14 suites, exit 0: ledger/loyalty, refund + 0028,
+  app start-stop/T134/review/shortfall, OCPP ownership, actual Nest composition.
+  Tổng backend mới **644/644**; không chạy lại full suite. Teardown của hai cluster
+  báo dừng sạch; các ca cố ý gây lỗi vẫn là một phần kiểm chứng rollback/ACK.
+- Flutter focused **93/93**, exit 0: RFID/owned-session/app start-stop/four-mode;
+  estimate 45.000 VND bị ẩn, posted vẫn có statement 6.000 VND/6 điểm từ API fixture.
+  RED copy là helper không tìm thấy label mới (`StateError`), không phải runtime crash.
+- CSMS Prettier/typecheck/build exit 0; không có CSMS lint script riêng. Flutter
+  analyze không lỗi và format 6 file touched/0 changed, exit 0.
+- Node 24.22.3; `npm ci` exact main lock exit 0 sau đưa Git sh có sẵn vào PATH.
+  Nest 12.6.0 và jose 6.2.18 installed=lock; không đổi manifest/lock/script.
+- Official runner trên DB mới áp 30 migration, 0028 refund trước 0029 T148; lần hai
+  không áp thêm. Không đọc/sửa DB runtime cũ hoặc `_migrations` của người dùng.
+- Capture riêng **1/1 pass**, exit 0; hai PNG 390px/100% đã mở/kiểm chữ và statement.
+  [Ảnh và lệnh tái hiện](../../apps/mobile/docs/evidence/t148-20261125/README.md);
+  widget fixture dùng SDK fonts, không phải native/hardware/staging.
+- [OCPP quan sát thật, đã loại định danh](evidence/t148-20261125-ocpp.md): counts,
+  action và CALLRESULT/Accepted từ `ocpp_message_log` trước khi PG test dừng.
+
+Evidence/check exits ở thư mục private ngoài Git
+`E:/Project/PowerMe/.review/t148-sync-publish-20261125/`; snapshot 33 WIP paths
+và binary patch ở `initial-snapshot/`. Không stage config/env/garage/private logs.
+Không có staging, hardware E2E, live migration, restart hay automated charge.
+BR-P19 RFID cutoff và D6 closure guard vẫn là giới hạn riêng.
 
 ## Yêu cầu và cách thực hiện
 
@@ -46,18 +110,18 @@ Review/meter/giá chưa đủ vẫn chờ worker theo điều kiện hiện hàn
 Xem [nhật ký 0029](../NHAT-KY-MIGRATION-0029.md).
 
 Trong phase 1, migration chỉ chạy trên DB test. Sau primary review và backup riêng,
-phase 3 đã áp 0029 đúng một lần lên local `powerme_rfid_local`; kết quả ở mục cuối.
+phase 3 đã áp bản T148 cũ số 0028 đúng một lần lên local `powerme_rfid_local`; kết quả ở mục cuối.
 
-## Nguồn nghiên cứu do primary bàn giao
+## Nguồn nghiên cứu trước triển khai
 
-Primary đã đọc source/test trước implementation; implementer ghi lại provenance
-được cung cấp, không tuyên bố tự đọc hoặc xác minh lại upstream. Chỉ áp dụng ý tưởng,
+Source/test đã được đọc trước triển khai; bản ghi này giữ provenance
+của nghiên cứu đã hoàn tất, không tuyên bố xác minh lại upstream trong lượt sync. Chỉ áp dụng ý tưởng,
 không sao chép code, chạy/install source hoặc thêm dependency/license vào PowerMe.
 
 | Nguồn ghim và giấy phép | Bằng chứng đã được primary cung cấp | Fit, kiến trúc và tradeoff |
 |---|---|---|
 | Kill Bill, commit `8881b6617a7ef2d0bd5e1dd354d37405eb1362d6` (19/11/2026), [Apache-2.0](https://github.com/killbill/killbill/blob/8881b6617a7ef2d0bd5e1dd354d37405eb1362d6/LICENSE) | [DefaultInvoiceDao.java](https://github.com/killbill/killbill/blob/8881b6617a7ef2d0bd5e1dd354d37405eb1362d6/invoice/src/main/java/org/killbill/billing/invoice/dao/DefaultInvoiceDao.java) 468–503: existing entity trong transaction; 823–867: cùng external key kiểm amount/payment rồi trả existing. [TestInvoiceDao.java](https://github.com/killbill/killbill/blob/8881b6617a7ef2d0bd5e1dd354d37405eb1362d6/invoice/src/test/java/org/killbill/billing/invoice/dao/TestInvoiceDao.java) 284–313: payment giảm balance; 1215–1248: CBA sau commit | Atomicity của billing phù hợp. Engine Java đầy đủ không cần cho debit nội bộ NestJS; kéo engine tăng dependency, vận hành và bề mặt bảo mật. Dùng ledger/loyalty hiện có dễ bảo trì hơn. |
-| Medusa, commit `8a43169b555ce1f7b3358ebd50016e076f57f3ba` (23/11/2026), [MIT core](https://github.com/medusajs/medusa/blob/8a43169b555ce1f7b3358ebd50016e076f57f3ba/LICENSE); Enterprise RBAC/SSO loại khỏi phạm vi | [payment-module.ts](https://github.com/medusajs/medusa/blob/8a43169b555ce1f7b3358ebd50016e076f57f3ba/packages/modules/payment/src/services/payment-module.ts) 783–906: khóa/reread trong transaction, provider bên ngoài; 995–1049: stable key/resume pending. [integration test](https://github.com/medusajs/medusa/blob/8a43169b555ce1f7b3358ebd50016e076f57f3ba/integration-tests/__tests__/services/payment-module/index.spec.ts) 1165–1188: duplicate một row; 1694–1719: timeout cùng key; 1751–1766: retry một provider call; 2198–2231: concurrent capture một accepted | Ý tưởng idempotency/concurrency TypeScript phù hợp. Provider/state machine thương mại không khớp RFID credit; không thêm HTTP/provider cho session debit. Dùng khóa/unique và durable jobs của PowerMe; không có dependency hay trust boundary mới. |
+| Medusa, commit `8a43169b555ce1f7b3358ebd50016e076f57f3ba` (23/11/2026), [MIT core](https://github.com/medusajs/medusa/blob/8a43169b555ce1f7b3358ebd50016e076f57f3ba/LICENSE); Enterprise RBAC/SSO loại khỏi phạm vi | [payment-module.ts](https://github.com/medusajs/medusa/blob/8a43169b555ce1f7b3358ebd50016e076f57f3ba/packages/modules/payment/src/services/payment-module.ts) 783–906: khóa/reread trong transaction, provider bên ngoài; 995–1049: stable key/resume pending. [integration test](https://github.com/medusajs/medusa/blob/8a43169b555ce1f7b3358ebd50016e076f57f3ba/packages/modules/payment/integration-tests/__tests__/services/payment-module/index.spec.ts) 1165–1188: duplicate một row; 1694–1719: timeout cùng key; 1751–1766: retry một provider call; 2198–2231: concurrent capture một accepted | Ý tưởng idempotency/concurrency TypeScript phù hợp. Provider/state machine thương mại không khớp RFID credit; không thêm HTTP/provider cho session debit. Dùng khóa/unique và durable jobs của PowerMe; không có dependency hay trust boundary mới. |
 
 Không đổi biểu giá, model billing, dependency hay hệ thống thanh toán. Dùng server
 captured owner, transaction và ràng buộc DB làm ranh giới bảo mật; dữ liệu test là
@@ -111,7 +175,7 @@ source ổn định và mọi SHA-256 khớp. Backup có thể cần WAL crash r
 dừng trước không sạch. Inventory chạy PG riêng, read-only, không migrate/seed,
 rồi dừng sạch; chỉ có phiên 1 RFID của driver 1, reconciled 599 Wh, job ineligible.
 
-Build BE actual dist exit 0; existing owned runner áp 0029 và seed idempotent bằng
+Build BE actual dist exit 0; existing owned runner áp bản T148 cũ số 0028 và seed idempotent bằng
 private credentials cũ. Hậu kiểm read-only: biểu giá lưu **3.800 VND/kWh**, 599 Wh
 → **2.276 VND**, **2 điểm** theo exact segment + half-up tổng một lần. Đúng một
 session_debit, một earn, một statement và job posted. Credit driver 1 từ 500.000

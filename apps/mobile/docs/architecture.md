@@ -1,8 +1,50 @@
 # Coding reference 2 — class, package và ranh giới WP3
 
+## T148 — đồng bộ main 25/11/2026
+
+Nền cuối `2272b13ea109d3e05c7de6625d5952adc11056dd`; bộ 93 ca đã kiểm trên
+`81b7433f`, mobile source giữ nguyên khi rebase; giữ #211 chặn
+active/can_stop khi đã received stop và ẩn tạm tính RFID chưa hỗ trợ. Capability
+`supportsCostEstimate` chỉ quyết định hiển thị tạm tính; “Chưa có tạm tính” /
+“Estimate unavailable” không phủ nhận billing. Pending → posted vẫn đọc bảng kê
+thật và hiển thị debit/điểm server, với budget 120 giây và lifecycle guards cũ.
+Focused charging/RFID/session/four-mode/start-stop **93/93 pass**, exit 0 trên base 81b7433f; không phải full Flutter hoặc native/hardware/staging acceptance. Bằng chứng
+publication và kiểm tra cuối: [T148](../../../docs/tasks/t148-rfid-settlement.md).
+Các số liệu 24/11 bên dưới là lịch sử, gồm bản migration T148 cũ số 0028; code hiện
+là 0029 sau refund 0028, không chỉnh `_migrations` hay DB runtime cũ.
+
+
+## T148 — bounded RFID settlement reads, 24/11 (current)
+
+Extension of Charging's existing domain → application → presentation path in
+PKG-3/CD-1/SD-1a/b. Current Driver API/T148 behavior overrides the diagrams'
+historical app-only/planned footers. No new repository, adapter, provider, route,
+configuration or dependency; backend financial effects remain server-owned.
+
+- `ChargeProgress.awaitingRfidSettlement` requires explicit RFID + csmsBilled,
+  closed/reconciled, final meter, pending settlement and no review. Only this
+  stopped external case extends `keepPolling`; unknown/missing external metadata
+  and stopped nonbillable cases retain fail-closed behavior.
+- `ChargeSessionController` owns one two-minute timer from the first accepted
+  pending reading. It bounds automatic reads, includes hidden/background time,
+  and is not reset by manual Refresh. Existing visibility generation, cancellation,
+  single-read gate and auth-scoped recordProgress remain authoritative. Disposal
+  cancels the timer. When automatic reads are exhausted, Refresh still reads once;
+  nonpolling resume notifies UI so a previously disabled button is enabled again.
+- `ChargeSessionScreen` shows the existing Refresh action for that pending case.
+  Posted uses existing statement eligibility/reader, once per controller; review
+  stays manual. Stop/retry eligibility and app start context are unchanged.
+
+Trace: views 6/7/9 → FR-05/08/16/17, UC-CHG-04/UC-PAY-02, BR-P08/34/45,
+NFR-SEC-01/US-01. Reused T146 primary-supplied Riverpod cancellation source/tests
+and their pinned provenance below; no new external code or dependency adapted.
+Acceptance: 75 focused tests pass; exact checks/visual limits in README and the
+external phase-two handoff. The separately approved local runtime upgrade is
+recorded in [current T148](../../../docs/tasks/t148-rfid-settlement.md); it is not staging deployment.
+
 ## T146 — owned-session query and scoped selection, 24/11
 
-Authorized extension of existing Charging/History (PKG-3), not a second runtime architecture. The current pure Dart WF01 start/command/progress separation remains; CD-1/SD-1a/b diagrams have historical planned/mock wording. Trace: views 5/6/7/9 → FR-04/05/08/16/17, UC-CHG-04/UC-PAY-02, BR-P08/15/17/34/45 and NFR-SEC-01/US-01. API §5/OpenAPI 0.15.0 takes precedence for owned-session discovery and read-only RFID capability; no T148/card-management contract is implemented.
+Authorized extension of existing Charging/History (PKG-3), not a second runtime architecture. The current pure Dart WF01 start/command/progress separation remains; CD-1/SD-1a/b diagrams have historical planned/mock wording. Trace: views 5/6/7/9 → FR-04/05/08/16/17, UC-CHG-04/UC-PAY-02, BR-P08/15/17/34/45 and NFR-SEC-01/US-01. API §5/OpenAPI 0.15.0 takes precedence for owned-session discovery and read-only RFID capability; T146 did not implement T148/card management; the current T148 extension is recorded above.
 
 | Actual interface/type | Contract and boundary |
 |---|---|

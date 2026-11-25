@@ -1,8 +1,8 @@
 # Nhật ký migration 0029 — khôi phục job quyết toán RFID (T148)
 
-Ngày 24/11/2026. File:
+Ngày đồng bộ 25/11/2026. File:
 [`0029_t148-rfid-settlement-recovery.sql`](../apps/csms/drizzle/0029_t148-rfid-settlement-recovery.sql).
-Migration SQL viết tay, append số kế tiếp 0027 (ADR-0008); không sửa migration cũ.
+Migration SQL viết tay, append sau 0028 refund của main (ADR-0008); không sửa migration cũ.
 
 ## Vì sao
 
@@ -42,9 +42,14 @@ settle được đúng một lần; review tiếp tục pending. Kết quả 1/1
 
 ## Triển khai
 
-**Phase 1 chưa áp runtime; phase 3 đã áp local sau backup và primary review.**
-Phiên lịch sử 599 Wh đã posted đúng một lần (2.276 VND, 2 điểm); xem
-[T148 hiện tại](tasks/t148-rfid-settlement.md). Staging vẫn chưa áp. Vì worker sẽ đọc job mới
-và có thể thu các khoản lịch sử, primary cần review tập ứng viên trước khi áp.
-Bản rollback không xóa ledger: không hoàn tác tài chính tự động. Nếu chưa áp thì
-chưa có dữ liệu runtime cần hoàn tác; mọi vận hành sau review là bước riêng.
+**0029 chỉ được kiểm trên PostgreSQL mới, riêng, loopback trong lượt sync 25/11.**
+Không áp staging hay DB người dùng. Trước triển khai, operator cần review tập ứng
+viên vì worker sẽ được đánh thức và có thể thu nợ RFID lịch sử đủ bằng chứng.
+Rollback không xóa ledger hoặc tự đảo tác động tài chính đã posted.
+
+Lịch sử riêng ngày 24/11: bản T148 chưa công bố mang số **0028** đã được áp local
+sau backup/review, có một phiên 599 Wh posted đúng một lần. Main sau đó có 0028
+refund độc lập, nên PR đổi tên T148 thành 0029. Đây chỉ là đổi tên code: không sửa
+DB cũ/`_migrations`, không đánh dấu lại lịch sử hay chạy lại khoản đã thu. Khi nâng
+DB local cũ cần kiểm kê/backup và phương án vận hành riêng; PR này không thực hiện.
+Xem [T148](tasks/t148-rfid-settlement.md) để phân biệt chứng cứ cũ và sync hiện tại.

@@ -211,6 +211,8 @@ class ChargeSessionController extends ChangeNotifier {
   final bool completionOnly;
   final StartRequest? startContext;
   Timer? _poll;
+  Timer? _settlementBudget;
+  bool _settlementBudgetExpired = false;
   void Function()? _cancel;
   bool _visible = false;
   bool _refreshOnIdle = false;
@@ -232,6 +234,8 @@ class ChargeSessionController extends ChangeNotifier {
             !(startContext == null &&
                 _progress?.origin == null &&
                 _progress?.confirmsEnd == true) &&
+            !(_settlementBudgetExpired &&
+                _progress?.awaitingRfidSettlement == true) &&
             (_progress?.keepPolling ?? true);
 
   void setVisible(bool visible) {
@@ -296,8 +300,10 @@ class ChargeSessionController extends ChangeNotifier {
     if (completionOnly) return;
     if (_canPoll) {
       refreshProgress();
-    } else if (_statementIssue == null) {
-      retryStatement();
+    } else {
+      if (_statementIssue == null) retryStatement();
+      // T148: resume must re-enable manual refresh even after automatic reads expire.
+      notifyListeners();
     }
   }
 
@@ -323,6 +329,14 @@ class ChargeSessionController extends ChangeNotifier {
       }
       _progress = next.withStartContext(startContext);
       _progressIssue = null;
+      if (_progress!.awaitingRfidSettlement) {
+        // T148: this bounds foreground reads, never the server's financial settlement.
+        _settlementBudget ??= Timer(const Duration(minutes: 2), () {
+          _settlementBudgetExpired = true;
+          _syncPolling();
+          if (_visible) notifyListeners();
+        });
+      }
     },
     fail: (issue) {
       _progressIssue = issue;
@@ -372,6 +386,7 @@ class ChargeSessionController extends ChangeNotifier {
 
   @override
   void dispose() {
+    _settlementBudget?.cancel();
     setVisible(false);
     super.dispose();
   }

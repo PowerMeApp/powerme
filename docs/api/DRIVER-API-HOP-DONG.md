@@ -29,7 +29,7 @@ migration 0018) — xem §13.
 — xem §2, §7 và §14. **Dùng được cho app từ T32 Phần 8** (14/11: IPN, trang return, quét top-up
 quá hạn + querydr); chưa có e-invoice (Phần 7), chưa thử sandbox VNPay thật.
 
-**T148 phase 1–3 local (24/11/2026, runtime đã nâng):** quyết toán RFID online có chủ và
+**T148 sync main (25/11/2026, chuẩn bị PR; chưa staging):** quyết toán RFID online có chủ và
 `csms_billed` dùng chung ledger/loyalty sau đối soát; không cần intent/xe mặc định.
 Owner lấy từ session lúc start, không đổi theo registry sau đó. `/credit`, lịch sử
 credit/phiên và statement hiện có phản ánh kết quả sau commit; RFID vẫn
@@ -37,9 +37,10 @@ credit/phiên và statement hiện có phản ánh kết quả sau commit; RFID 
 và statement chưa có (404). Flutter đã có read-only poll tối đa hai phút cho RFID
 csms_billed stopped/pending; budget tính cả background, manual Refresh không reset
 và vẫn dùng được sau hết hạn. Posted dùng bảng kê sở hữu hiện có. Migration 0029
-đã áp một lần vào local sau cold backup và primary review: phiên RFID lịch sử
-599 Wh có đúng một debit 2.276 VND, earn 2 điểm và statement. API/HMI loopback đang
-chạy; staging/physical hardware E2E chưa được xác nhận.
+đứng sau 0028 refund của main, chỉ kiểm bằng DB loopback mới trong lượt sync.
+Lần recovery local ngày 24/11 dùng bản T148 cũ số 0028, không phải 0029; không sửa
+lịch sử DB cũ hay chạy lại khoản đã posted. Không xác nhận API/HMI đang chạy,
+staging hoặc physical hardware E2E trong lượt đồng bộ này.
 Xem [T148 và giới hạn BR-P19](../tasks/t148-rfid-settlement.md).
 
 ---

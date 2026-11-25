@@ -1,8 +1,59 @@
 # @powerme/mobile — App tài xế PowerMe (WP3)
 
+## T148 — đồng bộ main 25/11/2026
+
+Nền cuối `2272b13ea109d3e05c7de6625d5952adc11056dd`; bộ 93 ca đã kiểm trên
+`81b7433f`, mobile source giữ nguyên khi rebase; giữ #211 chặn
+active/can_stop khi đã received stop và ẩn tạm tính RFID chưa hỗ trợ. Capability
+`supportsCostEstimate` chỉ quyết định hiển thị tạm tính; “Chưa có tạm tính” /
+“Estimate unavailable” không phủ nhận billing. Pending → posted vẫn đọc bảng kê
+thật và hiển thị debit/điểm server, với budget 120 giây và lifecycle guards cũ.
+Focused charging/RFID/session/four-mode/start-stop **93/93 pass**, exit 0 trên base 81b7433f; không phải full Flutter hoặc native/hardware/staging acceptance. Bằng chứng
+publication và kiểm tra cuối: [T148](../../docs/tasks/t148-rfid-settlement.md).
+Các số liệu 24/11 bên dưới là lịch sử, gồm bản migration T148 cũ số 0028; code hiện
+là 0029 sau refund 0028, không chỉnh `_migrations` hay DB runtime cũ.
+
+
+## T148 — RFID settlement observation, 24/11 (current local status)
+
+Backend phase 1 and Flutter phase 2 are implemented locally and reviewed. Phase 3
+subsequently upgraded the existing local API/HMI after a verified cold backup and
+authorized historical RFID recovery (599 Wh → 2,276 VND, 2 points, exactly once).
+This is not a physical reader/device/staging acceptance claim. Earlier T146 records below describe the
+pre-settlement implementation.
+
+Stopped closed/reconciled RFID with captured `csms_billed` and pending settlement
+keeps read-only progress polling every five seconds for at most two minutes from
+the first accepted pending reading in that controller. Hidden/background time
+consumes this budget, while network reads remain foreground-only; manual Refresh
+does not reset it. Refresh remains available afterward and on resume, including
+a canceled in-flight read. Review remains manual, legacy/unknown metadata fails
+closed, and stopped nonbillable origins do not start settlement polling. A posted
+owned statement is loaded once through the existing reader; no RFID Stop/retry,
+start context, vehicle substitution or client money calculation was added.
+
+Focused checks: **75/75 passed**, exit 0 (10 new RFID cases plus existing owned
+sessions, app session/Stop and four-mode regressions). A precise RED reproduced a
+disabled Refresh after background cancellation and budget expiry; the existing
+nonpolling resume branch now notifies listeners. Auth/generation/cancellation and
+no-overlap guards remain. Analyzer/format final results and hashes are recorded in
+`E:/Project/PowerMe/.review/t148-rfid-settlement-20261124/PHASE2-HANDOFF.md`.
+
+One offscreen capture batch passed **2/2**, exit 0: pending/posted at 390px/100% VI
+and 320px/200% EN, four PNGs using existing SDK fonts and fixture API routes.
+Pending copy and Refresh are visible; no debit is announced before posted.
+The 320px bottom-tab labels overlap as already documented for T146; the narrow
+posted frame shows the top of scrollable content. This slice did not redesign
+navigation or claim flawless/native/device accessibility. No full Flutter rerun or dependency/config/native/asset update. Phase 2 did not
+mutate runtime/dist; phase 3 separately authorized the local BE upgrade and APK
+build. Debug APK build --no-pub passed (exit 0) and was installed/started on the
+existing Pixel_6; app process/foreground activity verified, with no automated
+login/swipe/charge. This is not hardware/staging E2E. See the T148 final handoff. No commit
+or push. The preexisting garage test bytes are preserved.
+
 ## T146 — owned-session discovery and RFID observation, 24/11
 
-The approved “Bổ sung API rồi nối Flutter” phase connects Scan/Charge and History to Driver API **0.15.0** `GET /sessions`. A driver without a vehicle can observe an owned RFID session. A fresh unique active session opens progress; multiple sessions require a choice and support paging. Discovery sends no charging command. RFID/HMI/free-vend controls remain read-only with **Dừng phiên tại trụ**. Closed RFID with no statement retains final energy/status and honest unavailable billing; T148 is deferred.
+The approved “Bổ sung API rồi nối Flutter” phase connects Scan/Charge and History to Driver API **0.15.0** `GET /sessions`. A driver without a vehicle can observe an owned RFID session. A fresh unique active session opens progress; multiple sessions require a choice and support paging. Discovery sends no charging command. RFID/HMI/free-vend controls remain read-only with **Dừng phiên tại trụ**. Closed RFID with no statement retains final energy/status and honest unavailable billing; T148 was deferred in this T146 slice; current local status is recorded above.
 
 History now reads all owned sessions, including stopped unbilled RFID, independently of credit debits. Compact cards preserve unknown/null actuals and genuine zero amounts; final statement actions also require closed/reconciled, a stop timestamp and posted settlement. Credit retains its existing ledger. The selected session carries the captured auth scope, never an invented start request, vehicle or limit. Switching cannot discard an unresolved app start/stop or its recovery key.
 
@@ -18,7 +69,7 @@ New synthetic tests live in `test/t146_owned_sessions_test.dart` and `test/t146_
 
 Bounded offscreen review: `tool/capture_t146_sessions_test.dart` generated four fixture PNGs for RFID-active/History at 390px/100% Vietnamese and 320px/200% English, with existing SDK fonts. Body content, unknown vehicle and absent Stop were inspected. The 390px History app-bar glyphs render as blocks and the unchanged five-tab labels overlap at 320px/200%; these are observed capture defects/limitations, not a blanket visually-clean or native-accessibility claim. Their cause on a real device is unverified. The tab bar, theme and brand widget remain source-identical. No extra visual redesign/capture round was performed after the closed-session label was corrected to “Stopped”.
 
-On 24/11 the user reported that a physical reader swipe in the local HMI and the app connection succeeded. This is limited user acceptance, not a recorded complete hardware end-to-end, physical Stop/Retry, or billing test. The isolated local DB used real driver JWT login; the explicitly authorized card association was made directly in that local DB and production read-only authorization returned Accepted. No Admin registration UI/API was implemented. API 0.15 is running locally, not deployed to staging; T148 still provides no RFID debit/points/statement guarantee. No physical identifier or local credentials are published. Native permissions, dependencies, fonts and original assets are unchanged. Lists preserve bigint string IDs; the pre-existing progress/stop route safe-integer bound remains a reported backend limitation outside this slice.
+On 24/11 the user reported that a physical reader swipe in the local HMI and the app connection succeeded. This is limited user acceptance, not a recorded complete hardware end-to-end, physical Stop/Retry, or billing test. The isolated local DB used real driver JWT login; the explicitly authorized card association was made directly in that local DB and production read-only authorization returned Accepted. No Admin registration UI/API was implemented. API 0.15 is running locally, not deployed to staging; At T146 acceptance, RFID debit/points/statement was still pending; current T148 status is recorded above. No physical identifier or local credentials are published. Native permissions, dependencies, fonts and original assets are unchanged. Lists preserve bigint string IDs; the pre-existing progress/stop route safe-integer bound remains a reported backend limitation outside this slice.
 
 ## T96 — garage navigation runtime fix, 23/11
 
