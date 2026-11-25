@@ -22,6 +22,8 @@ import { ConsoleCommands } from './console.commands.js';
 import { ConsoleError, createConsoleListener } from './console.http.js';
 import { ConsoleQueries } from './console.queries.js';
 import { LoyaltyService } from '../billing/loyalty.service.js';
+import { EInvoiceService } from '../billing/e-invoice.service.js';
+import { RefundService } from '../billing/refund.service.js';
 import { TopUpService } from '../billing/top-up.service.js';
 import { createVnpayListener, isVnpayPath } from '../billing/vnpay-ipn.http.js';
 import { createDriverListener } from '../driver/driver.http.js';
@@ -50,6 +52,9 @@ export class ConsoleServer implements OnModuleInit, OnModuleDestroy {
     @Optional() private readonly faults?: FaultService,
     /** T149: điểm thưởng của tài xế (BillingModule). */
     @Optional() private readonly loyalty?: LoyaltyService,
+    /** T32 Phần 10a: route Admin billing (retry refund / hoá đơn) trên operator-api. */
+    @Optional() private readonly refunds?: RefundService,
+    @Optional() private readonly eInvoices?: EInvoiceService,
   ) {}
 
   /** WF-05 (T119): the onboarding service, or 503 when this server was built without it (tests). */
@@ -164,6 +169,9 @@ export class ConsoleServer implements OnModuleInit, OnModuleDestroy {
           },
           // FE-12 (screen 23): the same service instances the console uses.
           { review: this.commands.review, unattributed: this.commands.unattributed },
+          this.topUps && this.refunds && this.eInvoices
+            ? { topUps: this.topUps, refunds: this.refunds, eInvoices: this.eInvoices }
+            : undefined,
         )
       : null;
     // T32 Phần 6: /billing/vnpay/{ipn,return} công khai (chỉ dựa chữ ký VNPay). Mọi URL /billing…

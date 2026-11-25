@@ -1090,6 +1090,8 @@ paths:
 
         Gửi lại cùng `Idempotency-Key` + cùng body → **200** cùng top-up (không báo giá lại); tạo mới
         → **201**. Cùng key khác body → 409 `idempotency_conflict`. Key theo từng tài xế.
+        Response **không có** `refund_status` (trường đó chỉ có ở `GET /billing/top-ups/{id}`, T32
+        Phần 10a).
 
         Body `application/json` ≤ 16 KiB, trường lạ → 400 `invalid_input`. `points_to_redeem`:
         số nguyên ≥ 0, bỏ trống hoặc `null` = 0 (không dùng điểm).
@@ -1192,6 +1194,10 @@ paths:
         App poll sau khi quay về từ trang VNPay. `payment_url` chỉ có khi `status = pending` và chưa
         quá `expires_at`; còn lại `null`. Top-up của tài xế khác hoặc không có → 404 `not_found`.
 
+        Từ T32 Phần 10a có thêm `refund_status` (chỉ ở route này, không có ở POST): có key khi đã có
+        refund `kind = top_up`, không có key = chưa có. `status = refunded` mà `refund_status` khác
+        `done` → app hiện "Đang hoàn tiền".
+
         **Dùng được cho app từ T32 Phần 8.** Từ T32 Phần 6 IPN cộng tiền (`credited`) / báo lỗi
         (`failed`); từ Phần 8 querydr của vòng quét cũng cộng / báo lỗi / chuyển `expired`. Trang
         return `/billing/vnpay/return` chỉ báo "đang xác nhận", app poll route này.
@@ -1209,6 +1215,7 @@ paths:
               examples:
                 pending: { $ref: '#/components/examples/TopUpPending' }
                 expired: { $ref: '#/components/examples/TopUpExpired' }
+                dang_hoan_tien: { $ref: '#/components/examples/TopUpRefunding' }
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
@@ -1240,6 +1247,19 @@ components:
         created_at: '2026-11-11T08:00:00.000Z'
         expires_at: '2026-11-11T08:15:00.000Z'
         payment_url: null
+    TopUpRefunding:
+      summary: Admin đã hoàn, VNPay chưa nhận yêu cầu (chỉ ở GET)
+      value:
+        top_up_id: '39'
+        status: refunded
+        amount_vnd: 100000
+        points_redeemed: 0
+        points_discount_vnd: 0
+        amount_paid_vnd: 100000
+        created_at: '2026-11-10T08:00:00.000Z'
+        expires_at: '2026-11-10T08:15:00.000Z'
+        payment_url: null
+        refund_status: requested
 
   securitySchemes:
     bearerAuth:
@@ -2255,6 +2275,17 @@ components:
           type: [string, 'null']
           format: uri
           description: URL VNPay đã ký; chỉ có khi `status = pending` và chưa quá `expires_at`, còn lại null
+        refund_status:
+          type: string
+          enum: [requested, done, failed]
+          description: |
+            T32 Phần 10a. Trạng thái refund `kind = top_up` (Admin hoàn top-up) của top-up này.
+            **Chỉ trả ở `GET /billing/top-ups/{id}`**, không có trong response `POST /billing/top-ups`
+            (kể cả gửi lại cùng key). **Không có key = chưa có refund kind top_up.** Refund khoản trễ
+            (`late_payment`) không tính. `requested` = đang chờ gửi VNPay; `done` = VNPay đã nhận
+            yêu cầu hoàn (chưa chắc tiền đã về tài khoản tài xế); `failed` = gửi không được, chờ
+            Admin xử lý. `status = refunded` mà `refund_status` khác `done` thì app hiện "Đang hoàn
+            tiền", không hiện "Đã hoàn tiền".
 
     TopUpQuote:
       type: object

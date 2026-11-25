@@ -1127,6 +1127,47 @@ describeDb('billing: hoàn tiền VNPay (T32 Phần 9a, SD-2e, STM-10)', () => {
       expect(await balance(t.account)).toBe(100_000);
       expect(await refundCount(t.id)).toBe(0);
     });
+
+    describe('thiếu gateway_transaction_no (Phần 10a, review Trí mục 5)', () => {
+      const dropTxn = (id: number) =>
+        q('UPDATE top_ups SET gateway_transaction_no = NULL WHERE id=$1', [id]);
+
+      it('credited thiếu mã → missing_gateway_transaction_no; ví, sổ cái, điểm, status, refunds không đổi', async () => {
+        const t = await topUpWithPoints();
+        await dropTxn(t.id);
+        await expect(topUps.refund(t.id, admin)).rejects.toMatchObject({
+          reason: 'missing_gateway_transaction_no',
+        });
+        expect(await balance(t.account)).toBe(100_000);
+        expect(await ledgerRows(t.id)).toEqual([]);
+        expect(await points(t.driver)).toBe(1000);
+        expect(await one('SELECT status::text FROM top_ups WHERE id=$1', [t.id])).toEqual({
+          status: 'credited',
+        });
+        expect(await refundCount(t.id)).toBe(0);
+      });
+
+      it('tài khoản closed kiểm trước: closed + thiếu mã → account_closed', async () => {
+        const t = await topUp();
+        await dropTxn(t.id);
+        await q(`UPDATE credit_accounts SET status='closed', closed_at=now() WHERE id=$1`, [
+          t.account,
+        ]);
+        await expect(topUps.refund(t.id, admin)).rejects.toMatchObject({
+          reason: 'account_closed',
+        });
+      });
+
+      it('số dư kiểm sau: thiếu mã + số dư khả dụng thiếu → missing_gateway_transaction_no', async () => {
+        const t = await topUp();
+        await dropTxn(t.id);
+        await holdIntent(t.driver, 1);
+        await expect(topUps.refund(t.id, admin)).rejects.toMatchObject({
+          reason: 'missing_gateway_transaction_no',
+        });
+        expect(await refundCount(t.id)).toBe(0);
+      });
+    });
   });
 
   // ---------------------------------------------------------------------------------------------

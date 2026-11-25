@@ -28,6 +28,9 @@ migration 0018) — xem §13.
 `POST /billing/top-ups`, `GET /billing/top-ups/{id}` (nạp Charging Credit qua VNPay, WF-02 SD-2a)
 — xem §2, §7 và §14. **Dùng được cho app từ T32 Phần 8** (14/11: IPN, trang return, quét top-up
 quá hạn + querydr); chưa có e-invoice (Phần 7), chưa thử sandbox VNPay thật.
+**T32 Phần 10a (25/11/2026, WP5 — Khang):** `GET /billing/top-ups/{id}` có thêm trường tuỳ chọn
+`refund_status` (`requested` / `done` / `failed`). **Chỉ ở GET {id}**, không có trong response
+`POST /billing/top-ups`; **không có key = chưa có refund kind top_up** — xem §14 bước 6.
 
 **T148 sync main (25/11/2026, chuẩn bị PR; chưa staging):** quyết toán RFID online có chủ và
 `csms_billed` dùng chung ledger/loyalty sau đối soát; không cần intent/xe mặc định.
@@ -69,7 +72,7 @@ Tình huống chuỗi phải chạy được ở Review 3: HMI trụ đổi sún
 | `GET /vehicle-models`, `POST /vehicles`, `PATCH`/`DELETE /vehicles/{id}` | — (`driver/vehicles.http.ts`) | UC-ACC-03; BR-P03, BR-P17 | có (BE-34), §13 |
 | `GET /billing/top-ups/quote` | `TopUpService.quote` (billing) | UC-PAY-01; BR-P35 | có (T32 Phần 5), dùng được cho app từ T32 Phần 8 (§14) |
 | `POST /billing/top-ups` | `TopUpService.create` (billing) | UC-PAY-01; BR-P22, P35; WF-02 D2 | có (T32 Phần 5), dùng được cho app từ T32 Phần 8 (§14) |
-| `GET /billing/top-ups/{id}` | `TopUpService.get` (billing) | UC-PAY-01 | có (T32 Phần 5), dùng được cho app từ T32 Phần 8 (§14) |
+| `GET /billing/top-ups/{id}` | `TopUpService.get` (billing) | UC-PAY-01 | có (T32 Phần 5), dùng được cho app từ T32 Phần 8 (§14); `refund_status` tuỳ chọn từ T32 Phần 10a, chỉ ở route này |
 | `POST /connectors/{id}/fault-reports` | `FaultService.reportFromDriver` | UC-CHG-05; BR-P42 | có (FE-17) — xem §15 |
 
 Route tài xế nằm **cùng tiến trình/cổng HTTP** với console `/api/admin/*` (mặc định 3000),
@@ -386,6 +389,16 @@ Luật: WF-02 decisions D2, BR-P22 theo ADR-0013, BR-P35.
 5. **422** là lỗi luật nghiệp vụ (BR-P22: 50.000–2.000.000 ₫ mỗi lần, số dư sau nạp ≤ 5.000.000 ₫
    tính đủ `amount_vnd`; BR-P35: ≥ 500 điểm, không quá điểm còn hiệu lực, không quá 50 % số tiền).
    CSMS không tự hạ số điểm: gọi lại `quote` rồi để tài xế chọn.
+6. **Hoàn tiền (T32 Phần 10a).** `GET /billing/top-ups/{top_up_id}` có thêm `refund_status` khi
+   Admin đã hoàn top-up (refund `kind = top_up`); **không có key = chưa có refund kind top_up**.
+   Trường này **chỉ có ở GET {id}**, response `POST /billing/top-ups` (kể cả gửi lại cùng key) không
+   có, nên đừng tìm ở đó. Trong schema `TopUp` của OpenAPI nó là trường tuỳ chọn, không nằm trong
+   `required`, không nullable. Ý nghĩa:
+   - `requested`: Admin đã quyết định hoàn, CSMS đang chờ gửi VNPay;
+   - `done`: VNPay đã nhận yêu cầu hoàn (tiền về tài khoản tài xế sau, do VNPay / ngân hàng);
+   - `failed`: gửi không được, đang chờ Admin xử lý.
+   `status = refunded` mà `refund_status` khác `done` → hiện **"Đang hoàn tiền"**, không hiện "Đã
+   hoàn tiền". Hoàn khoản trễ (`late_payment`) không làm đổi trường này.
 
 ## 14a. T149 — điểm thưởng (cho Sơn, màn hình Loyalty, UC-PAY-04)
 

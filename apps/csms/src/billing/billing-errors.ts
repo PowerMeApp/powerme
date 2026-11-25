@@ -162,6 +162,11 @@ export type RefundRejectReason =
   | 'account_closed'
   /** Top-up không ở `credited`. */
   | 'not_refundable'
+  /**
+   * Top-up `credited` mà `gateway_transaction_no` NULL (dòng ghi ngoài API): VNPay không nhận lệnh
+   * hoàn thiếu `vnp_TransactionNo`, nên chặn trước khi trừ ví (Phần 10a, review Trí mục 5).
+   */
+  | 'missing_gateway_transaction_no'
   /** Số dư khả dụng < `amount_vnd`. */
   | 'insufficient_available_balance'
   /** Top-up không có khoản trễ. */
@@ -181,6 +186,25 @@ export class RefundNotFound extends Error {
   constructor(readonly refundId: number) {
     super(`refund_not_found: ${refundId}`);
     this.name = 'RefundNotFound';
+  }
+}
+
+/**
+ * Admin đánh dấu đã xem (T32 Phần 10a): ngoại lệ top-up (`markExceptionReviewed`) hoặc lần trả mâu
+ * thuẫn (`markConflictReviewed`). Route đổi: `not_found` → 404, còn lại → 409.
+ */
+export type AdminReviewRejectReason =
+  /** Không có top-up / dòng mâu thuẫn. */
+  | 'not_found'
+  /** Top-up không có `exception_kind`. */
+  | 'no_exception'
+  /** Dòng mâu thuẫn đã có `reviewed_at`. */
+  | 'already_reviewed';
+
+export class AdminReviewRejected extends Error {
+  constructor(readonly reason: AdminReviewRejectReason) {
+    super(`admin_review_rejected: ${reason}`);
+    this.name = 'AdminReviewRejected';
   }
 }
 
