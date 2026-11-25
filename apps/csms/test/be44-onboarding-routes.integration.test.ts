@@ -184,6 +184,12 @@ describeDb('BE-44 onboarding and registry routes behind RolesGuard', () => {
     const bad = await call('POST', REGISTER, tokens['admin'], { serial_number: 'a:b' });
     expect(bad.status).toBe(400);
     expect(bad.body.error).toBe('invalid_input');
+    // BE-47: serial is OCPP CiString25 and charge_points.serial_number is varchar(25) — 26 chars
+    // used to pass the check and fail in Postgres with 500.
+    for (const serial_number of ['A'.repeat(26), 'A'.repeat(48)]) {
+      const long = await call('POST', REGISTER, tokens['admin'], { serial_number });
+      expect([long.status, long.body.error]).toEqual([400, 'invalid_input']);
+    }
     const extra = await call('POST', ONBOARD, tokens['staffa'], {
       ...onboardBody('siteA'),
       staff_user_id: 1,

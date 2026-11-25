@@ -94,7 +94,7 @@ export interface OnboardResult {
 }
 
 /** OCPP identity rules: printable ASCII without ':' (it is also the Basic-auth user name). */
-const SERIAL_RE = /^[A-Za-z0-9._-]{3,48}$/;
+const SERIAL_RE = /^[A-Za-z0-9._-]{3,25}$/;
 
 @Injectable()
 export class ChargePointOnboardingService {
@@ -111,7 +111,7 @@ export class ChargePointOnboardingService {
     await this.requireRole(adminUserId, 'admin');
     const serialNumber = input.serialNumber?.trim() ?? '';
     if (!SERIAL_RE.test(serialNumber)) {
-      throw new OnboardingError('invalid_input', 'serialNumber must be 3–48 chars [A-Za-z0-9._-]');
+      throw new OnboardingError('invalid_input', 'serialNumber must be 3–25 chars [A-Za-z0-9._-]');
     }
     const lifecycle = this.policy.transition(null, 'REGISTER');
     const [row] = await this.db
