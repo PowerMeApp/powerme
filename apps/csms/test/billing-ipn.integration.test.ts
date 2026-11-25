@@ -10,7 +10,9 @@
  * (sai số tiền / tài khoản `closed`) phải thành `failed` + khoản trễ (số thực trừ) và trả 00 để
  * VNPay ngừng gửi lại, thay vì 04 / 99 không ghi gì. Phần 8b bổ sung (0024): lần trả thành công
  * mâu thuẫn phải thành một dòng `top_up_payment_conflicts` (Admin thấy), không đè `late_*` /
- * `exception_kind`, VNPay gửi lại không thêm dòng.
+ * `exception_kind`, VNPay gửi lại không thêm dòng. Phần 7: top-up `credited` có đúng một dòng
+ * `e_invoices` tạo trong CÙNG transaction cộng tiền (rollback thì không có, việc sau commit lỗi thì
+ * vẫn có); khoản trễ / #8 / thất bại / mâu thuẫn không có hoá đơn.
  *
  * Tham số IPN ký bằng đúng `vnpSignData` / `vnpSecureHash` của adapter với cấu hình test (secret giả).
  * Mã TC theo Report 5 bản nộp 09/11 (TC-STM4-01…08); ca khác đặt tên theo nội dung.
@@ -18,7 +20,10 @@
  * Cần DATABASE_URL (DB test riêng — test DROP SCHEMA public); thiếu thì cả describe bị skip.
  */
 import { Logger } from '@nestjs/common';
+import type { BackgroundWorkRunner } from '../src/billing/background-work.js';
 import { CreditLedgerService } from '../src/billing/credit-ledger.service.js';
+import { EInvoiceService } from '../src/billing/e-invoice.service.js';
+import { splitVat } from '../src/billing/e-invoice.js';
 import { LoyaltyService } from '../src/billing/loyalty.service.js';
 import { TopUpService } from '../src/billing/top-up.service.js';
 import {
@@ -59,6 +64,9 @@ describeDb('billing: IPN VNPay — TopUpService.applyPaymentResult (T32 Phần 6
   let loyalty: LoyaltyService;
   let service: TopUpService;
   let unconfigured: TopUpService;
+  /** Phần 7: tạo hoá đơn trong transaction cộng tiền; runner giả chỉ đếm `kick`. */
+  let eInvoices: EInvoiceService;
+  const kick = jest.fn();
   let seq = 0;
   let txn = 70_000_000;
 
@@ -205,7 +213,19 @@ describeDb('billing: IPN VNPay — TopUpService.applyPaymentResult (T32 Phần 6
     await resetAndMigrate(db.$client);
     const ledger = new CreditLedgerService(db);
     loyalty = new LoyaltyService({ pointsExpiryMonths: 12 });
-    service = new TopUpService(db, ledger, loyalty, new VnpayAdapter(VNPAY));
+    eInvoices = new EInvoiceService(db, { createInvoice: jest.fn() }, {
+      register: jest.fn(),
+      kick,
+    } as unknown as BackgroundWorkRunner);
+    service = new TopUpService(
+      db,
+      ledger,
+      loyalty,
+      new VnpayAdapter(VNPAY),
+      undefined,
+      undefined,
+      eInvoices,
+    );
     unconfigured = new TopUpService(
       db,
       ledger,
@@ -214,6 +234,7 @@ describeDb('billing: IPN VNPay — TopUpService.applyPaymentResult (T32 Phần 6
     );
   });
   beforeEach(() => {
+    kick.mockClear();
     errorSpy = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
     warnSpy = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
     logSpy = jest.spyOn(Logger.prototype, 'log').mockImplementation(() => undefined);
@@ -1244,6 +1265,167 @@ describeDb('billing: IPN VNPay — TopUpService.applyPaymentResult (T32 Phần 6
           t.topUpId,
         ]),
       ).toEqual({ n: 1 });
+    });
+  });
+
+  // ---------------------------------------------------------------------------------------------
+  describe('Phần 7: hoá đơn tạo trong cùng transaction cộng tiền (SD-2b, D5)', () => {
+    const invoices = (topUpId: number) =>
+      q(
+        `SELECT status::text, amount_vnd, vat_rate, vat_amount_vnd, attempt_count, invoice_no,
+                next_attempt_at <= now() AS due
+         FROM e_invoices WHERE top_up_id=$1`,
+        [topUpId],
+      );
+    const issueKicks = () => kick.mock.calls.filter((c) => c[0] === 'e-invoice-issue').length;
+
+    it('IPN credited → đúng một dòng requested: amount_vnd = amount_paid_vnd, vat_rate 8, VAT tách đúng, đến hạn ngay; kick sau commit; gửi lại (02) → vẫn một dòng', async () => {
+      const t = await pendingTopUp(200_000);
+      const p = ipn(t);
+      expect((await service.applyPaymentResult(p)).RspCode).toBe('00');
+      expect(splitVat(200_000, 8)).toBe(14_815);
+      expect(await invoices(t.topUpId)).toEqual([
+        {
+          status: 'requested',
+          amount_vnd: '200000',
+          vat_rate: 8,
+          vat_amount_vnd: '14815',
+          attempt_count: 0,
+          invoice_no: null,
+          due: true,
+        },
+      ]);
+      expect(issueKicks()).toBe(1);
+      expect((await service.applyPaymentResult(p)).RspCode).toBe('02');
+      expect(await invoices(t.topUpId)).toHaveLength(1);
+      expect(issueKicks()).toBe(1);
+    });
+
+    it('có dùng điểm → amount_vnd là số thực thu (phần giảm bằng điểm không lên hoá đơn)', async () => {
+      const d = await newDriver();
+      await earn(d, 1000, '6 months');
+      const t = await pendingTopUp(100_000, 600, d);
+      expect(t.amountPaidVnd).toBe(94_000);
+      expect((await service.applyPaymentResult(ipn(t))).RspCode).toBe('00');
+      expect(await invoices(t.topUpId)).toEqual([
+        expect.objectContaining({ amount_vnd: '94000', vat_rate: 8, vat_amount_vnd: '6963' }),
+      ]);
+    });
+
+    it('sổ điểm hỏng (loyalty_error) → vẫn credited, vẫn có hoá đơn', async () => {
+      const d = await newDriver();
+      await earn(d, 1000, '6 months');
+      const t = await pendingTopUp(100_000, 600, d);
+      await q(
+        'UPDATE loyalty_accounts SET points_balance = points_balance + 7 WHERE driver_id=$1',
+        [d],
+      );
+      expect((await service.applyPaymentResult(ipn(t))).RspCode).toBe('00');
+      expect((await topUpRow(t.topUpId))['exception_kind']).toBe('loyalty_error');
+      expect(await invoices(t.topUpId)).toEqual([
+        expect.objectContaining({ status: 'requested', amount_vnd: '94000' }),
+      ]);
+    });
+
+    it('việc sau commit lỗi (afterPaymentCommitted ném, như sập ngay sau commit) → hoá đơn vẫn có trong DB', async () => {
+      const t = await pendingTopUp(100_000);
+      jest
+        .spyOn(
+          service as unknown as { afterPaymentCommitted: () => Promise<void> },
+          'afterPaymentCommitted',
+        )
+        .mockRejectedValueOnce(new Error('after-commit boom'));
+      expect((await service.applyPaymentResult(ipn(t))).RspCode).toBe('00');
+      expect(await invoices(t.topUpId)).toEqual([
+        expect.objectContaining({ status: 'requested', amount_vnd: '100000' }),
+      ]);
+      expect(logged(errorSpy, 'ipn_after_commit_failed')).toHaveLength(1);
+    });
+
+    it('transaction cộng tiền rollback (lỗi giả ngay sau INSERT hoá đơn) → 99, không có hoá đơn, top-up vẫn pending, không cộng', async () => {
+      const t = await pendingTopUp(100_000);
+      const real = EInvoiceService.prototype.requestForTopUp;
+      jest.spyOn(eInvoices, 'requestForTopUp').mockImplementationOnce(async (c, id) => {
+        const r = await real.call(eInvoices, c, id);
+        expect(r.created).toBe(true);
+        throw new Error('boom after invoice insert');
+      });
+      expect((await service.applyPaymentResult(ipn(t))).RspCode).toBe('99');
+      expect(await invoices(t.topUpId)).toEqual([]);
+      expect((await topUpRow(t.topUpId))['status']).toBe('pending');
+      expect(await creditRows(t.topUpId)).toBe(0);
+      expect(issueKicks()).toBe(0);
+    });
+
+    it('IPN thất bại → failed, không hoá đơn', async () => {
+      const t = await pendingTopUp();
+      const p = ipn(t, {
+        vnp_ResponseCode: '24',
+        vnp_TransactionStatus: '02',
+        vnp_TransactionNo: '0',
+      });
+      expect((await service.applyPaymentResult(p)).RspCode).toBe('00');
+      expect((await topUpRow(t.topUpId))['status']).toBe('failed');
+      expect(await invoices(t.topUpId)).toEqual([]);
+      expect(issueKicks()).toBe(0);
+    });
+
+    it('khoản trễ trên expired (late_payment) → không hoá đơn', async () => {
+      const t = await pendingTopUp();
+      await setStatus(t.topUpId, 'expired');
+      expect((await service.applyPaymentResult(ipn(t))).RspCode).toBe('00');
+      expect((await topUpRow(t.topUpId))['late_gateway_ref']).not.toBeNull();
+      expect(await invoices(t.topUpId)).toEqual([]);
+      expect(issueKicks()).toBe(0);
+    });
+
+    it('khoản trễ trên credited (lần trả thứ hai) → vẫn đúng một hoá đơn của lần cộng', async () => {
+      const t = await pendingTopUp(100_000);
+      expect((await service.applyPaymentResult(ipn(t))).RspCode).toBe('00');
+      expect((await service.applyPaymentResult(ipn(t))).RspCode).toBe('00');
+      expect((await topUpRow(t.topUpId))['late_gateway_ref']).not.toBeNull();
+      expect(await invoices(t.topUpId)).toHaveLength(1);
+      expect(issueKicks()).toBe(1);
+    });
+
+    it('đã trả mà không cộng được (#8, sai số tiền) → failed + khoản trễ, không hoá đơn', async () => {
+      const t = await pendingTopUp(100_000);
+      const p = ipn(t, { vnp_Amount: String(90_000 * 100) });
+      expect((await service.applyPaymentResult(p)).RspCode).toBe('00');
+      expect((await topUpRow(t.topUpId))['status']).toBe('failed');
+      expect(await invoices(t.topUpId)).toEqual([]);
+      expect(issueKicks()).toBe(0);
+    });
+
+    it('lần trả mâu thuẫn (conflicting_result) trên expired đã có khoản trễ → không hoá đơn', async () => {
+      const t = await pendingTopUp();
+      await setStatus(t.topUpId, 'expired');
+      expect((await service.applyPaymentResult(ipn(t))).RspCode).toBe('00');
+      expect((await service.applyPaymentResult(ipn(t))).RspCode).toBe('02');
+      expect(
+        await one('SELECT count(*)::int AS n FROM top_up_payment_conflicts WHERE top_up_id=$1', [
+          t.topUpId,
+        ]),
+      ).toEqual({ n: 1 });
+      expect(await invoices(t.topUpId)).toEqual([]);
+      expect(issueKicks()).toBe(0);
+    });
+
+    it('requestForTopUp gọi lại cho top-up đã có hoá đơn → không thêm dòng, trả dòng cũ', async () => {
+      const t = await pendingTopUp(100_000);
+      expect((await service.applyPaymentResult(ipn(t))).RspCode).toBe('00');
+      const id = Number(
+        (await one('SELECT id FROM e_invoices WHERE top_up_id=$1', [t.topUpId]))['id'],
+      );
+      const c = await db.$client.connect();
+      try {
+        await c.query('BEGIN');
+        expect(await eInvoices.requestForTopUp(c, t.topUpId)).toEqual({ id, created: false });
+        await c.query('COMMIT');
+      } finally {
+        c.release();
+      }
+      expect(await invoices(t.topUpId)).toHaveLength(1);
     });
   });
 });

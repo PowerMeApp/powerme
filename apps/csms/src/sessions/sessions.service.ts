@@ -53,7 +53,11 @@ import {
   FrameRef,
   ReconciliationService,
 } from '../reconciliation/reconciliation.service.js';
-import { parseChargePointTime, TARIFF_CLOCK_UNTRUSTED } from '../reconciliation/tariff-clock.js';
+import {
+  parseChargePointTime,
+  readChargePointTime,
+  TARIFF_CLOCK_UNTRUSTED,
+} from '../reconciliation/tariff-clock.js';
 import { isConnectorStatus, isExpectedTransition } from './connectors/valid-transitions.js';
 import { SessionEvent, SessionStateMachine, SessionStatus } from './session-state-machine.js';
 
@@ -172,7 +176,10 @@ export class SessionsService {
           id: string;
           driver_id: string;
           vehicle_id: string;
-          energy_limit_wh: string;
+          mode: 'full' | 'timed' | 'energy_kwh' | 'amount_vnd';
+          energy_limit_wh: string | null;
+          duration_minutes: string | null;
+          amount_limit_vnd: string | null;
           session_id: string | null;
         }>(sql`SELECT i.* FROM driver_charge_intents i JOIN remote_commands r ON r.id=i.command_id
         WHERE i.id_tag=${req.idTag} AND i.connector_id=${connector.id}
@@ -220,8 +227,17 @@ export class SessionsService {
                 vehicleId: Number(appStart.vehicle_id),
                 origin: 'app_qr' as const,
                 paymentMode: 'csms_billed' as const,
-                billingMode: 'energy_kwh' as const,
-                limitValue: Number(appStart.energy_limit_wh),
+                billingMode: appStart.mode,
+                limitValue:
+                  appStart.mode === 'full'
+                    ? null
+                    : Number(
+                        appStart.mode === 'energy_kwh'
+                          ? appStart.energy_limit_wh
+                          : appStart.mode === 'timed'
+                            ? appStart.duration_minutes
+                            : appStart.amount_limit_vnd,
+                      ),
               }
             : {}),
         })
@@ -470,11 +486,7 @@ export class SessionsService {
         .where(
           and(
             eq(sessionStatusHistory.sessionId, session.id),
-            or(
-              eq(sessionStatusHistory.event, METER_EVIDENCE_CONFLICT),
-              sql`${sessionStatusHistory.event}='TARIFF_CLOCK_HOLD'
-                AND split_part(${sessionStatusHistory.note},' ',1)='tariff_clock_conflicting_sample'`,
-            ),
+            eq(sessionStatusHistory.event, METER_EVIDENCE_CONFLICT),
           ),
         )
         .limit(1);
@@ -783,7 +795,7 @@ export class SessionsService {
         ),
     );
     let conflictingSample = false;
-    for (const sample of this.flatten(values)) {
+    for (const sample of this.flatten(values, ctx.receivedAt)) {
       const aggregateEnergy =
         sample.measurand === ENERGY_MEASURAND &&
         sample.phase === null &&
@@ -879,11 +891,17 @@ export class SessionsService {
       await this.transition(tx, session, 'LATE_SAMPLE_CONFLICT', ctx.receivedAt, reason);
   }
 
-  private flatten(values: MeterValue[]): FlatSample[] {
+  private flatten(values: MeterValue[], receivedAt: Date): FlatSample[] {
     const out: FlatSample[] = [];
-    for (const mv of values) {
-      const cpTimestamp = parseChargePointTime(mv.timestamp);
-      if (!cpTimestamp) continue;
+    for (const [index, mv] of values.entries()) {
+      // T134: GIỮ mẫu điện năng có timestamp không dùng được cho khung giá; đồng hồ của phiên đã bị
+      // ingestSamples đánh dấu không tin được. Phần lẻ dài hơn mili giây: cắt tới mili giây. Thiếu
+      // múi giờ: không biết trụ ghi giờ nào (đọc là UTC thì giờ địa phương lệch 7 giờ và đối soát
+      // thấy khe hở giả), nên lưu mẫu tại giờ CSMS nhận; cộng thứ tự trong bản tin (ms) để các mẫu
+      // của cùng một bản tin không trùng mốc. Chỉ ngày giờ không tồn tại mới không lưu được.
+      const read = readChargePointTime(mv.timestamp);
+      if (!read) continue;
+      const cpTimestamp = read.zoned ? read.at : new Date(receivedAt.getTime() + index);
       for (const sv of mv.sampledValue) {
         if (!Number.isFinite(Number(sv.value))) {
           this.logger.warn(

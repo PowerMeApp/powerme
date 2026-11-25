@@ -141,6 +141,16 @@ STEP="khởi động ứng dụng"
 if [ "$SIM_ON" = true ]; then log "Khởi động CSMS + Caddy + simulator"; else log "Khởi động CSMS + Caddy"; fi
 APP_TOUCHED=true
 docker compose up -d csms caddy
+# BE-43: Caddyfile là bind mount MỘT FILE. `git checkout` thay file bằng inode mới, container vẫn giữ
+# inode cũ, nên `up -d` (và cả `caddy reload`) không thấy cấu hình mới — lần 17/11 hai đường VNPay
+# thêm ở review-15 vẫn chưa có trong Caddy sau 7 lần deploy. So mã băm và tạo lại container khi đổi
+# (trụ đang nối rớt vài giây rồi tự nối lại).
+CADDY_HASH="$(sha256sum Caddyfile | cut -d' ' -f1)"
+if [ "$(cat .deploy/caddyfile.sha256 2>/dev/null || true)" != "$CADDY_HASH" ]; then
+  log "Caddyfile đã đổi: tạo lại container caddy"
+  docker compose up -d --force-recreate caddy
+  echo "$CADDY_HASH" >.deploy/caddyfile.sha256
+fi
 if [ "$SIM_ON" = true ]; then docker compose up -d simulator; fi
 if [ "$STATION_ON" = true ]; then
   log "Cập nhật trụ luôn nối (demo-station)"

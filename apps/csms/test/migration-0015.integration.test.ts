@@ -223,6 +223,8 @@ describeDb('migration 0015 — refunds và lịch quét billing (nâng cấp DB 
                 coalesce(column_default, '-') AS c
            FROM information_schema.columns
           WHERE table_schema = 'public'
+            -- unfinished_claims thêm ở 0027, confirmed_via_query ở 0028 (kiểm ở test riêng).
+            AND column_name NOT IN ('unfinished_claims', 'confirmed_via_query')
             AND ((table_name = 'refunds')
               OR (table_name = 'invoice_adjustments' AND column_name IN ('refund_id', 'status',
                   'attempt_count', 'last_error_kind', 'last_error_message', 'last_attempt_at',
@@ -589,6 +591,7 @@ describeDb('migration 0015 — refunds và lịch quét billing (nâng cấp DB 
       insertRow('e_invoices', {
         top_up_id: await newTopUp(),
         amount_vnd: 200000,
+        vat_rate: 10,
         vat_amount_vnd: 18182,
         ...cols,
       });

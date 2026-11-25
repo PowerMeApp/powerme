@@ -13,6 +13,7 @@
 import { sql } from 'drizzle-orm';
 import {
   bigint,
+  boolean,
   check,
   index,
   integer,
@@ -119,13 +120,19 @@ export const topUps = pgTable(
      */
     completedAt: timestamp('completed_at', { withTimezone: true }),
     /**
-     * Lần querydr kế tiếp của top-up `pending` (T127, 0021): `expires_at + 2 phút`, rồi + 5, 10, 20,
-     * 40, 60 phút khi chưa ngã ngũ (Phần 8). NULL khi không còn `pending`.
+     * Lần querydr kế tiếp của top-up `pending` (T127, 0021; lịch đổi ở 0027): `expires_at + 2 phút`,
+     * rồi + 15, 30, 45, 60 phút khi chưa ngã ngũ; + 75 chỉ khi lần hỏi ở + 60 trả RC 94 (Phần 8c).
+     * NULL khi không còn `pending`.
      */
     nextAttemptAt: timestamp('next_attempt_at', { withTimezone: true }),
     /**
-     * Ngoại lệ cần Admin xem (0021): `loyalty_error` chỉ khi `credited` / `refunded` (Phần 6);
-     * `unresolved_04` / `unresolved_07` chỉ khi `expired` (Phần 8). NULL = không có.
+     * Số lần vòng quét giữ chỗ liên tiếp chưa ra kết quả (0027, D7): `claimDue` tăng, `lockLeased`
+     * commit đặt về 0; vượt `UNFINISHED_CLAIM_LIMIT` → `expired` + `retry_exhausted`.
+     */
+    unfinishedClaims: integer('unfinished_claims').notNull().default(0),
+    /**
+     * Ngoại lệ cần Admin xem (0021, 0027): `loyalty_error` chỉ khi `credited` / `refunded` (Phần 6);
+     * `unresolved_04` / `unresolved_07` / `retry_exhausted` chỉ khi `expired` (Phần 8, 8c). NULL = không có.
      */
     exceptionKind: topUpExceptionKindEnum('exception_kind'),
     /** Lúc Admin đánh dấu đã xem ngoại lệ (Phần 10); chỉ khi có `exceptionKind`. */
@@ -202,8 +209,9 @@ export const topUps = pgTable(
     ),
     check(
       'top_ups_exception_kind_status_check',
-      sql`${t.exceptionKind} IS NULL OR (${t.exceptionKind} = 'loyalty_error' AND ${t.status} IN ('credited', 'refunded')) OR (${t.exceptionKind} IN ('unresolved_04', 'unresolved_07') AND ${t.status} = 'expired')`,
+      sql`${t.exceptionKind} IS NULL OR (${t.exceptionKind} = 'loyalty_error' AND ${t.status} IN ('credited', 'refunded')) OR (${t.exceptionKind} IN ('unresolved_04', 'unresolved_07', 'retry_exhausted') AND ${t.status} = 'expired')`,
     ),
+    check('top_ups_unfinished_claims_check', sql`${t.unfinishedClaims} >= 0`),
   ],
 );
 
@@ -268,8 +276,16 @@ export const eInvoices = pgTable(
       .notNull()
       .references(() => topUps.id),
     status: eInvoiceStatusEnum('status').notNull().default('requested'),
+    /** Số thực thu (`top_ups.amount_paid_vnd`), ĐÃ GỒM VAT; phần giảm bằng điểm không lên hoá đơn. */
     amountVnd: bigint('amount_vnd', { mode: 'number' }).notNull(),
+    /** Phần thuế nằm trong `amount_vnd`: round(amount × vat_rate / (100 + vat_rate)), làm tròn nửa lên. */
     vatAmountVnd: bigint('vat_amount_vnd', { mode: 'number' }).notNull(),
+    /**
+     * Thuế suất GTGT đã dùng, phần trăm (0025, T32 Phần 7): theo thời điểm thu tiền
+     * (`top_ups.completed_at`, `vatRateAt`), không theo lúc gọi nhà cung cấp. Không DEFAULT.
+     * Hoá đơn điều chỉnh (Phần 9) dùng cột này, không suy ngược từ `vat_amount_vnd`.
+     */
+    vatRate: smallint('vat_rate').notNull(),
     issuedAt: timestamp('issued_at', { withTimezone: true }),
     attemptCount: integer('attempt_count').notNull().default(0),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
@@ -283,6 +299,8 @@ export const eInvoices = pgTable(
       .$onUpdate(() => new Date()),
     /** Lúc worker được xử lý (D7, 0015): now() khi tạo, +5 phút / 30 phút / 2 giờ sau lỗi tạm thời. */
     nextAttemptAt: timestamp('next_attempt_at', { withTimezone: true }).defaultNow(),
+    /** Lần giữ chỗ liên tiếp chưa ra kết quả (0027, D7); vượt giới hạn → `needs_review`. */
+    unfinishedClaims: integer('unfinished_claims').notNull().default(0),
   },
   (t) => [
     unique('e_invoices_invoice_no_key').on(t.invoiceNo),
@@ -300,6 +318,8 @@ export const eInvoices = pgTable(
       'e_invoices_next_attempt_check',
       sql`${t.status} NOT IN ('requested', 'failed') OR ${t.nextAttemptAt} IS NOT NULL`,
     ),
+    check('e_invoices_vat_rate_check', sql`${t.vatRate} IN (0, 5, 8, 10)`),
+    check('e_invoices_unfinished_claims_check', sql`${t.unfinishedClaims} >= 0`),
   ],
 );
 
@@ -317,6 +337,7 @@ export const refunds = pgTable(
     kind: refundKindEnum('kind').notNull(),
     /** VND > 0; không vượt số đã trả của top-up (RefundService kiểm, DB không kiểm chéo bảng). */
     amountVnd: bigint('amount_vnd', { mode: 'number' }).notNull(),
+    /** `done` = VNPay đã nhận yêu cầu hoàn, không có nghĩa tiền đã về tài xế (D1). */
     status: refundStatusEnum('status').notNull().default('requested'),
     /** Số lần đã gọi VNPay refund; tối đa 4, Admin retry không reset. */
     attemptCount: integer('attempt_count').notNull().default(0),
@@ -329,8 +350,10 @@ export const refunds = pgTable(
     lastErrorKind: eInvoiceErrorKindEnum('last_error_kind'),
     lastErrorMessage: text('last_error_message'),
     lastAttemptAt: timestamp('last_attempt_at', { withTimezone: true }),
-    /** Mã hoàn VNPay trả về; bắt buộc khi done, UNIQUE. */
+    /** Mã hoàn trong response của lệnh refund; UNIQUE. Done qua querydr thì NULL (0028). */
     gatewayRefundNo: varchar('gateway_refund_no', { length: 20 }),
+    /** Done nhờ querydr thấy lệnh hoàn, không có mã lệnh hoàn (0028, D1). */
+    confirmedViaQuery: boolean('confirmed_via_query').notNull().default(false),
     nextAttemptAt: timestamp('next_attempt_at', { withTimezone: true }).defaultNow(),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true })
@@ -339,6 +362,8 @@ export const refunds = pgTable(
       .$onUpdate(() => new Date()),
     /** Có giá trị ⇔ status = done. */
     completedAt: timestamp('completed_at', { withTimezone: true }),
+    /** Lần giữ chỗ liên tiếp chưa ra kết quả (0027, D7); > 1 thì phải querydr trước (Phần 9a). */
+    unfinishedClaims: integer('unfinished_claims').notNull().default(0),
   },
   (t) => [
     unique('refunds_gateway_refund_no_key').on(t.gatewayRefundNo),
@@ -358,7 +383,11 @@ export const refunds = pgTable(
     check('refunds_completed_check', sql`(${t.status} = 'done') = (${t.completedAt} IS NOT NULL)`),
     check(
       'refunds_gateway_refund_no_check',
-      sql`${t.status} <> 'done' OR ${t.gatewayRefundNo} IS NOT NULL`,
+      sql`${t.status} <> 'done' OR ${t.gatewayRefundNo} IS NOT NULL OR ${t.confirmedViaQuery}`,
+    ),
+    check(
+      'refunds_confirmed_via_query_check',
+      sql`NOT ${t.confirmedViaQuery} OR (${t.status} = 'done' AND ${t.gatewayRefundNo} IS NULL)`,
     ),
     check(
       'refunds_last_error_check',
@@ -368,6 +397,7 @@ export const refunds = pgTable(
       'refunds_next_attempt_check',
       sql`${t.status} <> 'requested' OR ${t.nextAttemptAt} IS NOT NULL`,
     ),
+    check('refunds_unfinished_claims_check', sql`${t.unfinishedClaims} >= 0`),
   ],
 );
 
@@ -401,6 +431,8 @@ export const invoiceAdjustments = pgTable(
       .notNull()
       .defaultNow()
       .$onUpdate(() => new Date()),
+    /** Lần giữ chỗ liên tiếp chưa ra kết quả (0027, D7); xử lý khi vượt giới hạn: Phần 9. */
+    unfinishedClaims: integer('unfinished_claims').notNull().default(0),
   },
   (t) => [
     unique('invoice_adjustments_invoice_adjustment_no_key').on(t.eInvoiceId, t.adjustmentNo),
@@ -421,6 +453,7 @@ export const invoiceAdjustments = pgTable(
       'invoice_adjustments_next_attempt_check',
       sql`${t.status} NOT IN ('requested', 'failed') OR ${t.nextAttemptAt} IS NOT NULL`,
     ),
+    check('invoice_adjustments_unfinished_claims_check', sql`${t.unfinishedClaims} >= 0`),
   ],
 );
 

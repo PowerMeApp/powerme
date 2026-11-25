@@ -20,8 +20,8 @@ class ApiAuthRepository implements AuthRepository, AuthSessionEvents {
   Future<String?> restore() async => _session.account?.id;
 
   @override
-  Future<String> signIn(String email, String password) =>
-      _authenticate(() => _session.signIn(email, password));
+  Future<String> signIn(String identifier, String password) =>
+      _authenticate(() => _session.signIn(identifier, password));
 
   @override
   Future<String> register(Registration registration) async {
@@ -36,6 +36,8 @@ class ApiAuthRepository implements AuthRepository, AuthSessionEvents {
       () => _session.register({
         'email': registration.email.trim(),
         'password': registration.password,
+        if (registration.phoneNumber?.trim().isNotEmpty ?? false)
+          'phone_number': registration.phoneNumber,
         'full_name': registration.displayName.trim(),
         'consent': true,
         'consent_version': version,
@@ -57,6 +59,8 @@ class ApiAuthRepository implements AuthRepository, AuthSessionEvents {
         DriverApiException(code: 'invalid_credentials') =>
           AuthFailure.invalidCredentials,
         DriverApiException(code: 'email_taken') => AuthFailure.emailInUse,
+        DriverApiException(code: 'phone_taken') => AuthFailure.phoneInUse,
+        DriverApiException(code: 'account_locked') => AuthFailure.accountLocked,
         DriverApiException(code: 'consent_required') =>
           AuthFailure.consentRequired,
         DriverApiException(status: 400) when registering =>

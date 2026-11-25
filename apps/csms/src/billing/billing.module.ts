@@ -3,7 +3,10 @@
  * (`charge-settlement`) gọi thay SQL thô (D9). Phần 12: `BackgroundWorkRunner` (worker quét DB, D7);
  * các service việc nền (Phần 7–9) gọi `register` trong `onModuleInit`. Phần 5: `TopUpService`
  * (tạo top-up, SD-2a) + `VnpayAdapter`, cấu hình `VNPAY_CONFIG`. Phần 8: `TopUpService` tự đăng ký việc nền
- * `top-up-timeout` (querydr), cấu hình gọi API `VNPAY_API_CONFIG`.
+ * `top-up-timeout` (querydr), cấu hình gọi API `VNPAY_API_CONFIG`. Phần 7: `EInvoiceService` (tạo hoá
+ * đơn trong transaction cộng tiền, việc nền `e-invoice-issue`) + nhà cung cấp stub
+ * (`E_INVOICE_PROVIDER`, cấu hình `EINVOICE_STUB_*`, sai thì không khởi động). Phần 9a:
+ * `RefundService` (việc nền `refund-send`).
  *
  * DbModule không @Global nên phải import (giống SessionsModule, StationsModule).
  */
@@ -12,8 +15,15 @@ import { DbModule } from '../db/db.module.js';
 import { BackgroundWorkRunner } from './background-work.js';
 import { BACKGROUND_WORK_CONFIG, loadBackgroundWorkConfig } from './background-work.config.js';
 import { CreditLedgerService } from './credit-ledger.service.js';
+import {
+  E_INVOICE_PROVIDER,
+  loadEInvoiceStubConfig,
+  StubEInvoiceProvider,
+} from './e-invoice-provider.js';
+import { EInvoiceService } from './e-invoice.service.js';
 import { LOYALTY_POLICY, loadLoyaltyPolicy } from './loyalty-policy.config.js';
 import { LoyaltyService } from './loyalty.service.js';
+import { RefundService } from './refund.service.js';
 import { TopUpService } from './top-up.service.js';
 import { VnpayAdapter } from './vnpay.adapter.js';
 import {
@@ -31,6 +41,12 @@ import {
     BackgroundWorkRunner,
     TopUpService,
     VnpayAdapter,
+    EInvoiceService,
+    RefundService,
+    {
+      provide: E_INVOICE_PROVIDER,
+      useFactory: () => new StubEInvoiceProvider(loadEInvoiceStubConfig()),
+    },
     { provide: LOYALTY_POLICY, useFactory: () => loadLoyaltyPolicy() },
     { provide: BACKGROUND_WORK_CONFIG, useFactory: () => loadBackgroundWorkConfig() },
     { provide: VNPAY_CONFIG, useFactory: () => loadVnpayConfig() },
@@ -43,6 +59,10 @@ import {
     BackgroundWorkRunner,
     // Phần 5: route tài xế (driver/top-ups.http.ts) qua ConsoleServer.
     TopUpService,
+    // Phần 7: Admin retry hoá đơn (route ở Phần 10).
+    EInvoiceService,
+    // Phần 9a: Admin retry refund (route ở Phần 10).
+    RefundService,
   ],
 })
 export class BillingModule {}

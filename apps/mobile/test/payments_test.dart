@@ -4,16 +4,16 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:driver_app/demo/demo_store.dart';
 import 'package:driver_app/demo/charging_store.dart';
 import 'package:driver_app/demo/charging_engine.dart';
-import 'package:driver_app/demo/payment_store.dart';
-import 'package:driver_app/demo/payment_engine.dart';
+import 'support/payment_store.dart';
+import 'support/payment_engine.dart';
 import 'package:driver_app/demo/station_actions_store.dart';
 import 'package:driver_app/features/auth/domain/auth_scope.dart';
 import 'package:driver_app/features/auth/application/auth_controller.dart';
 import 'package:driver_app/features/charging/domain/charging.dart';
-import 'package:driver_app/features/charging/data/mock_charging_repository.dart';
+import 'support/mock_charging_repository.dart';
 import 'package:driver_app/features/loyalty/domain/loyalty.dart';
 import 'package:driver_app/features/payments/domain/payments.dart';
-import 'package:driver_app/features/payments/data/mock_payments_repository.dart';
+import 'support/mock_payments_repository.dart';
 import 'package:driver_app/features/payments/application/payments_controller.dart';
 
 void main() {

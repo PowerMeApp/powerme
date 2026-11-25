@@ -37,7 +37,7 @@ Hội đồng Review 2 (29/10) hỏi: *"nhóm cần một simulation bắn tín 
 
 Tình huống chuỗi phải chạy được ở Review 3: HMI trụ đổi súng A sang `Charging` → CSMS ghi StatusNotification và MeterValues → trong **5 giây** app tài xế hiện "đang sạc · 1,2 kWh · còn khoảng 18–26 phút".
 
-## 2. Tám đường dẫn và hàm đã có
+## 2. Đường dẫn và hàm đã có
 
 | Đường dẫn | Hàm trong `DriverChargingService` | UC / BR | Trạng thái route |
 |---|---|---|---|
@@ -46,15 +46,16 @@ Tình huống chuỗi phải chạy được ở Review 3: HMI trụ đổi sún
 | `GET /connectors/{id}/time-left` | **chưa có** | FR-03; BR-P32, P40 | chưa — hình dạng chốt ở đây |
 | `POST /charges` | `start` | UC-CHG-02; D4; BR-P18, P19 | có (BE-22) |
 | `GET /charges/{key}` | `getStart` | UC-CHG-02 (mất mạng giữa chừng) | có (BE-22) |
+| `GET /sessions` | — (`driver/driver-sessions.ts`) | UC-CHG-04; UC-PAY-02 | có (T146), xem §5; không phụ thuộc ledger |
 | `GET /sessions/{id}/progress` | `progress` | UC-CHG-04 | có (BE-22); `estimated_cost_vnd` cận trên, `time_left` luôn null |
 | `POST /sessions/{id}/stop` | `stop` → `commandSnapshot` | UC-CHG-03; BR-P01 | có (BE-22) |
 | `GET /sessions/{id}/statement` | `statement` | BR-P45, P34 | có (BE-22) |
 | `GET /credit` | — (đọc `credit_accounts`, `driver/driver-credit.ts`) | UC-PAY-02; BR-P18 | có (BE-22) |
 | `GET /credit/transactions` | — (đọc `credit_transactions`) | UC-PAY-02 | có (BE-22) |
 | `GET /vehicle-models`, `POST /vehicles`, `PATCH`/`DELETE /vehicles/{id}` | — (`driver/vehicles.http.ts`) | UC-ACC-03; BR-P03, BR-P17 | có (BE-34), §13 |
-| `GET /billing/top-ups/quote` | `TopUpService.quote` (billing) | UC-PAY-01; BR-P35 | có (T32 Phần 5), **chưa dùng cho app** (§14) |
-| `POST /billing/top-ups` | `TopUpService.create` (billing) | UC-PAY-01; BR-P22, P35; WF-02 D2 | có (T32 Phần 5), **chưa dùng cho app** (§14) |
-| `GET /billing/top-ups/{id}` | `TopUpService.get` (billing) | UC-PAY-01 | có (T32 Phần 5), **chưa dùng cho app** (§14) |
+| `GET /billing/top-ups/quote` | `TopUpService.quote` (billing) | UC-PAY-01; BR-P35 | có (T32 Phần 5), dùng được cho app từ T32 Phần 8 (§14) |
+| `POST /billing/top-ups` | `TopUpService.create` (billing) | UC-PAY-01; BR-P22, P35; WF-02 D2 | có (T32 Phần 5), dùng được cho app từ T32 Phần 8 (§14) |
+| `GET /billing/top-ups/{id}` | `TopUpService.get` (billing) | UC-PAY-01 | có (T32 Phần 5), dùng được cho app từ T32 Phần 8 (§14) |
 | `POST /connectors/{id}/fault-reports` | `FaultService.reportFromDriver` | UC-CHG-05; BR-P42 | có (FE-17) — xem §15 |
 
 Route tài xế nằm **cùng tiến trình/cổng HTTP** với console `/api/admin/*` (mặc định 3000),
@@ -75,7 +76,7 @@ auth nên shared listener bắt buộc loopback.
 
 | `kind` | Dữ liệu | Có trong CSMS? |
 |---|---|---|
-| `limit` | hạn mức Wh của phiên (`sessions.limit_value`) và công suất hiện tại | có |
+| `limit` | hạn mức gốc theo `billing_mode` (phút/Wh/VND/null), `sessions.limit_value`, và công suất hiện tại | có |
 | `soc_curve` | SoC từ MeterValues (`measurand = SoC`) + đường cong sạc DC theo mẫu xe | SoC được lưu nếu trụ gửi; đường cong chưa có |
 | `history` | thời lượng phiên gần đây trên cùng trụ | dữ liệu có (`sessions`), hàm chưa |
 | `unknown` | không đủ dữ liệu, kèm `reason` | — |
@@ -90,11 +91,21 @@ Tình huống: tài xế bấm "Bắt đầu", app mất 4G ngay sau khi gửi. 
 
 Dừng tương tự: `POST /sessions/{id}/stop` trả 202 với `command_status`; phiên chỉ `closed` khi trụ gửi StopTransaction (BR-P01). `timeout` không phải thất bại: operator có đường khôi phục T72.
 
-## 5. Phiên không do app tạo
+## 5. Phiên không do app tạo — T146, OpenAPI 0.15.0 (24/11/2026)
 
-README WP3 ghi: app phải xử lý được phiên nó không tạo ra (thẻ RFID online, mật khẩu HMI). Hợp đồng: `sessions/*` trả mọi phiên có `driver_id` là tài xế gọi, bất kể `origin`; `charges/*` chỉ có với phiên bắt đầu từ app. Thẻ ví (`station_wallet`) không gắn tài xế nên không xuất hiện trong app, đúng BR-P08.
+Tài xế đọc mọi phiên có driver_id khớp principal, bất kể origin và có/không có intent hoặc ledger. Phiên không gắn tài xế không xuất hiện. Card management thuộc Admin. Nội dung cũ về thẻ ví/station_wallet tại mục này đã được thay thế: PowerMe đã bỏ thẻ ví theo BR-P08/T110; T146 không thêm lại và T148 quyết toán RFID vẫn chưa triển khai.
 
-Câu trả lời một dòng cho hội đồng về RFID: **thẻ online** để tài xế bắt đầu phiên không cần điện thoại, tiền trừ từ credit như app; **thẻ ví** là trụ tự thu, CSMS chỉ ghi nhận để đối soát.
+GET /api/driver/v1/sessions?view=active|all&page=1&page_size=20 trả {items,total,page,page_size}. Mặc định all/1/20; page 1–100000, page_size 1–100. Chỉ ba key này, mỗi key một lần; key lạ/trùng (kể cả driver_id/id_tag), enum sai, khoảng trắng/control, số âm/0/phân số/quá giới hạn/SQL-shaped đều 400 invalid_input. Bearer và active-driver DB check chạy trước validation/method; method khác trả 405 với Allow: GET, OPTIONS. OPTIONS theo preflight CORS hiện có (204, không cần bearer).
+
+view=active: meter_stop_wh IS NULL và status thuộc pending, active, paused, stopping, orphaned, review. failed/closed/reconciled và mọi phiên đã có meter_stop_wh bị loại. view=all gồm cả RFID đã dừng nhưng chưa có ledger/bảng kê. Sắp received_started_at DESC, id DESC; total và items từ cùng SQL snapshot, trang vượt cuối items=[] nhưng total vẫn đúng.
+
+Mỗi item luôn có: session_id, status, origin, payment_mode, can_stop, statement_available, started_at, stopped_at, updated_at, energy_wh, amount_vnd, settlement_state, connector_id, connector_no, charge_point_display_code, site_id, site_name, vehicle_id, vehicle_label. ID là chuỗi bigint, thời gian ISO UTC. started_at/stopped_at dùng received_started_at/received_stopped_at. energy_wh là Wh chốt đã lưu, có thể null; tiến trình thực dùng GET progress. Wh/VND phải là số nguyên JS an toàn hoặc null, không làm tròn số vượt giới hạn. amount_vnd chỉ lấy charging_statements.amount_vnd đúng session/chủ và payment_mode=csms_billed; không có bảng kê thì null, không dùng estimate hay sessions.total_cost_vnd.
+
+site_id/site_name/vehicle_id/vehicle_label giữ null khi chưa biết. charge_point_display_code cũng giữ null nếu DB chưa gán mã. vehicle_label là plate_number của xe gắn phiên và cùng chủ; không điền xe mặc định cho RFID và không lộ xe của chủ khác. Không trả id_tag, UID, card ID, serial/credential riêng của trụ.
+
+Progress thêm origin, payment_mode, can_stop, statement_available; giữ các field cũ. can_stop chỉ true khi app_qr + intent cùng driver + meter_stop_wh null + status active/paused/orphaned. RFID/HMI/free-vend false; POST stop hiện vẫn 404 cho phiên không có intent, không đổi hành vi. Đây là eligibility, server luôn kiểm lại khi POST. statement_available chỉ true khi payment_mode=csms_billed và có charging_statements đúng session/driver; GET không tạo bảng kê hay gửi lệnh sạc.
+
+Flutter đã nối local với API 0.15.0 cho phát hiện phiên đang sạc, theo dõi chỉ đọc RFID và Lịch sử mọi nguồn, qua adapter thật và kiểm thử transport/widget. Đây chưa là bằng chứng API staging/đầu đọc/điện thoại thật; backend 0.15 chưa triển khai staging và cấu hình app giữ nguyên. T148, ghi nợ credit, loyalty và quy trình Admin đăng ký thẻ không thay đổi. Xem [plan, research và bằng chứng kiểm thử](../tasks/t146-driver-session-discovery.md) và [kiểm chứng Flutter/giới hạn](../../apps/mobile/README.md#t146--owned-session-discovery-and-rfid-observation-2411).
 
 ## 6. Xác thực
 
@@ -215,8 +226,8 @@ hoặc generated Dart client trong slice này. Không tự tải thêm công c�
 | # | Câu hỏi | Đề xuất | Ai |
 |---|---|---|---|
 | 1 | Đường cong sạc DC theo mẫu xe lấy từ đâu cho `soc_curve` | bảng `vehicle_models` thêm 3 điểm (kW tại 20/50/80 % SoC), Admin nhập | Trí + Khang |
-| 2 | `estimated_cost_vnd` khi đang sạc tính theo biểu giá lúc nào | giá của đoạn hiện tại × Wh đã sạc, ghi rõ "ước tính" (BR-P02) | Trí + Khang |
-| 3 | Chế độ sạc ngoài `energy_kwh` (tiền, thời gian) | giữ ngoài hợp đồng đến khi OCPP có lệnh đặt hạn mức; app làm hạn mức mềm | Sơn |
+| 2 | `estimated_cost_vnd` khi đang sạc tính theo biểu giá lúc nào | Giá cao nhất hiện hành × Wh quan sát chính xác, ceil một lần; T134 estimate ở `metered_cost_vnd_estimate`, §17 | Trí + Khang |
+| 3 | Bốn chế độ sạc | Đã có backend: CSMS gửi RemoteStopTransaction theo mode, sweep timed bền qua restart; hợp đồng §17 | Sơn |
 | 4 | Login/OTP/refresh cho tài xế | BE-21 có đăng ký/đăng nhập email + mật khẩu và refresh không bảng (§6); BE-30 thêm đăng nhập số điện thoại + mật khẩu (§6a). OTP/SMS/Google/Firebase ngoài phạm vi, để sau Defense 1.1; hướng dự kiến: đổi token Firebase → JWT CSMS qua một route mới | Sơn + Trí |
 
 ## 12. BE-22 — cách app gọi route sạc và credit (cho Sơn, T96)
@@ -230,14 +241,15 @@ hình, rồi:
 ```
 POST /charges   Idempotency-Key: <uuid>   Content-Type: application/json
 {"connector_id":"12","vehicle_id":"3","mode":"energy_kwh","energy_limit_wh":20000}
-→ 202 {intent_id, command_id, session_id, outcome, effect_confirmed, version, max_energy_wh}
+→ 202 {intent_id, command_id, session_id, outcome, effect_confirmed, version, mode, max_energy_wh, max_duration_minutes, max_amount_vnd}
 ```
 
 - Mất mạng / timeout: gửi lại **đúng key, đúng body** (không tạo intent thứ hai, không gửi lệnh lần
   hai) hoặc `GET /charges/<uuid>`. Đổi body với key cũ → 409 `idempotency_conflict`.
 - Poll `GET /charges/<uuid>` mỗi 1–2 s cho tới khi `session_id` khác null → sang màn theo dõi.
 - Dừng poll và báo lỗi theo `outcome`: `topuprequired` → "số dư dưới mức tối thiểu, nạp thêm";
-  `requiresconfirmation` → hỏi "chỉ sạc được tối đa `max_energy_wh`", đồng ý thì gửi **key mới**
+  `requiresconfirmation` → hỏi theo cap của mode (`max_energy_wh`, `max_duration_minutes`,
+  `max_amount_vnd`), đồng ý thì gửi **key mới**
   với hạn mức đó; `rejected` → trụ từ chối; `start_timeout` / `released` → trụ không bắt đầu, thử
   lại. `sent`, `accepted`, `unknown` → tiếp tục poll (tài xế cắm súng).
 - 409 `connector_unavailable` / `connector_busy_or_unknown` → súng không sẵn sàng, chọn súng khác.
@@ -320,13 +332,15 @@ Content-Type: application/json
 
 ## 14. Top-up (WF-02) — nạp Charging Credit qua VNPay (T32 Phần 5)
 
-> **Dùng được cho app từ T32 Phần 8 (14/11).** Từ T32 Phần 6 (13/11) đã có IPN
-> (`/billing/vnpay/ipn`, cộng tiền) và trang return `/billing/vnpay/return` (chỉ báo "đang xác
-> nhận", app poll `GET /billing/top-ups/{id}`). Từ Phần 8, top-up `pending` quá `expires_at` được
-> vòng quét hỏi VNPay (querydr) từ `expires_at + 2 phút`, hỏi lại tới tối đa `expires_at + 60 phút`
-> khi VNPay chưa trả lời dứt khoát, rồi chuyển `credited` / `failed` / `expired`; trong lúc đó tạo
-> top-up mới bị chặn `pending_top_up_confirming`. Còn thiếu: e-invoice (Phần 7), chưa thử sandbox
-> VNPay thật.
+> **Dùng được cho app từ T32 Phần 8 (14/11).** IPN `/billing/vnpay/ipn` và trang return
+> `/billing/vnpay/return` có từ Phần 6 (13/11); return chỉ báo "đang xác nhận", app poll
+> `GET /billing/top-ups/{id}`. Top-up `pending` quá `expires_at` được hỏi VNPay (querydr) theo lịch
+> T32 Phần 8c (#194, 19/11): `expires_at` + 2 / 15 / 30 / 45 / 60 phút, thêm +75 chỉ khi lần +60
+> trả RC 94; hết lịch → `expired`. Trong lúc chờ, tạo top-up mới bị chặn
+> `pending_top_up_confirming`. Hoá đơn điện tử có từ Phần 7 (17/11), hiện dùng stub
+> (`StubEInvoiceProvider`); chưa có route xem hoá đơn cho app. Sandbox VNPay: querydr đã thử từ máy
+> dev ở Việt Nam (16/11); staging VM không gọi ra được `sandbox.vnpayment.vn` (xem
+> `infra/staging/README.md`, mục VNPay sandbox).
 
 Route ở `driver/top-ups.http.ts`, luật ở `billing/top-up.service.ts`; ánh xạ lỗi ở `topUpErrorJson`.
 Luật: WF-02 decisions D2, BR-P22 theo ADR-0013, BR-P35.
@@ -348,8 +362,8 @@ Luật: WF-02 decisions D2, BR-P22 theo ADR-0013, BR-P35.
    - `top_up_pending` → hỏi "Bạn còn giao dịch nạp chưa thanh toán, tiếp tục?" và mở lại
      `payment_url` trong body lỗi;
    - `pending_top_up_confirming` → báo "Giao dịch trước đang được xác nhận, thử lại sau ít phút"
-     (thường ~2 phút sau `expires_at`, tối đa ~1 giờ khi ngân hàng xác nhận chậm). Không có
-     `payment_url`.
+     (thường ~2 phút sau `expires_at`; khi ngân hàng xác nhận chậm tối đa ~1 giờ, ~1 giờ 15 khi
+     VNPay trả RC 94). Không có `payment_url`.
 4. **Kết quả.** Return URL chỉ để hiển thị — **không** coi là đã nạp. Poll
    `GET /billing/top-ups/{top_up_id}` tới khi `status` rời `pending` (`credited` → đọc lại
    `GET /credit`; `failed` / `expired` → báo chưa nạp được). Tiền chỉ được cộng khi VNPay báo qua
@@ -376,7 +390,7 @@ Luật (WF-04-PLAN Q75–Q81, 11/11/2026):
 - Súng (hoặc cả trụ) đang có sự cố mở → báo cáo gắn vào sự cố đó.
 - **2 tài xế khác nhau trong 2 giờ**, hoặc **1 tài xế khi súng `Faulted` / `Unavailable` hoặc trụ Offline** → CSMS tạo sự cố `driver_report`, báo Operator, **ẩn súng** khỏi `/stations` (cả `sort=smart`) và gắn mọi báo cáo chờ trong 2 giờ.
 - Cùng một tài xế báo nhiều lần chỉ tính một. Ở đường một tài xế, trong 2 giờ một tài xế chỉ tự mở được **một** sự cố trên một trụ; báo cáo ở súng khác vẫn `201`, `reported_issue: false`, chờ tài xế thứ hai (T131).
-- Nhãn hiện ở `GET /connectors/by-code/{code}/{no}` (`reported_issue`). Nhãn xoá khi Operator đóng sự cố, hoặc **một phiên trên súng hoàn tất bình thường** (bắt đầu sau khi có sự cố theo giờ trụ đã đối soát, > 0 Wh, không dừng vì EmergencyStop / PowerLoss / Other). Súng đổi trạng thái (kể cả `Available`) **không** xoá nhãn (BR-P42, D-G 14/11) — ADR-0019.
+- Nhãn hiện ở `GET /connectors/by-code/{code}/{no}` (`reported_issue`). Nhãn xoá khi Operator đóng sự cố, hoặc **một phiên trên súng hoàn tất bình thường** (bắt đầu sau khi có sự cố theo giờ trụ đã đối soát, > 0 Wh, không dừng vì EmergencyStop / PowerLoss / Other). Súng đổi trạng thái (kể cả `Available`) **không** xoá nhãn (BR-P42, D-G 14/11); báo cáo gắn vào một sự cố của trụ (Faulted / Offline) cũng giữ nhãn khi sự cố đó tự đóng — chuyển sang một sự cố `driver_report` (T141, D-X 17/11) — ADR-0019.
 
 ## 16. T96 — xếp hạng gợi ý theo đường bộ Vietmap
 
@@ -427,3 +441,91 @@ brief là giả định xếp hạng. Tải hình học từ `GET /stations/{sit
 [bản Playground công khai](https://tools.vietmap.vn/playground/assets/index-DQkfeQKM.js).
 Playground dùng `paths[0].annotations` và các hàng `{ first, last, value }`. Mẫu công khai ghi
 nhận mảng số mét có cả mức nhẹ. CSMS ghép theo cặp chỉ số và chỉ cộng heavy/severe.
+
+## 17. Bốn chế độ sạc — hợp đồng backend WP3
+
+`POST /charges` nhận đúng một shape dưới đây cùng `connector_id`, `vehicle_id` là chuỗi ID thật.
+Không nhận trường hạn mức của mode khác, trường lạ, số lẻ, chuỗi số, zero hoặc giá trị vượt
+9.007.199.254.740.991; thiếu mode là `invalid_input`, mode lạ là `unsupported_mode` (400).
+
+| mode | Trường riêng | Điều kiện dừng tự động |
+|---|---|---|
+| `full` | không có | BMS/trụ gửi StopTransaction; vẫn cho manual stop và cutoff credit chung. SoC 100% từ app/telemetry không tự dừng |
+| `timed` | `duration_minutes`: phút nguyên dương | Thời gian CSMS từ `received_started_at` đạt số phút, gồm pause; recovery sweep mỗi 10 giây, sống qua restart, không cần MeterValues hay điện thoại mở |
+| `energy_kwh` | `energy_limit_wh`: Wh nguyên dương | Wh quan sát hợp lệ đạt hạn mức; giữ chính xác phần Wh lẻ khi so sánh |
+| `amount_vnd` | `amount_limit_vnd`: VND nguyên dương | Ước tính tích lũy theo chính sách T134 đạt mục tiêu: nội suy mẫu ở biên tariff; fallback toàn phiên dùng tariff lúc CSMS nhận start |
+
+Energy/money chỉ gửi lệnh dừng sau khi mẫu hợp lệ quan sát được đạt ngưỡng; điện năng và tiền
+thực tế có thể vượt mục tiêu trong khoảng lấy mẫu, truyền lệnh và trụ thực sự dừng. Đây không
+phải hard cap hoặc predictive stop. Timed có độ trễ sweep danh nghĩa tới 10 giây, cộng thời gian
+xử lý/lệnh; lúc offline hoặc quá tải có thể lâu hơn. Chỉ StopTransaction thật chứng minh đã dừng.
+
+```json
+{"connector_id":"12","vehicle_id":"3","mode":"full"}
+{"connector_id":"12","vehicle_id":"3","mode":"timed","duration_minutes":30}
+{"connector_id":"12","vehicle_id":"3","mode":"energy_kwh","energy_limit_wh":20000}
+{"connector_id":"12","vehicle_id":"3","mode":"amount_vnd","amount_limit_vnd":100000}
+```
+
+Snapshot thêm `mode`, `max_duration_minutes`, `max_amount_vnd`; vẫn giữ `max_energy_wh` và mọi
+trường cũ. Cap không áp dụng tự động: trả 202 `requiresconfirmation`, command/session null,
+chỉ cap đúng mode có giá trị; tài xế đồng ý rồi gửi key mới. Full giữ toàn bộ credit khả dụng;
+timed giữ `ceil(min(kW connector, kW xe) × phút × giá cao nhất / 60)` VND, yêu cầu công suất
+connector có giá trị (xe chưa có max thì connector vẫn là cận vật lý an toàn). Energy giữ
+ceil(Wh × giá cao nhất / 1000), amount giữ số VND chọn. Mọi mode phải đạt minimum credit,
+không gửi lệnh nếu không đạt. Cùng key/body không tạo phiên/lệnh nữa; đổi mode hay hạn mức với
+key cũ là 409. Hash energy cũ giữ nguyên.
+
+Progress thêm `billing_mode`, `limit_value` gốc (null/phút/Wh/VND theo mode), `elapsed_seconds`
+(giây nguyên, dừng tại CSMS receipt của StopTransaction). `consumed_wh` vẫn Wh nguyên, làm tròn
+xuống chỉ để hiển thị. Thiếu/xung đột/stale/replayed telemetry trả null/unknown, không coi là zero.
+`metered_cost_vnd_estimate` là ước tính được dùng cho money cutoff. `metered_cost_quality` là
+`exact` (đủ mẫu hoặc giá áp dụng là một tariff), `interpolated` (nội suy tại biên giá), hoặc
+`unknown` (estimate null). `metered_cost_clock` là `cp`, `cp_offset`, `csms` hoặc null. Đồng hồ và
+mẫu đo được đọc từ StartTransaction/MeterValues thật; không tạo StopTransaction giả để tính tiền.
+Theo T134, mẫu thưa qua ranh giới được nội suy bằng cùng `meterAt` và làm tròn Wh tại biên như
+quyết toán; clock offset đo được từ các cụm live được cộng vào trục giờ. Khi resolver không tin
+đồng hồ, **toàn phiên dùng đúng tariff lúc CSMS nhận start**, không chia theo từng giờ nhận mẫu.
+`metered_cost_vnd_min` / `max` vẫn cho biết cận từ số đo; ví dụ 2 kWh qua hai tariff 1.000/5.000
+với thời gian bằng nhau: min=2.000, max=10.000, estimate=6.000, quality=`interpolated`. Money limit
+6.000 dừng theo estimate đã duyệt, không đợi cận min đạt 6.000. Những trường này không ghi ledger.
+Mất socket trong offline grace giữ `consumed_wh` quan sát cuối và quality `observed`; `is_online`
+cảnh báo mất liên lạc. Số cũ này không được dùng để tự cắt: cutoff luôn kiểm fresh/current epoch.
+Raw replay flag không đủ để loại một cụm live có clock offset được T134 xác minh; replay thật,
+epoch lạ, sample xung đột hoặc thiếu bằng chứng vẫn không cho phép tự cắt theo meter.
+
+`estimated_cost_vnd` cũ vẫn là **ước tính tối đa theo giá cao nhất**, không phải actual cost.
+Tính từ milliWh chính xác rồi ceil một lần ra VND, trước khi floor Wh cho hiển thị:
+99.999 Wh ở 5.000 VND/kWh trả maximum 500 VND, dù `consumed_wh` hiển thị 99.
+Cutoff credit chung dùng số đo chính xác × giá cao nhất (BR-P19); nếu credit khả dụng đã bằng
+hoặc dưới reserve, số dư tự nó đủ chứng minh cần dừng dù chỉ có SoC/chưa có mẫu energy. Không
+bịa số Wh. Chỉ gửi lệnh tới trụ online, fresh, đúng registry epoch. Khi trụ offline/stale,
+chỉ phiên `timed` đã đến hạn được thử lại qua DB sweep khi kết nối hợp lệ trở lại. Các mode
+còn lại đánh giá lại cutoff khi nhận MeterValues mới hợp lệ; bằng chứng từ số dư không phụ
+thuộc mẫu energy. RemoteStop Accepted chỉ là ACK, không đánh dấu đã dừng và không quyết toán.
+StopTransaction thật quyết toán một lần theo BR-P20/45; giữ nguyên chính sách T134 đã merge,
+shortfall và billing review.
+
+Migration `0026_driver_charge_modes.sql` áp sau `0025_e-invoice-vat-rate.sql`; không sửa 0025.
+Trong `driver_charge_intents`, `mode` dùng enum `billing_mode` có sẵn, NOT NULL DEFAULT
+`energy_kwh`; thêm bốn bigint nullable `duration_minutes`, `amount_limit_vnd`,
+`max_duration_minutes`, `max_amount_vnd`; `energy_limit_wh` thành nullable. CHECK buộc đúng
+một hạn mức nguyên dương theo mode (full không có) và cap không âm chỉ ở mode tương ứng.
+Hàng energy cũ giữ nguyên Wh, request hash và idempotency key; `sessions.billing_mode` và
+`sessions.limit_value` dùng cột có sẵn, không thêm schema phiên hoặc đổi đơn vị dữ liệu cũ.
+
+### Nghiên cứu nguồn và lựa chọn
+
+Các nguồn chính thức và commit đã khảo sát được ghim dưới đây. Áp dụng khái niệm vào mã riêng,
+không sao chép source hoặc thêm dependency. Ma trận edge case và kết quả kiểm chứng:
+[docs/testing/T96-FOUR-CHARGE-MODES.md](../testing/T96-FOUR-CHARGE-MODES.md).
+
+| Nguồn, giấy phép | Fit/kiến trúc | Điều áp dụng, tradeoff |
+|---|---|---|
+| [evcc core/loadpoint.go](https://github.com/evcc-io/evcc/blob/1d62b732f81caa53ae827b38bed0e5380776a1a7/core/loadpoint.go), [session tests](https://github.com/evcc-io/evcc/blob/1d62b732f81caa53ae827b38bed0e5380776a1a7/core/loadpoint_session_test.go), MIT | Energy limit trong control loop và metric reset theo phiên; vòng đời phiên phù hợp hơn phụ thuộc UI | Sweep CSMS + baseline theo transaction; thêm durability Postgres và locking vì nhiều CSMS worker. Không kéo Go runtime/dependency vào NestJS |
+| [SAP OCPP16IncomingRequestService.ts](https://github.com/SAP/e-mobility-charging-stations-simulator/blob/1d0f190e4ea659a68efb83c86ecbdf12b25cda4b/src/charging-station/ocpp/1.6/OCPP16IncomingRequestService.ts), [RemoteStopUnlock tests](https://github.com/SAP/e-mobility-charging-stations-simulator/blob/1d0f190e4ea659a68efb83c86ecbdf12b25cda4b/tests/charging-station/ocpp/1.6/OCPP16IncomingRequestService-RemoteStopUnlock.test.ts), Apache-2.0 | Simulator xử lý RemoteStop; phân biệt ACK với StopTransaction là điều kiện cần cho billing | Giữ stop intent/attempt và chờ effect thật, test qua ocpp-rpc. Không nhận ACK làm bằng chứng debit; không kéo simulator/dependency mới |
+
+Security giữ owner/vehicle/connector validation, khóa phiên, epoch fencing, reserved auto-key và
+idempotency hiện có. Dữ liệu meter/clock không chắc chắn không được coi là tiền đã trả; cận trên
+chỉ bảo vệ credit. Hai dự án có scope/stack khác nên implementation giữ kiến trúc hiện tại,
+không port source; attribution bằng URL/commit/license trên, không phát sinh mã sao chép cần header.

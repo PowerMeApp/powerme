@@ -29,6 +29,13 @@ Future<void> _open(
 
 Future<void> _tap(WidgetTester tester, String key, {bool settle = true}) async {
   final target = find.byKey(Key(key));
+  if (target.evaluate().isEmpty) {
+    await tester.scrollUntilVisible(
+      target,
+      180,
+      scrollable: find.byType(Scrollable).first,
+    );
+  }
   await tester.ensureVisible(target);
   await tester.pump();
   await tester.tap(target);
@@ -64,6 +71,13 @@ Future<void> _confirmDefault(WidgetTester tester, String id) async {
 bool _canSave(WidgetTester tester) =>
     tester.widget<FilledButton>(find.byKey(const Key(_save))).onPressed != null;
 
+const _creditSummary = {
+  'balance_vnd': 125000,
+  'held_vnd': 0,
+  'available_vnd': 125000,
+  'status': 'active',
+};
+
 void main() {
   testWidgets('Commons photo and credit stay separate from the signed API', (
     tester,
@@ -90,6 +104,7 @@ void main() {
             ),
           ),
           'stations' => reply(200, page([])),
+          'credit' => reply(200, _creditSummary),
           'vehicle-models' => reply(200, {
             'items': [picturedLeaf, vf8],
           }),
@@ -97,11 +112,13 @@ void main() {
         };
       });
       await _open(tester, fixture);
+      expect(find.text('125.000 đ'), findsOneWidget);
+      expect(imageClient.urls, isEmpty);
+      await _tap(tester, 'open-vehicle-garage');
       expect(find.text(leafPhotoCredit), findsOneWidget);
       expect(find.text('Ảnh minh họa'), findsOneWidget);
       expect(imageClient.urls, [Uri.parse(leafPhotoUrl)]);
       expect(imageClient.request.headers.values, isEmpty);
-      await _tap(tester, 'open-vehicle-garage');
       expect(find.text(leafPhotoCredit), findsOneWidget);
       final secondary = find.byKey(const ValueKey('10'));
       expect(
@@ -122,8 +139,9 @@ void main() {
       await _chooseModel(tester);
       expect(find.text(leafPhotoCredit), findsOneWidget);
       expect(find.text('Ảnh minh họa'), findsOneWidget);
+      await _tap(tester, 'change-vehicle-model');
       await _tap(tester, 'vehicle-model-${vf8['vehicle_model_id']}');
-      expect(find.text(leafPhotoCredit), findsOneWidget);
+      expect(find.text(leafPhotoCredit), findsNothing);
       expect(find.text('Ảnh minh họa'), findsOneWidget);
       expect(
         imageClient.urls.every((url) => url == Uri.parse(leafPhotoUrl)),
@@ -134,6 +152,7 @@ void main() {
         'auth/login',
         'me',
         'stations',
+        'credit',
         'vehicle-models',
       ]);
     } finally {
@@ -200,6 +219,12 @@ void main() {
     await _chooseModel(tester);
     await _tap(tester, _save, settle: false);
     await tester.tap(find.byKey(const Key(_save)));
+    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(
+      find.text('51K-901.01'),
+      -180,
+      scrollable: find.byType(Scrollable).first,
+    );
     await tester.pumpAndSettle();
     expect(find.text('51K-901.01'), findsOneWidget);
     expect(find.text('Xe mặc định'), findsOneWidget);
@@ -292,6 +317,7 @@ void main() {
         'auth/login' => reply(200, tokens(accessA)),
         'me' => reply(200, account()),
         'stations' => reply(200, page([])),
+        'credit' => reply(200, _creditSummary),
         'vehicle-models' => reply(200, {
           'items': [leaf, vf8],
         }),
@@ -331,6 +357,8 @@ void main() {
     expect(find.text('GB/T'), findsOneWidget);
     expect(find.text('Chưa có dữ liệu'), findsNWidgets(3));
 
+    expect(search, findsNothing);
+    await _tap(tester, 'change-vehicle-model');
     await tester.ensureVisible(search);
     await tester.enterText(search, 'lEaF');
     await tester.pumpAndSettle();
@@ -340,6 +368,7 @@ void main() {
     expect(find.text('270 km'), findsOneWidget);
     expect(find.text('50 kW'), findsOneWidget);
     expect(find.text('CHAdeMO'), findsOneWidget);
+    await _tap(tester, 'change-vehicle-model');
     await chooseBrand('VinFast');
     expect(find.text('Không tìm thấy mẫu xe phù hợp.'), findsOneWidget);
     expect(leafCard, findsNothing);
@@ -359,6 +388,7 @@ void main() {
       'auth/login',
       'me',
       'stations',
+      'credit',
       'vehicle-models',
       'vehicles',
       'me',
@@ -489,6 +519,14 @@ void main() {
       expect(find.byKey(const Key(_save)), findsNothing);
       blocked = false;
       await _tap(tester, _reload);
+      if (received) {
+        await tester.scrollUntilVisible(
+          find.text('30A-123.45'),
+          -180,
+          scrollable: find.byType(Scrollable).first,
+        );
+        await tester.pumpAndSettle();
+      }
       expect(find.text('30A-123.45'), findsOneWidget);
       expect(fixture.requests.where((r) => r.path == 'vehicles'), hasLength(1));
       if (received) {
@@ -496,6 +534,8 @@ void main() {
         expect(find.byKey(const Key(_save)), findsNothing);
       } else {
         expect(_canSave(tester), isTrue);
+        expect(search, findsNothing);
+        await _tap(tester, 'change-vehicle-model');
         expect(tester.widget<TextField>(search).controller!.text, 'Leaf');
         expect(
           tester

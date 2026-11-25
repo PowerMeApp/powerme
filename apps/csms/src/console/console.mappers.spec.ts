@@ -112,6 +112,18 @@ describe('reconciliationKind / resolutionNumber / mapReconciliation', () => {
     expect(reconciliationKind('late_sample', null)).toBe('late_sample');
   });
 
+  it('T134: bản tin lặp mang số đo khác (meter_evidence_conflict) không phải conflict của đối soát', () => {
+    expect(
+      reconciliationKind(
+        'conflict',
+        'meter_evidence_conflict reason=conflicting_sample message_log_id=7',
+      ),
+    ).toBe('meter_evidence_conflict');
+    // Các bản ghi conflict khác (gán lại intent, quá hard cap) vẫn là conflict.
+    expect(reconciliationKind('conflict', 'app_intent_reused: intent_id=1')).toBe('conflict');
+    expect(reconciliationKind('conflict', 'hard_cap_exceeded: cap_h=24')).toBe('conflict');
+  });
+
   it('mapReconciliation đọc cả bản ghi mới (late_sample) lẫn bản ghi cũ (meter_gap + "(late_sample)")', () => {
     const base = {
       id: 1,
@@ -141,15 +153,18 @@ describe('reconciliationKind / resolutionNumber / mapReconciliation', () => {
     ).toBe(true);
   });
 
-  it('mapReconciliation exposes the tariff fallback audit kind', () => {
-    const resolution = 'tariff_clock=csms_fallback reason=tariff_clock_ambiguous_delay';
+  it.each([
+    ['tariff_clock_fallback', 'tariff_clock=csms_fallback reason=tariff_clock_future_timestamp'],
+    ['tariff_clock_offset', 'tariff_clock=cp_offset offset_s=600 epoch=1 live_frames=4'],
+    ['tariff_boundary_interpolated', 'tariff_boundary=interpolated boundaries=1 max_gap_s=120'],
+  ])('mapReconciliation exposes the %s audit kind', (recordType, resolution) => {
     expect(
       mapReconciliation({
         id: 1,
         sessionId: 3,
         transactionNo: 3,
         recordNo: 1,
-        recordType: 'tariff_clock_fallback',
+        recordType,
         gapStart: null,
         gapEnd: null,
         energyDifferenceWh: null,
@@ -157,11 +172,7 @@ describe('reconciliationKind / resolutionNumber / mapReconciliation', () => {
         resolution,
         createdAt: T('14:21:00'),
       }),
-    ).toMatchObject({
-      kind: 'tariff_clock_fallback',
-      record_type: 'tariff_clock_fallback',
-      resolution,
-    });
+    ).toMatchObject({ kind: recordType, record_type: recordType, resolution });
   });
 
   it('rút số từ resolution; "null" hoặc thiếu khoá → null, không nhầm khoá có tiền tố', () => {
@@ -332,7 +343,7 @@ describe('replay: replayedFlag / epochOpenedAtFor / mapMessage / mapMeterValue',
 });
 
 describe('buildSummary', () => {
-  it('đủ 9 trạng thái phiên và 7 loại đối soát (điền 0), online/offline tính từ registry', () => {
+  it('đủ 9 trạng thái phiên và 10 loại đối soát (điền 0), online/offline tính từ registry', () => {
     const out = buildSummary({
       stationSerials: ['A', 'B', 'C'],
       connectedSerials: new Set(['A', 'Z']),
@@ -349,7 +360,7 @@ describe('buildSummary', () => {
     expect(out.sessions_by_status['review']).toBe(1);
     expect(out.sessions_by_status['failed']).toBe(0);
     expect(out.sessions_total).toBe(3);
-    expect(Object.keys(out.reconciliation_by_type)).toHaveLength(8);
+    expect(Object.keys(out.reconciliation_by_type)).toHaveLength(10);
     expect(out.reconciliation_by_type['conflict']).toBe(0);
     expect(out.reconciliation_by_type['late_sample']).toBe(0);
     expect(out.reconciliation_conflicts).toBe(7);

@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: PowerMe CSMS — Driver API
-  version: 0.13.0
+  version: 0.15.0
   summary: Hợp đồng REST cho app tài xế (T77, phiếu v1.3 §3.2g)
   description: |
     Hợp đồng giữa CSMS (WP2) và app tài xế Flutter (WP3) cho trạng thái súng sạc, thời gian còn lại,
@@ -19,7 +19,7 @@ info:
       đường `sessions/*` trả cả phiên đó nếu `driver_id` khớp; `charges/*` chỉ có với phiên bắt đầu
       từ app.
   x-owner: Trí (WP2) — hợp đồng; Sơn (WP3) — route và client Dart
-  x-status: MB03 — brief 07/11 smart station search, address search and canonical road routes implemented locally; BE-21 email/password register, login and refresh implemented; BE-30 login by email or phone number (E.164); BE-22 charges, sessions (progress/stop/statement) and credit implemented; BE-34 vehicle models and add/set-default/remove vehicles (soft delete) implemented; T32 Phần 5 billing/top-ups implemented but not for app use until T32 Phần 8 merges (IPN and return page since T32 Phần 6); time-left remains planned
+  x-status: MB03 — brief 07/11 smart station search, address search and canonical road routes implemented locally; BE-21 email/password register, login and refresh implemented; BE-30 login by email or phone number (E.164); BE-22 charges, sessions (progress/stop/statement) and credit implemented; T146 owned-session list and origin/payment/capabilities implemented; Flutter discovery/history locally integrated and fixture-verified, pending deployment/device proof; T148 deferred; BE-34 vehicle models and add/set-default/remove vehicles (soft delete) implemented; T32 Phần 5 billing/top-ups implemented but not for app use until T32 Phần 8 merges (IPN and return page since T32 Phần 6); time-left remains planned
 servers:
   - url: http://localhost:3000/api/driver/v1
     description: CSMS cục bộ (cùng tiến trình với console /api/admin)
@@ -42,7 +42,8 @@ tags:
     description: |
       UC-PAY-01 nạp Charging Credit qua VNPay (WF-02 SD-2a, T32 Phần 5). Dùng được cho app từ
       T32 Phần 8 (quét top-up quá hạn + querydr); IPN cộng tiền và trang return
-      `/billing/vnpay/return` có từ T32 Phần 6. Chưa có e-invoice, chưa thử sandbox VNPay thật.
+      `/billing/vnpay/return` có từ T32 Phần 6. E-invoice có từ T32 Phần 7, đang dùng stub.
+      querydr đã thử từ máy dev (16/11); staging VM chưa gọi ra được VNPay.
 
 security:
   - bearerAuth: []
@@ -694,16 +695,20 @@ paths:
         trước khi gửi RemoteStartTransaction (quyết định D4). Gọi lại cùng `Idempotency-Key` và
         cùng body trả về cùng snapshot; cùng key khác body → 409 `idempotency_conflict`.
         Kiểm tra tín dụng theo BR-P18 (đủ mức khởi đầu) và giữ trước `reserved_vnd`; CSMS tự dừng
-        khi chạm mức dự trữ cắt (BR-P19). Chỉ có chế độ `energy_kwh` (hạn mức kWh); các chế độ
-        khác là hướng phát triển (README WP3).
+        khi chạm mức dự trữ cắt (BR-P19). Bốn chế độ thực: `full`, `timed`, `energy_kwh`, `amount_vnd`. CSMS theo dõi và gửi
+        RemoteStopTransaction; app không cần mở để duy trì hạn mức.
+        Energy/money gửi lệnh khi mẫu telemetry hợp lệ quan sát được đạt ngưỡng; điện năng/tiền
+        thực tế có thể vượt mục tiêu do khoảng lấy mẫu, truyền lệnh và trụ dừng. Đây không phải
+        hard cap hoặc predictive stop. Timed có độ trễ sweep danh nghĩa tới 10 giây cộng xử lý/lệnh;
+        offline hoặc quá tải có thể lâu hơn. Chỉ StopTransaction thật chứng minh đã dừng.
 
         BE-22: body `application/json` ≤ 16 KiB, trường lạ → 400 `invalid_input`; `connector_id`,
         `vehicle_id` là **chuỗi** số. Request trả về khi lệnh RemoteStart đã có kết quả (tối đa
         `CHARGE_COMMAND_TIMEOUT_MS`, mặc định 30 s). **Tín dụng không đủ không phải lỗi HTTP**: intent
         được ghi ở trạng thái từ chối và trả 202 với `outcome = topuprequired` (dưới mức khởi đầu)
-        hoặc `requiresconfirmation` (đủ mức khởi đầu nhưng không đủ cho hạn mức xin; `max_energy_wh`
-        là hạn mức tối đa CSMS đề nghị — app hỏi tài xế rồi gửi **key mới** với
-        `energy_limit_wh = max_energy_wh`). Gửi lại cùng key trả lại đúng kết quả đó.
+        hoặc `requiresconfirmation` (đủ mức khởi đầu nhưng không đủ cho hạn mức xin;
+        `max_energy_wh`, `max_duration_minutes` hoặc `max_amount_vnd` theo mode là đề nghị;
+        app hỏi tài xế rồi gửi **key mới** với hạn mức đã đồng ý). Gửi lại cùng key trả lại đúng kết quả đó.
       parameters:
         - $ref: '#/components/parameters/idempotencyKey'
       requestBody:
@@ -763,6 +768,63 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
         '405': { $ref: '#/components/responses/MethodNotAllowed' }
 
+  /sessions:
+    get:
+      tags: [sessions]
+      operationId: listDriverSessions
+      x-status: implemented — T146 backend and local Flutter discovery/history integration fixture-verified; API deployment/device proof pending; T148 deferred
+      summary: Các phiên thuộc tài xế, kể cả RFID chưa có bảng kê
+      description: |
+        Principal chỉ từ bearer và DB active-driver check; không nhận driver_id/id_tag filter.
+        Mọi origin có driver_id khớp đều được đọc, không phụ thuộc intent hay ledger.
+        view=active yêu cầu meter_stop_wh null và status pending/active/paused/stopping/orphaned/review.
+        view=all gồm phiên đã dừng/chưa quyết toán. Sắp received_started_at DESC, id DESC.
+        Một SQL snapshot cho cả items và total; trang vượt cuối trả items rỗng, total giữ đúng.
+        Chỉ nhận view/page/page_size, mỗi key đúng một lần. Từ chối key lạ, trùng, số không nguyên,
+        khoảng trắng/control, quá giới hạn hoặc SQL-shaped input với 400 invalid_input.
+        can_stop là eligibility; POST stop vẫn kiểm lại. Không tạo billing, statement hay OCPP command.
+        amount_vnd chỉ từ bảng kê thực sự thuộc tài xế; không dùng ước tính hay sessions.total_cost_vnd.
+        Không trả UID/id_tag/card ID/credential. Wh/VND phải là số nguyên JS an toàn hoặc null.
+      parameters:
+        - name: view
+          in: query
+          schema: { type: string, enum: [active, all], default: all }
+        - name: page
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100000, default: 1 }
+        - name: page_size
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+      responses:
+        '200':
+          description: Một trang phiên thuộc tài xế
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DriverSessionPage' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '405':
+          description: method_not_allowed
+          headers:
+            Allow: { schema: { type: string, const: 'GET, OPTIONS' } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '500': { $ref: '#/components/responses/InternalError' }
+        '503': { $ref: '#/components/responses/AuthUnavailable' }
+    options:
+      tags: [sessions]
+      operationId: optionsDriverSessions
+      security: []
+      summary: Preflight theo cơ chế CORS local hiện có
+      responses:
+        '204':
+          description: Preflight không cần bearer
+          headers:
+            Access-Control-Allow-Methods: { schema: { type: string, const: 'GET, OPTIONS' } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
   /sessions/{sessionId}/progress:
     get:
       tags: [sessions]
@@ -776,6 +838,7 @@ paths:
         là `unknown` khi chưa có mẫu hoặc mẫu không hợp lệ.
         Ngưỡng M3 của WP3: SoC và kWh lên app trong vài giây sau MeterValues → app **poll mỗi 5 s**
         cho đến khi có kênh realtime (Tuần 10, ngoài hợp đồng này).
+        T146: origin/payment_mode/can_stop/statement_available cùng ngữ nghĩa với GET /sessions.
         BE-22: phiên không do app tạo có `reserved_vnd = null`. Ngừng poll khi `status` là
         `closed`/`reconciled` và `settlement_state = posted` (khi đó gọi statement), hoặc `review`.
       parameters:
@@ -975,8 +1038,8 @@ paths:
           "giao dịch trước đang được xác nhận, thử lại sau ít phút". Không có `payment_url`.
 
         **Dùng được cho app từ T32 Phần 8**: top-up bỏ dở được vòng quét hỏi VNPay (querydr) từ
-        `expires_at + 2 phút`, tối đa tới `expires_at + 60 phút`, rồi chuyển `credited` / `failed` /
-        `expired`; trong lúc đó tạo mới trả `pending_top_up_confirming`. IPN cộng tiền và trang
+        `expires_at + 2 phút`, tối đa tới `expires_at + 60 phút` (+75 khi lần +60 trả RC 94), rồi
+        chuyển `credited` / `failed` / `expired`; trong lúc đó tạo mới trả `pending_top_up_confirming`. IPN cộng tiền và trang
         return `/billing/vnpay/return` có từ T32 Phần 6.
       parameters:
         - $ref: '#/components/parameters/idempotencyKey'
@@ -1417,7 +1480,7 @@ components:
         error: { type: string, description: 'Mã ổn định, snake_case' }
         detail: { type: string, description: Lời giải thích để hiển thị }
       examples:
-        - { error: credit_unavailable, detail: 'Số dư 15.000 ₫ thấp hơn mức khởi đầu 50.000 ₫' }
+        - { error: credit_unavailable, detail: 'Tài xế chưa có tài khoản Charging Credit hoặc tài khoản không ở trạng thái active' }
 
     RegisterRequest:
       type: object
@@ -1760,22 +1823,49 @@ components:
         - { kind: soc_curve, min_minutes: 18, max_minutes: 26, computed_at: '2026-10-28T14:20:27Z', reason: null, basis: 'SoC 42 % → 80 %, 60 kW' }
         - { kind: unknown, min_minutes: null, max_minutes: null, computed_at: '2026-10-28T14:20:27Z', reason: no_soc, basis: null }
 
+    ChargeMode:
+      type: string
+      enum: [full, timed, energy_kwh, amount_vnd]
+
     StartChargeRequest:
-      type: object
-      required: [connector_id, vehicle_id, mode, energy_limit_wh]
-      properties:
-        connector_id: { $ref: '#/components/schemas/Id' }
-        vehicle_id: { $ref: '#/components/schemas/Id' }
-        mode: { type: string, enum: [energy_kwh], description: Chỉ hạn mức kWh ở Iteration 2 }
-        energy_limit_wh:
-          type: integer
-          minimum: 1
-          description: Hạn mức tài xế chọn; CSMS cắt thấp hơn nếu tín dụng không đủ (BR-P18)
+      description: Bốn shape loại trừ nhau; full không có trường hạn mức. Wh, phút và VND là số nguyên dương an toàn JS.
+      oneOf:
+        - type: object
+          additionalProperties: false
+          required: [connector_id, vehicle_id, mode]
+          properties:
+            connector_id: { $ref: '#/components/schemas/Id' }
+            vehicle_id: { $ref: '#/components/schemas/Id' }
+            mode: { type: string, const: full }
+        - type: object
+          additionalProperties: false
+          required: [connector_id, vehicle_id, mode, duration_minutes]
+          properties:
+            connector_id: { $ref: '#/components/schemas/Id' }
+            vehicle_id: { $ref: '#/components/schemas/Id' }
+            mode: { type: string, const: timed }
+            duration_minutes: { type: integer, minimum: 1, maximum: 9007199254740991 }
+        - type: object
+          additionalProperties: false
+          required: [connector_id, vehicle_id, mode, energy_limit_wh]
+          properties:
+            connector_id: { $ref: '#/components/schemas/Id' }
+            vehicle_id: { $ref: '#/components/schemas/Id' }
+            mode: { type: string, const: energy_kwh }
+            energy_limit_wh: { type: integer, minimum: 1, maximum: 9007199254740991 }
+        - type: object
+          additionalProperties: false
+          required: [connector_id, vehicle_id, mode, amount_limit_vnd]
+          properties:
+            connector_id: { $ref: '#/components/schemas/Id' }
+            vehicle_id: { $ref: '#/components/schemas/Id' }
+            mode: { type: string, const: amount_vnd }
+            amount_limit_vnd: { type: integer, minimum: 1, maximum: 9007199254740991 }
 
     ChargeSnapshot:
       type: object
       description: Trạng thái của một start intent (D4). Trả cùng hình dạng ở POST /charges và GET /charges/{key}.
-      required: [intent_id, command_id, session_id, outcome, effect_confirmed, version, max_energy_wh]
+      required: [intent_id, command_id, session_id, outcome, effect_confirmed, version, max_energy_wh, mode, max_duration_minutes, max_amount_vnd]
       properties:
         intent_id: { $ref: '#/components/schemas/Id' }
         command_id:
@@ -1790,7 +1880,7 @@ components:
             BE-22 (khớp code): lý do từ chối nếu có, nếu không thì trạng thái phiên khi đã có phiên,
             nếu không thì trạng thái intent.
             - Lý do từ chối: `topuprequired` (số dư khả dụng dưới mức khởi đầu, BR-P18),
-              `requiresconfirmation` (xem `max_energy_wh`), `start_timeout` (trụ không bắt đầu
+              `requiresconfirmation` (xem cap theo mode), `start_timeout` (trụ không bắt đầu
               trong hạn, intent đã giải phóng).
             - Trạng thái phiên: `active`, `paused`, `stopping`, `closed`, `reconciled`, `review`,
               `orphaned`.
@@ -1803,7 +1893,10 @@ components:
         version: { type: integer, minimum: 1 }
         max_energy_wh:
           type: [integer, 'null']
-          description: Hạn mức sau khi cắt theo tín dụng; khác `energy_limit_wh` gửi lên là đã bị cắt
+          description: Đề nghị Wh cho energy_kwh khi requiresconfirmation; chưa áp dụng, cần key mới và đồng ý rõ ràng
+        mode: { $ref: '#/components/schemas/ChargeMode' }
+        max_duration_minutes: { type: [integer, 'null'], minimum: 0, description: Đề nghị phút cho timed; null ở mode khác }
+        max_amount_vnd: { type: [integer, 'null'], minimum: 0, description: Đề nghị VND cho amount_vnd; null ở mode khác }
 
     StopSnapshot:
       type: object
@@ -1822,11 +1915,59 @@ components:
           type: boolean
           description: true khi phiên đã có `meter_stop_wh`, tức trụ đã gửi StopTransaction
 
-    SessionProgress:
+    SessionOrigin:
+      type: string
+      enum: [app_qr, rfid, hmi_password, free_vend]
+    SessionPaymentMode:
+      type: string
+      enum: [csms_billed, unattributed]
+    DriverSession:
       type: object
-      required: [session_id, status, updated_at, meter_start_wh, consumed_wh, telemetry_quality, charge_point]
+      additionalProperties: false
+      required: [session_id, status, origin, payment_mode, can_stop, statement_available, started_at, stopped_at, updated_at, energy_wh, amount_vnd, settlement_state, connector_id, connector_no, charge_point_display_code, site_id, site_name, vehicle_id, vehicle_label]
       properties:
         session_id: { $ref: '#/components/schemas/Id' }
+        status: { type: string, enum: [pending, active, paused, stopping, closed, review, reconciled, orphaned, failed] }
+        origin: { $ref: '#/components/schemas/SessionOrigin' }
+        payment_mode: { $ref: '#/components/schemas/SessionPaymentMode' }
+        can_stop:
+          type: boolean
+          description: Chỉ app_qr có intent cùng driver, meter_stop_wh null và status active/paused/orphaned; không bảo đảm lệnh dừng sẽ thành công
+        statement_available:
+          type: boolean
+          description: payment_mode csms_billed và có charging_statements đúng session/driver; không tạo bảng kê
+        started_at: { $ref: '#/components/schemas/Timestamp' }
+        stopped_at: { oneOf: [{ $ref: '#/components/schemas/Timestamp' }, { type: 'null' }] }
+        updated_at: { $ref: '#/components/schemas/Timestamp' }
+        energy_wh: { type: [integer, 'null'], minimum: -9007199254740991, maximum: 9007199254740991, description: energy_wh chốt đã lưu; null là chưa biết, không thay bằng 0 }
+        amount_vnd: { type: [integer, 'null'], minimum: 0, maximum: 9007199254740991, description: Chỉ charging_statements.amount_vnd thực sự thuộc tài xế và csms_billed; null khi chưa có bảng kê }
+        settlement_state: { type: [string, 'null'], description: charge_settlement_jobs.state hoặc null }
+        connector_id: { $ref: '#/components/schemas/Id' }
+        connector_no: { type: integer }
+        charge_point_display_code: { type: [string, 'null'], description: Null được giữ nguyên nếu trụ chưa có display_code }
+        site_id: { oneOf: [{ $ref: '#/components/schemas/Id' }, { type: 'null' }] }
+        site_name: { type: [string, 'null'] }
+        vehicle_id: { oneOf: [{ $ref: '#/components/schemas/Id' }, { type: 'null' }] }
+        vehicle_label: { type: [string, 'null'], description: plate_number của xe cùng chủ; không dùng xe mặc định và không lộ xe chủ khác }
+    DriverSessionPage:
+      type: object
+      additionalProperties: false
+      required: [items, total, page, page_size]
+      properties:
+        items: { type: array, maxItems: 100, items: { $ref: '#/components/schemas/DriverSession' } }
+        total: { type: integer, minimum: 0, maximum: 9007199254740991 }
+        page: { type: integer, minimum: 1, maximum: 100000 }
+        page_size: { type: integer, minimum: 1, maximum: 100 }
+
+    SessionProgress:
+      type: object
+      required: [session_id, status, origin, payment_mode, can_stop, statement_available, updated_at, meter_start_wh, consumed_wh, telemetry_quality, charge_point, billing_mode, limit_value, elapsed_seconds]
+      properties:
+        session_id: { $ref: '#/components/schemas/Id' }
+        origin: { $ref: '#/components/schemas/SessionOrigin' }
+        payment_mode: { $ref: '#/components/schemas/SessionPaymentMode' }
+        can_stop: { type: boolean, description: Cùng eligibility như DriverSession.can_stop; POST stop vẫn kiểm lại }
+        statement_available: { type: boolean, description: Cùng điều kiện có bảng kê thuộc tài xế như DriverSession.statement_available }
         status:
           type: string
           enum: [pending, active, paused, stopping, closed, review, reconciled, orphaned, failed]
@@ -1837,17 +1978,26 @@ components:
         energy_wh: { type: [integer, 'null'], description: Điện năng chốt sau StopTransaction }
         consumed_wh:
           type: [integer, 'null']
-          description: Điện năng đã sạc tới hiện tại (mẫu mới nhất − meter_start) hoặc `energy_wh` khi đã dừng
+          description: Wh quan sát hợp lệ làm tròn xuống cho hiển thị; tính hạn mức giữ chính xác phần lẻ. Null khi thiếu/xung đột/cũ/replay; offline grace giữ quan sát cuối, không cấp quyền cutoff. energy_wh khi đã dừng
         telemetry_quality:
           type: string
           enum: [observed, unknown]
-        limit_value: { type: [integer, 'null'], description: Hạn mức Wh đã áp (BR-P18) }
+        billing_mode: { $ref: '#/components/schemas/ChargeMode' }
+        limit_value: { type: [integer, 'null'], description: Hạn mức gốc; null full / phút timed / Wh energy_kwh / VND amount_vnd }
+        elapsed_seconds: { type: integer, minimum: 0, description: Giây CSMS từ received_started_at đến lúc nhận stop hoặc hiện tại; gồm cả pause }
+        metered_cost_vnd_min: { type: [integer, 'null'], description: Cận dưới từ mẫu đo; money cutoff dùng metered_cost_vnd_estimate theo T134 }
+        metered_cost_vnd_max: { type: [integer, 'null'], description: Cận trên tích lũy theo tariff; không phải khoản trừ cuối cùng }
+        metered_cost_vnd_estimate: { type: [integer, 'null'], description: Ước tính T134 dùng để cắt amount_vnd; nội suy Wh tại biên giá hoặc toàn phiên theo tariff lúc nhận start khi clock fallback }
+        metered_cost_quality: { type: string, enum: [exact, interpolated, unknown], description: Interpolated khi nội suy biên tariff; không gọi estimate là actual debit }
+        metered_cost_clock: { type: [string, 'null'], enum: [cp, cp_offset, csms, null], description: Cùng resolver T134; chỉ StartTransaction và MeterValues thật được dùng lúc đang sạc }
         reserved_vnd: { type: [integer, 'null'], description: Số tiền đang giữ trước cho phiên }
         estimated_cost_vnd:
           type: [integer, 'null']
           description: |
-            BE-22 (§11 #2): cận trên ceil(`consumed_wh` × giá cao nhất hiện hành của operator / 1000)
-            — cùng giá dùng để giữ trước. Null khi chưa có `consumed_wh` hoặc chưa có biểu giá.
+            Cận trên ceil(Wh quan sát chính xác, gồm phần lẻ × giá cao nhất hiện hành / 1000),
+            tính bằng milliWh/BigInt trước khi làm tròn lên VND. Public consumed_wh chỉ làm tròn xuống
+            để hiển thị; 99.999 Wh ở 5000 VND/kWh cho maximum 500 VND, không phải 495.
+            Null khi chưa có số đo hợp lệ hoặc chưa có biểu giá.
             Không phải số trừ thật; số trừ thật ở statement (BR-P45).
         billing_review_required: { type: boolean }
         settlement_state:

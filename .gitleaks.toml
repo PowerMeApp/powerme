@@ -24,4 +24,6 @@ regexes = [
   # Mật khẩu admin mặc định của trụ D1/YJ-EU. Đây là một PHÁT HIỆN BẢO MẬT
   # được ghi vào báo cáo, không phải bí mật của nhóm bị lộ.
   '''115200''',
+  # Fake idempotency UUID used as test input, not a secret.
+  '''^01f74cc1-f6d5-40d1-8f27-42df86d119dd$''',
 ]

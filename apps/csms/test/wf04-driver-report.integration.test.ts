@@ -373,6 +373,144 @@ describeDb('FE-17 driver fault report (UC-CHG-05, BR-P42, STM-6 t8)', () => {
     expect((await report(drivers[0]!, 2)).reportedIssue).toBe(true);
   });
 
+  it('T141 / D-X: an OCPP fault closing on Available hands its reports to a driver_report fault; only Operator close clears the label', async () => {
+    const at = (offsetMs: number) => new Date(Date.now() + offsetMs);
+    const status = (st: string, errorCode = 'NoError', offsetMs = 1000) =>
+      faults.onConnectorStatus({
+        chargePointId: cp,
+        connectorNo: 1,
+        status: st,
+        errorCode,
+        receivedAt: at(offsetMs),
+      });
+    const qrIssue = async () =>
+      (
+        await http(
+          'GET',
+          `/connectors/by-code/FE17-CP/1?vehicle_id=${vehicles[0]}`,
+          undefined,
+          drivers[0],
+        )
+      ).body.reported_issue;
+    const ocpp = await status('Faulted', 'GroundFailure', 0);
+    const ocppId = (ocpp as { faultId: number }).faultId;
+    expect((await report(drivers[0]!, 1)).faultEventId).toBe(ocppId); // one driver joins it
+    expect(await qrIssue()).toBe(true);
+
+    const closed = await status('Available');
+    expect(closed).toMatchObject({ kind: 'resolved', faultId: ocppId });
+    const [event] = await openEvents();
+    expect(event).toMatchObject({ source: 'driver_report', status: 'raised' });
+    expect(Number(event.connector_id)).toBe(conn[1]);
+    expect(closed).toMatchObject({
+      handedOver: [{ toFaultId: Number(event.id), reports: 1, created: true }],
+    });
+    const [r] = await q('SELECT fault_event_id::text AS f, cleared_at FROM fault_reports');
+    expect([r.f, r.cleared_at]).toEqual([event.id, null]);
+    expect(await qrIssue()).toBe(true); // label kept (BR-P42, D-X)
+    expect(await listedConnectors()).toEqual([2]); // still hidden
+
+    // No later status closes it (D-G); the Operator does, and records who cleared it.
+    expect((await status('Available', 'NoError', 2000)).kind).toBe('none');
+    const [staff] = await q(
+      "INSERT INTO users(email,full_name,role) VALUES('t141-staff@example.invalid','Staff','operator_staff') RETURNING id",
+    );
+    await q(
+      "INSERT INTO operator_staff(user_id,operator_id,staff_role) SELECT $1,operator_id,'technician' FROM sites LIMIT 1",
+      [staff.id],
+    );
+    await faults.acknowledge(Number(event.id), Number(staff.id));
+    await faults.close(Number(event.id), Number(staff.id));
+    const [after] = await q('SELECT cleared_at, cleared_by::text AS by FROM fault_reports');
+    expect(after.cleared_at).not.toBeNull();
+    expect(after.by).toBe(String(staff.id));
+    expect(await qrIssue()).toBe(false);
+    expect(await listedConnectors()).toEqual([1, 2]);
+  });
+
+  it('T141: an Offline fault closing on reconnect hands reports on each connector to its own driver_report fault', async () => {
+    const offline = await faults.raiseOffline(cp, new Date(Date.now() - 1000));
+    const offlineId = (offline as { faultId: number }).faultId;
+    expect((await report(drivers[0]!, 1)).faultEventId).toBe(offlineId);
+    expect((await report(drivers[1]!, 2)).faultEventId).toBe(offlineId);
+    // The charge point talks again after the fault was raised.
+    await q(
+      "UPDATE charge_points SET is_online=true,last_message_at=now()+interval '1 second' WHERE id=$1",
+      [cp],
+    );
+    expect(await faults.resolveOffline(offlineId, new Date(Date.now() + 2000))).toBe('resolved');
+    const events = await openEvents();
+    expect(events.map((e: any) => [e.source, Number(e.connector_id)]).sort()).toEqual(
+      [
+        ['driver_report', conn[1]],
+        ['driver_report', conn[2]],
+      ].sort(),
+    );
+    const reports = await q(
+      'SELECT connector_id::text AS c, fault_event_id::text AS f, cleared_at FROM fault_reports ORDER BY connector_id',
+    );
+    for (const r of reports) {
+      expect(r.cleared_at).toBeNull();
+      expect(events.find((e: any) => e.connector_id === r.c)?.id).toBe(r.f);
+    }
+  });
+
+  it('T141: reports join a fault already open on the connector; a fault without reports closes as before', async () => {
+    // Whole charge point Faulted (connector 0) with a report on connector 1, while connector 1
+    // has its own open fault: the report joins that fault, no new one.
+    const cpFault = await faults.onConnectorStatus({
+      chargePointId: cp,
+      connectorNo: 0,
+      status: 'Faulted',
+      errorCode: 'PowerMeterFailure',
+      receivedAt: new Date(Date.now() - 2000),
+    });
+    const cpFaultId = (cpFault as { faultId: number }).faultId;
+    const [own] = await q(
+      `INSERT INTO fault_events(charge_point_id,connector_id,source,error_code,status,raised_at)
+       VALUES($1,$2,'ocpp','GroundFailure','raised',now()) RETURNING id::text AS id`,
+      [cp, conn[1]],
+    );
+    await q(
+      `INSERT INTO fault_reports(driver_id,connector_id,description,reported_at,fault_event_id)
+       VALUES($1,$2,'Báo khi cả trụ lỗi',now(),$3)`,
+      [drivers[0], conn[1], cpFaultId],
+    );
+    const closed = await faults.onConnectorStatus({
+      chargePointId: cp,
+      connectorNo: 0,
+      status: 'Available',
+      errorCode: 'NoError',
+      receivedAt: new Date(Date.now() + 1000),
+    });
+    expect(closed).toMatchObject({
+      kind: 'resolved',
+      handedOver: [{ toFaultId: Number(own.id), reports: 1, created: false }],
+    });
+    expect((await openEvents()).map((e: any) => e.id)).toEqual([own.id]);
+
+    // An OCPP fault with no reports: resolved, no handover, nothing new.
+    await q('DELETE FROM fault_reports');
+    await q('DELETE FROM fault_events');
+    await faults.onConnectorStatus({
+      chargePointId: cp,
+      connectorNo: 2,
+      status: 'Faulted',
+      errorCode: 'GroundFailure',
+      receivedAt: new Date(Date.now() - 1000),
+    });
+    const plain = await faults.onConnectorStatus({
+      chargePointId: cp,
+      connectorNo: 2,
+      status: 'Available',
+      errorCode: 'NoError',
+      receivedAt: new Date(Date.now() + 1000),
+    });
+    expect(plain.kind).toBe('resolved');
+    expect(plain).not.toHaveProperty('handedOver');
+    expect(await openEvents()).toEqual([]);
+  });
+
   it('POST /connectors/{id}/fault-reports: 201, validation, 401, 404, 409, 405', async () => {
     const path = `/connectors/${conn[2]}/fault-reports`;
     const created = await http(

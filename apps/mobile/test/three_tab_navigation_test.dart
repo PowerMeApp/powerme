@@ -3,16 +3,16 @@ import 'package:driver_app/app/router.dart';
 import 'package:driver_app/demo/charging_engine.dart';
 import 'package:driver_app/demo/charging_store.dart';
 import 'package:driver_app/demo/demo_store.dart';
-import 'package:driver_app/demo/payment_store.dart';
+import 'support/payment_store.dart';
 import 'package:driver_app/demo/station_actions_store.dart';
 import 'package:driver_app/features/auth/application/auth_controller.dart';
 import 'support/fake_auth_repository.dart';
 import 'package:driver_app/features/auth/domain/auth_scope.dart';
 import 'package:driver_app/features/charging/application/charging_controller.dart';
-import 'package:driver_app/features/charging/data/mock_charging_repository.dart';
+import 'support/mock_charging_repository.dart';
 import 'package:driver_app/features/charging/domain/charging.dart';
 import 'package:driver_app/features/payments/application/payments_controller.dart';
-import 'package:driver_app/features/payments/data/mock_payments_repository.dart';
+import 'support/mock_payments_repository.dart';
 import 'package:driver_app/features/profile/application/profile_controller.dart';
 import 'package:driver_app/features/profile/data/mock_profile_repository.dart';
 import 'package:driver_app/features/stations/application/station_actions_controller.dart';
@@ -25,6 +25,7 @@ import 'scanner_platform_fake.dart';
 import 'package:driver_app/features/charging/application/qr_connection_controller.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'support/preview_routes.dart';
 
 class _SignedIn extends AuthController {
   @override
@@ -97,6 +98,7 @@ void main() {
     await tester.pumpWidget(
       ProviderScope(
         overrides: [
+          previewRoutesProvider.overrideWith((ref) => buildPreviewRoutes()),
           authControllerProvider.overrideWith(_SignedIn.new),
           authRepositoryProvider.overrideWithValue(FakeAuthRepository(store)),
           authScopeProvider.overrideWith((ref) {

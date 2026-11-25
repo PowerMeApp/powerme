@@ -8,7 +8,7 @@ import 'package:driver_app/demo/station_actions_store.dart';
 import 'package:driver_app/features/auth/domain/auth_scope.dart';
 import 'package:driver_app/features/auth/application/auth_controller.dart';
 import 'package:driver_app/features/charging/domain/charging.dart';
-import 'package:driver_app/features/charging/data/mock_charging_repository.dart';
+import 'support/mock_charging_repository.dart';
 import 'package:driver_app/features/charging/application/charging_controller.dart';
 import 'package:driver_app/features/stations/data/mock_station_actions_repository.dart';
 import 'package:driver_app/features/stations/domain/station_actions.dart';

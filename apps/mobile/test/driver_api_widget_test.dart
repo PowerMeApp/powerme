@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:dio/dio.dart';
 import 'package:driver_app/app/composition/api_app.dart';
+import 'package:driver_app/app/driver_tab_bar.dart';
 import 'package:driver_app/core/api/api_config.dart';
 import 'package:driver_app/features/profile/application/profile_controller.dart';
 import 'package:flutter/material.dart';
@@ -84,7 +85,10 @@ void main() {
 
     firstLogin.complete(reply(401, {'error': 'invalid_credentials'}));
     await tester.pumpAndSettle();
-    expect(find.text('Email hoặc mật khẩu chưa đúng.'), findsOneWidget);
+    expect(
+      find.text('Email, số điện thoại hoặc mật khẩu chưa đúng.'),
+      findsOneWidget,
+    );
 
     await tester.ensureVisible(submit);
     await tester.tap(submit);
@@ -116,6 +120,7 @@ void main() {
         'auth/login' => reply(200, tokens(accessA)),
         'me' when forbidden => reply(403, {'error': 'forbidden'}),
         'me' => reply(200, account()),
+        'sessions' => emptyActiveSessions(request),
         'stations' => reply(200, page([])),
         _ => throw StateError('Unexpected path'),
       },
@@ -124,12 +129,28 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Đăng ký hiện chưa khả dụng.'), findsOneWidget);
     await enterAccount(tester);
-    final bar = find.byType(NavigationBar);
-    final navigation = tester.widget<NavigationBar>(bar);
-    expect(navigation.selectedIndex, 0);
+    final bar = find.byType(DriverTabBar);
+    final navigation = tester.widget<DriverTabBar>(bar);
+    expect(navigation.selected, DriverTab.discover);
+    final tabs = [
+      for (final name in [
+        'discovery',
+        'history',
+        'charging',
+        'credit',
+        'account',
+      ])
+        find.byKey(Key('nav-$name')),
+    ];
+    for (var i = 1; i < tabs.length; i++) {
+      expect(
+        tester.getCenter(tabs[i]).dx,
+        greaterThan(tester.getCenter(tabs[i - 1]).dx),
+      );
+    }
     expect(
-      navigation.destinations.cast<NavigationDestination>().map((d) => d.label),
-      ['Khám phá', 'Quét QR', 'Tài khoản'],
+      find.descendant(of: bar, matching: find.text('Sạc')),
+      findsOneWidget,
     );
     final router = GoRouter.of(tester.element(bar));
     expect(router.routeInformationProvider.value.uri.path, '/discover');
@@ -138,13 +159,14 @@ void main() {
     expect(find.text('Tài xế kiểm thử'), findsOneWidget);
     expect(find.text('VinFast VF 8'), findsOneWidget);
     expect(find.textContaining('51A-00001'), findsOneWidget);
-    expect(find.text('Tín dụng sạc'), findsNothing);
+    expect(find.text('Tín dụng sạc'), findsOneWidget);
     expect(find.byKey(const Key('edit-profile')), findsNothing);
-    expect(find.byKey(const Key('add-vehicle')), findsOneWidget);
+    final addVehicle = find.byKey(const Key('add-vehicle'));
+    await _showProfileControl(tester, addVehicle);
+    expect(addVehicle, findsOneWidget);
     expect(find.byKey(const Key('edit-9')), findsNothing);
-    expect(tester.widget<NavigationBar>(bar).selectedIndex, 2);
+    expect(tester.widget<DriverTabBar>(bar).selected, DriverTab.account);
     for (final route in [
-      '/credit',
       '/station/test',
       '/vehicles/9/edit',
       '/start?connector=21',
@@ -158,8 +180,7 @@ void main() {
     await tester.tap(find.byKey(const Key('nav-account')));
     await tester.pumpAndSettle();
     final reload = find.byKey(const Key('refresh-profile'));
-    await tester.ensureVisible(reload);
-    await tester.pump();
+    await _showProfileControl(tester, reload);
     await tester.tap(reload);
     await tester.pumpAndSettle();
     expect(
@@ -190,6 +211,7 @@ void main() {
               ],
             ),
           ),
+          ('GET', 'sessions') => emptyActiveSessions(r),
           ('GET', 'stations') => reply(200, page([])),
           ('GET', 'connectors/by-code/PM%20T96.1/2') => switch (++attempt) {
             1 => reply(503, {'error': 'auth_unavailable'}),
@@ -216,8 +238,8 @@ void main() {
       await tester.pumpAndSettle();
       expect(router.routeInformationProvider.value.uri.path, '/scan');
       expect(
-        tester.widget<NavigationBar>(find.byType(NavigationBar)).selectedIndex,
-        1,
+        tester.widget<DriverTabBar>(find.byType(DriverTabBar)).selected,
+        DriverTab.charging,
       );
       expect(camera.starts, 1);
       expect(find.textContaining('Cho phép Camera'), findsOneWidget);
@@ -285,6 +307,7 @@ void main() {
             200,
             ownVehicle(id: vehicle = '10'),
           ),
+          ('GET', 'sessions') => emptyActiveSessions(r),
           ('GET', 'stations') => reply(200, page([])),
           ('GET', 'connectors/by-code/PM-T96/2')
               when r.uri.queryParameters['vehicle_id'] == '9' =>
@@ -300,7 +323,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(camera.starts, 1);
       final container = ProviderScope.containerOf(
-        tester.element(find.byType(NavigationBar)),
+        tester.element(find.byType(DriverTabBar)),
       );
       camera.emit('powerme:connector:PM-T96/2');
       camera.emit('powerme:connector:PM-T96/2');
@@ -425,8 +448,8 @@ void main() {
     });
     expect(find.text('Thêm xe để tìm trạm tương thích.'), findsOneWidget);
     expect(
-      tester.widget<NavigationBar>(find.byType(NavigationBar)).selectedIndex,
-      0,
+      tester.widget<DriverTabBar>(find.byType(DriverTabBar)).selected,
+      DriverTab.discover,
     );
     await tester.tap(find.byKey(const Key('nav-account')));
     await tester.pumpAndSettle();
@@ -454,8 +477,21 @@ Future<void> _submitConnector(WidgetTester tester, String code) async {
   final field = find.byKey(const Key('qr-manual-reference'));
   await tester.ensureVisible(field);
   await tester.enterText(field, code);
+  await tester.pump();
   final submit = find.byKey(const Key('qr-connect'));
   await tester.ensureVisible(submit);
   await tester.tap(submit);
   await tester.pumpAndSettle();
+}
+
+Future<void> _showProfileControl(WidgetTester tester, Finder target) async {
+  if (target.evaluate().isEmpty) {
+    await tester.scrollUntilVisible(
+      target,
+      180,
+      scrollable: find.byType(Scrollable).first,
+    );
+  }
+  await tester.ensureVisible(target);
+  await tester.pump();
 }

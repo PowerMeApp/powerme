@@ -9,25 +9,27 @@
  */
 import type { IncomingMessage } from 'node:http';
 import type { Db } from '../db/db.module.js';
+import type { ChargeStartInput } from '../sessions/charge-mode-policy.js';
 import type { ChargeSnapshot, DriverChargingService } from '../sessions/driver-charging.service.js';
 import { creditSummary, creditTransactions } from './driver-credit.js';
+import { driverSessions } from './driver-sessions.js';
 import { databaseId, DriverApiError } from './driver-auth.js';
 
 const BASE = '/api/driver/v1';
 /** Hợp đồng: 8–128 ký tự; service nhận tối đa 100 nên hợp đồng chốt 8–100 (BE-22). */
 const IDEMPOTENCY_KEY = /^[A-Za-z0-9._:-]{8,100}$/;
-const START_FIELDS = ['connector_id', 'vehicle_id', 'mode', 'energy_limit_wh'];
 
 type Route =
   | { name: 'start' }
   | { name: 'start_status'; key: string }
   | { name: 'progress' | 'stop' | 'statement'; sessionId: string }
-  | { name: 'credit' | 'credit_transactions' };
+  | { name: 'credit' | 'credit_transactions' | 'sessions' };
 
 const METHOD: Record<Route['name'], 'GET' | 'POST'> = {
   start: 'POST',
   start_status: 'GET',
   progress: 'GET',
+  sessions: 'GET',
   stop: 'POST',
   statement: 'GET',
   credit: 'GET',
@@ -39,6 +41,7 @@ export function isChargePath(path: string): boolean {
   return (
     path === `${BASE}/charges` ||
     path.startsWith(`${BASE}/charges/`) ||
+    path === `${BASE}/sessions` ||
     path.startsWith(`${BASE}/sessions/`) ||
     path === `${BASE}/credit` ||
     path === `${BASE}/credit/transactions`
@@ -56,6 +59,7 @@ export function chargeRouteMethod(path: string): 'GET' | 'POST' | null {
 
 function matchRoute(path: string): Route {
   if (path === `${BASE}/charges`) return { name: 'start' };
+  if (path === `${BASE}/sessions`) return { name: 'sessions' };
   if (path === `${BASE}/credit`) return { name: 'credit' };
   if (path === `${BASE}/credit/transactions`) return { name: 'credit_transactions' };
   const charge = new RegExp(`^${BASE}/charges/([^/]+)$`).exec(path);
@@ -123,6 +127,9 @@ export function chargeSnapshotJson(s: ChargeSnapshot) {
     effect_confirmed: s.effectConfirmed,
     version: s.version,
     max_energy_wh: s.maxEnergyWh,
+    mode: s.mode,
+    max_duration_minutes: s.maxDurationMinutes,
+    max_amount_vnd: s.maxAmountVnd,
   };
 }
 
@@ -133,18 +140,33 @@ function progressJson(row: Record<string, any>) {
   return {
     session_id: String(row['id']),
     status: row['status'],
+    origin: row['origin'],
+    payment_mode: row['payment_mode'],
+    can_stop: row['can_stop'] === true,
+    statement_available: row['statement_available'] === true,
     updated_at: row['updated_at'],
     meter_start_wh: intOrNull(row['meter_start_wh']),
     meter_stop_wh: intOrNull(row['meter_stop_wh']),
     energy_wh: intOrNull(row['energy_wh']),
     consumed_wh: consumed,
     telemetry_quality: row['telemetry_quality'],
+    billing_mode: row['billing_mode'],
     limit_value: intOrNull(row['limit_value']),
+    elapsed_seconds: intOrNull(row['elapsed_seconds']),
+    metered_cost_vnd_min: row['metered_cost_vnd_min'] ?? null,
+    metered_cost_vnd_max: row['metered_cost_vnd_max'] ?? null,
+    metered_cost_quality: row['metered_cost_quality'] ?? 'unknown',
+    metered_cost_vnd_estimate: row['metered_cost_vnd_estimate'] ?? null,
+    metered_cost_clock: row['metered_cost_clock'] ?? null,
     reserved_vnd: intOrNull(row['reserved_vnd']),
     // BE-22 (hợp đồng §11 #2): cận trên = ceil(Wh × giá cao nhất hiện hành / 1000), cùng công thức
     // giữ trước BR-P18 và est_cost_vnd_max của /stations. Không phải quyết toán (BR-P45 → statement).
     estimated_cost_vnd:
-      consumed === null || price === null ? null : Math.ceil((consumed * price) / 1000),
+      row['estimated_cost_vnd'] !== undefined
+        ? intOrNull(row['estimated_cost_vnd'])
+        : consumed === null || price === null
+          ? null
+          : Math.ceil((consumed * price) / 1000),
     billing_review_required: row['billing_review_required'] === true,
     settlement_state: row['settlement_state'] ?? null,
     settlement_reason: row['settlement_reason'] ?? null,
@@ -173,20 +195,41 @@ function statementJson(row: Record<string, any>) {
   };
 }
 
-function startInput(body: Record<string, unknown>) {
-  for (const key of Object.keys(body))
-    if (!START_FIELDS.includes(key)) throw new DriverApiError(400, 'invalid_input');
-  if (typeof body['mode'] !== 'string') throw new DriverApiError(400, 'invalid_input');
-  const limit = body['energy_limit_wh'];
-  if (typeof limit !== 'number' || !Number.isSafeInteger(limit) || limit < 1)
-    throw new DriverApiError(400, 'invalid_input');
-  return {
-    connectorId: Number(databaseId(body['connector_id'])),
-    vehicleId: Number(databaseId(body['vehicle_id'])),
-    // Service tự trả `unsupported_mode` cho mode khác energy_kwh.
-    mode: body['mode'] as 'energy_kwh',
-    energyLimitWh: limit,
+export function startInput(body: Record<string, unknown>): ChargeStartInput {
+  const fields: Record<string, string | null> = {
+    full: null,
+    timed: 'duration_minutes',
+    energy_kwh: 'energy_limit_wh',
+    amount_vnd: 'amount_limit_vnd',
   };
+  const mode = body['mode'];
+  if (mode === undefined) throw new DriverApiError(400, 'invalid_input');
+  if (typeof mode !== 'string' || !Object.hasOwn(fields, mode))
+    throw new DriverApiError(400, 'unsupported_mode');
+  const field = fields[mode];
+  if (field === undefined) throw new DriverApiError(400, 'unsupported_mode');
+  const allowed = ['connector_id', 'vehicle_id', 'mode', ...(field ? [field] : [])];
+  if (Object.keys(body).some((key) => !allowed.includes(key)))
+    throw new DriverApiError(400, 'invalid_input');
+  const identity = {
+    connectorId: safeId(databaseId(body['connector_id'])),
+    vehicleId: safeId(databaseId(body['vehicle_id'])),
+  };
+  const value = field ? body[field] : null;
+  if (field && (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 1))
+    throw new DriverApiError(400, 'invalid_input');
+  switch (body['mode']) {
+    case 'full':
+      return { ...identity, mode: 'full' };
+    case 'timed':
+      return { ...identity, mode: 'timed', durationMinutes: value as number };
+    case 'energy_kwh':
+      return { ...identity, mode: 'energy_kwh', energyLimitWh: value as number };
+    case 'amount_vnd':
+      return { ...identity, mode: 'amount_vnd', amountLimitVnd: value as number };
+    default:
+      throw new DriverApiError(400, 'unsupported_mode');
+  }
 }
 
 export interface ChargeRouteContext {
@@ -212,6 +255,8 @@ export async function handleChargeRoute(
     ctx.setAllow(`${method}, OPTIONS`);
     throw new DriverApiError(405, 'method_not_allowed');
   }
+  if (route.name === 'sessions')
+    return { status: 200, body: await driverSessions(ctx.db, ctx.driverId, ctx.q) };
   noQuery(ctx.q, route.name === 'credit_transactions' ? ['page', 'page_size'] : []);
   const driver = safeId(ctx.driverId);
   switch (route.name) {
@@ -270,6 +315,7 @@ const CONFLICT = new Set([
   'connector_unavailable',
   'connector_busy_or_unknown',
   'tariff_unavailable',
+  'power_unavailable',
   'session_not_stoppable',
   'stop_pending_or_unknown',
 ]);

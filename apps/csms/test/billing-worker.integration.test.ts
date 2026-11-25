@@ -101,9 +101,9 @@ describeDb('billing: worker quét DB dùng chung — lease, SKIP LOCKED, runner 
     return Number(
       (
         await one(
-          `INSERT INTO e_invoices(top_up_id,status,amount_vnd,vat_amount_vnd,invoice_no,issued_at,
-           next_attempt_at)
-         VALUES($1,$2,100000,9091,$3,$4,${dueSql}) RETURNING id`,
+          `INSERT INTO e_invoices(top_up_id,status,amount_vnd,vat_rate,vat_amount_vnd,invoice_no,
+           issued_at,next_attempt_at)
+         VALUES($1,$2,100000,10,9091,$3,$4,${dueSql}) RETURNING id`,
           [topUp, status, issued ? `SEED-${seq}` : null, issued ? new Date() : null],
         )
       )['id'],
@@ -154,9 +154,15 @@ describeDb('billing: worker quét DB dùng chung — lease, SKIP LOCKED, runner 
           }
         },
         signal,
-        { warn: () => undefined },
+        {
+          warn: () => undefined,
+          error: (m: unknown) => {
+            this.errors.push(String(m));
+          },
+        },
       );
     }
+    readonly errors: string[] = [];
   }
 
   const config = (over: Partial<BackgroundWorkConfig> = {}): BackgroundWorkConfig => ({
@@ -411,5 +417,147 @@ describeDb('billing: worker quét DB dùng chung — lease, SKIP LOCKED, runner 
     expect(await w.runDue(20, new AbortController().signal)).toBe(1);
     expect((await invoice(ids[0]!))['status']).toBe('issued');
     expect(w.calls.get(ids[0]!)).toBe(2);
+  });
+
+  describe('bộ đếm unfinished_claims (T32 Phần 8c)', () => {
+    const claims = async (id: number) =>
+      Number(
+        (await one('SELECT unfinished_claims FROM e_invoices WHERE id=$1', [id]))[
+          'unfinished_claims'
+        ],
+      );
+    /** Giả lập hết lease: dòng đến hạn lại. */
+    const expireLease = (id: number) =>
+      q("UPDATE e_invoices SET next_attempt_at = now() - interval '1 second' WHERE id=$1", [id]);
+
+    it('tx1 tăng bộ đếm và trả số mới; tx2 commit thì về 0', async () => {
+      const x = await seedInvoice();
+      const c = await db.$client.connect();
+      try {
+        const [row] = await inTx(c, () => claimDue(c, { ...INVOICES, limit: 1 }));
+        expect(row!.unfinishedClaims).toBe(1);
+        expect(await claims(x)).toBe(1);
+        await inTx(c, async () => {
+          const locked = await lockLeased(c, 'e_invoices', row!);
+          expect(locked?.['unfinished_claims']).toBe(0);
+        });
+        expect(await claims(x)).toBe(0);
+      } finally {
+        c.release();
+      }
+    });
+
+    it('tx2 rollback thì bộ đếm giữ nguyên; mất lease thì không đặt về 0', async () => {
+      const x = await seedInvoice();
+      const c = await db.$client.connect();
+      try {
+        const [old] = await inTx(c, () => claimDue(c, { ...INVOICES, leaseMs: 200, limit: 1 }));
+        await c.query('BEGIN');
+        expect(await lockLeased(c, 'e_invoices', old!)).not.toBeNull();
+        await c.query('ROLLBACK');
+        expect(await claims(x)).toBe(1);
+
+        await new Promise((r) => setTimeout(r, 300));
+        const [fresh] = await inTx(c, () => claimDue(c, { ...INVOICES, limit: 1 }));
+        expect(fresh!.unfinishedClaims).toBe(2);
+        await inTx(c, async () => expect(await lockLeased(c, 'e_invoices', old!)).toBeNull());
+        expect(await claims(x)).toBe(2);
+      } finally {
+        c.release();
+      }
+    });
+
+    it('handle ném 5 lần: gọi handle 5 lần; lần giữ chỗ thứ 6 gọi onExhausted, không gọi handle', async () => {
+      const x = await seedInvoice();
+      const seen: { claims: unknown; inTx: boolean }[] = [];
+      let after = 0;
+      const w = new FakeInvoiceWork(
+        'fake-invoice',
+        db.$client,
+        async () => {
+          throw new Error('sập ở tx2');
+        },
+        {
+          ...INVOICES,
+          onExhausted: async (locked, tx) => {
+            seen.push({ claims: locked['unfinished_claims'], inTx: true });
+            await tx.query(
+              `UPDATE e_invoices SET status='needs_review', next_attempt_at=NULL WHERE id=$1`,
+              [locked['id']],
+            );
+            return async () => {
+              after++;
+            };
+          },
+        },
+      );
+      for (let i = 1; i <= 5; i++) {
+        expect(await w.runDue(20, new AbortController().signal)).toBe(1);
+        expect(await claims(x)).toBe(i);
+        await expireLease(x);
+      }
+      expect(w.calls.get(x)).toBe(5);
+      expect(seen).toEqual([]);
+
+      expect(await w.runDue(20, new AbortController().signal)).toBe(1);
+      expect(w.calls.get(x)).toBe(5);
+      // Dòng giữ số lần làm dấu vết (không đặt về 0 ở đường hết lượt).
+      expect(seen).toEqual([{ claims: 6, inTx: true }]);
+      expect(after).toBe(1);
+      expect(
+        await one('SELECT status, unfinished_claims FROM e_invoices WHERE id=$1', [x]),
+      ).toEqual({ status: 'needs_review', unfinished_claims: 6 });
+      expect(w.errors.map((e) => JSON.parse(e))).toEqual([
+        { event: 'leased_row_exhausted', table: 'e_invoices', id: x, unfinished_claims: 6 },
+      ]);
+    });
+
+    it('onExhausted ném: rollback, log exhaust_failed, không gọi handle, lô không lặp, dòng giữ lease', async () => {
+      const x = await seedInvoice();
+      await q('UPDATE e_invoices SET unfinished_claims = 5 WHERE id=$1', [x]);
+      let tries = 0;
+      const w = new FakeInvoiceWork('fake-invoice', db.$client, async () => {}, {
+        ...INVOICES,
+        onExhausted: async (locked, tx) => {
+          tries++;
+          await tx.query(
+            `UPDATE e_invoices SET status='needs_review', next_attempt_at=NULL
+                          WHERE id=$1`,
+            [locked['id']],
+          );
+          throw new Error('lỗi đường hết lượt');
+        },
+      });
+      expect(await w.runDue(20, new AbortController().signal)).toBe(1);
+      expect(tries).toBe(1);
+      expect(w.calls.get(x)).toBeUndefined();
+      const row = await one(
+        `SELECT status, unfinished_claims, next_attempt_at > now() AS leased
+         FROM e_invoices WHERE id=$1`,
+        [x],
+      );
+      expect(row).toEqual({ status: 'requested', unfinished_claims: 6, leased: true });
+      expect(w.errors).toHaveLength(1);
+      expect(JSON.parse(w.errors[0]!)).toMatchObject({
+        event: 'leased_row_exhausted',
+        id: x,
+        unfinished_claims: 6,
+        exhaust_failed: true,
+      });
+      // Vẫn trong lease → lượt sau không lấy lại.
+      expect(await w.runDue(20, new AbortController().signal)).toBe(0);
+    });
+
+    it('bảng không có onExhausted: log no_handler rồi vẫn gọi handle', async () => {
+      const x = await seedInvoice();
+      await q('UPDATE e_invoices SET unfinished_claims = 5 WHERE id=$1', [x]);
+      const w = new FakeInvoiceWork('fake-invoice', db.$client);
+      expect(await w.runDue(20, new AbortController().signal)).toBe(1);
+      expect(w.calls.get(x)).toBe(1);
+      expect(
+        await one('SELECT status, unfinished_claims FROM e_invoices WHERE id=$1', [x]),
+      ).toEqual({ status: 'issued', unfinished_claims: 0 });
+      expect(JSON.parse(w.errors[0]!)).toMatchObject({ no_handler: true, unfinished_claims: 6 });
+    });
   });
 });

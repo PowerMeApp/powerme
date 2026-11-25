@@ -1,8 +1,8 @@
 // tru-sac.js — vẽ và cập nhật hình "Trụ sạc" minh hoạ trên HMI D1 (QA-02).
 //
 // LÀM GÌ
-//   - Dựng phần SVG lặp lại (hai súng A/B, màn hình LCD) vào khung có sẵn trong index.html.
-//   - Mỗi lần HMI nhận snapshot qua SSE, index.html gọi window.renderTru(state); hàm này chỉ ĐỔI
+//   - Dựng phần SVG lặp lại (hai súng A/B, màn hình LCD) vào khung có sẵn trong tru.html.
+//   - Mỗi lần HMI nhận snapshot qua SSE, tru.html gọi window.renderTru(state); hàm này chỉ ĐỔI
 //     class/chữ/biến CSS — mọi chuyển động nằm trong tru-sac.css.
 // VÌ SAO
 //   KHÔNG có nguồn dữ liệu thứ hai: hình dùng đúng snapshot mà hai panel súng đang dùng

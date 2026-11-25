@@ -9,7 +9,10 @@
  *
  * URL gọi / chuyển tới VNPay (`VNPAY_URL`, `VNPAY_API_URL`) chỉ nhận `https:` ở mọi môi trường (T32
  * Phần 8b, Khang 16/11); test thay `fetch` nên không cần ngoại lệ `http:`. `VNPAY_RETURN_URL` là URL
- * của PowerMe (mặc định `http://localhost`), vẫn nhận http(s).
+ * của PowerMe (mặc định `http://localhost`): nhận http(s), trừ khi `NODE_ENV=production` **và** VNPay
+ * đã cấu hình (`VNPAY_TMN_CODE` + `VNPAY_HASH_SECRET`) thì bắt buộc `https:` (T32 Phần 8c, Khang
+ * 19/11). Kèm điều kiện "đã cấu hình" vì lab `infra/lab/rq1-staging` chạy `NODE_ENV: production` mà
+ * không đặt `VNPAY_RETURN_URL`; chỉ xét `NODE_ENV` thì csms ở lab không khởi động được.
  */
 import { isIP } from 'node:net';
 
@@ -36,8 +39,11 @@ export function loadVnpayConfig(env: NodeJS.ProcessEnv = process.env): VnpayConf
     throw new Error('invalid_vnpay_config: VNPAY_URL phải là URL https');
   if (!hasProtocol(returnUrl, ['http:', 'https:']))
     throw new Error('invalid_vnpay_config: VNPAY_RETURN_URL phải là URL http(s)');
+  const configured = tmnCode !== '' && hashSecret !== '';
+  if (env['NODE_ENV'] === 'production' && configured && !hasProtocol(returnUrl, ['https:']))
+    throw new Error('invalid_vnpay_config: VNPAY_RETURN_URL phải là URL https khi production');
   return {
-    configured: tmnCode !== '' && hashSecret !== '',
+    configured,
     tmnCode,
     hashSecret,
     payUrl,
