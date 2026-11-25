@@ -6,6 +6,8 @@
  *   GET  /api/operator/v1/faults, POST …/faults/{id}/acknowledge|reset|close  (FE-04a, operator-faults.ts)
  *   GET  /api/operator/v1/charge-points, GET /api/operator/v1/summary  (FE-03, operator-monitoring.ts)
  *   GET  /api/operator/v1/charge-points/{id}  (FE-05, screen 20)
+ *   GET  /api/operator/v1/revenue[.csv], GET /api/admin/v1/revenue[.csv]  (T108a, revenue-report.ts)
+ *   GET  /api/admin/v1/transactions[.csv]  (T108b, admin-transactions.ts)
  *   GET  /api/admin/v1/me     admin
  * RolesGuard runs before route matching, so an unknown path without a valid token is 401, not 404.
  * CORS: localhost origins only (Vite dev server). JSON: snake_case, string ids, `{ error, detail }`.
@@ -23,6 +25,14 @@ import {
   runMonitoringRoute,
   type MonitoringThresholds,
 } from './operator-monitoring.js';
+import {
+  exportTransactions,
+  listTransactions,
+  matchTransactionsRoute,
+} from './admin-transactions.js';
+import { toRevenueCsv } from './revenue-csv.js';
+import { matchRevenueRoute, revenueReport } from './revenue-report.js';
+import { toTransactionsCsv } from './transactions-csv.js';
 
 /** FE-03: what the monitoring routes need besides the DB. */
 export interface MonitoringDeps {
@@ -40,6 +50,9 @@ const DEFAULT_THRESHOLDS: MonitoringThresholds = {
 /** Paths `ConsoleServer` hands to this listener, before its own `/api/admin/*` routes. */
 export const OPERATOR_API_PATH = /^\/api\/(auth|operator|admin)\/v1(?:\/|\?|$)/;
 
+/** Paths that take a query string (contract §2.2a: RolesGuard runs first, then the parameters). */
+const QUERY_PATHS =
+  /^\/api\/(?:operator\/v1\/(?:faults|charge-points|revenue(?:\.csv)?)|admin\/v1\/(?:revenue|transactions)(?:\.csv)?)$/;
 const LOCAL_ORIGIN = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/;
 const BODY_LIMIT = 16 * 1024;
 
@@ -83,9 +96,8 @@ export function createOperatorApiListener(
     }
     const url = new URL(req.url ?? '', 'http://operator-api.local');
     const [, surface, rest] = /^\/api\/(auth|operator|admin)\/v1(\/.*)?$/.exec(url.pathname) ?? [];
-    // Only the fault and charge point lists take a query; everywhere else a query is 400.
-    if (url.search && !/^\/api\/operator\/v1\/(faults|charge-points)$/.test(url.pathname))
-      throw new AuthError(400, 'invalid_input');
+    // Only the fault, charge point, revenue and transactions routes take a query; elsewhere it is 400.
+    if (url.search && !QUERY_PATHS.test(url.pathname)) throw new AuthError(400, 'invalid_input');
 
     if (surface === 'auth') {
       if (rest !== '/login' && rest !== '/refresh') throw new AuthError(404, 'not_found');
@@ -133,6 +145,34 @@ export function createOperatorApiListener(
         ),
       );
       return;
+    }
+    const revenueRoute = matchRevenueRoute(surface, rest ?? '', url.searchParams);
+    if (revenueRoute) {
+      allow(req, res, 'GET');
+      // Operator scope from RolesGuard's DB read, never from the request (BR-P16, contract §2.2a).
+      const report = await revenueReport(db, {
+        ...revenueRoute,
+        operatorId: surface === 'operator' ? principal.operatorId! : revenueRoute.operatorId,
+      });
+      if (revenueRoute.format === 'json') return send(res, 200, report);
+      return sendCsv(
+        res,
+        `revenue_${revenueRoute.from}_${revenueRoute.to}.csv`,
+        toRevenueCsv(report),
+      );
+    }
+    const txRoute =
+      surface === 'admin' ? matchTransactionsRoute(rest ?? '', url.searchParams) : null;
+    if (txRoute) {
+      allow(req, res, 'GET');
+      if (txRoute.format === 'json')
+        return send(res, 200, await listTransactions(db, txRoute, txRoute.page, txRoute.pageSize));
+      // Over the row cap the service throws 400 `export_too_large` before any byte is sent (K10).
+      return sendCsv(
+        res,
+        `transactions_${txRoute.from}_${txRoute.to}.csv`,
+        toTransactionsCsv(await exportTransactions(db, txRoute)),
+      );
     }
     if (rest !== '/me') throw new AuthError(404, 'not_found');
     allow(req, res, 'GET');
@@ -198,4 +238,15 @@ function send(res: ServerResponse, status: number, body: unknown) {
     'Content-Length': Buffer.byteLength(value),
   });
   res.end(value);
+}
+
+/** CSV download; Content-Length in bytes (BOM and Vietnamese are multi-byte). */
+function sendCsv(res: ServerResponse, filename: string, body: string) {
+  res.writeHead(200, {
+    'Content-Type': 'text/csv; charset=utf-8',
+    'Content-Disposition': `attachment; filename="${filename}"`,
+    'Cache-Control': 'no-store',
+    'Content-Length': Buffer.byteLength(body),
+  });
+  res.end(body);
 }

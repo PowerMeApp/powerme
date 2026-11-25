@@ -11,8 +11,9 @@
 //   - GET  /api/tong              → tóm tắt mọi trụ (JSON)
 //   - GET  /api/<cpId>/state      → snapshot JSON của một trụ
 //   - POST /api/<cpId>/<hành động> body JSON → station.act(<hành động>, body) → { ok, message }
+//   - POST /api/<cpId>/swipeReader → đầu đọc RFID USB (T146), route riêng có kiểm chặt (swipeReader())
 //   Đường cũ (trước QA-03) vẫn chạy và trỏ vào TRỤ ĐẦU TIÊN: GET /events, GET /api/state,
-//   POST /api/<hành động> (smoke, healthcheck của Dockerfile, ai đang dùng HMI cũ).
+//   POST /api/<hành động>, POST /api/swipeReader (smoke, healthcheck Dockerfile, HMI cũ).
 // VÌ SAO
 //   http thuần của Node: không thêm dependency, demo chỉ cần `node server.mjs`.
 // GIẢ ĐỊNH
@@ -184,6 +185,47 @@ async function act(entry, action, req, res) {
   return json(res, result.ok ? 200 : 400, result);
 }
 
+// POST /api/<cpId>/swipeReader (và /api/swipeReader cũ → trụ đầu tiên). Chỉ loopback (peer + Host
+// đúng cổng), cùng origin, Sec-Fetch-Site same-origin/none, application/json, thân ≤ 512 B; kiểm
+// đúng {connector, idTag} nằm trong hành động swipeReader (hmi-actions.mjs).
+async function swipeReader(entry, req, res) {
+  const reject = (status, message) => json(res, status, { ok: false, message });
+  const localHost = new Set(['127.0.0.1', 'localhost', '[::1]']);
+  let host;
+  try {
+    host = new URL('http://' + req.headers.host);
+  } catch {
+    return reject(403, 'Đầu đọc chỉ nhận yêu cầu cùng origin trên máy local.');
+  }
+  const remote = req.socket.remoteAddress;
+  if (
+    !['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(remote) ||
+    !localHost.has(host.hostname) ||
+    host.port !== String(server.address().port) ||
+    (req.headers.origin && req.headers.origin !== host.origin) ||
+    (req.headers['sec-fetch-site'] &&
+      !['same-origin', 'none'].includes(req.headers['sec-fetch-site']))
+  )
+    return reject(403, 'Đầu đọc chỉ nhận yêu cầu cùng origin trên máy local.');
+  if (!/^application\/json(?:\s*;|$)/i.test(req.headers['content-type'] ?? ''))
+    return reject(415, 'Đầu đọc yêu cầu application/json.');
+  let body = '',
+    size = 0;
+  for await (const chunk of req) {
+    size += chunk.length;
+    if (size > 512) return reject(413, 'Khung đầu đọc quá dài.');
+    body += chunk;
+  }
+  let args;
+  try {
+    args = JSON.parse(body);
+  } catch {
+    return reject(400, 'Khung đầu đọc JSON không hợp lệ.');
+  }
+  const result = await entry.station.act('swipeReader', args);
+  return json(res, result.ok ? 200 : 400, result);
+}
+
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://localhost');
   // Tách path thành các đoạn ĐÃ giải mã; đoạn rỗng, "." hay ".." hoặc chứa gạch chéo → 404.
@@ -241,6 +283,16 @@ const server = http.createServer(async (req, res) => {
       const entry = stations.get(parts[1]);
       return entry ? openStationSse(entry, req, res) : notFound(res);
     }
+    // Đầu đọc RFID USB (T146): route riêng có kiểm chặt, theo trụ. Đặt TRƯỚC route hành động chung
+    // để "swipeReader" không bao giờ đi qua đường không kiểm tra.
+    if (req.method === 'POST' && parts[0] === 'api' && parts.at(-1) === 'swipeReader') {
+      if (parts.length === 2) return swipeReader(first, req, res);
+      if (parts.length === 3) {
+        const entry = stations.get(parts[1]);
+        return entry ? swipeReader(entry, req, res) : notFound(res);
+      }
+      return notFound(res);
+    }
     if (parts[0] === 'api' && parts.length === 2) {
       if (get && parts[1] === 'state') return json(res, 200, first.station.snapshot());
       if (req.method === 'POST') return act(first, parts[1], req, res);
@@ -264,7 +316,7 @@ const PORT = num(env.HMI_PORT, 8100);
 server.listen(PORT, HOST, () => {
   const ids = [...stations.keys()];
   console.log(
-    `HMI trụ D1 tại http://${HOST}:${PORT}  (${ids.length} trụ: ${ids.join(', ')}; CSMS ${common.csmsUrl})`,
+    `HMI trụ D1 tại http://${HOST}:${server.address().port}  (${ids.length} trụ: ${ids.join(', ')}; CSMS ${common.csmsUrl})`,
   );
   for (const e of stations.values()) e.station.start();
 });

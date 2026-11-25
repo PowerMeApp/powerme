@@ -17,10 +17,12 @@ class ChargeFlowPage extends StatelessWidget {
     this.backTooltip = 'Quay lại',
     this.backLocation = '/',
     this.onBack,
+    this.action,
   });
 
   final String title;
   final List<Widget> children;
+  final Widget? action;
   final bool showBack;
   final String backTooltip;
   final String backLocation;
@@ -41,6 +43,7 @@ class ChargeFlowPage extends StatelessWidget {
         backTooltip: backTooltip,
         backLocation: backLocation,
         onBack: onBack,
+        action: action,
         children: children,
       ),
     );
@@ -156,9 +159,15 @@ class ChargeDetail extends StatelessWidget {
 }
 
 class ChargeMilestones extends StatelessWidget {
-  const ChargeMilestones({super.key, required this.title, required this.steps});
+  const ChargeMilestones({
+    super.key,
+    required this.title,
+    required this.steps,
+    this.compact = false,
+  });
 
   final String title;
+  final bool compact;
   final List<({String label, String state, IconData icon, Color color})> steps;
 
   @override
@@ -166,55 +175,93 @@ class ChargeMilestones extends StatelessWidget {
     spacing: 12,
     children: [
       Text(title, style: Theme.of(context).textTheme.titleMedium),
-      for (final step in steps)
-        LayoutBuilder(
-          builder: (context, box) {
-            final theme = Theme.of(context);
-            final stackLabels =
-                box.maxWidth < 285 ||
-                MediaQuery.textScalerOf(context).scale(14) > 18;
-            final label = Text(step.label, style: theme.textTheme.labelLarge);
-            final state = Text(
-              step.state,
-              style: theme.textTheme.bodySmall?.copyWith(color: step.color),
-            );
-            return Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                ExcludeSemantics(
-                  child: Container(
-                    width: 32,
-                    height: 32,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: step.color.withValues(alpha: .13),
-                    ),
-                    child: Icon(step.icon, size: 18, color: step.color),
+      if (compact &&
+          MediaQuery.sizeOf(context).width >= 360 &&
+          MediaQuery.textScalerOf(context).scale(14) <= 18)
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            for (final step in steps)
+              Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 3),
+                  child: Column(
+                    children: [
+                      CircleAvatar(
+                        radius: 16,
+                        backgroundColor: step.color.withValues(alpha: .13),
+                        child: Icon(step.icon, size: 18, color: step.color),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        step.label,
+                        textAlign: TextAlign.center,
+                        style: Theme.of(context).textTheme.labelSmall,
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        step.state,
+                        textAlign: TextAlign.center,
+                        style: Theme.of(
+                          context,
+                        ).textTheme.bodySmall?.copyWith(color: step.color),
+                      ),
+                    ],
                   ),
                 ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: stackLabels
-                      ? Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [label, state],
-                        )
-                      : Padding(
-                          padding: const EdgeInsets.only(top: 6),
-                          child: Row(
+              ),
+          ],
+        )
+      else
+        for (final step in steps)
+          LayoutBuilder(
+            builder: (context, box) {
+              final theme = Theme.of(context);
+              final stackLabels =
+                  box.maxWidth < 285 ||
+                  MediaQuery.textScalerOf(context).scale(14) > 18;
+              final label = Text(step.label, style: theme.textTheme.labelLarge);
+              final state = Text(
+                step.state,
+                style: theme.textTheme.bodySmall?.copyWith(color: step.color),
+              );
+              return Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  ExcludeSemantics(
+                    child: Container(
+                      width: 32,
+                      height: 32,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: step.color.withValues(alpha: .13),
+                      ),
+                      child: Icon(step.icon, size: 18, color: step.color),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: stackLabels
+                        ? Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Expanded(flex: 3, child: label),
-                              const SizedBox(width: 8),
-                              Expanded(flex: 2, child: state),
-                            ],
+                            children: [label, state],
+                          )
+                        : Padding(
+                            padding: const EdgeInsets.only(top: 6),
+                            child: Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Expanded(flex: 3, child: label),
+                                const SizedBox(width: 8),
+                                Expanded(flex: 2, child: state),
+                              ],
+                            ),
                           ),
-                        ),
-                ),
-              ],
-            );
-          },
-        ),
+                  ),
+                ],
+              );
+            },
+          ),
     ],
   );
 }
@@ -240,7 +287,9 @@ class ChargeRing extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final largeText = MediaQuery.textScalerOf(context).scale(14) > 18;
+    final largeText =
+        MediaQuery.textScalerOf(context).scale(14) > 18 ||
+        (energy?.length ?? 0) > 12;
     final readout = Column(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -264,7 +313,7 @@ class ChargeRing extends StatelessWidget {
       builder: (context, box) {
         final diameter = math.min(
           box.maxWidth,
-          phase == ChargeRingPhase.energy ? 228.0 : 208.0,
+          phase == ChargeRingPhase.energy ? 316.0 : 208.0,
         );
         return Column(
           children: [

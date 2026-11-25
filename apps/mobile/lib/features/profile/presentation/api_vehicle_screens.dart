@@ -470,7 +470,7 @@ class _FindStationsButton extends ConsumerWidget {
     );
     return FilledButton.icon(
       key: const Key('find-vehicle-stations'),
-      onPressed: enabled ? () => context.push('/discover') : null,
+      onPressed: enabled ? () => context.go('/discover') : null,
       icon: const Icon(Icons.near_me_outlined),
       label: Text(copy.text('Tìm trạm phù hợp', 'Find compatible stations')),
     );

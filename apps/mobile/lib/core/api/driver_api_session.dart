@@ -33,11 +33,14 @@ class DriverApiSession {
   DriverAccountResponse? get account => _session?.account;
   Stream<DriverSessionEnd> get ended => _ended.stream;
 
-  Future<String> signIn(String email, String password) => _authenticate(
-    'auth/login',
-    {'email': email, 'password': password},
-    status: 200,
-  );
+  Future<String> signIn(String identifier, String password) =>
+      _authenticate('auth/login', {
+        if (identifier.contains('@'))
+          'email': identifier.trim()
+        else
+          'phone_number': identifier,
+        'password': password,
+      }, status: 200);
 
   Future<String> register(Map<String, Object?> fields) =>
       _authenticate('auth/register', fields, status: 201);
@@ -116,14 +119,15 @@ class DriverApiSession {
     required String key,
     required String connectorId,
     required String vehicleId,
-    required int energyLimitWh,
+    required String mode,
+    required Map<String, int> limit,
   }) async {
     final session = _ownedSession(principalId);
     final body = <String, Object?>{
       'connector_id': connectorId,
       'vehicle_id': vehicleId,
-      'mode': 'energy_kwh',
-      'energy_limit_wh': energyLimitWh,
+      'mode': mode,
+      ...limit,
     };
     return _withProtectedSession(
       session,
@@ -141,10 +145,12 @@ class DriverApiSession {
 
   Future<Map<String, dynamic>> readCharge(
     String principalId,
-    String key,
-  ) async => _protectedRead(
-    _ownedSession(principalId),
+    String key, [
+    CancelToken? cancel,
+  ]) async => _readForPrincipal(
+    principalId,
     'charges/${Uri.encodeComponent(key)}',
+    cancel ?? CancelToken(),
   );
 
   Future<Map<String, dynamic>> readCredit(
@@ -251,6 +257,18 @@ class DriverApiSession {
       ),
     );
   }
+
+  Future<Map<String, dynamic>> readOwnedSessions(
+    String principalId, {
+    required String view,
+    required int page,
+    required int pageSize,
+    required CancelToken cancel,
+  }) => _readForPrincipal(principalId, 'sessions', cancel, {
+    'view': view,
+    'page': page,
+    'page_size': pageSize,
+  });
 
   Future<Map<String, dynamic>> readChargeProgress(
     String principalId,
@@ -541,6 +559,8 @@ class DriverApiSession {
           'invalid_password' => 'invalid_password',
           'invalid_input' => 'invalid_input',
           'email_taken' => 'email_taken',
+          'phone_taken' => 'phone_taken',
+          'account_locked' => 'account_locked',
           'consent_required' => 'consent_required',
           'invalid_plate_number' => 'invalid_plate_number',
           'unknown_vehicle_model' => 'unknown_vehicle_model',
@@ -555,6 +575,7 @@ class DriverApiSession {
           'account_closed' => 'account_closed',
           'payment_unconfigured' => 'payment_unconfigured',
           'balance_limit_exceeded' => 'balance_limit_exceeded',
+          'points_below_minimum' => 'points_below_minimum',
           'invalid_description' => 'invalid_description',
           'duplicate_report' => 'duplicate_report',
           'stop_pending_or_unknown' => 'stop_pending_or_unknown',

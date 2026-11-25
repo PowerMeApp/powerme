@@ -1,3 +1,4 @@
+import '../../../core/format.dart';
 import '../../../core/l10n/app_copy.dart';
 
 String roadDistance(double distanceM, AppCopy copy) {
@@ -6,10 +7,8 @@ String roadDistance(double distanceM, AppCopy copy) {
   return copy.text('${km.replaceAll('.', ',')} km', '$km km');
 }
 
-String roadTravelTime(int durationSeconds, AppCopy copy) {
-  final minutes = (durationSeconds / 60).ceil();
-  return copy.text('$minutes phút', '$minutes min');
-}
+String roadTravelTime(int durationSeconds, AppCopy copy) =>
+    estimatedMinutes(durationSeconds / 60, copy);
 
 String heavyTrafficDistance(double distanceM, AppCopy copy) {
   final distance = roadDistance(distanceM, copy);

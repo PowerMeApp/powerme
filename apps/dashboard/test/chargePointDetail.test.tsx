@@ -81,19 +81,31 @@ const DETAIL_URL = 'GET /api/operator/v1/charge-points/5';
 const FAULTS_URL = 'GET /api/operator/v1/faults';
 const faults = { status: 200, body: { items: [fault], total: 1, page: 1, page_size: 20 } };
 
-describe('Chi tiết Charge Point (màn 20)', () => {
+describe('Chi tiết trụ sạc (màn 20)', () => {
   it('shows header, capabilities, connectors, its fault history and recent commands', async () => {
     const seen = fakeCsms({ [DETAIL_URL]: { status: 200, body: DETAIL }, [FAULTS_URL]: faults });
     renderApp('/operator/charge-points/5', session(STAFF));
     expect(await screen.findByRole('heading', { name: 'PM-D1-HCM-0001' })).toBeInTheDocument();
-    expect(screen.getByText('Trạm sạc demo Quận 1 · HCM-DEMO-01')).toBeInTheDocument();
+    // FE-07: the station is a link to its own page; breadcrumb Tổng quan › Trụ sạc › trạm › trụ.
+    const head = within(document.querySelector('.page-head') as HTMLElement);
+    expect(head.getByRole('link', { name: 'Trạm sạc demo Quận 1' })).toHaveAttribute(
+      'href',
+      '/operator/stations/1',
+    );
+    const crumbs = within(screen.getByRole('navigation', { name: 'Breadcrumb' }));
+    expect(crumbs.getAllByRole('link').map((a) => a.getAttribute('href'))).toEqual([
+      '/operator',
+      '/operator/charge-points',
+      '/operator/stations/1',
+    ]);
+    expect(crumbs.getByText('PM-D1-HCM-0001')).toHaveAttribute('aria-current', 'page');
     expect(screen.getByText('Đang hoạt động')).toBeInTheDocument();
-    const info = within(screen.getByRole('region', { name: 'Thông tin Charge Point' }));
+    const info = within(screen.getByRole('region', { name: 'Thông tin trụ sạc' }));
     expect(info.getByText('1.4.2')).toBeInTheDocument();
     expect(info.getByText('120 kW')).toBeInTheDocument();
-    const c1 = within(screen.getByRole('region', { name: 'Connector 1' }));
+    const c1 = within(screen.getByRole('region', { name: 'Súng 1' }));
     expect(c1.getByText('Faulted · GroundFailure')).toBeInTheDocument();
-    const c2 = within(screen.getByRole('region', { name: 'Connector 2' }));
+    const c2 = within(screen.getByRole('region', { name: 'Súng 2' }));
     expect(c2.getByText('Charging')).toBeInTheDocument();
     expect(c2.getByText(/Đang có phiên 88/)).toBeInTheDocument();
     // Fault history: the screen 21 table filtered to this charge point, all statuses.
@@ -133,8 +145,8 @@ describe('Chi tiết Charge Point (màn 20)', () => {
       },
     });
     renderApp('/operator/charge-points/99', session(STAFF));
-    expect(await screen.findByText('Không tìm thấy Charge Point')).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: '← Danh sách Charge Point' })).toHaveAttribute(
+    expect(await screen.findByText('Không tìm thấy trụ sạc')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: '← Danh sách trụ sạc' })).toHaveAttribute(
       'href',
       '/operator/charge-points',
     );

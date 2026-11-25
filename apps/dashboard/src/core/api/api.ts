@@ -26,6 +26,8 @@ import type {
   RefreshResponse,
   ResetRequest,
   ResetResponse,
+  RevenueQuery,
+  RevenueReport,
   SessionsActiveError,
 } from '@powerme/shared';
 import { loggedOut, tokenRefreshed, type AuthState } from '../auth/authSlice';
@@ -41,6 +43,13 @@ export interface ChargePointFilter {
   lifecycle?: ChargePointLifecycle;
   online?: boolean;
   page: number;
+  /** Station page (FE-07): only this Charging Station's charge points. */
+  siteId?: string;
+  /** Default CHARGE_POINT_PAGE_SIZE; the station page asks for up to 100. */
+  pageSize?: number;
+  /** FE-07 searches: charge point code / serial / id, and station code / name / id, separately. */
+  chargePointQ?: string;
+  siteQ?: string;
 }
 
 export interface ApiError {
@@ -125,7 +134,7 @@ const baseQuery: BaseQueryFn<string | FetchArgs, unknown, ApiError> = async (arg
 export const api = createApi({
   reducerPath: 'api',
   baseQuery,
-  tagTypes: ['Fault', 'Summary', 'ChargePoint'],
+  tagTypes: ['Fault', 'Summary', 'ChargePoint', 'Revenue'],
   endpoints: (b) => ({
     login: b.mutation<LoginResponse, LoginRequest>({
       query: (body) => ({ url: 'auth/v1/login', method: 'POST', body }),
@@ -162,12 +171,23 @@ export const api = createApi({
       providesTags: ['Summary'],
     }),
     operatorChargePoints: b.query<ChargePointPage, ChargePointFilter>({
-      query: ({ lifecycle, online, page }) => {
+      query: ({
+        lifecycle,
+        online,
+        page,
+        siteId,
+        chargePointQ,
+        siteQ,
+        pageSize = CHARGE_POINT_PAGE_SIZE,
+      }) => {
         const q = new URLSearchParams();
+        if (siteId) q.set('site_id', siteId);
+        if (chargePointQ?.trim()) q.set('charge_point_q', chargePointQ.trim());
+        if (siteQ?.trim()) q.set('site_q', siteQ.trim());
         if (lifecycle) q.set('lifecycle', lifecycle);
         if (online !== undefined) q.set('online', String(online));
         q.set('page', String(page));
-        q.set('page_size', String(CHARGE_POINT_PAGE_SIZE));
+        q.set('page_size', String(pageSize));
         return `operator/v1/charge-points?${q}`;
       },
       providesTags: ['ChargePoint'],
@@ -176,6 +196,19 @@ export const api = createApi({
     operatorChargePoint: b.query<OperatorChargePointDetail, string>({
       query: (id) => `operator/v1/charge-points/${id}`,
       providesTags: ['ChargePoint', 'Fault'],
+    }),
+    // Screens 25 / 35 (FE-07, UC-OPS-09 / UC-ADM-10): revenue report of T108 (BR-P46).
+    revenue: b.query<RevenueReport, { scope: RevenueScope } & RevenueQuery>({
+      query: ({ scope, ...q }) => `${scope}/v1/revenue?${revenueSearch(q)}`,
+      providesTags: ['Revenue'],
+    }),
+    // Same parameters and query as the JSON (contract: "CSV khớp màn hình"). A mutation so it goes
+    // through baseQuery (Bearer + refresh on 401) and is never cached; the body is the CSV text.
+    revenueCsv: b.mutation<string, { scope: RevenueScope } & RevenueQuery>({
+      query: ({ scope, ...q }) => ({
+        url: `${scope}/v1/revenue.csv?${revenueSearch(q)}`,
+        responseHandler: (r) => (r.ok ? r.text() : r.json()),
+      }),
     }),
   }),
 });
@@ -191,7 +224,19 @@ export const {
   useOperatorSummaryQuery,
   useOperatorChargePointsQuery,
   useOperatorChargePointQuery,
+  useRevenueQuery,
+  useRevenueCsvMutation,
 } = api;
+
+export type RevenueScope = 'operator' | 'admin';
+
+/** Query string of the revenue routes, in a fixed order (JSON and CSV ask the same thing). */
+export function revenueSearch(q: RevenueQuery): string {
+  const p = new URLSearchParams({ from: q.from, to: q.to, group_by: q.group_by });
+  if (q.site_id) p.set('site_id', q.site_id);
+  if (q.operator_id) p.set('operator_id', q.operator_id);
+  return p.toString();
+}
 
 /** Vietnamese text for any error of this API. */
 export function errorMessage(err: unknown): string {
@@ -214,13 +259,16 @@ export function errorMessage(err: unknown): string {
     case 'fault_not_acknowledged':
       return 'Phải xác nhận sự cố trước khi Reset';
     case 'station_offline':
-      return 'Charge Point đang offline, không gửi được lệnh Reset';
+      return 'Trụ sạc đang offline, không gửi được lệnh Reset';
     case 'reset_in_progress':
-      return 'Charge Point đang chờ kết quả một lệnh Reset khác, thử lại sau';
+      return 'Trụ sạc đang chờ kết quả một lệnh Reset khác, thử lại sau';
     case 'station_error':
-      return 'Charge Point không trả lời lệnh Reset hợp lệ, sự cố quay về "Đã xác nhận"';
+      return 'Trụ sạc không trả lời lệnh Reset hợp lệ, sự cố quay về "Đã xác nhận"';
     case 'not_found':
       return 'Không tìm thấy sự cố này';
+    // FE-07 revenue (T108).
+    case 'invalid_period':
+      return 'Kỳ báo cáo không hợp lệ: ngày đầu phải trước ngày cuối và dài tối đa 366 ngày';
   }
   if (e.status === 429) {
     const minutes = Math.max(1, Math.ceil((e.retryAfterS ?? 60) / 60));

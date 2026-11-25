@@ -580,6 +580,10 @@
         grid-template-columns: minmax(0, 1fr);
         gap: 0.8rem;
       }
+      .reader-input:focus {
+        outline: 3px solid var(--accent);
+        outline-offset: 2px;
+      }
     </style>
   </head>
   <body>
@@ -742,6 +746,7 @@
 
     <script src="/static/tru-sac.js"></script>
     <script type="module" src="/static/tru-3d.js"></script>
+    <script src="/static/rfid-reader.js"></script>
     <script>
       const $ = (id) => document.getElementById(id);
       // cpId lấy từ đường dẫn /tru/<cpId>; mọi API của trang đều mang định danh trụ.
@@ -764,6 +769,8 @@
       };
       const MODE_UNIT = { full: '', time: 'phút', kwh: 'kWh', money: 'đ' };
       let state = null;
+      let hmiConnected = false;
+      const readers = {};
 
       // ── Dựng sẵn hai panel súng một lần; sau đó chỉ cập nhật chữ/số (giữ nguyên ô đang gõ)
       function buildGun(id, label) {
@@ -786,7 +793,15 @@
           <div class="controls">
             <div class="row"><button class="primary" data-f="plugBtn" style="flex:1">Cắm súng</button>
               <button class="danger" data-f="stopBtn" style="flex:1">Dừng sạc</button></div>
-            <div class="row"><label>Thẻ RFID</label>
+            <div class="row"><label for="reader${id}">Đầu đọc RFID USB · súng ${label}</label>
+              <input id="reader${id}" data-f="reader" class="reader-input" type="password"
+                inputmode="numeric" autocomplete="off" spellcheck="false"
+                aria-describedby="readerHint${id} readerMsg${id}" disabled />
+              <button data-f="readerClear" type="button" disabled>Xoá ô</button></div>
+            <div class="note" id="readerHint${id}">Cắm súng, chờ online rồi bấm ô của súng này và quẹt thẻ: 10 chữ số + Enter.
+              Chỉ nhận khi ô có focus; không tự đăng ký thẻ. Quẹt lại cần bấm ô lần nữa.</div>
+            <div class="msg" data-f="readerMsg" id="readerMsg${id}" role="status" aria-live="polite"></div>
+            <div class="row"><label>Thẻ RFID mẫu</label>
               <select data-f="card"><option value="valid">Thẻ hợp lệ (đã đăng ký)</option>
                 <option value="valid2">Thẻ hợp lệ 2 (tài xế mẫu 2)</option><option value="unknown">Thẻ lạ</option></select>
               <button data-f="swipeBtn">Quẹt thẻ</button></div>
@@ -808,6 +823,13 @@
           </div>`;
         const root = $('gun' + id);
         const f = (n) => root.querySelector(`[data-f="${n}"]`);
+        readers[id] = window.bindRfidReader(
+          f('reader'),
+          f('readerClear'),
+          f('readerMsg'),
+          id,
+          API + 'swipeReader',
+        );
         const call = async (path, body) => {
           const r = await fetch(API + path, {
             method: 'POST',
@@ -917,12 +939,17 @@
                 : ['bad', `Quẹt thẻ khi OFFLINE —${tag} không có trong danh sách cục bộ`];
             return [
               st.status === 'Accepted' ? 'ok' : 'bad',
-              `→ <b>Authorize</b>${tag} → CSMS trả <b>${esc(st.status ?? 'không trả lời')}</b>`,
+              `${st.reader ? 'Quẹt thẻ ở <b>đầu đọc RFID USB</b> · ' : ''}→ <b>Authorize</b>${tag} → CSMS trả <b>${esc(st.status ?? 'không trả lời')}</b>`,
+            ];
+          case 'readerStale':
+            return [
+              'bad',
+              'Súng hoặc kết nối đổi trong lúc chờ Authorize — trụ KHÔNG gửi StartTransaction (đầu đọc RFID USB)',
             ];
           case 'startSent':
             return [
               st.queued ? 'wait' : 'ok',
-              `→ Gửi <b>StartTransaction</b>${tag}, meterStart ${esc(st.meterStart)} Wh, nguồn ${esc(SOURCE[st.source] ?? st.source)}${st.queued ? ' — trụ OFFLINE: vào hàng đợi, gửi khi nối lại' : ''}`,
+              `→ Gửi <b>StartTransaction</b>${tag}, meterStart ${esc(st.meterStart)} Wh, nguồn ${esc(st.reader ? 'thẻ RFID (đầu đọc USB)' : (SOURCE[st.source] ?? st.source))}${st.queued ? ' — trụ OFFLINE: vào hàng đợi, gửi khi nối lại' : ''}`,
             ];
           case 'queued':
             return [
@@ -1108,6 +1135,7 @@
       function render(s) {
         state = s;
         window.__truLast = s; // cho tru-3d.js (module nạp sau) vẽ ngay khung đầu
+        hmiConnected = true;
         try {
           window.renderTru?.(s); // hình trụ minh hoạ (tru-sac.js); lỗi hình không được làm hỏng HMI
           window.renderTru3d?.(s); // hình 3D (tru-3d.js) nếu đang bật
@@ -1178,6 +1206,7 @@
 
       function renderGun(c) {
         const f = gunF[c.id];
+        readers[c.id](state, c, hmiConnected);
         const st = f('status');
         st.textContent = c.status + (c.errorCode !== 'NoError' ? ` · ${c.errorCode}` : '');
         st.style.background = `var(--st-${c.status})`;
@@ -1226,7 +1255,7 @@
         f('plugBtn').textContent = c.plugged ? 'Rút súng' : 'Cắm súng';
         f('plugBtn').classList.toggle('primary', !c.plugged);
         f('stopBtn').disabled = !c.txActive;
-        f('swipeBtn').disabled = f('pwBtn').disabled = !c.plugged || c.txActive;
+        f('swipeBtn').disabled = f('pwBtn').disabled = !c.plugged || c.txActive || c.readerPending;
       }
 
       // ── Nhật ký OCPP
@@ -1285,6 +1314,8 @@
           series[jid] = arr.filter((_, i) => i % 2 === 0 || i === arr.length - 1);
       });
       es.onerror = () => {
+        hmiConnected = false;
+        for (const c of state?.connectors ?? []) readers[c.id](state, c, false);
         $('netChip').textContent = 'Mất kết nối tới server HMI';
       };
     </script>

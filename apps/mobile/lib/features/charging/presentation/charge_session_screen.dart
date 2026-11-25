@@ -10,6 +10,8 @@ import '../application/charge_start_controller.dart';
 import '../domain/charge_session.dart';
 import '../domain/charging.dart';
 import 'charge_flow_visuals.dart';
+import 'charge_session_navigation.dart';
+import 'owned_session_card.dart';
 import 'charge_session_readout.dart';
 import 'charge_statement_card.dart';
 import 'charge_stop_widgets.dart';
@@ -34,7 +36,7 @@ class ChargeSessionScreen extends ConsumerWidget {
       canPop: canPop,
       onPopInvokedWithResult: (didPop, _) {
         if (didPop || !canPop) {
-          ref.read(chargeStartProvider.notifier).releaseFinishedSession();
+          leaveChargeSession(ref, target);
           if (!didPop) context.go('/scan');
         }
       },
@@ -81,11 +83,23 @@ class _ChargeSessionViewState extends ConsumerState<_ChargeSessionView>
     _controller = ChargeSessionController(
       ref.read(chargeSessionRepositoryProvider),
       widget.target,
-      recordProgress: (target, progress) =>
-          _visible &&
+      startContext: ref.read(matchingChargeStartProvider)?.attempt.request,
+      recordProgress: (target, progress) {
+        if (!_visible || ref.read(confirmedChargeSessionProvider) != target) {
+          return false;
+        }
+        final accepted =
+            ref.read(chargeStartProvider)?.sessionTarget != target ||
+            ref
+                .read(chargeStartProvider.notifier)
+                .recordProgress(target, progress);
+        if (accepted) {
           ref
-              .read(chargeStartProvider.notifier)
-              .recordProgress(target, progress),
+              .read(chargeStopProvider.notifier)
+              .recordProgress(target, progress);
+        }
+        return accepted;
+      },
     );
     ref.listenManual(confirmedChargeSessionProvider, (_, target) {
       if (target != widget.target) _controller.setVisible(false);
@@ -143,7 +157,7 @@ class _ChargeSessionViewState extends ConsumerState<_ChargeSessionView>
   }
 
   void _returnToScan() {
-    ref.read(chargeStartProvider.notifier).releaseFinishedSession();
+    leaveChargeSession(ref, widget.target);
     context.go('/scan');
   }
 
@@ -175,7 +189,7 @@ class _ChargeSessionViewState extends ConsumerState<_ChargeSessionView>
                   canConfirm:
                       sameSession && _controller.canRequestStop(retry: false),
                   attempt: sameSession
-                      ? ref.read(chargeStartProvider)?.attempt
+                      ? ref.read(matchingChargeStartProvider)?.attempt
                       : null,
                 ),
               );
@@ -191,18 +205,22 @@ class _ChargeSessionViewState extends ConsumerState<_ChargeSessionView>
     if (!_visible || !_controller.canRequestStop(retry: retry)) return;
     await ref
         .read(chargeStopProvider.notifier)
-        .send(widget.target, retry: retry);
+        .send(widget.target, retry: retry, progress: _controller.progress!);
   }
 
   @override
   Widget build(BuildContext context) {
-    final stop = ref.watch(chargeStopProvider);
-    final attempt = ref.watch(chargeStartProvider)?.attempt;
+    final stop = ref.watch(currentChargeStopProvider);
+    final attempt = ref.watch(matchingChargeStartProvider)?.attempt;
     return ListenableBuilder(
       listenable: _controller,
       builder: (context, _) {
         final copy = widget.copy;
         final progress = _controller.progress;
+        final selected = ref.read(selectedChargeSessionProvider);
+        final summary = selected?.target == widget.target
+            ? selected?.summary
+            : null;
         final canRetry =
             stop?.outcome == ChargeStopOutcome.responseUnknown &&
             _controller.canRequestStop(retry: true);
@@ -246,7 +264,69 @@ class _ChargeSessionViewState extends ConsumerState<_ChargeSessionView>
               _returnToScan();
             }
           },
+          action: canStop || canRetry
+              ? FilledButton.tonalIcon(
+                  key: Key(
+                    canRetry ? 'retry-stop-charging' : 'request-stop-charging',
+                  ),
+                  style: canRetry ? null : chargeStopButtonStyle(context),
+                  icon: Icon(
+                    canRetry
+                        ? Icons.refresh_rounded
+                        : Icons.stop_circle_outlined,
+                  ),
+                  onPressed: () => _requestStop(retry: canRetry),
+                  label: Text(
+                    canRetry
+                        ? copy.text(
+                            'Gửi lại yêu cầu dừng',
+                            'Retry stop request',
+                          )
+                        : copy.text('Dừng sạc', 'Stop charging'),
+                  ),
+                )
+              : null,
           children: [
+            if (attempt == null && summary != null)
+              InfoCard(
+                children: [
+                  Text(
+                    summary.siteName ??
+                        copy.text('Chưa rõ trạm', 'Unknown station'),
+                  ),
+                  StatusBadge(sessionOriginLabel(summary.origin, copy)),
+                  ValueLine(
+                    copy.text('Xe', 'Vehicle'),
+                    summary.vehicleLabel ??
+                        copy.text('Chưa rõ xe', 'Unknown vehicle'),
+                  ),
+                  ValueLine(
+                    copy.text('Mã phiên sạc', 'Session ID'),
+                    summary.id,
+                  ),
+                ],
+              ),
+            if (progress != null &&
+                progress.origin != null &&
+                progress.origin != SessionOrigin.appQr)
+              Text(
+                copy.text(
+                  'Dừng phiên tại trụ',
+                  'Stop the session at the charger',
+                ),
+              ),
+            if (progress?.confirmsEnd == true &&
+                (progress?.statementAvailable == false ||
+                    (attempt == null && progress?.statementAvailable == null)))
+              Text(
+                copy.text(
+                  'Bảng kê chưa có.',
+                  'The statement is not available yet.',
+                ),
+              ),
+            if (progress != null &&
+                (waitingForStop || progress.closed || progress.confirmsEnd))
+              chargeStopMilestones(stop, progress, copy),
             if (showRing)
               ChargeSessionReadout(
                 copy: copy,
@@ -294,7 +374,6 @@ class _ChargeSessionViewState extends ConsumerState<_ChargeSessionView>
                     ),
                   ),
                 ),
-              if (stop != null) chargeStopMilestones(stop, progress, copy),
             ],
             if (showRing && !waitingForStop) ...[
               ChargeSessionMetrics(
@@ -310,30 +389,6 @@ class _ChargeSessionViewState extends ConsumerState<_ChargeSessionView>
                   vehicle: attempt.vehicleLabel,
                 ),
             ],
-            if (canStop || canRetry)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 8),
-                child: FilledButton.tonalIcon(
-                  key: Key(
-                    canRetry ? 'retry-stop-charging' : 'request-stop-charging',
-                  ),
-                  style: canRetry ? null : chargeStopButtonStyle(context),
-                  icon: Icon(
-                    canRetry
-                        ? Icons.refresh_rounded
-                        : Icons.stop_circle_outlined,
-                  ),
-                  onPressed: () => _requestStop(retry: canRetry),
-                  label: Text(
-                    canRetry
-                        ? copy.text(
-                            'Gửi lại yêu cầu dừng',
-                            'Retry stop request',
-                          )
-                        : copy.text('Dừng sạc', 'Stop charging'),
-                  ),
-                ),
-              ),
             if (issue != null ||
                 progress?.inReview == true ||
                 awaitingStopMeter ||
@@ -358,10 +413,12 @@ class _ChargeSessionViewState extends ConsumerState<_ChargeSessionView>
                 includeEnergy: true,
               ),
             ],
-            if (progress?.statementEligible == true)
+            if (progress?.statementEligible == true &&
+                (attempt != null || progress?.statementAvailable == true))
               ChargeStatementCard(
                 copy: copy,
                 sessionId: widget.target.id,
+                progress: progress,
                 statement: _controller.statement,
                 issue: _controller.statementIssue,
                 retry: _controller.reading ? null : _controller.retryStatement,

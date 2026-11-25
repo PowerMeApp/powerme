@@ -1,7 +1,7 @@
 /**
  * VnpayAdapter (CD-2 «port») — Phần 5: `buildPaymentUrl`; Phần 6: `verifyIpn` (kiểm chữ ký IPN);
- * Phần 8: `queryTransaction` (querydr). Phần dựng / kiểm là hàm THUẦN (không gọi mạng, không đọc DB
- * hay đồng hồ); lớp `VnpayAdapter` chỉ bọc cấu hình và HTTP của querydr. Refund (Phần 9) thêm sau.
+ * Phần 8: `queryTransaction` (querydr); Phần 9a: `refund`, `queryRefundState`. Phần dựng / kiểm là
+ * hàm THUẦN (không gọi mạng, không đọc DB hay đồng hồ); lớp `VnpayAdapter` chỉ bọc cấu hình và HTTP.
  *
  * URL thanh toán **không lưu DB**: dựng lại từ dòng `top_ups` + cấu hình mỗi lần cần (tạo, gửi lại
  * cùng key, GET), nên `vnp_CreateDate` / `vnp_ExpireDate` lấy từ `created_at` / `expires_at` của
@@ -321,8 +321,10 @@ export type QueryUnresolvedReason =
 
 /**
  * Mã / câu thô của một response querydr CHƯA xác thực (sai / thiếu chữ ký, `vnp_TmnCode` hay
- * `vnp_TxnRef` khác). Chỉ để log (vd. phân biệt RC `94` với `99`, thử sandbox 16/11), không dùng để
- * quyết định gì.
+ * `vnp_TxnRef` khác), ví dụ để phân biệt RC `94` với `99` (thử sandbox 16/11).
+ *
+ * RC chưa xác thực chỉ để log, ngoại lệ duy nhất: 94 ở mốc +60 để hẹn thêm một lần querydr (D4, T32
+ * Phần 8c). Không bao giờ dùng để phân loại kết quả hay ghi gì vào DB.
  */
 export interface UnverifiedResponseInfo {
   responseCode?: string;
@@ -384,6 +386,34 @@ const UNVERIFIED_REASONS: ReadonlySet<QueryUnresolvedReason> = new Set([
 ]);
 
 /**
+ * Chuẩn hoá body JSON của VNPay về chuỗi trước khi ký / đọc: null / undefined = thiếu (chuỗi rỗng
+ * trong chuỗi ký), số hữu hạn → `String(v)`; object / array / boolean / số không hữu hạn → `null`.
+ */
+function normalizeVnpBody(body: unknown): Record<string, string> | null {
+  if (body === null || typeof body !== 'object' || Array.isArray(body)) return null;
+  const r: Record<string, string> = {};
+  for (const [k, v] of Object.entries(body as Record<string, unknown>)) {
+    if (v === null || v === undefined) continue;
+    if (typeof v === 'string') r[k] = v;
+    else if (typeof v === 'number' && Number.isFinite(v)) r[k] = String(v);
+    else return null;
+  }
+  return r;
+}
+
+/** So `vnp_SecureHash` của response với chuỗi ký, thời gian hằng. */
+function signatureMatches(
+  r: Record<string, string>,
+  signData: string,
+  hashSecret: string,
+): boolean {
+  const given = (r['vnp_SecureHash'] ?? '').toLowerCase();
+  if (!/^[0-9a-f]{128}$/.test(given)) return false;
+  const expected = vnpSecureHash(signData, hashSecret);
+  return timingSafeEqual(Buffer.from(given, 'hex'), Buffer.from(expected, 'hex'));
+}
+
+/**
  * Kiểm + phân loại response querydr (hàm thuần, không log). Thứ tự: dạng body (chuẩn hoá giá trị
  * về chuỗi) → chữ ký (thời gian hằng) → `vnp_TmnCode` → `vnp_TxnRef` → RC `91` (`not_found`) →
  * RC ≠ `00` → `vnp_TransactionType` ≠ `01` → TS `00` (kiểm dạng `vnp_TransactionNo`, `vnp_Amount`
@@ -395,23 +425,11 @@ export function classifyQuerydrResponse(
   expect: { tmnCode: string; txnRef: string },
   hashSecret: string,
 ): QueryResult {
-  if (body === null || typeof body !== 'object' || Array.isArray(body))
-    return { kind: 'unresolved', reason: 'malformed' };
-  // Chuẩn hoá giá trị JSON về chuỗi trước khi ký / đọc: null / undefined = thiếu (chuỗi rỗng trong
-  // chuỗi ký), số hữu hạn → String(v); object / array / boolean / số không hữu hạn → malformed.
-  const r: Record<string, string> = {};
-  for (const [k, v] of Object.entries(body as Record<string, unknown>)) {
-    if (v === null || v === undefined) continue;
-    if (typeof v === 'string') r[k] = v;
-    else if (typeof v === 'number' && Number.isFinite(v)) r[k] = String(v);
-    else return { kind: 'unresolved', reason: 'malformed' };
-  }
+  const r = normalizeVnpBody(body);
+  if (!r) return { kind: 'unresolved', reason: 'malformed' };
   const str = (k: string) => r[k] ?? '';
 
-  const given = str('vnp_SecureHash').toLowerCase();
-  if (!/^[0-9a-f]{128}$/.test(given)) return { kind: 'unresolved', reason: 'signature' };
-  const expected = vnpSecureHash(querydrResponseSignData(r), hashSecret);
-  if (!timingSafeEqual(Buffer.from(given, 'hex'), Buffer.from(expected, 'hex')))
+  if (!signatureMatches(r, querydrResponseSignData(r), hashSecret))
     return { kind: 'unresolved', reason: 'signature' };
   if (str('vnp_TmnCode') !== expect.tmnCode) return { kind: 'unresolved', reason: 'tmn_code' };
   if (str('vnp_TxnRef') !== expect.txnRef) return { kind: 'unresolved', reason: 'txn_ref' };
@@ -441,6 +459,231 @@ export function classifyQuerydrResponse(
     };
   }
   if (transactionStatus === '02') return { kind: 'failed', ...codes };
+  return { kind: 'unresolved', reason: 'transaction_status', ...codes };
+}
+
+// ---------------------------------------------------------------------------------------------
+// refund (T32 Phần 9a, SD-2e, D1) — cùng trang tài liệu với querydr (đọc 23/11), cùng endpoint.
+// Giả định (trang không ghi; refund không thử được trên sandbox, VNPay trả lời 18/11):
+//   - `vnp_Amount` = VND × 100, như lệnh trả, IPN và querydr;
+//   - luôn gửi `vnp_TransactionNo`, nên không gặp ca trường này vắng trong chuỗi ký;
+//   - trường thiếu trong response đưa vào chuỗi ký là chuỗi rỗng, như querydr;
+//   - RC 00 + TS 00 / 05 / 06 = done: VNPay đã nhận yêu cầu hoàn; không có nghĩa tiền đã về tài
+//     khoản tài xế (VNPay / ngân hàng chuyển sau, ta không có kênh báo về).
+// ---------------------------------------------------------------------------------------------
+
+/** Thứ tự chuỗi ký request refund (tài liệu VNPay). */
+export const REFUND_REQUEST_SIGN_FIELDS = [
+  'vnp_RequestId',
+  'vnp_Version',
+  'vnp_Command',
+  'vnp_TmnCode',
+  'vnp_TransactionType',
+  'vnp_TxnRef',
+  'vnp_Amount',
+  'vnp_TransactionNo',
+  'vnp_TransactionDate',
+  'vnp_CreateBy',
+  'vnp_CreateDate',
+  'vnp_IpAddr',
+  'vnp_OrderInfo',
+] as const;
+
+/** Thứ tự chuỗi ký response refund (tài liệu VNPay). */
+export const REFUND_RESPONSE_SIGN_FIELDS = [
+  'vnp_ResponseId',
+  'vnp_Command',
+  'vnp_ResponseCode',
+  'vnp_Message',
+  'vnp_TmnCode',
+  'vnp_TxnRef',
+  'vnp_Amount',
+  'vnp_BankCode',
+  'vnp_PayDate',
+  'vnp_TransactionNo',
+  'vnp_TransactionType',
+  'vnp_TransactionStatus',
+  'vnp_OrderInfo',
+] as const;
+
+export function refundRequestSignData(params: Record<string, string>): string {
+  return joinFields(REFUND_REQUEST_SIGN_FIELDS, params);
+}
+
+export function refundResponseSignData(body: Record<string, unknown>): string {
+  return joinFields(REFUND_RESPONSE_SIGN_FIELDS, body);
+}
+
+/** Đủ để gửi một lệnh refund. */
+export interface RefundInput {
+  refundId: number;
+  /** `top_ups.gateway_reference` (khoản trễ dùng cùng TxnRef với top-up gốc). */
+  gatewayReference: string;
+  /** `vnp_TransactionNo` của giao dịch gốc theo kind (bảng 2.1). */
+  originalTransactionNo: string;
+  /** Số tiền của giao dịch gốc, VND: bằng `amountVnd` thì hoàn toàn phần (02), khác thì 03. */
+  originalAmountVnd: number;
+  /** `top_ups.created_at` = `vnp_CreateDate` của lệnh trả. */
+  createdAt: Date;
+  amountVnd: number;
+  /** `refunds.requested_by`; NULL = hệ thống. */
+  requestedBy: number | null;
+}
+
+const VNP_REF = /^[A-Za-z0-9]{1,100}$/;
+
+/** Body JSON đã ký của một lệnh refund. Hàm thuần: `now`, `requestId` do bên gọi đưa vào. */
+export function refundRequest(
+  input: RefundInput,
+  cfg: Pick<VnpayConfig, 'tmnCode' | 'hashSecret'> & Pick<VnpayApiConfig, 'serverIp'>,
+  now: Date,
+  requestId: string,
+): Record<string, string> {
+  const amount = input.amountVnd * 100;
+  if (!Number.isSafeInteger(amount) || amount <= 0 || input.amountVnd > input.originalAmountVnd)
+    throw new Error('invalid_refund_amount');
+  if (!VNP_REF.test(input.gatewayReference)) throw new Error('invalid_gateway_reference');
+  if (!VNP_REF.test(input.originalTransactionNo)) throw new Error('invalid_transaction_no');
+  if (!/^[A-Za-z0-9]{1,32}$/.test(requestId)) throw new Error('invalid_request_id');
+  const params: Record<string, string> = {
+    vnp_RequestId: requestId,
+    vnp_Version: VNP_VERSION,
+    vnp_Command: 'refund',
+    vnp_TmnCode: cfg.tmnCode,
+    vnp_TransactionType: input.amountVnd === input.originalAmountVnd ? '02' : '03',
+    vnp_TxnRef: input.gatewayReference,
+    vnp_Amount: String(amount),
+    vnp_TransactionNo: input.originalTransactionNo,
+    vnp_TransactionDate: vnpDate(input.createdAt),
+    vnp_CreateBy: input.requestedBy === null ? 'system' : `admin:${input.requestedBy}`,
+    vnp_CreateDate: vnpDate(now),
+    vnp_IpAddr: cfg.serverIp,
+    vnp_OrderInfo: `Hoan tien PowerMe ${input.refundId}`,
+  };
+  return {
+    ...params,
+    vnp_SecureHash: vnpSecureHash(refundRequestSignData(params), cfg.hashSecret),
+  };
+}
+
+export type RefundUnknownReason = QueryUnresolvedReason | 'amount' | 'transaction_no';
+
+/** Kết quả một lệnh refund (bảng 2.2). */
+export type RefundResult =
+  | { kind: 'accepted'; refundNo: string; transactionStatus: string }
+  | { kind: 'rejected'; responseCode: string; transactionStatus?: string }
+  /** RC 94: VNPay đang xử lý yêu cầu hoàn trước đó. Không gửi lại; lượt sau truy vấn. */
+  | { kind: 'in_progress'; verified: boolean; unverified?: UnverifiedResponseInfo }
+  | {
+      kind: 'unknown';
+      reason: RefundUnknownReason;
+      responseCode?: string;
+      transactionStatus?: string;
+      unverified?: UnverifiedResponseInfo;
+    };
+
+const REFUND_OK_STATUSES: ReadonlySet<string> = new Set(['00', '05', '06']);
+const REFUND_REJECT_CODES: ReadonlySet<string> = new Set(['02', '03', '91', '95']);
+
+/**
+ * Phân loại response refund (bảng 2.2, hàm thuần, chỉ gọi với HTTP 200). RC 94 nhận cả khi không có
+ * chữ ký (sandbox trả 94 không ký) và chỉ dẫn tới "không gửi lại". RC 97 là VNPay báo sai chữ ký của
+ * ta, thường không ký; chỉ làm refund `failed`, không bao giờ `done`. RC 02 / 03 / 91 / 95 có thể
+ * không lặp lại `vnp_TmnCode` / `vnp_TxnRef`: thiếu thì chấp nhận, có mà khác thì `unknown`.
+ */
+export function classifyRefundResponse(
+  body: unknown,
+  expect: { tmnCode: string; txnRef: string; amountVnd: number },
+  hashSecret: string,
+): RefundResult {
+  const r = normalizeVnpBody(body);
+  if (!r) return { kind: 'unknown', reason: 'malformed' };
+  const str = (k: string) => r[k] ?? '';
+  const responseCode = str('vnp_ResponseCode');
+  const signed = signatureMatches(r, refundResponseSignData(r), hashSecret);
+  if (responseCode === '94') return { kind: 'in_progress', verified: signed };
+  if (responseCode === '97') return { kind: 'rejected', responseCode };
+  if (!signed) return { kind: 'unknown', reason: 'signature' };
+
+  const tmn = str('vnp_TmnCode');
+  const ref = str('vnp_TxnRef');
+  if (REFUND_REJECT_CODES.has(responseCode)) {
+    if (tmn !== '' && tmn !== expect.tmnCode)
+      return { kind: 'unknown', reason: 'tmn_code', responseCode };
+    if (ref !== '' && ref !== expect.txnRef)
+      return { kind: 'unknown', reason: 'txn_ref', responseCode };
+    return { kind: 'rejected', responseCode };
+  }
+  if (tmn !== expect.tmnCode) return { kind: 'unknown', reason: 'tmn_code', responseCode };
+  if (ref !== expect.txnRef) return { kind: 'unknown', reason: 'txn_ref', responseCode };
+  if (responseCode !== '00') return { kind: 'unknown', reason: 'response_code', responseCode };
+
+  const transactionStatus = str('vnp_TransactionStatus');
+  const codes = { responseCode, transactionStatus };
+  if (transactionStatus === '09') return { kind: 'rejected', ...codes };
+  if (!REFUND_OK_STATUSES.has(transactionStatus))
+    return { kind: 'unknown', reason: 'transaction_status', ...codes };
+  if (str('vnp_Amount') !== String(expect.amountVnd * 100))
+    return { kind: 'unknown', reason: 'amount', ...codes };
+  // `gateway_refund_no` là varchar(20), bắt buộc khi done theo đường này.
+  const refundNo = str('vnp_TransactionNo');
+  if (!/^\d{1,20}$/.test(refundNo)) return { kind: 'unknown', reason: 'transaction_no', ...codes };
+  return { kind: 'accepted', refundNo, transactionStatus };
+}
+
+/** Kết quả querydr trước khi gửi lại refund (mục 2.3). */
+export type RefundQueryResult =
+  /** Đã có lệnh hoàn, TS 00 / 05 / 06. */
+  | { kind: 'refunded'; transactionType: string; transactionStatus: string }
+  /** Đã có lệnh hoàn, TS 09. */
+  | { kind: 'refund_rejected'; transactionType: string; transactionStatus: string }
+  /** Giao dịch trả 01 / 00 cùng mã. KHÔNG chứng minh chưa hoàn: tài liệu không ghi querydr đổi loại. */
+  | { kind: 'payment_only' }
+  | {
+      kind: 'unresolved';
+      reason: RefundUnknownReason;
+      responseCode?: string;
+      transactionStatus?: string;
+      transactionType?: string;
+      unverified?: UnverifiedResponseInfo;
+    };
+
+/**
+ * Phân loại querydr cho refund (hàm thuần). Khác `classifyQuerydrResponse` (giữ cho top-up): loại
+ * 02 / 03 là kết quả hợp lệ, và `vnp_TransactionNo` phải khớp giao dịch gốc của kind. Cách nhận lệnh
+ * hoàn là suy luận từ tài liệu, chưa thử được trên sandbox. Mọi ca không chắc → `unresolved`.
+ */
+export function classifyRefundQueryResponse(
+  body: unknown,
+  expect: { tmnCode: string; txnRef: string; transactionNo: string; amountVnd: number },
+  hashSecret: string,
+): RefundQueryResult {
+  const r = normalizeVnpBody(body);
+  if (!r) return { kind: 'unresolved', reason: 'malformed' };
+  const str = (k: string) => r[k] ?? '';
+  if (!signatureMatches(r, querydrResponseSignData(r), hashSecret))
+    return { kind: 'unresolved', reason: 'signature' };
+  if (str('vnp_TmnCode') !== expect.tmnCode) return { kind: 'unresolved', reason: 'tmn_code' };
+  if (str('vnp_TxnRef') !== expect.txnRef) return { kind: 'unresolved', reason: 'txn_ref' };
+  const responseCode = str('vnp_ResponseCode');
+  if (responseCode !== '00') return { kind: 'unresolved', reason: 'response_code', responseCode };
+  const transactionStatus = str('vnp_TransactionStatus');
+  const transactionType = str('vnp_TransactionType');
+  const codes = { responseCode, transactionStatus, transactionType };
+  if (str('vnp_TransactionNo') !== expect.transactionNo)
+    return { kind: 'unresolved', reason: 'transaction_no', ...codes };
+  if (transactionType === '01')
+    return transactionStatus === '00'
+      ? { kind: 'payment_only' }
+      : { kind: 'unresolved', reason: 'transaction_status', ...codes };
+  if (transactionType !== '02' && transactionType !== '03')
+    return { kind: 'unresolved', reason: 'transaction_type', ...codes };
+  if (str('vnp_Amount') !== String(expect.amountVnd * 100))
+    return { kind: 'unresolved', reason: 'amount', ...codes };
+  if (REFUND_OK_STATUSES.has(transactionStatus))
+    return { kind: 'refunded', transactionType, transactionStatus };
+  if (transactionStatus === '09')
+    return { kind: 'refund_rejected', transactionType, transactionStatus };
   return { kind: 'unresolved', reason: 'transaction_status', ...codes };
 }
 
@@ -486,16 +729,92 @@ export class VnpayAdapter {
    */
   async queryTransaction(topUp: QueryTopUp, signal?: AbortSignal): Promise<QueryResult> {
     if (!this.config.configured) throw new Error('vnpay_unconfigured');
-    const body = querydrRequest(
-      topUp,
+    const body = querydrRequest(topUp, this.signing(), new Date(), newQuerydrRequestId());
+    const sent = await this.postJson(body, signal);
+    if (!sent.ok) return { kind: 'unresolved', reason: sent.reason };
+    const result = classifyQuerydrResponse(
+      sent.json,
+      { tmnCode: this.config.tmnCode, txnRef: topUp.gatewayReference },
+      this.config.hashSecret,
+    );
+    // Response không tin được: kèm mã / câu thô để log (T32 Phần 8b, mục 5.1); phân loại giữ nguyên.
+    if (result.kind === 'unresolved' && UNVERIFIED_REASONS.has(result.reason))
+      return { ...result, unverified: unverifiedResponseInfo(sent.json) };
+    return result;
+  }
+
+  /**
+   * Gửi lệnh refund (SD-2e, timeout 10 s). Lỗi mạng, timeout, HTTP ≠ 200, JSON hỏng → `unknown`
+   * (không ném): lệnh có thể đã tới VNPay. Chỉ `RefundService.send` gọi, ngoài DB transaction.
+   */
+  async refund(input: RefundInput, signal?: AbortSignal): Promise<RefundResult> {
+    if (!this.config.configured) throw new Error('vnpay_unconfigured');
+    const body = refundRequest(input, this.signing(), new Date(), newQuerydrRequestId());
+    const sent = await this.postJson(body, signal);
+    if (!sent.ok) return { kind: 'unknown', reason: sent.reason };
+    const result = classifyRefundResponse(
+      sent.json,
       {
         tmnCode: this.config.tmnCode,
-        hashSecret: this.config.hashSecret,
-        serverIp: this.api.serverIp,
+        txnRef: input.gatewayReference,
+        amountVnd: input.amountVnd,
       },
+      this.config.hashSecret,
+    );
+    if (
+      (result.kind === 'unknown' &&
+        UNVERIFIED_REASONS.has(result.reason as QueryUnresolvedReason)) ||
+      (result.kind === 'in_progress' && !result.verified)
+    )
+      return { ...result, unverified: unverifiedResponseInfo(sent.json) };
+    return result;
+  }
+
+  /** querydr trước khi gửi lại refund (mục 2.3). Dùng `querydrRequest` như top-up. */
+  async queryRefundState(input: RefundInput, signal?: AbortSignal): Promise<RefundQueryResult> {
+    if (!this.config.configured) throw new Error('vnpay_unconfigured');
+    const body = querydrRequest(
+      { gatewayReference: input.gatewayReference, createdAt: input.createdAt },
+      this.signing(),
       new Date(),
       newQuerydrRequestId(),
     );
+    const sent = await this.postJson(body, signal);
+    if (!sent.ok) return { kind: 'unresolved', reason: sent.reason };
+    const result = classifyRefundQueryResponse(
+      sent.json,
+      {
+        tmnCode: this.config.tmnCode,
+        txnRef: input.gatewayReference,
+        transactionNo: input.originalTransactionNo,
+        amountVnd: input.amountVnd,
+      },
+      this.config.hashSecret,
+    );
+    if (
+      result.kind === 'unresolved' &&
+      UNVERIFIED_REASONS.has(result.reason as QueryUnresolvedReason)
+    )
+      return { ...result, unverified: unverifiedResponseInfo(sent.json) };
+    return result;
+  }
+
+  private signing() {
+    return {
+      tmnCode: this.config.tmnCode,
+      hashSecret: this.config.hashSecret,
+      serverIp: this.api.serverIp,
+    };
+  }
+
+  /** POST JSON tới `VNPAY_API_URL`, timeout 10 s. Không ném; không đưa lỗi gốc ra ngoài. */
+  private async postJson(
+    body: Record<string, string>,
+    signal?: AbortSignal,
+  ): Promise<
+    | { ok: true; json: unknown }
+    | { ok: false; reason: 'http_status' | 'timeout' | 'network' | 'malformed' }
+  > {
     const timeout = AbortSignal.timeout(this.timeoutMs);
     const combined = signal ? AbortSignal.any([timeout, signal]) : timeout;
     let text: string;
@@ -508,27 +827,17 @@ export class VnpayAdapter {
       });
       if (response.status !== 200) {
         await response.body?.cancel().catch(() => undefined);
-        return { kind: 'unresolved', reason: 'http_status' };
+        return { ok: false, reason: 'http_status' };
       }
       text = await response.text();
     } catch {
-      // Không đưa lỗi gốc ra ngoài (có thể chứa URL / body); chỉ phân biệt timeout với lỗi mạng.
-      return { kind: 'unresolved', reason: timeout.aborted ? 'timeout' : 'network' };
+      // Lỗi gốc có thể chứa URL / body; chỉ phân biệt timeout với lỗi mạng.
+      return { ok: false, reason: timeout.aborted ? 'timeout' : 'network' };
     }
-    let json: unknown;
     try {
-      json = JSON.parse(text);
+      return { ok: true, json: JSON.parse(text) };
     } catch {
-      return { kind: 'unresolved', reason: 'malformed' };
+      return { ok: false, reason: 'malformed' };
     }
-    const result = classifyQuerydrResponse(
-      json,
-      { tmnCode: this.config.tmnCode, txnRef: topUp.gatewayReference },
-      this.config.hashSecret,
-    );
-    // Response không tin được: kèm mã / câu thô để log (T32 Phần 8b, mục 5.1); phân loại giữ nguyên.
-    if (result.kind === 'unresolved' && UNVERIFIED_REASONS.has(result.reason))
-      return { ...result, unverified: unverifiedResponseInfo(json) };
-    return result;
   }
 }

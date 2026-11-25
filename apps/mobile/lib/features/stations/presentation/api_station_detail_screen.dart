@@ -86,6 +86,16 @@ class ApiStationDetailScreen extends ConsumerWidget {
             ),
           ),
           const SizedBox(height: 16),
+          FilledButton.icon(
+            key: const Key('station-scan-qr'),
+            onPressed: () => context.go('/scan'),
+            icon: const Icon(Icons.qr_code_scanner_rounded),
+            label: Text(
+              copy.text('Quét QR tại trạm', 'Scan QR at the station'),
+              textAlign: TextAlign.center,
+            ),
+          ),
+          const SizedBox(height: 12),
           if (destination != null &&
               destination.valid &&
               !kIsWeb &&

@@ -331,17 +331,19 @@ class _SuggestionResult extends StatelessWidget {
     final metrics = [
       MetricItem(
         copy.text('Chờ ước tính', 'Estimated wait'),
-        _minutes(hit.waitMinutes, copy),
+        estimatedMinutes(hit.waitMinutes, copy),
         Icons.schedule,
       ),
       MetricItem(
         copy.text('Sạc ước tính', 'Estimated charging'),
-        _minutes(hit.chargeMinutes, copy),
+        estimatedMinutes(hit.chargeMinutes, copy),
         Icons.bolt_outlined,
       ),
       MetricItem(
         copy.text('Chi phí tối đa ước tính', 'Estimated upper cost'),
-        hit.maxCostVnd == null ? _unknown(copy) : vnd(hit.maxCostVnd),
+        hit.maxCostVnd == null
+            ? _unknown(copy)
+            : vnd(hit.maxCostVnd, copy: copy),
         Icons.payments_outlined,
       ),
     ];
@@ -415,14 +417,6 @@ class _SuggestionResult extends StatelessWidget {
 }
 
 String _unknown(AppCopy copy) => copy.text('Chưa xác định', 'Unknown');
-
-String _minutes(double? value, AppCopy copy) {
-  if (value == null) return _unknown(copy);
-  final display = value == value.truncateToDouble()
-      ? value.toStringAsFixed(0)
-      : value.toString();
-  return copy.text('$display phút', '$display min');
-}
 
 String _fallback(
   SmartUnavailable? reason,

@@ -97,3 +97,19 @@ class DriverApiFixture implements HttpClientAdapter {
   @override
   void close({bool force = false}) {}
 }
+
+// Existing QR tests explicitly opt into an empty active-session response.
+ResponseBody emptyActiveSessions(RequestOptions request) {
+  if (request.method != 'GET' ||
+      request.path != 'sessions' ||
+      request.queryParameters['view'] != 'active' ||
+      request.queryParameters['page_size'] != 20) {
+    throw StateError('Unexpected active-session query');
+  }
+  return reply(200, {
+    'items': [],
+    'total': 0,
+    'page': request.queryParameters['page'],
+    'page_size': 20,
+  });
+}

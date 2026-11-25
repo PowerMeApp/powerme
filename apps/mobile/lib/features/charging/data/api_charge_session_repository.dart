@@ -4,6 +4,7 @@ import '../../../core/api/driver_api_exception.dart';
 import '../../../core/api/driver_api_session.dart';
 import '../domain/charge_session.dart';
 import '../domain/charging.dart';
+import 'session_metadata.dart';
 
 class ApiChargeSessionRepository implements ChargeSessionRepository {
   const ApiChargeSessionRepository(this._session);
@@ -77,7 +78,60 @@ class ApiChargeSessionRepository implements ChargeSessionRepository {
         : DataQuality.unknown;
     final point = json['charge_point'];
     final online = point is Map<String, dynamic> ? point['is_online'] : null;
+    final mode = switch (json['billing_mode']) {
+      'full' => ChargingMode.autoFull,
+      'timed' => ChargingMode.timed,
+      'energy_kwh' => ChargingMode.energy,
+      'amount_vnd' => ChargingMode.cost,
+      _ => null,
+    };
+    final limit = _integerOrNull(json['limit_value']);
+    if (mode == ChargingMode.autoFull
+        ? limit != null
+        : mode != null && (limit == null || limit == 0)) {
+      throw _retry;
+    }
+    final costQuality = _state(
+      ChargeCostQuality.values,
+      json['metered_cost_quality'],
+      ChargeCostQuality.unknown,
+    );
+    final cost = _integerOrNull(json['metered_cost_vnd_estimate']);
+    final hasMetadata = [
+      'origin',
+      'payment_mode',
+      'can_stop',
+      'statement_available',
+    ].any(json.containsKey);
+    if (hasMetadata &&
+        (json['origin'] is! String ||
+            json['payment_mode'] is! String ||
+            json['can_stop'] is! bool ||
+            json['statement_available'] is! bool ||
+            (json['can_stop'] == true &&
+                (sessionOrigin(json['origin']) != SessionOrigin.appQr ||
+                    json['meter_stop_wh'] != null ||
+                    !isStoppableStatus(
+                      _state(
+                        SessionState.values,
+                        json['status'],
+                        SessionState.unknown,
+                      ),
+                    ))) ||
+            (json['statement_available'] == true &&
+                sessionPaymentMode(json['payment_mode']) !=
+                    PaymentMode.csmsBilled))) {
+      throw _retry;
+    }
     return ChargeProgress(
+      origin: hasMetadata ? sessionOrigin(json['origin']) : null,
+      paymentMode: hasMetadata
+          ? sessionPaymentMode(json['payment_mode'])
+          : null,
+      serverCanStop: hasMetadata ? json['can_stop'] as bool : null,
+      statementAvailable: hasMetadata
+          ? json['statement_available'] as bool
+          : null,
       status: _state(SessionState.values, json['status'], SessionState.unknown),
       settlement: switch (json['settlement_state']) {
         'pending' => SettlementState.pending,
@@ -93,7 +147,18 @@ class ApiChargeSessionRepository implements ChargeSessionRepository {
       },
       quality: quality,
       updatedAt: _timestamp(json['updated_at']),
-      limitWh: _integerOrNull(json['limit_value']),
+      billingMode: mode,
+      billingModeMissing: !json.containsKey('billing_mode'),
+      limitValue: limit,
+      elapsedSeconds: _integerOrNull(json['elapsed_seconds']),
+      costEstimateVnd: costQuality == ChargeCostQuality.unknown ? null : cost,
+      costQuality: cost == null ? ChargeCostQuality.unknown : costQuality,
+      costClock: switch (json['metered_cost_clock']) {
+        'cp' => ChargeCostClock.cp,
+        'cp_offset' => ChargeCostClock.cpOffset,
+        'csms' => ChargeCostClock.csms,
+        _ => null,
+      },
       consumedWh: _integerOrNull(json['consumed_wh']),
       meterStopWh: _integerOrNull(json['meter_stop_wh']),
       energyWh: _integerOrNull(json['energy_wh']),

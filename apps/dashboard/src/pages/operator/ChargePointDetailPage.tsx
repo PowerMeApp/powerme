@@ -6,6 +6,7 @@
  * remote commands. Opened from screens 18 and 21 (D41). Uptime / utilisation and sending remote
  * commands come with Trí's `/metrics` and `/commands` routes; no placeholder until then (D36).
  */
+import { Breadcrumbs } from '../../components/Breadcrumbs';
 import { Link, useParams } from 'react-router';
 import type { RemoteCommandRow } from '@powerme/shared';
 import { errorMessage, useOperatorChargePointQuery, type ApiError } from '../../core/api/api';
@@ -38,10 +39,13 @@ export function ChargePointDetailPage() {
   if (!data) {
     const notFound = (error as ApiError | undefined)?.status === 404;
     return (
-      <div className="card">
-        <p role="alert">{notFound ? 'Không tìm thấy Charge Point' : errorMessage(error)}</p>
-        <Link to="/operator/charge-points">← Danh sách Charge Point</Link>
-      </div>
+      <>
+        <Breadcrumbs items={[{ label: 'Trụ sạc', to: '/operator/charge-points' }, { label: id }]} />
+        <div className="card">
+          <p role="alert">{notFound ? 'Không tìm thấy trụ sạc' : errorMessage(error)}</p>
+          <Link to="/operator/charge-points">← Danh sách trụ sạc</Link>
+        </div>
+      </>
     );
   }
 
@@ -57,13 +61,18 @@ export function ChargePointDetailPage() {
 
   return (
     <>
-      <p className="muted small">
-        <Link to="/operator/charge-points">← Danh sách Charge Point</Link>
-      </p>
+      <Breadcrumbs
+        items={[
+          { label: 'Trụ sạc', to: '/operator/charge-points' },
+          { label: data.site.site_name, to: `/operator/stations/${data.site.id}` },
+          { label: data.display_code ?? data.serial_number },
+        ]}
+      />
       <div className="page-head">
         <h1>{data.display_code ?? data.serial_number}</h1>
         <p>
-          {data.site.site_name} · {data.site.site_code}
+          <Link to={`/operator/stations/${data.site.id}`}>{data.site.site_name}</Link> ·{' '}
+          {data.site.site_code}
         </p>
       </div>
       <div className="btn-row detail-status">
@@ -73,7 +82,7 @@ export function ChargePointDetailPage() {
       </div>
 
       <div className="tiles">
-        <section className="card tile" aria-label="Thông tin Charge Point">
+        <section className="card tile" aria-label="Thông tin trụ sạc">
           <h2>Thông tin</h2>
           <dl className="info-list">
             {info.map(([k, v]) => (
@@ -85,12 +94,8 @@ export function ChargePointDetailPage() {
           </dl>
         </section>
         {data.connectors.map((c) => (
-          <section
-            key={c.connector_id}
-            className="card tile"
-            aria-label={`Connector ${c.connector_no}`}
-          >
-            <h2>Connector {c.connector_no}</h2>
+          <section key={c.connector_id} className="card tile" aria-label={`Súng ${c.connector_no}`}>
+            <h2>Súng {c.connector_no}</h2>
             <p>
               <span className={`pill ${connectorTone(c)}`}>
                 {c.status_quality === 'offline' ? 'Offline' : c.status}
@@ -113,7 +118,7 @@ export function ChargePointDetailPage() {
         ))}
       </div>
 
-      <h2 className="section-title">Sự cố của Charge Point</h2>
+      <h2 className="section-title">Sự cố của trụ sạc</h2>
       <FaultTable chargePointId={data.id} defaultStatus="all" />
 
       <h2 className="section-title">Lệnh gần đây</h2>
@@ -128,7 +133,7 @@ export function ChargePointDetailPage() {
               <thead>
                 <tr>
                   <th scope="col">Lệnh</th>
-                  <th scope="col">Connector</th>
+                  <th scope="col">Súng</th>
                   <th scope="col">Kết quả</th>
                   <th scope="col">Yêu cầu</th>
                   <th scope="col">Trụ trả lời</th>
@@ -141,7 +146,7 @@ export function ChargePointDetailPage() {
                   return (
                     <tr key={cmd.id}>
                       <td className="cell-title">{cmd.action}</td>
-                      <td>{cmd.connector_no ? `Connector ${cmd.connector_no}` : 'Cả trụ'}</td>
+                      <td>{cmd.connector_no ? `Súng ${cmd.connector_no}` : 'Cả trụ'}</td>
                       <td>
                         <span className={`pill ${tone}`}>{label}</span>
                       </td>

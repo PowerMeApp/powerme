@@ -1,6 +1,6 @@
 # WF-02 – Quyết định thiết kế
 
-> Đặt tại `docs/spec/WF-02_decisions.md`. Cập nhật: 17/11/2026 (D3, D5, D7, "Còn mở" theo T32 Phần 7); 14/11/2026 (D2, D3, D4, D7, "Còn mở" theo T32 Phần 8; D3, D4, D7, D8 theo T32 Phần 6 13/11; D2 theo T32 Phần 5, 12/11).
+> Đặt tại `docs/spec/WF-02_decisions.md`. Cập nhật: 24/11/2026 (D1 nghĩa `done`; "Còn mở": điều kiện của Ân, kết quả querydr sandbox, Phần 10 dự kiến 25/11); 23/11/2026 (D1, D7, "Còn mở" theo T32 Phần 9a; "Còn mở": VNPay trả lời 18/11, giả định vnp_Amount khi khuyến mãi); 17/11/2026 (D3, D5, D7, "Còn mở" theo T32 Phần 7); 14/11/2026 (D2, D3, D4, D7, "Còn mở" theo T32 Phần 8; D3, D4, D7, D8 theo T32 Phần 6 13/11; D2 theo T32 Phần 5, 12/11).
 > **Nguồn chính là diagram trong `diagrams/report4/class/CD-2/` + `diagrams/report4/sequence/SD-2a…2f/`** (CD-2, SD-2a…2f v2.0, 01/11/2026, bản đã chia sẻ vào tài liệu chung của nhóm). File này chỉ ghi lại:
 > (1) những điểm trong diagram mà code phải bám, viết ra cho dễ tra;
 > (2) cách khớp diagram với repo hiện tại;
@@ -40,6 +40,46 @@ STM-4 TopUp, STM-5 CreditAccount, STM-7 EInvoice (cũng dùng cho InvoiceAdjustm
 
 **Cùng mẫu:** hoàn khoản trễ (`TopUpService.refundLatePayment`, `kind = late_payment`, **không ghi sổ cái**, không có điều chỉnh hoá đơn); Admin retry refund `failed` (`RefundService.retry(refundId, adminId)`: một lượt thử, không reset bộ đếm).
 
+⊕ **Cài đặt T32 Phần 9a (Khang chốt 23/11).** Code: `billing/refund.service.ts`, `billing/vnpay.adapter.ts` (`refundRequest`, `classifyRefundResponse`, `classifyRefundQueryResponse`), `TopUpService.refund` / `refundLatePayment`, migration 0028. Chưa có route (Phần 10); điều chỉnh hoá đơn ở Phần 9b.
+
+- **Ba số khi hoàn top-up (theo SD-2e):** sổ cái và guard số dư khả dụng dùng `amount_vnd`; VNPay hoàn `amount_paid_vnd` (`refunds.amount_vnd`); điểm trả qua `restoreForTopUp`. Ví dụ: nạp 100.000, điểm 20.000, trả 80.000 → ví −100.000, VNPay hoàn 80.000, điểm được trả lại.
+- **Điều kiện trước khi quyết định hoàn:** VNPay chưa cấu hình → `RefundNotAllowed('payment_unconfigured')` trước khi đổi bất cứ gì, để không có ca trừ ví rồi refund nằm chờ vô hạn. Thứ tự kiểm sau đó: `not_found`, `account_closed`, `not_refundable`, `insufficient_available_balance`. Khoản trễ: `not_found`, `no_late_payment`, `already_requested`.
+- **Tham số gửi theo kind:**
+
+  | kind | `vnp_TxnRef` | `vnp_TransactionNo` | `vnp_TransactionDate` | `vnp_Amount` | `vnp_TransactionType` |
+  |---|---|---|---|---|---|
+  | `top_up` | `gateway_reference` | `gateway_transaction_no` | `vnpDate(created_at)` | `refunds.amount_vnd` × 100 | 02 nếu = `amount_paid_vnd`, khác thì 03 |
+  | `late_payment` | như trên (cùng TxnRef với top-up gốc) | `late_gateway_ref` | như trên | `refunds.amount_vnd` × 100 | 02 nếu = `late_amount_vnd`, khác thì 03 |
+  | `account_closure` | như `top_up` | `gateway_transaction_no` | như trên | phần chia × 100 | 02 / 03 như `top_up` |
+
+  `vnp_CreateBy` = `admin:<requested_by>` hoặc `system`; `vnp_OrderInfo` = `Hoan tien PowerMe <refund.id>`; `vnp_IpAddr` như querydr; `vnp_RequestId` mới cho mỗi lần gọi.
+- **Phân loại kết quả gửi hoàn:**
+
+  | Response | Kết quả | STM-10 |
+  |---|---|---|
+  | Chữ ký đúng, khớp `vnp_TmnCode` / `vnp_TxnRef` / số tiền, có mã hoàn, RC 00, TS 00 / 05 / 06 | `accepted` | #3 `done`, `gateway_refund_no` = `vnp_TransactionNo` của response |
+  | Chữ ký đúng, RC 00, TS 09 | `rejected` | #4 `failed` (`data`) |
+  | Chữ ký đúng, RC 02 / 03 / 91 / 95 (thiếu TmnCode / TxnRef thì chấp nhận, có mà khác thì `unknown`); hoặc HTTP 200 RC 97 | `rejected` | #4 `failed` (`data`) |
+  | RC 94 (có hay không có chữ ký) | `in_progress` | lỗi tạm thời (#2, hoặc #4 khi hết lượt); không gửi lại |
+  | RC 99, lỗi mạng, timeout, HTTP ≠ 200, JSON hỏng, sai / thiếu chữ ký, sai TmnCode / TxnRef / số tiền, thiếu mã hoàn, RC 00 mà TS khác | `unknown` | lỗi tạm thời |
+
+  **Nghĩa của `done`:** refund `done` = VNPay đã nhận yêu cầu hoàn (RC 00 + TS 00 / 05 / 06, hoặc querydr thấy lệnh hoàn); không có nghĩa tiền đã về tài khoản tài xế (VNPay / ngân hàng chuyển sau, ta không có kênh báo về). `late_refunded_at` / `closure_refunded_at` là lúc refund chuyển `done` theo nghĩa này.
+- **Truy vấn trước khi gửi lại.** Mỗi lượt theo `planRound`:
+
+  | Lượt | Cách chạy |
+  |---|---|
+  | `attempt_count = 0`, `last_error_kind IS NULL`, `unfinished_claims = 1` | gửi luôn |
+  | Ngay sau Admin retry (`unfinished_claims = 1` và (`last_error_kind = 'data'` hoặc `attempt_count >= RETRY_LIMIT`)) | querydr, thấy 01 / 00 thì gửi đúng một lần |
+  | Mọi lượt khác | querydr, không bao giờ gửi |
+
+  - `unfinished_claims > 1` nghĩa là lượt trước giữ chỗ mà chưa ghi được kết quả, có thể đã gửi rồi sập, nên không được coi là lượt đầu.
+  - Kết quả querydr: 02 / 03 khớp mã giao dịch gốc của kind và số tiền, TS 00 / 05 / 06 → `done`, `confirmed_via_query = true`, `gateway_refund_no` NULL (0028), log `refund_done_via_query`; TS 09 → `failed` (`data`); 01 / 00 cùng mã → theo bảng trên; còn lại (không xác thực được, RC 94 / 99, mã khác, sai số tiền, lỗi mạng) → lỗi tạm thời, không gửi.
+  - 01 / 00 **không** chứng minh là chưa hoàn: tài liệu VNPay không ghi querydr có đổi sang 02 / 03 sau khi hoàn, cũng không ghi giới hạn tổng tiền hoàn. Nên lượt tự động không gửi. Thà hết lượt rồi `failed` để Admin xem, còn hơn hoàn hai lần.
+- **Admin retry là khẳng định "đã kiểm trên cổng VNPay là chưa hoàn".** `failed → requested` (#5), giữ `attempt_count`, `unfinished_claims = 0`, `next_attempt_at = now()`. Lượt ngay sau đó được gửi đúng một lần nếu querydr thấy 01 / 00. **Phần 10 phải hiện cảnh báo này trên nút retry.**
+- **Hết lượt giữ chỗ** (`onExhausted`, D7): `requested → failed` (#4), `attempt_count = max(attempt_count + 1, RETRY_LIMIT)`, `last_error_kind = 'transient'`, `last_error_message = 'retry_exhausted'`, log error, không gọi VNPay.
+- **Tắt có kiểm soát:** đã có kết quả từ VNPay thì vẫn chạy tx2 dù signal đã abort, vì bỏ một kết quả `accepted` có thể dẫn tới hoàn hai lần qua Admin retry. Runner chờ lượt đang chạy xong trước khi `DbModule` đóng pool. Lời gọi bị abort giữa chừng tính là lỗi tạm thời một lượt.
+- **Khoá ở tx2 khi `done`:** `top_ups` (`late_payment`) hoặc `credit_accounts` (`account_closure`) rồi mới `lockLeased(refunds)`, cùng thứ tự với đường tạo refund, tránh deadlock; khoá `credit_accounts` cũng làm tuần tự việc kiểm "refund closure cuối cùng".
+
 **STM-10 Refund**
 ```
 [*] → requested          RefundService.create (cùng transaction với quyết định hoàn)
@@ -62,20 +102,21 @@ Không có `failed → done`.
 | `attemptCount` | int, mặc định 0 |
 | `requestedBy` [0..1] | FK → `admins (user_id)` (ISA của BE-16/0011; chốt 04/11). Thay `top_ups.refunded_by` (bỏ ở 0015, ERD Alignment B5). `top_up` / `late_payment` = `adminId`; `account_closure` = **NULL** (hệ thống tạo lúc tài xế đóng, D6; đúng CHECK `refunds_requested_by_check` của 0015) |
 | `lastErrorKind`, `lastErrorMessage`, `lastAttemptAt` [0..1] | theo mẫu `e_invoices` |
-| `gatewayRefundNo` [0..1] | mã hoàn VNPay trả về |
+| `gatewayRefundNo` [0..1] | mã hoàn VNPay trả về trong response của lệnh refund; NULL khi done qua querydr (⊕ 0028) |
+| ⊕ `confirmedViaQuery` | boolean, mặc định false (0028, T32 Phần 9a): done nhờ querydr thấy lệnh hoàn, không có mã lệnh hoàn |
 | `nextAttemptAt` [0..1] | lịch chạy nền (D4) |
 | `createdAt`, `completedAt` [0..1] | |
 
 Ràng buộc / index đề xuất cho migration:
 - Partial unique `(top_up_id, kind) WHERE kind IN ('top_up','late_payment')`.
 - CHECK `kind = 'account_closure' OR requested_by IS NOT NULL` (đã có ở 0015, giữ nguyên).
-- CHECK `(status = 'done') = (completed_at IS NOT NULL)`; `status <> 'done' OR gateway_refund_no IS NOT NULL`.
+- CHECK `(status = 'done') = (completed_at IS NOT NULL)`; ~~`status <> 'done' OR gateway_refund_no IS NOT NULL`~~ → thay bởi 0028 (T32 Phần 9a): `status <> 'done' OR gateway_refund_no IS NOT NULL OR confirmed_via_query`, và `NOT confirmed_via_query OR (status = 'done' AND gateway_refund_no IS NULL)`.
 - Index `(status, next_attempt_at)` cho worker; index `(top_up_id)`.
 
 Nghĩa của cột đã có:
-- `top_ups.late_refunded_at` = lúc refund `late_payment` chuyển `done`.
+- `top_ups.late_refunded_at` = lúc refund `late_payment` chuyển `done` (VNPay đã nhận yêu cầu hoàn, xem "Nghĩa của `done`" ở trên).
 - `credit_accounts.closure_refunded_at` = lúc tài khoản `closed` không còn refund `account_closure` nào chưa `done` (chốt 09/11, D6). Có hai trường hợp:
-  - refund `account_closure` cuối cùng chuyển `done`;
+  - refund `account_closure` cuối cùng chuyển `done` (cùng nghĩa `done` ở trên);
   - lúc đóng không tạo refund nào (số dư 0, hoặc toàn bộ là phần dư) → `= closed_at`, ghi trong transaction đóng.
   - NULL chỉ còn nghĩa "chưa hoàn xong". COMMENT của 0015 còn ghi "NULL = … không có gì để hoàn" → sửa ở migration Phần 6 (mục "Còn mở").
 
@@ -214,7 +255,12 @@ Cộng tiền, dòng sổ cái và điểm nằm trong **một** DB transaction,
   - `recheckTopUp`: `paid` → `conflicting_result` → dòng `source = 'recheck'`, trả `conflicting_result` như cũ; **không** đặt `exception_reviewed_at` (ngoại lệ `unresolved_*` chưa được giải quyết).
   - `PaymentResultCommitted` không thêm outcome (Phần 7 không gắn e-invoice; Phần 10 đọc bảng); không log `ipn_applied` / `querydr_applied` cho ca này (đã có `${source}_conflicting_result`).
   - Phần 10: Billing Exceptions hiện dòng `reviewed_at IS NULL` (partial index `top_up_payment_conflicts_unreviewed_idx`), nút "Đã xử lý" ghi `reviewed_at`, `reviewed_by`, `review_note` (CHECK bắt buộc, không rỗng) + audit; **không có nút hoàn** (Ân điểm 3).
-- ⊕ **Lịch querydr** (T127, 0021): `top_ups.next_attempt_at` = lần querydr kế tiếp. `create` đặt `expires_at + 2 phút` (`QUERYDR_FIRST_DELAY_MS`); chưa ngã ngũ thì Phần 8 hẹn tiếp + 5, 10, 20, 40, 60 phút; mọi chỗ rời `pending` đặt NULL. ~~Không có `attempt_count` (lần thứ mấy suy từ `next_attempt_at − expires_at`).~~ → thay bởi T32 Phần 8 14/11: lease (D7) ghi đè `next_attempt_at`, nên **không** suy lần thứ mấy từ cột này. Các mốc `QUERYDR_SCHEDULE_MIN = [2, 5, 10, 20, 40, 60]` phút tính **từ `expires_at`**; chưa ngã ngũ → mốc kế = mốc nhỏ nhất có `expires_at + mốc > now()` (đồng hồ DB, tính trong SQL); không còn mốc → hết lịch. Đánh thức trễ (now đã qua vài mốc) nhảy tới mốc kế còn lại, không hỏi dồn; thức dậy khi đã quá +60 thì chỉ hỏi một lần rồi hết lịch (đúng chữ chốt 14/11; xem "Còn mở"). Index `top_ups_pending_next_attempt_idx (next_attempt_at) WHERE status = 'pending'` (Trí review).
+- ⊕ **Lịch querydr** (T127, 0021): `top_ups.next_attempt_at` = lần querydr kế tiếp. `create` đặt `expires_at + 2 phút` (`QUERYDR_FIRST_DELAY_MS`); chưa ngã ngũ thì Phần 8 hẹn tiếp ~~+ 5, 10, 20, 40, 60 phút~~ → thay bởi T32 Phần 8c 19/11: + 15, 30, 45, 60 phút (+ 75 khi RC `94`, xem dưới); mọi chỗ rời `pending` đặt NULL. ~~Không có `attempt_count` (lần thứ mấy suy từ `next_attempt_at − expires_at`).~~ → thay bởi T32 Phần 8 14/11: lease (D7) ghi đè `next_attempt_at`, nên **không** suy lần thứ mấy từ cột này. Các mốc ~~`QUERYDR_SCHEDULE_MIN = [2, 5, 10, 20, 40, 60]`~~ (→ thay bởi T32 Phần 8c 19/11: `[2, 15, 30, 45, 60]`) phút tính **từ `expires_at`**; chưa ngã ngũ → mốc kế = mốc nhỏ nhất có `expires_at + mốc > now()` (đồng hồ DB, tính trong SQL); không còn mốc → hết lịch. Đánh thức trễ (now đã qua vài mốc) nhảy tới mốc kế còn lại, không hỏi dồn; thức dậy khi đã quá +60 thì chỉ hỏi một lần rồi hết lịch (đúng chữ chốt 14/11; xem "Còn mở"). Index `top_ups_pending_next_attempt_idx (next_attempt_at) WHERE status = 'pending'` (Trí review).
+  - ⊕ **Lịch mới và mốc RC `94`** (T32 Phần 8c, Khang chốt 19/11): `QUERYDR_SCHEDULE_MIN = [2, 15, 30, 45, 60]`, bỏ +5 vì sandbox VNPay trả RC `94` (yêu cầu trùng) khi hỏi lại cùng giao dịch trong khoảng ≤ 4,5 phút, cách 11 phút trở lên thì không bị chặn (thử 16/11). `QUERYDR_FIRST_DELAY_MS` giữ 2 phút.
+    - Thêm **một** mốc +75 (`QUERYDR_RC94_EXTRA_MIN`), **chỉ** khi lần hỏi ở mốc +60 trả `unresolved` với RC `94`. "Ở mốc +60" = `now() >= expires_at + 60 phút` (đồng hồ DB): code thêm 75 vào danh sách mốc khi RC là `94`, mốc kế vẫn là mốc nhỏ nhất còn ở tương lai, nên `94` ở +45 trở về trước vẫn hẹn +60 như thường.
+    - Ở +75 mà vẫn chưa ngã ngũ (kể cả lại `94`) thì hết lịch → `expired` theo luật có sẵn (TS `04` / `07` → `unresolved_*`, còn lại không có `exception_kind`). Không có +90.
+    - **Ngoại lệ về RC chưa xác thực** (Khang chốt 19/11): RC chưa xác thực (`unverified.responseCode`, response sai / thiếu chữ ký) chỉ để log, ngoại lệ duy nhất là `94` ở mốc +60 để hẹn thêm một lần querydr. Không bao giờ dùng nó để phân loại kết quả hay ghi gì vào DB (`kind` / `reason` / `exception_kind` giữ nguyên). RC `94` đã xác thực cũng được nhận như vậy. Lý do: response `94` của sandbox thử 16/11 không có chữ ký, nên chỉ nhận RC đã xác thực thì mốc +75 không bao giờ chạy; hỏi thêm một lần không ghi kết quả nên rủi ro thấp.
+    - Log `querydr_rescheduled` có `rc94_extension: true` khi mốc kế là +75.
 - ⊕ **Ca 04 / 07 tới hạn mà vẫn chưa ngã ngũ** (làm ở Phần 8): `pending → expired` (`TIMEOUT_NOT_PAID`) + `exception_kind = 'unresolved_04'` / `'unresolved_07'` (0021), đưa lên Billing Exceptions; khoản tới sau đó là khoản trễ.
 - ⊕ **Bảng kết quả querydr** (Ân 12/11; cài ở T32 Phần 8 14/11, `classifyQuerydrResponse` trong `vnpay.adapter.ts`):
 
@@ -360,7 +406,15 @@ Diagram chỉ ghi "job" / "queue" / "after commit". Repo chưa có BullMQ (Redis
   2. gọi bên ngoài, ngoài transaction;
   3. tx thứ hai khoá lại dòng (`lockLeased`, kiểm `next_attempt_at` còn đúng lease của mình) rồi ghi kết quả qua state machine.
 
-  Sập giữa chừng thì hết lease dòng tự đến hạn lại. Lease không tăng `attempt_count` (rủi ro: mục "Lỗi lặp ở tx2" của "Còn mở"; ⊕ T32 Phần 7 17/11: PR 8c sửa chung trong `due-rows.ts`, bao cả `e_invoices`). Các điều kiện đến hạn:
+  Sập giữa chừng thì hết lease dòng tự đến hạn lại. Lease không tăng `attempt_count`. ~~(rủi ro: mục "Lỗi lặp ở tx2" của "Còn mở"; ⊕ T32 Phần 7 17/11: PR 8c sửa chung trong `due-rows.ts`, bao cả `e_invoices`)~~ → thay bởi T32 Phần 8c 19/11:
+  - ⊕ **Bộ đếm lần giữ chỗ chưa ra kết quả** (0027, Khang chốt 19/11): cột `unfinished_claims` trên cả bốn bảng của `LeasedTable`. tx1 (`claimDue`) tăng 1 trong cùng câu UPDATE đẩy lease và trả số mới. tx2 (`lockLeased`) khoá lại được bằng lease của mình thì đặt về 0 (CTE `SELECT … FOR UPDATE` + `UPDATE`, giữ đúng mức khoá cũ); tx2 rollback thì phần đặt về 0 cũng rollback; mất lease thì không đụng bộ đếm.
+  - Giới hạn: hằng `UNFINISHED_CLAIM_LIMIT = 5` (`due-rows.ts`, không qua biến môi trường). Lần giữ chỗ làm bộ đếm **vượt** giới hạn (lần thứ 6 liên tiếp) thì `runLeasedBatch` không gọi `handle` mà gọi `spec.onExhausted` của bảng, trong một tx ngắn riêng tự khoá lại dòng bằng lease (không đặt bộ đếm về 0: dòng giữ số 6 làm dấu vết), không gọi bên ngoài, log error `leased_row_exhausted` (`table`, `id`, `unfinished_claims`). `onExhausted` ném → rollback, log `leased_row_exhausted` kèm `exhaust_failed: true`, dòng giữ lease như trước (không thêm cơ chế lặp: mỗi lần hết lease lại chạy `onExhausted` và log, không gọi bên ngoài).
+  - `top_ups`: `pending → expired` (STM-4 #4, `TIMEOUT_NOT_PAID`, đường có sẵn `applyLockedResult`) + `exception_kind = 'retry_exhausted'`, `next_attempt_at = NULL`, `completed_at`. Không giữ `pending` (tài xế sẽ bị chặn `pending_top_up_confirming` tới khi có Admin). IPN thành công tới sau → khoản trễ như `unresolved_04/07`; `recheckTopUp` nhận `retry_exhausted`. Log warn `top_up_retry_exhausted`; `querydr_applied` của đường này có `reason: 'retry_exhausted'` (không có querydr nào ra kết quả).
+  - `e_invoices`: `needs_review` qua chuyển có sẵn của STM-7 (`failed` qua #6 trước, rồi `ATTEMPT_FAILED` → #3→#5), không thêm chuyển mới. `attempt_count = max(attempt_count + 1, RETRY_LIMIT)`, guard cùng số, `last_error_kind = 'transient'`, `last_error_message = 'unfinished_claims_exhausted'` (Khang chốt 19/11: guard #5 "lượt thứ RETRY_LIMIT trở đi" giữ nghĩa, Admin retry #7 vẫn là một lượt; đổi lại `attempt_count` có thể lớn hơn số lần gọi thật). Log error `e_invoice_needs_review` `reason: 'unfinished_claims_exhausted'`. Admin retry đặt `unfinished_claims = 0`.
+  - ~~`refunds`, `invoice_adjustments`: chỉ có cột; chưa có `onExhausted` (Phần 9).~~ → thay bởi T32 Phần 9a 23/11: `refunds` hết lượt → `failed` (STM-10 #4, D1). `invoice_adjustments`: chỉ có cột, chưa có `onExhausted` (Phần 9b); tới lúc đó `runLeasedBatch` log error `no_handler` rồi vẫn gọi `handle`.
+  - Staging không gọi ra được VNPay: querydr trả `unresolved` (timeout), tx2 vẫn hẹn mốc kế và commit, nên bộ đếm về 0 mỗi lần, không tích luỹ (có test).
+
+  Các điều kiện đến hạn:
   - `refunds`: `status = 'requested' AND next_attempt_at <= now()` → `RefundService.send`.
   - `e_invoices`, `invoice_adjustments`: `status IN ('requested','failed') AND next_attempt_at <= now()` → `EInvoiceService.issue` / điều chỉnh.
   - ~~`top_ups`: `status = 'pending' AND expires_at <= now()` → `TopUpService.onPendingTimeout` (dùng `expires_at` đã có; D4 09/11: chạy lúc `expires_at + 2 phút`). Không có `next_attempt_at`, nên cách giữ chỗ do Phần 5/8 chọn (interface `BackgroundWork.runDue` không ràng buộc).~~ → thay bởi T32 Phần 6 13/11: `top_ups`: `status = 'pending' AND next_attempt_at <= now()` → `TopUpService.onPendingTimeout` (0021 thêm `next_attempt_at`, D4; giữ chỗ như các bảng khác bằng `runLeasedBatch`).
@@ -468,19 +522,51 @@ Chốt 09/11: WP5 làm job hết hạn điểm.
   - ~~response RC `91` (không có giao dịch) và response lỗi (`02` / `03` / `94` / `97` / `99`) **có được ký và có trả `vnp_TxnRef` không**.~~ RC `91` **có chữ ký**, có `vnp_TxnRef` và `vnp_TmnCode` → `not_found` dùng được. RC `94` / `99` **không có chữ ký** và không có `vnp_TxnRef` (→ `unresolved/signature`; từ 8b log thêm mã thô chưa xác thực để phân biệt). Code hiện bắt chữ ký đúng + `vnp_TmnCode` / `vnp_TxnRef` khớp trước khi đọc RC. Nếu VNPay không ký, hoặc không trả `vnp_TxnRef` ở các response này, thì RC `91` thành `unresolved` → top-up bỏ dở (tài xế chưa mở trang thanh toán) chờ tới `expires_at + 60 phút` mới `expired` (bị chặn `pending_top_up_confirming` suốt lúc đó). **Quyết sau khi thử sandbox; chưa nới kiểm** (Khang 14/11);
   - giá trị JSON không phải chuỗi: code chuẩn hoá trước khi ký (`null` = thiếu → chuỗi rỗng, số hữu hạn → `String(v)`, object / array / boolean → `malformed`), chờ xem VNPay trả kiểu gì.
 - **`vnp_IpAddr` của querydr** = "IP của máy chủ gọi API": biến `VNPAY_SERVER_IP` (trống = `127.0.0.1`). Thử sandbox 16/11: sandbox **chấp nhận** `127.0.0.1`; môi trường thật chưa biết. Nếu VNPay kiểm IP (whitelist / khớp IP gọi thật) thì querydr luôn `unresolved` → top-up hết lịch thành `expired` không `exception_kind`, tiền đã trừ (nếu có) thành khoản trễ khi IPN tới. Người lo staging điền IP ra ngoài của VM khi thử sandbox.
-- **VNPay trả `94` ("Request is duplicated", không chữ ký) khi querydr lặp cho cùng giao dịch** (thử sandbox 16/11): sandbox chặn ít nhất khoảng 4,5 phút; lần cách 11 phút thì không bị chặn. Mốc +2 → +5 chỉ cách 3 phút nên lần +5 có thể bị chặn; "Kiểm tra lại" ngay sau một lượt quét có thể trả `still_unresolved`. Code vẫn an toàn (`94` → hẹn mốc kế). Đổi lịch: **chờ Ân** (D4 / T117); T32 Phần 8b không đổi `QUERYDR_SCHEDULE_MIN`.
+- **VNPay trả `94` ("Request is duplicated", không chữ ký) khi querydr lặp cho cùng giao dịch** (thử sandbox 16/11): sandbox chặn ít nhất khoảng 4,5 phút; lần cách 11 phút thì không bị chặn. Mốc +2 → +5 chỉ cách 3 phút nên lần +5 có thể bị chặn; "Kiểm tra lại" ngay sau một lượt quét có thể trả `still_unresolved`. Code vẫn an toàn (`94` → hẹn mốc kế). ~~Đổi lịch: **chờ Ân** (D4 / T117); T32 Phần 8b không đổi `QUERYDR_SCHEDULE_MIN`.~~ → thay bởi T32 Phần 8c 19/11: lịch 2/15/30/45/60, mốc +75 khi lần hỏi ở +60 trả 94 (D4).
 - **Sandbox không gửi lại IPN** trong ~30 phút sau khi nhận HTTP 403 (thử 16/11), khác tài liệu VNPay (gọi lại tối đa 10 lần, cách 5 phút). Hệ quả: querydr là đường duy nhất bắt được khoản đã trả mà IPN không tới (ca E 16/11 đã chứng minh đường này chạy). Ca "IPN tới sau khi querydr đã cộng → 02" mới chỉ có test integration làm bằng chứng.
+- **VNPay trả lời email (18/11/2026, Online Service Dept.):** (1) IPN ở môi trường test chỉ gọi 1 lần, không gọi lại — khớp quan sát 16/11 ở mục "Sandbox không gửi lại IPN"; (2) thông tin test tự đăng ký qua trang dev không hỗ trợ API query / refund, muốn đủ thì làm việc với kinh doanh VNPay kèm đăng ký kinh doanh. Mâu thuẫn với thử 16/11 (querydr trả RC `00` / `91` có chữ ký hợp lệ; ngày 14/11 luôn `99`) → coi querydr sandbox là không cam kết, lúc chạy lúc không; refund (Phần 9) có thể không thử được trên sandbox, khi đó chỉ có test tự động. (3) Câu `vnp_Amount` khi có mã giảm giá: VNPay không trả lời — xem mục dưới.
+- **Giả định `vnp_Amount` khi có khuyến mãi phía VNPay** (Khang 23/11, VNPay chưa trả lời): nếu số VNPay thực trừ (`vnp_Amount / 100`, IPN hoặc querydr) khác `amount_paid_vnd` — ví dụ do mã khuyến mãi của VNPay — hệ thống coi là sai số tiền theo T32 Phần 8b: top-up `pending → failed` (STM-4 #8, `not_creditable`), khoản trễ ghi đúng số VNPay thực trừ (`late_amount_vnd`), không cộng tiền, không trừ điểm, không hoá đơn; Admin hoàn qua Billing Exceptions (Phần 9 / 10). Nếu VNPay báo `vnp_Amount` là số trước giảm giá (bằng `amount_paid_vnd`, khuyến mãi do VNPay / ngân hàng chịu) thì cộng đủ như thanh toán thường, không vào #8. Đây là hành vi code đang chạy, không đổi code.
 - **querydr trả `paid` với txn khác bị bỏ khi mất lease** (T32 Phần 8b bổ sung ghi lại, Khang 16/11; chưa sửa code): IPN cộng txn A trong lúc querydr đang chạy, querydr trả `paid` với txn B ≠ A → `lockLeased` trả `null` → kết quả querydr bị bỏ. Nếu B là lần trả thật thứ hai, chỉ bắt được khi IPN của B tới. Khó xảy ra (VNPay thường trả cùng giao dịch cho một `vnp_TxnRef`), nhưng sandbox 16/11 cho thấy VNPay có thể không gửi lại IPN. Hướng xử lý sau: khi `lockLeased` trả `null` mà querydr là `paid` với txn khác `gateway_transaction_no`, áp kết quả như IPN (khoá theo `id`, không theo token) → khoản trễ hoặc dòng `top_up_payment_conflicts`.
-- **Lỗi lặp ở tx2 của vòng quét** (T32 Phần 8b ghi lại, chưa sửa): lease không đếm số lần thử. Một lỗi lặp lại ở tx2 (sau querydr; trước 8b có `account_closed`, nay #8 xử lý; còn lại: lỗi DB / lỗi code bất kỳ) làm `runLeasedBatch` log warn rồi để dòng giữ lease → hết lease lại tới hạn → gọi querydr lại. Hệ quả: gọi VNPay lặp mỗi `BILLING_WORKER_LEASE_MS` (có thể dính `94`), log lặp, top-up kẹt `pending` không bao giờ hết lịch. Hướng xử lý có thể làm: đếm lần thử (cột mới, cần migration), hoặc tx2 lỗi thì vẫn hẹn mốc kế của `QUERYDR_SCHEDULE_MIN` trong một transaction riêng (hết lịch → `expired`).
+- ~~**Lỗi lặp ở tx2 của vòng quét** (T32 Phần 8b ghi lại, chưa sửa): lease không đếm số lần thử. Một lỗi lặp lại ở tx2 (sau querydr; trước 8b có `account_closed`, nay #8 xử lý; còn lại: lỗi DB / lỗi code bất kỳ) làm `runLeasedBatch` log warn rồi để dòng giữ lease → hết lease lại tới hạn → gọi querydr lại. Hệ quả: gọi VNPay lặp mỗi `BILLING_WORKER_LEASE_MS` (có thể dính `94`), log lặp, top-up kẹt `pending` không bao giờ hết lịch. Hướng xử lý có thể làm: đếm lần thử (cột mới, cần migration), hoặc tx2 lỗi thì vẫn hẹn mốc kế của `QUERYDR_SCHEDULE_MIN` trong một transaction riêng (hết lịch → `expired`).~~ → thay bởi T32 Phần 8c 19/11: đếm lần giữ chỗ (`unfinished_claims`, 0027), lần thứ 6 → `expired` + `retry_exhausted` (D7).
 - **Thuế suất hoá đơn** (T32 Phần 7): Đã đối chiếu Phụ lục I–II NĐ 174/2025 (17/11, xem căn cứ ở D5): dịch vụ sạc xe điện không bị loại trừ, áp 8% tới hết 31/12/2026. Còn lại: người lập hoá đơn thật (kế toán / công ty khách hàng) xác nhận mã ngành đăng ký; nếu có nghị quyết gia hạn hoặc đổi mức thì sửa `vatRateAt`.
-- **Lease không đếm lần thử, cả với `e_invoices`** (T32 Phần 7 ghi lại): giống mục "Lỗi lặp ở tx2" của top-up. Dòng làm tiến trình sập, hoặc gặp lỗi lặp ở tx2, được thử lại sau mỗi lease mà không bị đếm, nên nhà cung cấp bị gọi lặp. Ví dụ lỗi lặp: nhà cung cấp trả `invoice_no` đã có ở dòng khác → 23505 UNIQUE. PR 8c sửa chung trong `due-rows.ts`, bao cả `e_invoices`.
+- ~~**Lease không đếm lần thử, cả với `e_invoices`** (T32 Phần 7 ghi lại): giống mục "Lỗi lặp ở tx2" của top-up. Dòng làm tiến trình sập, hoặc gặp lỗi lặp ở tx2, được thử lại sau mỗi lease mà không bị đếm, nên nhà cung cấp bị gọi lặp. Ví dụ lỗi lặp: nhà cung cấp trả `invoice_no` đã có ở dòng khác → 23505 UNIQUE. PR 8c sửa chung trong `due-rows.ts`, bao cả `e_invoices`.~~ → thay bởi T32 Phần 8c 19/11: lần thứ 6 → `needs_review` (D7).
 - **Top-up `credited` trước khi deploy Phần 7** (sandbox trên staging) không có hoá đơn và không tạo bù (T32 Phần 7).
 - **Thông tin người bán** (MST, mẫu số, ký hiệu hoá đơn) và biến môi trường của nhà cung cấp thật (MISA): chốt khi làm provider thật; stub không dùng (T32 Phần 7).
 - **Đánh thức trễ quá +60 phút** (worker dừng lâu): vòng quét chỉ hỏi querydr một lần rồi hết lịch (`expired`). Đề xuất cho sau (chưa làm): cho Admin "Kiểm tra lại" cả top-up `expired` hết lịch không `exception_kind` (ca lỗi mạng / TS `01`).
 - **Billing Exceptions thêm mục lỗi sổ điểm (`loyalty_error`) và ca 04 / 07 chưa ngã ngũ (`unresolved_04` / `unresolved_07`)**: UC-ADM-08 hiện có 3 tab (Ân / Nghĩa).
 - **Nghĩa `vnp_TransactionStatus` 01 / 04 / 07** (coi là chưa ngã ngũ ở D3): trang tài liệu VNPay đọc được không có bảng mã này nguyên văn; đối chiếu trên sandbox.
 - Đổi tên `lateGatewayRef` → `lateGatewayTransactionNo`? (T32 Phần 6 giữ tên, JSDoc / COMMENT ghi rõ là `vnp_TransactionNo`.)
-- VNPay sandbox: refund có chống trùng không, có API tra trạng thái hoàn không (`VnpayAdapter.queryRefund`), thời hạn được hoàn, danh sách mã IPN.
+- VNPay sandbox: refund có chống trùng không, có API tra trạng thái hoàn không (`VnpayAdapter.queryRefund`), thời hạn được hoàn, danh sách mã IPN. ⊕ T32 Phần 9a đọc lại trang 23/11: không có API riêng tra trạng thái hoàn; chống trùng chỉ thấy RC 94; không ghi thời hạn hoàn và giới hạn tổng tiền hoàn.
+- **Refund (T32 Phần 9a) chưa thử được trên sandbox** (xem "VNPay trả lời email 18/11", ý (2)). Khang chốt 23/11: chấp nhận chỉ kiểm bằng test tự động với VNPay giả lập. Các giả định cần đối chiếu khi có tài khoản đủ quyền:
+  - `vnp_Amount` của refund là VND × 100 (như lệnh trả, IPN, querydr);
+  - trường thiếu trong response refund đưa vào chuỗi ký là chuỗi rỗng;
+  - RC 00 + TS 00 / 05 / 06 coi là `done`, nghĩa là VNPay đã nhận yêu cầu hoàn (D1).
+
+  Ân chấp nhận 3 giả định 24/11, điều kiện: (a) done = VNPay đã nhận yêu cầu hoàn (đã ghi ở D1); (b) thử querydr trùng vnp_TxnRef trên sandbox (kết quả ở mục Khoản trễ và querydr).
+- **Cách nhận lệnh hoàn qua querydr là suy luận từ tài liệu** (T32 Phần 9a): trang chỉ liệt kê `vnp_TransactionType` 02 / 03, không ghi khi nào xuất hiện, không ghi `vnp_TransactionNo` là của giao dịch gốc hay lệnh hoàn.
+  - Nếu là mã của lệnh hoàn: so với mã gốc không khớp → lỗi tạm thời → `failed`, Admin xem (an toàn, không hoàn hai lần).
+  - Nếu querydr vẫn trả 01 / 00 sau khi hoàn: lượt tự động không gửi; chỉ lượt ngay sau Admin retry mới gửi, nên Admin phải kiểm trên cổng VNPay trước khi retry (D1).
+- **`gateway_refund_no` khi done qua querydr** (Khang chốt 23/11): querydr không có trường mã lệnh hoàn, nên để NULL và đánh dấu `confirmed_via_query = true` (0028). Đối soát các dòng này với sao kê VNPay theo `vnp_TxnRef` và số tiền.
+- **Khoản trễ và querydr** (T32 Phần 9a): khoản trễ dùng cùng `vnp_TxnRef` với top-up gốc, nên querydr có thể trả giao dịch đầu thay vì khoản trễ → mã khác → lỗi tạm thời, hết lượt thành `failed`. Trang VNPay ghi `vnp_TransactionNo` là trường request **tuỳ chọn** của querydr nhưng **không có trong chuỗi ký**; chưa gửi trường này.
+
+  **Kết quả thử trên sandbox 24/11 (production chưa kiểm).** Thẻ NCB test, querydr gọi từ máy local:
+
+  | Ca | Thao tác trên VNPay | querydr |
+  |---|---|---|
+  | A | Trả thành công (`15747269`), mở lại cùng URL bị chặn (`code=01`) | Không gửi / gửi mã A1 → A1, RC 00, TS 00 |
+  | B (đường khoản trễ thật) | Lần 1 huỷ (RC 24, TS 02, mã `0`), lần 2 trả thành công (`15747271`) | Không gửi / gửi `0` / gửi mã B2 → B2, RC 00, TS 00 |
+  | Hai tab | Tab 1 dừng ở OTP, tab 2 mở cùng URL bị chặn (`code=01`); về tab 1 nhập OTP báo "Đơn hàng không tồn tại hoặc đã được xử lý" | Không gửi → `15747275`, RC 00, **TS 01** (chưa hoàn tất) |
+
+  Mọi response đều 01 (loại giao dịch), 50.000 VND, chữ ký khớp.
+
+  - **Ca B đã kiểm:** querydr trả đúng giao dịch thành công, không trả lần huỷ trước đó.
+  - **`vnp_TransactionNo` gửi `0` vẫn được nhận** và trả B2, nên field này có thể bị bỏ qua. Chưa chứng minh được nó chọn đúng giao dịch.
+  - **Không tạo được hai giao dịch thành công cùng `vnp_TxnRef` qua cùng URL**, nên chưa biết querydr trả giao dịch đầu hay cuối trong ca đó. Nếu trả nhầm, mã không khớp → lỗi tạm thời → `failed`, Admin xem; không gửi hoàn thêm.
+  - **Ca TS 01:** `classifyQuerydrResponse` xếp vào `unresolved`, không cộng tiền.
+  - **Giới hạn:** hai tab dùng chung một phiên ẩn danh, chưa thử hai trình duyệt / thiết bị. Refund không chạy được trên sandbox, nên chưa biết querydr hiển thị gì sau khi hoàn.
+
+  **Khang quyết định 24/11:** không thêm `vnp_TransactionNo` vào `queryRefundState`, giữ nguyên code.
+- **Phần 10** (route retry refund của Admin, đường xử lý duy nhất cho refund `failed`) dự kiến 25/11/2026.
 - Cách tạo `CreditAccount` + `LoyaltyAccount` khi tài xế đăng ký (WF-05 gọi billing hay billing nghe event).
 - Chiều gọi `session_debit` và loyalty `earn` từ WF-01/03.
 - **Đóng tài khoản khi còn phiên chưa quyết toán** (phát hiện ở T32 Phần 3): định nghĩa "chưa xong" ở D6 (c) — intent chưa kết thúc (gồm `pending` của BE-18), phiên (kể cả phiên thẻ RFID) chưa ở trạng thái cuối về tiền (kể cả `review` do hard cap), hoặc `charge_settlement_jobs.state = 'pending'`. Không chặn thì job quyết toán chạy sau khi đóng bị `CreditLedgerService.post` từ chối (`account_closed`) và kẹt `pending`. Thống nhất `SessionQuery.hasUnsettledSession(driverId)` với Sơn / Trí trước Phần 11.

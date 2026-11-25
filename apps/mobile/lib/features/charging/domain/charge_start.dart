@@ -2,6 +2,27 @@ import '../../../core/api/idempotency_key.dart';
 import 'charging.dart';
 
 const maxChargeEnergyWh = 9007199254740991;
+const maxChargeLimit = maxChargeEnergyWh;
+
+bool validChargeLimit(ChargingMode mode, int? limit) =>
+    mode == ChargingMode.autoFull
+    ? limit == null
+    : limit != null && limit > 0 && limit <= maxChargeLimit;
+
+int? parseChargeLimit(ChargingMode mode, String input) {
+  if (mode == ChargingMode.autoFull) return null;
+  if (mode == ChargingMode.energy) return parseChargeEnergyWh(input);
+  if (!RegExp(r'^[0-9]+$').hasMatch(input.trim())) return null;
+  final value = int.tryParse(input.trim());
+  return validChargeLimit(mode, value) ? value : null;
+}
+
+String chargeLimitInput(ChargingMode mode, int? limit) {
+  if (limit == null) return '';
+  if (mode != ChargingMode.energy) return '$limit';
+  return '${limit ~/ 1000}.${(limit % 1000).toString().padLeft(3, '0')}';
+}
+
 final _kwh = RegExp(r'^([0-9]*)(?:[.,]([0-9]{1,3}))?$');
 
 int? parseChargeEnergyWh(String input) {
@@ -61,7 +82,7 @@ class ChargeStartSnapshot {
     required this.outcome,
     required this.effectConfirmed,
     required this.version,
-    required this.maxEnergyWh,
+    required this.maxLimitValue,
   });
 
   final String intentId;
@@ -69,7 +90,7 @@ class ChargeStartSnapshot {
   final ChargeStartOutcome outcome;
   final bool effectConfirmed;
   final int version;
-  final int? maxEnergyWh;
+  final int? maxLimitValue;
 
   bool get started => sessionId != null && effectConfirmed;
 }
@@ -83,6 +104,8 @@ enum ChargeStartIssue {
   connectorBusy,
   tariffUnavailable,
   vehicleIncompatible,
+  modeUnavailable,
+  powerUnavailable,
   invalidRequest;
 
   bool get refused => switch (this) {
@@ -91,6 +114,8 @@ enum ChargeStartIssue {
     connectorBusy ||
     tariffUnavailable ||
     vehicleIncompatible ||
+    modeUnavailable ||
+    powerUnavailable ||
     invalidRequest => true,
     _ => false,
   };
@@ -104,4 +129,5 @@ class ChargeStartException implements Exception {
 abstract interface class ChargeStartRepository {
   Future<ChargeStartSnapshot> start(StartRequest request);
   Future<ChargeStartSnapshot> read(StartRequest request);
+  void cancelStatusRead();
 }

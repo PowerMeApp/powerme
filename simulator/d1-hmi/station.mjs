@@ -46,6 +46,7 @@ import {
 } from './model.mjs';
 import { registerHandlers } from './ocpp-commands.mjs';
 import { makeHmiActions, fail, done } from './hmi-actions.mjs';
+import { isReaderFrame, maskReaderText } from './rfid-reader.mjs';
 
 export { OCPP_STATUSES, ERROR_CODES, CARDS };
 
@@ -99,6 +100,8 @@ export function createStation(options = {}) {
     status: 'Available',
     errorCode: 'NoError',
     plugged: false,
+    readerGeneration: 0,
+    readerPending: false,
     fault: null,
     inoperative: false,
     pendingAvail: null, // 'Inoperative' | 'Operative' chờ hết phiên
@@ -137,6 +140,7 @@ export function createStation(options = {}) {
 
   // ── Nhật ký OCPP + dòng thời gian ─────────────────────────────────────────
   function pushLog(entry) {
+    entry.text = maskReaderText(entry.text);
     entry.n = ++seq;
     entry.t = Date.now();
     log.push(entry);
@@ -144,7 +148,7 @@ export function createStation(options = {}) {
     events.emit('log', entry);
   }
   function tl(kind, text) {
-    timeline.push({ t: Date.now(), kind, text });
+    timeline.push({ t: Date.now(), kind, text: maskReaderText(text) });
     if (timeline.length > 40) timeline.shift();
     changed();
   }
@@ -205,11 +209,12 @@ export function createStation(options = {}) {
       }
       const [type, id, a, b] = m;
       if (type === 2) {
-        callNames.set(id, a);
+        callNames.set(id, { action: a, reader: isReaderFrame(b?.idTag) });
         pushLog({ dir: outbound ? 'out' : 'in', kind: 'CALL', action: a, text: summarize(a, b) });
       } else {
-        const action = callNames.get(id) ?? '?';
-        const body = type === 3 ? a : { code: a, desc: b };
+        const call = callNames.get(id);
+        const action = call?.action ?? '?';
+        const body = type === 3 ? a : { code: a, desc: call?.reader ? 'Reader request failed' : b };
         pushLog({
           dir: outbound ? 'out' : 'in',
           kind: type === 3 ? 'RESULT' : 'ERROR',
@@ -237,7 +242,10 @@ export function createStation(options = {}) {
       return await client.call(action, payload);
     } catch (e) {
       if (e.rpcErrorCode) {
-        tl('warn', `CSMS từ chối ${action}: ${e.message}`);
+        tl(
+          'warn',
+          `CSMS từ chối ${action}: ${isReaderFrame(payload.idTag) ? 'lỗi yêu cầu đầu đọc' : e.message}`,
+        );
         throw e;
       }
       if (!buffer) throw e;
@@ -248,6 +256,7 @@ export function createStation(options = {}) {
   }
 
   const setStatus = (c, status, errorCode = 'NoError') => {
+    c.readerGeneration++;
     c.status = status;
     c.errorCode = errorCode;
     changed();
@@ -519,6 +528,9 @@ export function createStation(options = {}) {
   }
 
   async function startTx(c, idTag, source) {
+    // RemoteStart may have been scheduled before another caller claimed this connector.
+    if (c.tx) return false;
+    c.readerGeneration++;
     const tx = {
       id: null,
       idTag,
@@ -549,6 +561,7 @@ export function createStation(options = {}) {
     await setStatus(c, 'Charging');
     jAdd(tx.journey, 'charging');
     if (res) flushQueue();
+    return c.tx === tx && res?.idTagInfo?.status === 'Accepted' && tx.id != null;
   }
 
   async function stopTx(c, reason) {
@@ -710,7 +723,8 @@ export function createStation(options = {}) {
       limitHit,
       txId: tx?.id ?? null,
       txActive: !!tx,
-      idTag: tx?.idTag ?? null,
+      idTag: isReaderFrame(tx?.idTag) ? '[reader identifier]' : (tx?.idTag ?? null),
+      readerPending: c.readerPending,
       source: tx?.source ?? null,
       remoteWaitSec: c.remoteWait
         ? Math.max(0, Math.round((c.remoteWait.until - Date.now()) / 1000))

@@ -5,13 +5,12 @@ import 'package:driver_app/app/composition/api_app.dart';
 import 'package:driver_app/app/driver_tab_bar.dart';
 import 'package:driver_app/core/api/api_config.dart';
 import 'package:driver_app/core/api/driver_api_session.dart';
-import 'package:driver_app/core/theme/powerme_theme.dart';
+import 'package:driver_app/app/router.dart';
 import 'package:driver_app/features/auth/application/auth_controller.dart';
 import 'package:driver_app/features/auth/domain/auth_scope.dart';
 import 'package:driver_app/features/charging/data/api_charge_start_repository.dart';
 import 'package:driver_app/features/charging/domain/charge_start.dart';
 import 'package:driver_app/features/charging/domain/charging.dart';
-import 'package:driver_app/features/charging/presentation/charge_flow_visuals.dart';
 import 'package:driver_app/features/profile/application/profile_controller.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -149,6 +148,16 @@ void main() {
             return reply(202, _snapshot('accepted', version: 2));
         }
       }
+      if (r.path == 'sessions/78/progress') {
+        return reply(200, {
+          'session_id': '78',
+          'status': 'active',
+          'updated_at': '2026-11-16T01:02:00Z',
+          'limit_value': 12345,
+          'telemetry_quality': 'unknown',
+          'charge_point': {'is_online': true},
+        });
+      }
       if (r.method == 'GET' && r.path.startsWith('charges/')) {
         return switch (++chargeReads) {
           1 => notFound.future,
@@ -264,25 +273,14 @@ void main() {
       reply(200, _snapshot('active', session: '78', version: 3)),
     );
     await tester.pumpAndSettle();
-    expect(find.text('Trụ đã bắt đầu phiên sạc.'), findsOneWidget);
-    expect(find.text('Đã xác nhận'), findsOneWidget);
-    expect(find.text('Đã chấp nhận'), findsNothing);
-    expect(find.text('Chưa xác nhận'), findsNothing);
-    expect(find.text('Đã bắt đầu'), findsOneWidget);
-    final milestones = tester.widget<ChargeMilestones>(
-      find.byType(ChargeMilestones),
+    expect(
+      _container(
+        tester,
+      ).read(routerProvider).routeInformationProvider.value.uri.path,
+      '/charge-session',
     );
-    final acknowledgement = milestones.steps.singleWhere(
-      (step) => step.label == 'Trụ phản hồi',
-    );
-    expect(acknowledgement.icon, Icons.check_rounded);
-    expect(acknowledgement.color, PowerMeColors.teal);
-    expect(find.text('78'), findsOneWidget);
+    expect(_key('qr-follow-charge'), findsNothing);
     expect(_key('qr-submit-start'), findsNothing);
-    expect(_key('qr-resend-charge'), findsNothing);
-
-    expect(_key('qr-follow-charge'), findsOneWidget);
-    expect(_key('qr-clear-charge'), findsNothing);
     expect(chargePosts, 3);
 
     final reads = fixture.requests.where((r) => r.path.startsWith('charges/'));
@@ -461,6 +459,7 @@ DriverApiFixture _fixture(
         ],
       ),
     ),
+    ('GET', 'sessions') => emptyActiveSessions(r),
     ('GET', 'stations') => reply(200, page([])),
     _ => charges(r),
   };

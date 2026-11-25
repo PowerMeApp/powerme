@@ -120,12 +120,14 @@ export const topUpStatusEnum = pgEnum('top_up_status', [
 /**
  * Ngoại lệ top-up cho Billing Exceptions (migration 0021, T32 Phần 6). `loyalty_error`: đã cộng
  * tiền nhưng sổ điểm hỏng nên không trừ điểm (Phần 6). `unresolved_04` / `unresolved_07`: querydr
- * tới hạn vẫn chưa ngã ngũ, top-up chuyển `expired` (Phần 8).
+ * tới hạn vẫn chưa ngã ngũ, top-up chuyển `expired` (Phần 8). `retry_exhausted` (0027, T32 Phần 8c):
+ * vòng quét giữ chỗ quá `UNFINISHED_CLAIM_LIMIT` lần liên tiếp không ra kết quả, top-up chuyển `expired`.
  */
 export const topUpExceptionKindEnum = pgEnum('top_up_exception_kind', [
   'unresolved_04',
   'unresolved_07',
   'loyalty_error',
+  'retry_exhausted',
 ]);
 /**
  * Loại lần trả mâu thuẫn (migration 0024, T32 Phần 8b). `extra_payment`: đã có khoản trễ, thêm
@@ -165,6 +167,10 @@ export const eInvoiceErrorKindEnum = pgEnum('e_invoice_error_kind', ['transient'
  * đóng tài khoản (SD-2f); hai loại còn lại do Admin quyết (SD-2e).
  */
 export const refundKindEnum = pgEnum('refund_kind', ['top_up', 'late_payment', 'account_closure']);
+/**
+ * STM-10. `done` = VNPay đã nhận yêu cầu hoàn (RC 00 + TS 00 / 05 / 06, hoặc querydr thấy lệnh hoàn);
+ * không có nghĩa tiền đã về tài khoản tài xế (VNPay / ngân hàng chuyển sau, ta không có kênh báo về).
+ */
 export const refundStatusEnum = pgEnum('refund_status', ['requested', 'done', 'failed']);
 
 // ---- ops ----

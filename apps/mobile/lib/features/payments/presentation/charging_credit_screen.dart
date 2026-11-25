@@ -474,19 +474,8 @@ class _LedgerIcon extends StatelessWidget {
 String _sessionLabel(String id, AppCopy copy) =>
     copy.text('Mã phiên sạc $id', 'Session ID $id');
 
-String _money(int value, AppCopy copy, {bool signed = false}) {
-  final absolute = vnd(value.abs());
-  final amount = copy.text(
-    absolute,
-    absolute.replaceAll('.', ',').replaceFirst(' đ', ' VND'),
-  );
-  final sign = value < 0
-      ? '−'
-      : signed && value > 0
-      ? '+'
-      : '';
-  return '$sign$amount';
-}
+String _money(int value, AppCopy copy, {bool signed = false}) =>
+    vnd(value, copy: copy, signed: signed);
 
 String _ledgerLabel(LedgerKind kind, AppCopy copy) => switch (kind) {
   LedgerKind.topUp => copy.text('Nạp tín dụng', 'Top-up'),

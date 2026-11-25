@@ -85,7 +85,10 @@ void main() {
 
     firstLogin.complete(reply(401, {'error': 'invalid_credentials'}));
     await tester.pumpAndSettle();
-    expect(find.text('Email hoặc mật khẩu chưa đúng.'), findsOneWidget);
+    expect(
+      find.text('Email, số điện thoại hoặc mật khẩu chưa đúng.'),
+      findsOneWidget,
+    );
 
     await tester.ensureVisible(submit);
     await tester.tap(submit);
@@ -117,6 +120,7 @@ void main() {
         'auth/login' => reply(200, tokens(accessA)),
         'me' when forbidden => reply(403, {'error': 'forbidden'}),
         'me' => reply(200, account()),
+        'sessions' => emptyActiveSessions(request),
         'stations' => reply(200, page([])),
         _ => throw StateError('Unexpected path'),
       },
@@ -157,7 +161,9 @@ void main() {
     expect(find.textContaining('51A-00001'), findsOneWidget);
     expect(find.text('Tín dụng sạc'), findsOneWidget);
     expect(find.byKey(const Key('edit-profile')), findsNothing);
-    expect(find.byKey(const Key('add-vehicle')), findsOneWidget);
+    final addVehicle = find.byKey(const Key('add-vehicle'));
+    await _showProfileControl(tester, addVehicle);
+    expect(addVehicle, findsOneWidget);
     expect(find.byKey(const Key('edit-9')), findsNothing);
     expect(tester.widget<DriverTabBar>(bar).selected, DriverTab.account);
     for (final route in [
@@ -174,8 +180,7 @@ void main() {
     await tester.tap(find.byKey(const Key('nav-account')));
     await tester.pumpAndSettle();
     final reload = find.byKey(const Key('refresh-profile'));
-    await tester.ensureVisible(reload);
-    await tester.pump();
+    await _showProfileControl(tester, reload);
     await tester.tap(reload);
     await tester.pumpAndSettle();
     expect(
@@ -206,6 +211,7 @@ void main() {
               ],
             ),
           ),
+          ('GET', 'sessions') => emptyActiveSessions(r),
           ('GET', 'stations') => reply(200, page([])),
           ('GET', 'connectors/by-code/PM%20T96.1/2') => switch (++attempt) {
             1 => reply(503, {'error': 'auth_unavailable'}),
@@ -301,6 +307,7 @@ void main() {
             200,
             ownVehicle(id: vehicle = '10'),
           ),
+          ('GET', 'sessions') => emptyActiveSessions(r),
           ('GET', 'stations') => reply(200, page([])),
           ('GET', 'connectors/by-code/PM-T96/2')
               when r.uri.queryParameters['vehicle_id'] == '9' =>
@@ -475,4 +482,16 @@ Future<void> _submitConnector(WidgetTester tester, String code) async {
   await tester.ensureVisible(submit);
   await tester.tap(submit);
   await tester.pumpAndSettle();
+}
+
+Future<void> _showProfileControl(WidgetTester tester, Finder target) async {
+  if (target.evaluate().isEmpty) {
+    await tester.scrollUntilVisible(
+      target,
+      180,
+      scrollable: find.byType(Scrollable).first,
+    );
+  }
+  await tester.ensureVisible(target);
+  await tester.pump();
 }
