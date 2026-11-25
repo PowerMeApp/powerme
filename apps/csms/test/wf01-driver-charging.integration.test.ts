@@ -1,3 +1,5 @@
+import { CreditLedgerService } from '../src/billing/credit-ledger.service.js';
+import { LoyaltyService } from '../src/billing/loyalty.service.js';
 // WP3/T31: real Postgres and OCPP transport; seeded inputs never replace business outputs.
 import { Logger } from '@nestjs/common';
 import { createServer } from 'node:net';
@@ -197,7 +199,13 @@ describeDb('WP3/T31 WF-01 service journey with real OCPP + Postgres', () => {
       new ReconciliationService(db, config),
       config,
     ));
-    settlement = new ChargeSettlementService(db, policy, config);
+    settlement = new ChargeSettlementService(
+      db,
+      new CreditLedgerService(db),
+      new LoyaltyService(policy),
+      policy,
+      config,
+    );
     service = new DriverChargingService(db, registry, settlement, policy);
     grace = new OfflineGraceService(db, config, sessions, registry);
     server = new OcppServer(
@@ -571,7 +579,12 @@ describeDb('WP3/T31 WF-01 service journey with real OCPP + Postgres', () => {
       'DROP TRIGGER test_billing_failure ON credit_transactions; DROP FUNCTION test_billing_failure()',
     );
     await q('UPDATE charge_settlement_jobs SET next_attempt_at=now()');
-    const restarted = new ChargeSettlementService(db, policy);
+    const restarted = new ChargeSettlementService(
+      db,
+      new CreditLedgerService(db),
+      new LoyaltyService(policy),
+      policy,
+    );
     await Promise.all([restarted.retryPending(), settlement.retryPending()]);
     expect((await service.statement(driver, sid)).amount_vnd).toBe('50000');
     expect(

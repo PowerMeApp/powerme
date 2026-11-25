@@ -1,3 +1,5 @@
+import { CreditLedgerService } from '../src/billing/credit-ledger.service.js';
+import { LoyaltyService } from '../src/billing/loyalty.service.js';
 import { randomBytes } from 'node:crypto';
 import { request } from 'node:http';
 import { SignJWT, type JWTPayload } from 'jose';
@@ -170,7 +172,12 @@ describeDb('MB03 authenticated Driver discovery over HTTP and dedicated Postgres
     service = new DriverChargingService(
       db,
       registry,
-      new ChargeSettlementService(db, policy),
+      new ChargeSettlementService(
+        db,
+        new CreditLedgerService(db),
+        new LoyaltyService(policy),
+        policy,
+      ),
       policy,
     );
     server = new ConsoleServer(

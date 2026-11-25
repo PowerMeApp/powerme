@@ -29,6 +29,19 @@ migration 0018) — xem §13.
 — xem §2, §7 và §14. **Dùng được cho app từ T32 Phần 8** (14/11: IPN, trang return, quét top-up
 quá hạn + querydr); chưa có e-invoice (Phần 7), chưa thử sandbox VNPay thật.
 
+**T148 phase 1–3 local (24/11/2026, runtime đã nâng):** quyết toán RFID online có chủ và
+`csms_billed` dùng chung ledger/loyalty sau đối soát; không cần intent/xe mặc định.
+Owner lấy từ session lúc start, không đổi theo registry sau đó. `/credit`, lịch sử
+credit/phiên và statement hiện có phản ánh kết quả sau commit; RFID vẫn
+`can_stop=false`, app Stop 404. Khi chưa posted, progress giữ settlement state/reason
+và statement chưa có (404). Flutter đã có read-only poll tối đa hai phút cho RFID
+csms_billed stopped/pending; budget tính cả background, manual Refresh không reset
+và vẫn dùng được sau hết hạn. Posted dùng bảng kê sở hữu hiện có. Migration 0029
+đã áp một lần vào local sau cold backup và primary review: phiên RFID lịch sử
+599 Wh có đúng một debit 2.276 VND, earn 2 điểm và statement. API/HMI loopback đang
+chạy; staging/physical hardware E2E chưa được xác nhận.
+Xem [T148 và giới hạn BR-P19](../tasks/t148-rfid-settlement.md).
+
 ---
 
 ## 1. Vì sao cần hợp đồng này ngay
@@ -93,7 +106,7 @@ Dừng tương tự: `POST /sessions/{id}/stop` trả 202 với `command_status`
 
 ## 5. Phiên không do app tạo — T146, OpenAPI 0.15.0 (24/11/2026)
 
-Tài xế đọc mọi phiên có driver_id khớp principal, bất kể origin và có/không có intent hoặc ledger. Phiên không gắn tài xế không xuất hiện. Card management thuộc Admin. Nội dung cũ về thẻ ví/station_wallet tại mục này đã được thay thế: PowerMe đã bỏ thẻ ví theo BR-P08/T110; T146 không thêm lại và T148 quyết toán RFID vẫn chưa triển khai.
+Tài xế đọc mọi phiên có driver_id khớp principal, bất kể origin và có/không có intent hoặc ledger. Phiên không gắn tài xế không xuất hiện. Card management thuộc Admin. Nội dung cũ về thẻ ví/station_wallet tại mục này đã được thay thế: PowerMe đã bỏ thẻ ví theo BR-P08/T110; T146 không thêm lại. T148 phase 1–3 đã triển khai backend/Flutter và nâng runtime local sau backup; xem trạng thái T148 ở đầu tài liệu.
 
 GET /api/driver/v1/sessions?view=active|all&page=1&page_size=20 trả {items,total,page,page_size}. Mặc định all/1/20; page 1–100000, page_size 1–100. Chỉ ba key này, mỗi key một lần; key lạ/trùng (kể cả driver_id/id_tag), enum sai, khoảng trắng/control, số âm/0/phân số/quá giới hạn/SQL-shaped đều 400 invalid_input. Bearer và active-driver DB check chạy trước validation/method; method khác trả 405 với Allow: GET, OPTIONS. OPTIONS theo preflight CORS hiện có (204, không cần bearer).
 

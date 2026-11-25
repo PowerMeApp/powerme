@@ -1,3 +1,5 @@
+import { CreditLedgerService } from '../src/billing/credit-ledger.service.js';
+import { LoyaltyService } from '../src/billing/loyalty.service.js';
 /**
  * BE-21 — đăng ký / đăng nhập / làm mới token tài xế qua HTTP thật trên Postgres riêng.
  * BE-30 — đăng ký có số điện thoại (chuẩn hoá E.164, 409 `phone_taken`) và đăng nhập bằng số.
@@ -96,7 +98,17 @@ describeDb('BE-21 driver register / login / refresh over HTTP and dedicated Post
       new ConsoleQueries(db, config, registry),
       new ConsoleCommands(db, registry),
       db,
-      new DriverChargingService(db, registry, new ChargeSettlementService(db, policy), policy),
+      new DriverChargingService(
+        db,
+        registry,
+        new ChargeSettlementService(
+          db,
+          new CreditLedgerService(db),
+          new LoyaltyService(policy),
+          policy,
+        ),
+        policy,
+      ),
     );
     await server.start();
     base = `http://127.0.0.1:${server.port}`;

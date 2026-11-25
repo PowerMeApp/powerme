@@ -1,3 +1,5 @@
+import { CreditLedgerService } from '../src/billing/credit-ledger.service.js';
+import { LoyaltyService } from '../src/billing/loyalty.service.js';
 /**
  * BE-22 — route sạc/credit của app tài xế qua HTTP thật + OCPP thật + Postgres riêng.
  * Chạy bằng `npm run test:driver-discovery -w @powerme/csms` (runner tạo DB mới cho mỗi suite).
@@ -283,7 +285,12 @@ describeDb('BE-22 driver charges and credit over HTTP, real OCPP and dedicated P
       new ReconciliationService(db, config),
       config,
     );
-    settlement = new ChargeSettlementService(db, policy);
+    settlement = new ChargeSettlementService(
+      db,
+      new CreditLedgerService(db),
+      new LoyaltyService(policy),
+      policy,
+    );
     service = new DriverChargingService(db, registry, settlement, policy);
     grace = new OfflineGraceService(db, config, sessions, registry);
     ocpp = new OcppServer(

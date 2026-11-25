@@ -365,7 +365,25 @@ Function kiểm `NEW.received_stopped_at IS NOT NULL`, không chỉ chuyển NUL
 
 **Job và tiền:** PK `charge_settlement_jobs.session_id` giữ một job/phiên; partial index `charge_settlement_jobs_due(next_attempt_at) WHERE state='pending'` hỗ trợ quét đến hạn. Chống thu trùng còn cần partial UNIQUE `session_debit` ([0000](../apps/csms/drizzle/0000_init.sql)), UNIQUE `earn`/phiên, PK `charging_statements.session_id` ([0004](../apps/csms/drizzle/0004_wp3_t31_charging.sql)) và khóa `FOR UPDATE` trên phiên, ví, tài khoản điểm. [ChargeSettlementService](../apps/csms/src/sessions/charge-settlement.service.ts) ghi debit, điểm, số dư, đoạn giá, statement và đặt reserve về 0 trong transaction riêng; lỗi thì rollback phần tiền. Job được cập nhật sau đó; nếu tiến trình dừng giữa hai bước, thử lại nhận `already_posted` từ statement đã tồn tại.
 
-**Điều kiện và thử lại:** cần policy, `origin='app_qr'`, intent khớp phiên/tài xế, `csms_billed`, Driver, `reconciled`, meter/energy hợp lệ và đủ giá/bằng chứng biên giá. Promotion, offline pricing hoặc late-start cần review vẫn chờ. `pending.reason` phân biệt `awaiting_reconciliation`, `policy_unconfigured`, `tariff_coverage_or_boundary_meter_required`, `transient_error`…; `ineligible` là ngoài nhánh đủ điều kiện; `posted` là đã ghi statement. `station_wallet`/`unattributed` không tự debit/earn. Statement thuộc phiên; e-invoice thuộc top-up.
+**Điều kiện và thử lại (T148):** cần policy, `csms_billed`, Driver và một nhánh:
+app_qr có intent khớp; RFID có chủ captured trong sessions; hoặc origin khác free_vend
+có history `UNATTRIBUTED_ASSIGNED` (BE-24). Cần reconciled, meter cuối/energy khớp,
+không promotion và đủ giá. T134 giữ clock CP/offset/CSMS và nội suy biên; BR-P45
+round tổng một lần. D9 dùng `CreditLedgerService.post` rồi
+`LoyaltyService.earnForSession` trên cùng PoolClient, khóa session → credit → loyalty.
+Không tra lại card owner/status lúc stop. Free vend/unattributed không thu.
+Thiếu account → pending/credit_account_missing; closed → pending/account_closed;
+in_shortfall được âm thêm theo BR-P20. Giữ các reason phục hồi/review hiện có.
+Statement thuộc phiên; e-invoice thuộc top-up.
+
+**Khôi phục RFID 0029 (đã áp local ở phase 3 sau backup/review; chưa staging):** chỉ job thiếu/ineligible của stopped RFID
+có chủ, csms_billed, closed/review/reconciled, stop không sau thời điểm migration,
+chưa statement và chưa session debit → pending/t148_rfid_recovered. Giữ attempts,
+pending/posted và mọi tiền/loyalty/session; không đổi trigger 0005 (vẫn queue mọi
+stopped session và chỉ wake pending). Không đổi schema TS/DBML.
+[Nhật ký 0029](NHAT-KY-MIGRATION-0029.md), [test 0029](../apps/csms/test/migration-0029.integration.test.ts)
+và [T148](tasks/t148-rfid-settlement.md) ghi tiêu chí, idempotency và giới hạn triển khai.
+
 
 [ChargeRecoveryService](../apps/csms/src/sessions/charge-recovery.service.ts) quét ngay khi bootstrap, rồi mỗi 10 giây; `retryPending()` mặc định lấy tối đa 25 job đến hạn. Lịch thử lại pending/lỗi billing là sau 30 giây nếu cập nhật metadata thành công; trigger có thể đưa job pending về hạn ngay. DB giữ job qua restart; WP3 dùng timer, không dùng BullMQ.
 

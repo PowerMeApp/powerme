@@ -65,7 +65,7 @@ Việc nền viết theo D7 (quét DB). API admin bám D10. Đường dẫn theo
 | `RealtimeGateway.emit` | realtime | | |
 | `SessionQuery.hasUnsettledSession` (định nghĩa ở decisions D6 (c), chờ thống nhất với Sơn / Trí) | WF-01/03 | | |
 | Tạo `CreditAccount` (+ `LoyaltyAccount`; settlement WP3 đã tự tạo loyalty khi thiếu) | chưa có module `users` | | |
-| Ghi `session_debit` + loyalty `earn` | WP3 (`charge-settlement.service.ts`, đang ghi thẳng) | | |
+| Ghi `session_debit` + loyalty `earn` | WP3 (`charge-settlement.service.ts`, T148 gọi shared services cùng transaction; phase 3 đã nâng local sau backup/review) | D9, [T148](t148-rfid-settlement.md) | 24/11/2026 local |
 | VNPay sandbox (TMN code, hash secret, URL IPN public) | Khang / nhóm | | |
 
 ## Yêu cầu cho nhóm

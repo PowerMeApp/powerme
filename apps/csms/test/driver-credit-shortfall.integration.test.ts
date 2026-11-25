@@ -322,7 +322,12 @@ describeDb('T104 BR-P20 trên đường app: ví âm, nạp bù phần thiếu, 
     const charging = new DriverChargingService(
       db,
       registry,
-      new ChargeSettlementService(db, policy),
+      new ChargeSettlementService(
+        db,
+        new CreditLedgerService(db),
+        new LoyaltyService(policy),
+        policy,
+      ),
       policy,
     );
     grace = new OfflineGraceService(db, config, sessions, registry);
