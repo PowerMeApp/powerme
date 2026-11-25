@@ -39,7 +39,8 @@ CP_IDS=RH24D1-00001,RH24D1-00002 CP_PASSWORDS=pw1,pw2 node simulator/d1-hmi/serv
 | `GET /` | Trang tổng: mọi trụ, online/offline, tốc độ, hàng đợi, trạng thái + kW/kWh/SoC từng súng, link sang trang trụ (SSE `/tong/events`, JSON `/api/tong`) |
 | `GET /tru/<cpId>` | Trang từng trụ: "Phiên sạc trên trụ này" + hình trụ 3D/2D + HMI bấm được + nhật ký OCPP của riêng trụ đó (SSE `/events/<cpId>`) |
 | `GET /api/<cpId>/state`, `POST /api/<cpId>/<hành động>` | Snapshot / hành động HMI của một trụ (`plug`, `unplug`, `swipe`, `password`, `mode`, `stop`, `fault`, `clearfault`, `speed`, `syncclock`, `drop`, `halfopen`, `reboot`) |
-| `GET /events`, `GET /api/state`, `POST /api/<hành động>` | Đường cũ, trỏ vào **trụ đầu tiên** (healthcheck Dockerfile, script cũ) |
+| `POST /api/<cpId>/swipeReader` | Đầu đọc RFID USB của một trụ (T146): chỉ loopback (peer + Host đúng cổng), cùng origin, `Sec-Fetch-Site` same-origin/none, `application/json`, thân ≤ 512 B, đúng `{connector, idTag}`. Không đi qua route hành động chung |
+| `GET /events`, `GET /api/state`, `POST /api/<hành động>`, `POST /api/swipeReader` | Đường cũ, trỏ vào **trụ đầu tiên** (healthcheck Dockerfile, script cũ) |
 | `GET /vendor/three/three.module.js`, `.../three.core.js` | Đúng hai file build của `three` trong `node_modules`; tên khác hoặc có `..` → 404 |
 
 cpId lạ, đoạn đường dẫn có `..`/gạch chéo (kể cả dạng `%2e`, `%2f`, `%5c`) → 404. Mọi chữ đến từ OCPP/CSMS được escape trước khi chèn vào HTML.
@@ -50,6 +51,8 @@ cpId lạ, đoạn đường dẫn có `..`/gạch chéo (kể cả dạng `%2e`
 ## Đầu đọc RFID USB (T146, phase 1)
 
 Đầu đọc USB dạng bàn phím đã được người dùng xác nhận xuất 10 chữ số + Enter trong Notepad. Cắm súng, chờ online, bấm ô **Đầu đọc RFID USB** của đúng súng rồi quẹt. HMI giữ nguyên chuỗi (kể cả số 0 đầu), gửi OCPP Authorize thật và chỉ yêu cầu Start khi được Accepted và súng/kết nối vẫn hợp lệ. Thẻ lạ/offline không dùng danh sách thẻ mẫu. Thẻ mẫu vẫn có lối riêng.
+
+**Trên trang từng trụ (QA-03):** mỗi súng của `/tru/<cpId>` có ô **"Đầu đọc RFID USB · súng X"**, gửi tới `POST /api/<cpId>/swipeReader` của đúng trụ đó (cùng kiểm tra bảo mật như route cũ; cpId lạ → 404). `POST /api/swipeReader` cũ vẫn chạy, trỏ vào trụ đầu tiên. Khối "Phiên sạc trên trụ này" ghi bước `Quẹt thẻ ở đầu đọc RFID USB → Authorize` và `StartTransaction … nguồn thẻ RFID (đầu đọc USB)`; mã thẻ 10 số luôn hiện `[reader identifier]` ở hành trình, snapshot, nhật ký và trang tổng (server che trước khi gửi SSE). Ảnh: [`docs/tru-trang-rfid.png`](docs/tru-trang-rfid.png) (2 trụ, quẹt đầu đọc ở súng A trụ 2 qua bàn phím giả lập trong Edge headless, CSMS giả trong máy).
 
 **Chưa retest capture bằng đầu đọc vật lý trên HMI/điện thoại.** Các phase tiếp theo đã thêm API 0.15 và nối Flutter local để tìm/theo dõi phiên RFID chỉ đọc và hiển thị Lịch sử mọi nguồn; kiểm chứng hiện là transport/widget, không là staging hay đầu đọc thật. Backend 0.15 chưa triển khai staging, cấu hình app không đổi; cần liên kết thẻ đúng chủ qua quy trình Admin được cho phép và retest HMI/điện thoại sau khi API sẵn sàng. Không tự đăng ký thẻ và chưa hoàn tất tính tiền RFID (T148 hoãn). Xem [nghiên cứu, kiểm thử và giới hạn đầu đọc](docs/t146-rfid-usb.md) và [handoff API/Flutter](../../docs/tasks/t146-driver-session-discovery.md).
 
@@ -75,7 +78,9 @@ Dựng một CSMS ocpp-rpc tối thiểu trong chính script, chạy `server.mjs
 | `public/tru.html` | Trang từng trụ: hành trình phiên + biểu đồ, bộ chọn tốc độ, HMI (CSS/JS inline, sáng/tối theo hệ thống, nút "Chữ lớn" cho máy chiếu) + khung SVG của hình trụ. Trước QA-03 là `index.html` |
 | `public/tru-3d.js` | Hình trụ 3D (three.js, ES module), fallback về SVG |
 | `public/tru-sac.css`, `public/tru-sac.js` | Hình trụ sạc minh hoạ có hoạt ảnh (QA-02); phục vụ qua `GET /static/<tên>.css\|js` (chỉ tên file đơn trong `public/`, `..` và gạch chéo bị 404) |
+| `rfid-reader.mjs`, `public/rfid-reader.js` | Đầu đọc RFID USB (T146): kiểm khung 10 chữ số, che mã; ô nhập theo súng trên trang trụ |
 | `smoke.mjs` | Kiểm thử chuỗi bản tin |
+| `rfid-*.test.mjs` | Test đầu đọc: hành động, loopback OCPP + route HTTP (cả `/api/<cpId>/swipeReader` nhiều trụ), giao diện |
 | `docs/` | Ảnh chụp HMI và trang tổng/trang trụ |
 
 ## Trang từng trụ — cho người test app tài xế (QA-03)

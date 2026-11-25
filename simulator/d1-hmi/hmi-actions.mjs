@@ -6,7 +6,7 @@
 //   Authorize; offline chấp nhận hai thẻ hợp lệ theo danh sách cục bộ; pin đầy/lỗi → "Other".
 
 import { CARDS, ERROR_CODES, FREE_VEND_TAG } from './model.mjs';
-import { isReaderFrame } from './rfid-reader.mjs';
+import { isReaderFrame, READER_MASK } from './rfid-reader.mjs';
 
 export const fail = (message) => ({ ok: false, message });
 export const done = (message = 'ok') => ({ ok: true, message });
@@ -26,6 +26,9 @@ export function makeHmiActions(s) {
     c.errorCode === 'NoError' &&
     c.status === 'Preparing' &&
     !c.remoteWait;
+  // Hành trình phiên (QA-03): bước Authorize của đầu đọc; idTag bị che trong station (jAdd).
+  const readerStep = (c, status, close) =>
+    jStep(c, 'authorize', { idTag: READER_MASK, status, reader: true }, { close });
   return {
     async swipeReader(a) {
       if (
@@ -58,12 +61,14 @@ export function makeHmiActions(s) {
         try {
           response = await authorize(a.idTag);
         } catch {
+          readerStep(c, null, true);
           return readerFail(
             'network',
             'Chưa nhận được kết quả Authorize từ CSMS. Chưa gửi StartTransaction; kiểm tra mạng rồi quẹt lại.',
           );
         }
         const status = response?.idTagInfo?.status;
+        readerStep(c, status ?? null, status !== 'Accepted');
         if (['Invalid', 'Blocked', 'Expired', 'ConcurrentTx'].includes(status))
           return readerFail(
             'rejected',
@@ -79,11 +84,13 @@ export function makeHmiActions(s) {
           net.epoch !== epoch ||
           !readerReady(c) ||
           c.readerGeneration !== generation
-        )
+        ) {
+          jStep(c, 'readerStale', {}, { close: true });
           return readerFail(
             'stale',
             'Súng hoặc kết nối đã thay đổi trong lúc chờ. Chưa gửi StartTransaction; kiểm tra súng rồi quẹt lại.',
           );
+        }
         let confirmed;
         try {
           confirmed = await startTx(c, a.idTag, 'rfid');

@@ -5,7 +5,7 @@ import vm from 'node:vm';
 
 const code = await readFile(new URL('./public/rfid-reader.js', import.meta.url), 'utf8');
 const TAG = '0000012345';
-function surface(fetch) {
+function surface(fetch, endpoint) {
   const listeners = {};
   const input = {
     value: '',
@@ -19,7 +19,7 @@ function surface(fetch) {
     message = { classList: { toggle() {} } };
   const window = {};
   vm.runInNewContext(code, { window, fetch });
-  const update = window.bindRfidReader(input, clear, message, 2);
+  const update = window.bindRfidReader(input, clear, message, 2, ...(endpoint ? [endpoint] : []));
   const state = { net: { state: 'online', booted: true, epoch: 1, halfOpen: false } };
   const gun = {
     plugged: true,
@@ -125,4 +125,21 @@ test('blur clears partial frame and fetch failure reports uncertain outcome', as
   assert.ok(h.message.textContent.includes('chưa xác định'));
   assert.equal(h.input.value, '');
   assert.equal(h.input.disabled, false);
+});
+
+test('per-station page posts to its own reader route (QA-03)', async () => {
+  const calls = [];
+  const h = surface(async (url, options) => {
+    calls.push({ url, body: JSON.parse(options.body) });
+    return { json: async () => ({ ok: true, message: 'confirmed' }) };
+  }, '/api/RH24D1-00002/swipeReader');
+  h.input.value = TAG;
+  await h.enter();
+  assert.deepEqual(calls, [
+    { url: '/api/RH24D1-00002/swipeReader', body: { connector: 2, idTag: TAG } },
+  ]);
+  const page = await readFile(new URL('./public/tru.html', import.meta.url), 'utf8');
+  assert.match(page, /<script src="\/static\/rfid-reader\.js"><\/script>/);
+  assert.match(page, /bindRfidReader\([\s\S]{0,120}API \+ 'swipeReader'/);
+  assert.doesNotMatch(page, /localStorage|sessionStorage/);
 });

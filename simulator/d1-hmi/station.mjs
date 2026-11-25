@@ -46,7 +46,7 @@ import {
 } from './model.mjs';
 import { registerHandlers } from './ocpp-commands.mjs';
 import { makeHmiActions, fail, done } from './hmi-actions.mjs';
-import { isReaderFrame, maskReaderText } from './rfid-reader.mjs';
+import { isReaderFrame, maskReaderText, READER_MASK } from './rfid-reader.mjs';
 
 export { OCPP_STATUSES, ERROR_CODES, CARDS };
 
@@ -169,6 +169,8 @@ export function createStation(options = {}) {
   }
   function jAdd(j, kind, info = {}) {
     if (!j) return;
+    // Mã đầu đọc (10 chữ số) không bao giờ rời server: hành trình đi qua SSE/snapshot.
+    if (isReaderFrame(info.idTag)) info = { ...info, idTag: READER_MASK };
     j.steps.push({ t: Date.now(), sim: simIso(), kind, ...info });
     if (j.steps.length > 30) j.steps.splice(1, 1); // giữ bước đầu tiên
     changed();
@@ -548,7 +550,13 @@ export function createStation(options = {}) {
     c.remoteWait = null;
     tx.journey = openJourney(c);
     const online = net.state === 'online';
-    jAdd(tx.journey, 'startSent', { idTag, source, meterStart: tx.meterStart, queued: !online });
+    jAdd(tx.journey, 'startSent', {
+      idTag,
+      source,
+      reader: source === 'rfid' && isReaderFrame(idTag), // phiên từ đầu đọc RFID USB (T146)
+      meterStart: tx.meterStart,
+      queued: !online,
+    });
     pushPoint(c, true);
     changed();
     const res = await emit(
@@ -586,7 +594,7 @@ export function createStation(options = {}) {
     if (j) {
       j.summary = {
         txId: tx.id,
-        idTag: tx.idTag,
+        idTag: isReaderFrame(tx.idTag) ? READER_MASK : tx.idTag,
         meterStart: tx.meterStart,
         meterStop,
         wh: tx.wh,
@@ -723,7 +731,7 @@ export function createStation(options = {}) {
       limitHit,
       txId: tx?.id ?? null,
       txActive: !!tx,
-      idTag: isReaderFrame(tx?.idTag) ? '[reader identifier]' : (tx?.idTag ?? null),
+      idTag: isReaderFrame(tx?.idTag) ? READER_MASK : (tx?.idTag ?? null),
       readerPending: c.readerPending,
       source: tx?.source ?? null,
       remoteWaitSec: c.remoteWait
