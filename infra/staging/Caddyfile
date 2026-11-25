@@ -1,8 +1,9 @@
 # TLS cho mọi thứ (OCPP Security Profile 2 cần wss). Let's Encrypt tự cấp cho $DOMAIN
 # (cần DNS A record trỏ về VPS và cổng 80/443 mở).
 #
-# CHỈ các đường dẫn dưới đây ra internet: /ocpp/*, /health, và đúng hai đường VNPay
-# /billing/vnpay/ipn, /billing/vnpay/return (T32 Phần 6, Trí duyệt). Console vận hành (/api/admin/*,
+# CHỈ các đường dẫn dưới đây ra internet: /ocpp/*, /health, đúng hai đường VNPay
+# /billing/vnpay/ipn, /billing/vnpay/return (T32 Phần 6, Trí duyệt), và Driver API /api/driver/v1/*
+# (BE-45, có JWT tài xế). Console vận hành (/api/admin/*,
 # gồm POST ngắt kết nối và RemoteStop) CHƯA có xác thực nên TUYỆT ĐỐI không được proxy ở đây — xem
 # bằng SSH tunnel. KHÔNG mở /billing/* hay đường console khác. Khi có xác thực (users + RolesGuard)
 # và REST/realtime cho app thì mới thêm route.
@@ -27,6 +28,17 @@
 		reverse_proxy csms:3000
 	}
 	handle /billing/vnpay/return {
+		reverse_proxy csms:3000
+	}
+
+	# BE-45: Driver API cho app tài xế trên điện thoại (bản release chỉ nhận https). Mọi route trừ
+	# /auth/* đều cần JWT tài xế (ADR-0018); CORS chỉ nhận origin localhost nên trang web lạ bị 403.
+	# CSMS chuyển MỌI URL bắt đầu /api/driver/ sang listener Driver API (khớp đường chính xác), nên
+	# không rơi vào console. Thêm lớp chặn: URI gốc có "..", %2e, %2f hoặc %5c → 400 trước khi proxy.
+	handle /api/driver/v1/* {
+		# Chuỗi raw r'…' của CEL: regex không qua lớp escape nào (chuỗi "…" thường làm CEL lỗi lúc chạy).
+		@unsafe expression `{http.request.orig_uri}.matches(r'(?i)(\.\.|%2e|%2f|%5c)')`
+		respond @unsafe 400
 		reverse_proxy csms:3000
 	}
 

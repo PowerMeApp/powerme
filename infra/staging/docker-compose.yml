@@ -60,6 +60,10 @@ services:
       # IP của Caddy → 5 lần sai mật khẩu của kẻ lạ khoá luôn trụ thật, 20 lần khoá mọi trụ.
       # Cố định ở đây, không đọc từ .env.
       OCPP_TRUST_PROXY: 'true'
+      # BE-45: cùng lý do cho Driver API (Caddy proxy /api/driver/v1/*). Thiếu dòng này mọi tài xế chung
+      # IP của Caddy → 20 lần sai mật khẩu trong 60 s của kẻ lạ khoá đăng nhập của MỌI tài xế 15 phút.
+      # Gọi thẳng 127.0.0.1:3000 trên VM (không qua Caddy, không có header) vẫn dùng IP socket.
+      DRIVER_API_TRUST_PROXY: 'true'
       OFFLINE_GRACE_S: ${OFFLINE_GRACE_S:-120}
       OCPP_HEARTBEAT_INTERVAL_SECONDS: ${OCPP_HEARTBEAT_INTERVAL_SECONDS:-300}
       SESSION_START_TIMEOUT_S: ${SESSION_START_TIMEOUT_S:-120}

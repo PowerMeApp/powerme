@@ -5,7 +5,13 @@ import type { DriverChargingService } from '../sessions/driver-charging.service.
 import { ChargingError } from '../sessions/charging-error.js';
 import type { EstimateStationRoads, StationSearchInput } from '../sessions/station-search.js';
 import { DriverAccounts, DriverRateLimited } from './driver-account.js';
-import { authenticateDriver, databaseId, DriverApiConfig, DriverApiError } from './driver-auth.js';
+import {
+  authenticateDriver,
+  databaseId,
+  DriverApiConfig,
+  DriverApiError,
+  driverClientIp,
+} from './driver-auth.js';
 import {
   chargeRouteMethod,
   chargingErrorStatus,
@@ -194,6 +200,7 @@ export function createDriverListener(
           q,
           driverId,
           topUps,
+          clientAddress: driverClientIp(req, config),
           readBody: () => readJsonObject(req, res),
           setAllow: (methods) => res.setHeader('Allow', methods),
         });
@@ -384,7 +391,7 @@ export function createDriverListener(
       throw new DriverApiError(400, 'invalid_input');
     accounts.assertConfigured();
     const body = await readJsonObject(req, res);
-    const ip = req.socket.remoteAddress ?? 'unknown';
+    const ip = driverClientIp(req, config);
     if (route === 'register') send(res, 201, await accounts.register(body, ip));
     else if (route === 'login') send(res, 200, await accounts.login(body, ip));
     else send(res, 200, await accounts.refresh(body));

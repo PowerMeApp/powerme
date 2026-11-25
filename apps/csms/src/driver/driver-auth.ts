@@ -10,6 +10,12 @@ export interface DriverApiConfig {
   searchKey?: string;
   /** Refresh token life in seconds (BE-21, `DRIVER_API_REFRESH_TTL_S`); access tokens stay 900 s. */
   refreshTtlS?: number;
+  /**
+   * BE-45: CSMS đứng sau Caddy (staging) → lấy IP client từ giá trị CUỐI của X-Forwarded-For (do Caddy
+   * thêm, client không giả được) cho bộ khoá đăng nhập theo IP và vnp_IpAddr. Biến `DRIVER_API_TRUST_PROXY`.
+   * KHÔNG bật khi Driver API lộ thẳng ra internet: khi đó header do client tự đặt.
+   */
+  trustProxy?: boolean;
 }
 
 /** BE-21: default refresh token life = 30 days; bounds 1 h .. 90 days. */
@@ -58,6 +64,8 @@ export function loadDriverApiConfig(env: NodeJS.ProcessEnv): DriverApiConfig {
     if (secret.length < 32 || Buffer.from(secret).toString('base64') !== encoded)
       throw new Error('Driver JWT secret must be canonical base64 of at least 32 random bytes');
   }
+  const proxy = env['DRIVER_API_TRUST_PROXY'] ?? 'false';
+  if (!['true', 'false'].includes(proxy)) throw new Error('Invalid DRIVER_API_TRUST_PROXY');
   const refreshRaw = env['DRIVER_API_REFRESH_TTL_S'];
   let refreshTtlS = DEFAULT_DRIVER_REFRESH_TTL_S;
   if (refreshRaw !== undefined && refreshRaw !== '') {
@@ -72,7 +80,21 @@ export function loadDriverApiConfig(env: NodeJS.ProcessEnv): DriverApiConfig {
     devAuth: dev === 'true',
     searchKey: env['VIETMAP_SEARCH_API_KEY'],
     refreshTtlS,
+    trustProxy: proxy === 'true',
   };
+}
+
+/** IP của client cho giới hạn đăng nhập và VNPay; xem `DriverApiConfig.trustProxy`. */
+export function driverClientIp(
+  req: Pick<IncomingMessage, 'headers' | 'socket'>,
+  config: Pick<DriverApiConfig, 'trustProxy'>,
+): string {
+  if (config.trustProxy) {
+    const xff = req.headers['x-forwarded-for'];
+    const last = (Array.isArray(xff) ? xff.join(',') : xff)?.split(',').pop()?.trim();
+    if (last) return last;
+  }
+  return req.socket.remoteAddress ?? 'unknown';
 }
 
 export async function authenticateDriver(

@@ -134,6 +134,8 @@ export interface TopUpRouteContext {
   path: string;
   q: URLSearchParams;
   driverId: string;
+  /** BE-45: IP client đã tính theo DRIVER_API_TRUST_PROXY; không có → địa chỉ socket. */
+  clientAddress?: string;
   /** Không có (server dựng không kèm billing, vd test) → 503 payment_unconfigured. */
   topUps?: TopUpService;
   /** Đọc body JSON object (415/413/400 theo mẫu /auth/*). */
@@ -152,7 +154,7 @@ export async function handleTopUpRoute(
   }
   noQuery(ctx.q, route.name === 'quote' ? ['amount_vnd'] : []);
   const driver = safeId(ctx.driverId);
-  const ip = clientIp(ctx.req.socket.remoteAddress);
+  const ip = clientIp(ctx.clientAddress ?? ctx.req.socket.remoteAddress);
   try {
     switch (route.name) {
       case 'quote': {
