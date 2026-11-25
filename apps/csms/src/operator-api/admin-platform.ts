@@ -13,20 +13,20 @@
  */
 import type { Db } from '../db/db.module.js';
 import { guideFor } from '../stations/faults/error-code-guide.js';
-import { AuthError } from '../users/auth.js';
 import { OFFLINE_SQL, type MonitoringThresholds } from './operator-monitoring.js';
 
 export type AdminRoute = { kind: 'summary' };
 
-/** Matches `rest` (path after /api/admin/v1); null if it is not a platform route. */
-export function matchAdminRoute(rest: string, query: URLSearchParams): AdminRoute | null {
-  if (rest !== '/summary') return null;
-  if ([...query.keys()].length) throw new AuthError(400, 'invalid_input');
-  return { kind: 'summary' };
+/**
+ * Matches `rest` (path after /api/admin/v1); null if it is not a platform route. No query check
+ * here: operator-api.http.ts answers 400 to any query on this path before routing (QUERY_PATHS).
+ */
+export function matchAdminRoute(rest: string): AdminRoute | null {
+  return rest === '/summary' ? { kind: 'summary' } : null;
 }
 
 /** `offline` with the threshold as $1 (same rule as the operator API, D20). */
-const OFFLINE = OFFLINE_SQL.replace('$2', '$1');
+const OFFLINE = OFFLINE_SQL.replaceAll('$2', '$1');
 
 /**
  * Lab data kept on staging and never counted here (apps/csms/lab/nfr03/load-data.mjs,
