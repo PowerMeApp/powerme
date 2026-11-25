@@ -1,6 +1,6 @@
 @startuml AD-9
 !include _style.iuml
-title AD-9 (System level) — Handle billing exceptions: refunds and e-invoice retry\nTrigger: Admin picks an item on Billing Exceptions, or a Driver closes the account\nUse cases: UC-ADM-08, UC-ACC-02 · Rules: BR-P13, BR-P14, BR-P21, BR-P44, BR-P51
+title AD-9 (System level) — Handle billing exceptions: manual refunds and e-invoice retry\nTrigger: Admin picks an item on Billing Exceptions, or a Driver closes the account\nUse cases: UC-ADM-08, UC-ACC-02 · Rules: BR-P13, BR-P14, BR-P21, BR-P44, BR-P51\nRefunds are made by customer service (Admin staff) in the VNPay merchant portal, outside PowerMe
 
 |«person»\nDriver|
 |«person»\nAdmin|
@@ -13,27 +13,25 @@ if ( ) then ([Admin picks an item])
   |«person»\nAdmin|
   :Open Billing Exceptions\nand choose an item;
   |«software system»\nPowerMe Platform|
-  if ( ) then ([top-up to refund])
+  if ( ) then ([BR-P44: e-invoice needs review])
+    :Send the e-invoice to the provider\nagain, once (attempt count not reset)>
+    if ( ) then ([issued by the provider])
+      :EInvoice\n&#91;issued&#93;]
+    else ([provider error])
+      :EInvoice\n&#91;needs_review&#93;]
+    endif
+    stop
+  elseif ( ) then ([top-up to refund])
     :Check that the available\nbalance covers the top-up;
     if ( ) then ([BR-P21: available balance < amount,\naccount closed, or top-up not credited])
       :Refuse with reason;
       stop
     else ([balance covers it])
-      :Record the refund at once: debit\ncredit, restore redeemed points;
+      :Debit Charging Credit at once,\nreturn redeemed points;
       :TopUp\n&#91;refunded&#93;]
       :LoyaltyTransaction\n&#91;restore&#93;]
     endif
-  else ([else])
-    if ( ) then ([BR-P44: e-invoice needs review])
-      :Send the e-invoice to the provider\nagain, once (attempt count not reset)>
-      if ( ) then ([issued by the provider])
-        :EInvoice\n&#91;issued&#93;]
-      else ([provider error])
-        :EInvoice\n&#91;needs_review&#93;]
-      endif
-      stop
-    else ([late payment to refund,\nor failed refund to retry])
-    endif
+  else ([late payment to refund\n(never credited, nothing debited)])
   endif
 else ([Driver closed the account])
   |«person»\nDriver|
@@ -49,20 +47,33 @@ else ([Driver closed the account])
   :LoyaltyTransaction\n&#91;expire&#93;]
   :CreditAccount\n&#91;closed&#93;]
 endif
-if ( ) then ([failed refund\nbeing retried])
-else ([new refund])
-  :Create refund request (top_up and\nlate_payment: one per top-up;\nclosure: one per share);
-  :Refund\n&#91;requested&#93;]
-endif
-:Send refund to the original payment\nsource (automatic retries after 5 min,\n30 min, 2 h; unknown result: query\nthe gateway before any resend)>
+:Create refund request (top_up and\nlate_payment: by the Admin, one per top-up;\naccount_closure: by the system, one per share);
+:Refund\n&#91;requested&#93;]
+:List the refund on Billing Exceptions\nfor customer service;
+(A)
+|«person»\nAdmin|
+:Customer service refunds the amount\nto the original payment source in the\nVNPay merchant portal (outside PowerMe);
 |«external system»\nPayment\nGateway|
-:Process refund and\nreturn the result>
-|«software system»\nPowerMe Platform|
-if ( ) then ([rejected, or fourth\nattempt failed])
-  :List the failed refund on\nBilling Exceptions, notify Admin;
+:Process the refund,\nor refuse it;
+|«person»\nAdmin|
+if ( ) then ([refused by the gateway])
+  :Mark the refund failed,\nwith the reason;
+  |«software system»\nPowerMe Platform|
   :Refund\n&#91;failed&#93;]
+  |«person»\nAdmin|
+  :Redo the refund;
+  |«software system»\nPowerMe Platform|
+  :Refund\n&#91;requested&#93;]
+  (A)
+  detach
+else ([refunded])
+  :Enter the gateway refund\ntransaction number;
+endif
+|«software system»\nPowerMe Platform|
+if ( ) then ([BR-P51: number already recorded])
+  :Reject the number,\nrefund stays requested;
   stop
-else ([confirmed by the gateway])
+else ([new number])
 endif
 :Refund\n&#91;done&#93;]
 :Request adjustment invoice\nfor the amount refunded>
@@ -74,7 +85,7 @@ if ( ) then ([issued])
 else ([error after\nautomatic retries])
   :InvoiceAdjustment\n&#91;needs_review&#93;]
 endif
-:Notify Driver that the\nrefund was sent (MSG25);
+:Notify Driver that the\nrefund was made (MSG25);
 |«person»\nDriver|
 :Receive refund\nconfirmation;
 stop

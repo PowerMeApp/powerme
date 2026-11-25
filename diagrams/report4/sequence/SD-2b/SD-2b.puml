@@ -1,7 +1,7 @@
 @startuml SD-2b
 !include ../_style.iuml
 title SD-2b (Software level, CSMS billing) — Payment notification credits the top-up once\nPrecondition: top-up is pending · System view: AD-2 · State: STM-4, STM-5, STM-7
-footer Owner: Lê Bảo Khang (WP5) · v2.0 · 01/11/2026 · names = CD-2 class diagram · left gate = Payment Gateway (VNPay IPN)
+footer Owner: Lê Bảo Khang (WP5) · v2.1 · 23/11/2026 · names = CD-2 class diagram · left gate = Payment Gateway (VNPay IPN)
 
 participant "«component»\n<u>:VnpayIpnController</u>" as IPN
 participant "«component»\n<u>:TopUpService</u>" as TS
@@ -26,7 +26,18 @@ else paid
   CL --> TS -- : creditTransactionId
   opt points were redeemed
     TS -> LS ++ : redeemForTopUp(topUp)
-    LS --> TS --
+    LS -> LS : livePoints(driver, now)
+    alt enough live points
+      LS -> LS : write redeem rows
+    else shortfall (points expired or spent since the quote)
+      LS -> LS : redeem the available part,\nadjust row of 0 points (quoted discount kept)
+    else points ledger inconsistent
+      LS -> LS : roll back point writes, no adjust row
+    end
+    LS --> TS -- : ok / LoyaltyLedgerCorrupt
+    opt LoyaltyLedgerCorrupt
+      TS -> TS : keep the credit,\nexception_kind = loyalty_error (Admin, Billing Exceptions)
+    end
   end
   TS ->> EI : requestForTopUp(topUp)
   note right : runs after commit (queue);\ninvoice requested → SD-2c
@@ -34,5 +45,5 @@ else paid
 end
 deactivate TS
 [<-- IPN -- : 200 {RspCode, Message}
-note over IPN, EI : Credit, ledger entry and points are written in one database transaction, so a repeated notification can never credit twice.
+note over IPN, EI : Credit, ledger entry and points are written in one database transaction, so a repeated notification can never credit twice. The top-up is credited with the quoted discount in all three loyalty cases.
 @enduml
