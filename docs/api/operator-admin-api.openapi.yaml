@@ -352,16 +352,22 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
+
+  /operator/v1/charge-points/onboard:
     post:
       tags: [onboarding]
       operationId: onboardChargePoint
       x-roles: [operator_staff]
-      x-status: service
-      x-source: 'ChargePointOnboardingService.onboard (WF-05, PR #33/#35)'
-      x-owner: Ân (T119)
+      x-status: implemented
+      x-source: 'operator-api/charge-point-onboarding.ts (BE-44) → ChargePointOnboardingService.onboard (WF-05, T119); actor = staff của token'
+      x-owner: 'Trí (route, BE-44) · Ân (service, T119)'
       x-refs: [UC-OPS-01, FR-09, 'STM-3 #2', SD-5a, ADR-0011]
       summary: Onboard một serial đã đăng ký vào site của mình, nhận credential một lần
       description: |
+        BE-44: đường dẫn có `/onboard` (cùng console `/api/operator/charge-points/onboard`), thay cho
+        `POST /operator/v1/charge-points` của bản nháp. Body, kiểm tra và mã lỗi như console T119;
+        actor là user của token (manager và technician đều được), operator đọc từ DB (RolesGuard),
+        không từ body. Không có rate limit riêng (service không có). Query string → 400.
         Serial phải đã được Admin đăng ký (`registered`). Tạo 1–2 súng `Unavailable`, đổi vòng đời
         sang `awaiting_connection`, sinh mật khẩu Basic Auth 24 ký tự, chỉ lưu băm scrypt và
         **trả mật khẩu đúng một lần** trong response này. Response có `Cache-Control: no-store`.
@@ -513,11 +519,14 @@ paths:
       tags: [onboarding]
       operationId: listRegistryChargePoints
       x-roles: [admin]
-      x-status: console
-      x-source: 'GET /api/admin/stations (một phần: thiếu model, firmware, bảo hành, operator)'
-      x-owner: Ân
+      x-status: implemented
+      x-source: 'operator-api/charge-point-onboarding.ts (BE-44): đọc thẳng charge_points + site + operator'
+      x-owner: 'Trí (BE-44) · Ân'
       x-refs: [UC-ADM-03, UC-ADM-07, FR-15, 'Table 5 #29']
       summary: Sổ đăng ký trụ toàn nền tảng
+      description: |
+        **Đã làm (BE-44):** `lifecycle`, `page`, `page_size`; mới nhất trước (id giảm dần). Không bao
+        giờ trả băm hay mật khẩu Basic Auth. **Chưa làm:** `operator_id`, `q` → 400 `invalid_input`.
       parameters:
         - name: lifecycle
           in: query
@@ -544,11 +553,14 @@ paths:
       tags: [onboarding]
       operationId: registerChargePoint
       x-roles: [admin]
-      x-status: service
-      x-source: 'ChargePointOnboardingService.registerDevice'
-      x-owner: Ân (T119)
+      x-status: implemented
+      x-source: 'operator-api/charge-point-onboarding.ts (BE-44) → ChargePointOnboardingService.registerDevice; actor = admin của token'
+      x-owner: 'Trí (route, BE-44) · Ân (service, T119)'
       x-refs: [UC-ADM-03, FR-15, 'STM-3 #1']
       summary: Thêm serial vào sổ đăng ký (vòng đời registered)
+      description: |
+        Body, kiểm tra và mã lỗi như console `POST /api/admin/charge-points` (T119); phản hồi 201 là
+        dòng sổ đăng ký đầy đủ (`RegistryChargePoint`), có `Cache-Control: no-store`.
       requestBody:
         required: true
         content:

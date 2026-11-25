@@ -9,6 +9,8 @@
  *   GET  /api/operator/v1/revenue[.csv], GET /api/admin/v1/revenue[.csv]  (T108a, revenue-report.ts)
  *   GET  /api/admin/v1/transactions[.csv]  (T108b, admin-transactions.ts)
  *   GET  /api/admin/v1/me     admin
+ *   POST /api/operator/v1/charge-points/onboard, GET|POST /api/admin/v1/charge-points  (BE-44, WF-05,
+ *        charge-point-onboarding.ts → ChargePointOnboardingService)
  * RolesGuard runs before route matching, so an unknown path without a valid token is 401, not 404.
  * CORS: localhost origins only (Vite dev server). JSON: snake_case, string ids, `{ error, detail }`.
  */
@@ -19,6 +21,8 @@ import { FaultActionError, type FaultActions } from '../console/fault-actions.js
 import { AuthError, StaffAccounts, type DashboardAuthConfig } from '../users/auth.js';
 import { rolesGuard, type Principal } from '../users/roles-guard.js';
 import type { ConnectionRegistry } from '../ocpp-gateway/connection-registry.js';
+import type { ChargePointOnboardingService } from '../stations/charge-point-onboarding.service.js';
+import { matchOnboardingRoute, runOnboardingRoute } from './charge-point-onboarding.js';
 import { matchFaultRoute, runFaultRoute } from './operator-faults.js';
 import {
   matchMonitoringRoute,
@@ -39,6 +43,8 @@ export interface MonitoringDeps {
   thresholds: MonitoringThresholds;
   /** `connected` is true only when this process holds the socket. */
   registry?: ConnectionRegistry;
+  /** BE-44 (WF-05). Missing → onboarding POST routes answer 503 `onboarding_unavailable`. */
+  onboarding?: ChargePointOnboardingService;
 }
 
 /** Same thresholds as the Driver API (`loadChargePolicy`): 2 × heartbeat, 900 s. */
@@ -95,6 +101,25 @@ export function createOperatorApiListener(
       return;
     }
     const url = new URL(req.url ?? '', 'http://operator-api.local');
+    // BE-44 (WF-05): own block, RolesGuard first, then method, body and query (contract §2.2a).
+    const onboardingRoute = matchOnboardingRoute(url.pathname, req.method);
+    if (onboardingRoute) {
+      const principal = await rolesGuard(req, onboardingRoute.role, db, config, driverConfig);
+      if (!(onboardingRoute.methods as readonly string[]).includes(req.method ?? '')) {
+        res.setHeader('Allow', `${onboardingRoute.methods.join(', ')}, OPTIONS`);
+        throw new AuthError(405, 'method_not_allowed');
+      }
+      const body = req.method === 'POST' ? await readJsonObject(req, res) : undefined;
+      const result = await runOnboardingRoute(
+        onboardingRoute,
+        principal,
+        db,
+        url.searchParams,
+        monitoring.onboarding,
+        body,
+      );
+      return send(res, result.status, result.body);
+    }
     const [, surface, rest] = /^\/api\/(auth|operator|admin)\/v1(\/.*)?$/.exec(url.pathname) ?? [];
     // Only the fault, charge point, revenue and transactions routes take a query; elsewhere it is 400.
     if (url.search && !QUERY_PATHS.test(url.pathname)) throw new AuthError(400, 'invalid_input');
