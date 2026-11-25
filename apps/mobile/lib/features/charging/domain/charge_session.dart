@@ -119,9 +119,10 @@ class ChargeProgress {
       settlement == SettlementState.review ||
       billingReviewRequired;
 
-  /// Chỉ phiên khởi động từ app mới được CSMS tính tiền vào Charging Credit;
-  /// phiên RFID/HMI/free-vend không có tạm tính để hiển thị.
-  bool get billedThroughApp => origin == null || origin == SessionOrigin.appQr;
+  /// Tạm tính hiện chỉ được hỗ trợ cho phiên khởi động từ app;
+  /// khoản trừ thực tế lấy từ bảng kê posted, độc lập với origin.
+  bool get supportsCostEstimate =>
+      origin == null || origin == SessionOrigin.appQr;
   bool get canStop =>
       (origin == null || origin == SessionOrigin.appQr) &&
       serverCanStop != false &&
@@ -134,10 +135,18 @@ class ChargeProgress {
       meterStopWh != null &&
       settlement == SettlementState.posted &&
       statementAvailable != false;
+  bool get awaitingRfidSettlement =>
+      origin == SessionOrigin.rfid &&
+      paymentMode == PaymentMode.csmsBilled &&
+      closed &&
+      meterStopWh != null &&
+      settlement == SettlementState.pending &&
+      !inReview;
   bool get keepPolling =>
-      !(origin != null &&
-          origin != SessionOrigin.appQr &&
-          meterStopWh != null) &&
+      (awaitingRfidSettlement ||
+          !(origin != null &&
+              origin != SessionOrigin.appQr &&
+              meterStopWh != null)) &&
       !inReview &&
       status != SessionState.failed &&
       !(closed &&

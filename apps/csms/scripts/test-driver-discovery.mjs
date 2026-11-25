@@ -17,10 +17,14 @@ const suites = [
   'test/driver-smart.integration.test.ts',
   'test/driver-auth.integration.test.ts',
   'test/driver-charges.integration.test.ts',
+  'test/rfid-settlement.integration.test.ts',
+  'test/migration-0029.integration.test.ts',
   'test/driver-sessions.integration.test.ts',
   'test/driver-vehicles.integration.test.ts',
 ];
-for (const suite of suites) {
+const selected = process.argv.slice(2);
+if (selected.some((suite) => !suites.includes(suite))) throw new Error('Unknown isolated suite');
+for (const suite of selected.length ? selected : suites) {
   const name = `powerme_mb03_driver_test_${Date.now()}_${randomBytes(4).toString('hex')}`;
   const client = new Client({ connectionString: adminUrl.toString() });
   try {

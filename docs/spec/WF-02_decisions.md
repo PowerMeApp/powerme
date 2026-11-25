@@ -453,6 +453,14 @@ Diagram chỉ ghi "job" / "queue" / "after commit". Repo chưa có BullMQ (Redis
 
 ## D9. Ranh giới với WP3 và tạo tài khoản ⊕
 
+**T148, 24/11/2026 (phase 3 đã nâng local sau backup/review):** WP3 đã thay khối SQL thô chung
+trong `charge-settlement.service.ts` bằng hai service dưới đây trên cùng transaction,
+khóa phiên → credit → loyalty; nhận thêm RFID có chủ captured và csms_billed.
+`OcppGatewayModule` import `BillingModule` vì settler được cung cấp tại gateway.
+Ledger closed giữ pending/account_closed theo D6. Xem [T148](../tasks/t148-rfid-settlement.md).
+Đoạn yêu cầu ban đầu dưới đây được giữ để truy nguyên.
+
+
 - **Sổ cái khi trừ tiền phiên sạc:** billing làm `CreditLedgerService.post` và `LoyaltyService.earnForSession`. Sau khi Phần 3 merge, WP3 (Sơn) thay SQL thô trong `charge-settlement.service.ts` bằng lời gọi hai hàm này. Tới lúc đó code WP3 giữ nguyên, billing không sửa file của WP3. Mọi nơi ghi sổ khoá `credit_accounts FOR UPDATE` trước khi tính `entry_no`.
 - **Tạo tài khoản:** `ensureAccounts(driverId)` idempotent (tạo `credit_accounts` + `loyalty_accounts`, `INSERT … ON CONFLICT DO NOTHING`). Luồng đăng ký tài xế (khi có) gọi hàm này; billing tự gọi khi tạo top-up.
 

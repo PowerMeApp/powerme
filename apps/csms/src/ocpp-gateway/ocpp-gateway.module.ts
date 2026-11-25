@@ -5,6 +5,7 @@
  * module nào nhập ngược lại gateway (chỉ có import kiểu `InboundContext`).
  */
 import { Module } from '@nestjs/common';
+import { BillingModule } from '../billing/billing.module.js';
 import { DbModule } from '../db/db.module.js';
 import { ReconciliationModule } from '../reconciliation/reconciliation.module.js';
 import { SessionsModule } from '../sessions/sessions.module.js';
@@ -24,7 +25,7 @@ import { OcppServer } from './ocpp-server.js';
 import { OfflineGraceService } from './offline-grace.service.js';
 
 @Module({
-  imports: [DbModule, SessionsModule, ReconciliationModule, StationsModule],
+  imports: [DbModule, BillingModule, SessionsModule, ReconciliationModule, StationsModule],
   providers: [
     { provide: CHARGE_POLICY, useFactory: () => loadChargePolicy() },
     ConnectionRegistry,

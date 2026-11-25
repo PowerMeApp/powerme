@@ -1,3 +1,5 @@
+import { CreditLedgerService } from '../src/billing/credit-ledger.service.js';
+import { LoyaltyService } from '../src/billing/loyalty.service.js';
 import { createServer, request, type Server } from 'node:http';
 import { randomBytes } from 'node:crypto';
 import { SignJWT, type JWTPayload } from 'jose';
@@ -138,7 +140,12 @@ type Endpoint = (typeof endpoints)[number];
     const service = new DriverChargingService(
       db,
       new ConnectionRegistry(db),
-      new ChargeSettlementService(db, policy),
+      new ChargeSettlementService(
+        db,
+        new CreditLedgerService(db),
+        new LoyaltyService(policy),
+        policy,
+      ),
       policy,
       config,
     );

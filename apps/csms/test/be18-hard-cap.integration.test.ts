@@ -1,3 +1,5 @@
+import { CreditLedgerService } from '../src/billing/credit-ledger.service.js';
+import { LoyaltyService } from '../src/billing/loyalty.service.js';
 /**
  * BE-18 — STM-1 #16a HARD_CAP_EXCEEDED trên Postgres thật (powerme_test).
  *
@@ -60,7 +62,12 @@ describeDb('BE-18 hard cap orphaned → review (STM-1 #16a)', () => {
     const driverCharging = new DriverChargingService(
       db,
       new ConnectionRegistry(db),
-      new ChargeSettlementService(db, policy),
+      new ChargeSettlementService(
+        db,
+        new CreditLedgerService(db),
+        new LoyaltyService(policy),
+        policy,
+      ),
       policy,
     );
     return new SessionTimersService(db, cfg, driverCharging, recon);
@@ -265,11 +272,21 @@ describeDb('BE-18 hard cap orphaned → review (STM-1 #16a)', () => {
     const driverCharging = new DriverChargingService(
       db,
       new ConnectionRegistry(db),
-      new ChargeSettlementService(db, policy),
+      new ChargeSettlementService(
+        db,
+        new CreditLedgerService(db),
+        new LoyaltyService(policy),
+        policy,
+      ),
       policy,
     );
     const recovery = new ChargeRecoveryService(
-      new ChargeSettlementService(db, policy),
+      new ChargeSettlementService(
+        db,
+        new CreditLedgerService(db),
+        new LoyaltyService(policy),
+        policy,
+      ),
       driverCharging,
       timers,
     );

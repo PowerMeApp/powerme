@@ -1,3 +1,5 @@
+import { CreditLedgerService } from '../src/billing/credit-ledger.service.js';
+import { LoyaltyService } from '../src/billing/loyalty.service.js';
 /**
  * BE-18 — STM-1 #17 OPERATOR_RESOLVED (SessionReviewService.resolveReview) trên Postgres thật.
  *
@@ -148,7 +150,12 @@ describeDb('BE-18 operator resolves a review session (STM-1 #17)', () => {
     otherOpStaff = await staffOf(other, 'b@b18.test');
     driverUser = await user('driver@b18.test', 'driver');
     adminUser = await user('admin@b18.test', 'admin');
-    settlement = new ChargeSettlementService(db, policy);
+    settlement = new ChargeSettlementService(
+      db,
+      new CreditLedgerService(db),
+      new LoyaltyService(policy),
+      policy,
+    );
     service = new SessionReviewService(db, settlement);
   });
   afterAll(async () => {

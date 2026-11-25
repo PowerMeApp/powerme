@@ -1,3 +1,5 @@
+import { CreditLedgerService } from '../src/billing/credit-ledger.service.js';
+import { LoyaltyService } from '../src/billing/loyalty.service.js';
 /**
  * FE-17 — driver fault report (UC-CHG-05, BR-P42, STM-6 t8) on real Postgres, plus the Driver API
  * route over HTTP (ConsoleServer, dev header auth). Rules: WF-04-PLAN Q75–Q81 (11/11/2026).
@@ -157,7 +159,17 @@ describeDb('FE-17 driver fault report (UC-CHG-05, BR-P42, STM-6 t8)', () => {
       new ConsoleQueries(db, config, registry),
       new ConsoleCommands(db, registry, faults),
       db,
-      new DriverChargingService(db, registry, new ChargeSettlementService(db, policy), policy),
+      new DriverChargingService(
+        db,
+        registry,
+        new ChargeSettlementService(
+          db,
+          new CreditLedgerService(db),
+          new LoyaltyService(policy),
+          policy,
+        ),
+        policy,
+      ),
       undefined, // onboarding
       undefined, // topUps (T32)
       faults,
