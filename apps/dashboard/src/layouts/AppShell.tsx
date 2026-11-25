@@ -4,7 +4,9 @@
  * exist; each slice adds its own item.
  */
 import { NavLink, Outlet, useNavigate } from 'react-router';
+import { CountBadge } from '../components/CountBadge';
 import { Icon } from '../components/Icon';
+import { useOperatorSummaryQuery } from '../core/api/api';
 import { loggedOut, loginPath } from '../core/auth/authSlice';
 import { useAppDispatch, useAppSelector } from '../core/store/store';
 
@@ -14,7 +16,15 @@ export function AppShell() {
   const user = useAppSelector((s) => s.auth.user);
   const dispatch = useAppDispatch();
   const navigate = useNavigate();
+  // Pending work on the menu (Operator only): same summary as the home page, refreshed every 10 s.
+  const { data: summary } = useOperatorSummaryQuery(undefined, {
+    skip: !user || user.role === 'admin',
+    pollingInterval: 10_000,
+    skipPollingIfUnfocused: true,
+  });
   if (!user) return null;
+  const pendingSessions =
+    (summary?.sessions_to_review ?? 0) + (summary?.unattributed_sessions ?? 0);
   const admin = user.role === 'admin';
   const home = admin ? '/admin' : '/operator';
 
@@ -56,6 +66,17 @@ export function AppShell() {
             >
               <Icon name="alert" />
               <span>Cảnh báo sự cố</span>
+              <CountBadge count={summary?.open_faults?.total} label="sự cố đang mở" />
+            </NavLink>
+          )}
+          {!admin && (
+            <NavLink
+              to="/operator/sessions"
+              className={({ isActive }) => `nav-link${isActive ? ' active' : ''}`}
+            >
+              <Icon name="sessions" />
+              <span>Phiên cần xử lý</span>
+              <CountBadge count={pendingSessions} label="phiên cần xử lý" />
             </NavLink>
           )}
           <NavLink

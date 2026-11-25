@@ -15,7 +15,7 @@ export function AdminRevenuePage() {
       </div>
       <RevenueReportView scope="admin" />
       <p className="muted small revenue-later">
-        Danh sách giao dịch từng phiên sẽ có khi API giao dịch của T108 sẵn sàng.
+        Danh sách giao dịch từng phiên sẽ có trong bản cập nhật sau.
       </p>
     </>
   );

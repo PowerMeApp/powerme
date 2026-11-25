@@ -190,7 +190,7 @@ export function FaultRow({ fault }: { fault: OperatorFault }) {
             onCancel={() => setPending(null)}
             onConfirm={run}
           >
-            {pending === 'acknowledge' && <p>Bạn đã thấy cảnh báo này và sẽ xử lý (UC-OPS-03).</p>}
+            {pending === 'acknowledge' && <p>Bạn đã thấy cảnh báo này và sẽ xử lý.</p>}
             {pending === 'close' && (
               <p>Chỉ đóng sau khi kỹ thuật đã kiểm tra tại chỗ. Trạng thái connector do trụ báo.</p>
             )}
@@ -220,7 +220,7 @@ export function FaultRow({ fault }: { fault: OperatorFault }) {
             )}
             {pending === 'force' && (
               <>
-                <p>Reset sẽ dừng giữa chừng các phiên sạc này (BR-P07):</p>
+                <p>Reset sẽ dừng giữa chừng các phiên sạc này:</p>
                 <ul>
                   {(sessions ?? []).map((s) => (
                     <li key={s.session_id}>
