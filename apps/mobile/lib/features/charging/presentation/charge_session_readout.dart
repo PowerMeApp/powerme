@@ -29,7 +29,8 @@ class ChargeSessionReadout extends StatelessWidget {
     final limit = progress.limitValue;
     final value = switch (mode) {
       ChargingMode.timed => progress.elapsedSeconds,
-      ChargingMode.cost => progress.costEstimateVnd,
+      ChargingMode.cost =>
+        progress.supportsCostEstimate ? progress.costEstimateVnd : null,
       ChargingMode.energy => progress.measuredEnergyWh,
       _ => null,
     };
@@ -87,10 +88,7 @@ class ChargeSessionReadout extends StatelessWidget {
                   ChargingMode.timed => chargeElapsedLabel(
                     progress.elapsedSeconds,
                   ),
-                  ChargingMode.cost =>
-                    progress.costEstimateVnd == null
-                        ? copy.text('Chưa xác định', 'Unknown')
-                        : vnd(progress.costEstimateVnd, copy: copy),
+                  ChargingMode.cost => _estimateLabel(progress, copy),
                   _ => _observedEnergy(progress, copy),
                 },
           fraction: waitingForStop ? null : fraction,
