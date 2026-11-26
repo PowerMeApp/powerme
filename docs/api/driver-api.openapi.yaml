@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: PowerMe CSMS — Driver API
-  version: 0.15.0
+  version: 0.16.0
   summary: Hợp đồng REST cho app tài xế (T77, phiếu v1.3 §3.2g)
   description: |
     Hợp đồng giữa CSMS (WP2) và app tài xế Flutter (WP3) cho trạng thái súng sạc, thời gian còn lại,
@@ -19,7 +19,7 @@ info:
       đường `sessions/*` trả cả phiên đó nếu `driver_id` khớp; `charges/*` chỉ có với phiên bắt đầu
       từ app.
   x-owner: Trí (WP2) — hợp đồng; Sơn (WP3) — route và client Dart
-  x-status: MB03 — brief 07/11 smart station search, address search and canonical road routes implemented locally; BE-21 email/password register, login and refresh implemented; BE-30 login by email or phone number (E.164); BE-22 charges, sessions (progress/stop/statement) and credit implemented; T146 owned-session list and origin/payment/capabilities implemented; Flutter discovery/history locally integrated and fixture-verified, pending deployment/device proof; T148 deferred; BE-34 vehicle models and add/set-default/remove vehicles (soft delete) implemented; T32 Phần 5 billing/top-ups implemented but not for app use until T32 Phần 8 merges (IPN and return page since T32 Phần 6); time-left remains planned
+  x-status: MB03 — brief 07/11 smart station search, address search and canonical road routes implemented locally; BE-21 email/password register, login and refresh implemented; BE-30 login by email or phone number (E.164); BE-22 charges, sessions (progress/stop/statement) and credit implemented; T146 owned-session list and origin/payment/capabilities implemented; Flutter discovery/history locally integrated and fixture-verified, pending deployment/device proof; T148 deferred; BE-34 vehicle models and add/set-default/remove vehicles (soft delete) implemented; T32 Phần 5 billing/top-ups implemented but not for app use until T32 Phần 8 merges (IPN and return page since T32 Phần 6); T149 loyalty summary and points history implemented; time-left remains planned
 servers:
   - url: http://localhost:3000/api/driver/v1
     description: CSMS cục bộ (cùng tiến trình với console /api/admin)
@@ -38,6 +38,8 @@ tags:
     description: UC-CHG-03 dừng, UC-CHG-04 theo dõi, bảng kê sau phiên
   - name: credit
     description: UC-PAY-02 / màn hình 9 — số dư Charging Credit và lịch sử sổ cái của chính tài xế (BE-22)
+  - name: loyalty
+    description: UC-PAY-04 / màn hình 15 — điểm thưởng còn dùng được, sắp hết hạn trong 30 ngày và lịch sử điểm của chính tài xế (T149)
   - name: top-ups
     description: |
       UC-PAY-01 nạp Charging Credit qua VNPay (WF-02 SD-2a, T32 Phần 5). Dùng được cho app từ
@@ -967,6 +969,68 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '405': { $ref: '#/components/responses/MethodNotAllowed' }
 
+  /loyalty:
+    get:
+      tags: [loyalty]
+      operationId: getOwnLoyalty
+      x-status: implemented — T149
+      summary: Điểm thưởng của tài xế đang đăng nhập
+      description: |
+        Chỉ đọc (UC-PAY-04, màn hình 15; BR-P34–P37). `points_available` tính bằng phát lại lô earn
+        tại `as_of` (= `now()` của DB, WF-02 D11), **bằng `points_available` của
+        `GET /billing/top-ups/quote`**; không phải `points_balance` của DB (lô đã quá hạn vẫn nằm
+        trong `points_balance` tới khi job hết hạn hằng ngày chạy).
+        `expiring_soon` liệt kê từng lô còn sống hết hạn trong `expiring_within_days` ngày (30, SRS
+        màn hình 15), sắp hạn tăng dần; `points` là phần còn lại của lô; `points_expiring_soon` là
+        tổng các lô đó. `points_earned_total` = Σ earn; `points_redeemed_total` = số ròng đã dùng
+        (redeem trừ phần đã trả lại khi top-up bị hoàn). Tài xế chưa có tài khoản điểm → 200, số 0,
+        `status = none`; GET không tạo tài khoản. Không có query.
+      responses:
+        '200':
+          description: Tóm tắt điểm hiện tại
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LoyaltySummary' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+        '500': { $ref: '#/components/responses/InternalError' }
+        '503': { $ref: '#/components/responses/LoyaltyUnavailable' }
+
+  /loyalty/transactions:
+    get:
+      tags: [loyalty]
+      operationId: listOwnLoyaltyTransactions
+      x-status: implemented — T149
+      summary: Lịch sử điểm thưởng, mới nhất trước
+      description: |
+        Các dòng `loyalty_transactions` của tài xế, sắp `entry_no` giảm dần; trang vượt cuối →
+        `items` rỗng, `total` vẫn đúng. Gồm cả dòng `adjust` `points = 0` (top-up định dùng điểm
+        nhưng điểm đã hết hạn / bị dùng lúc cộng tiền; WF-02 D3) — app tự quyết hiển thị.
+        Dòng `expire` chỉ xuất hiện khi job hết hạn hằng ngày (WF-02 Phần 13) chạy, hoặc khi đóng
+        tài khoản; **trước đó lô quá hạn đã không còn trong `points_available` nhưng chưa có dòng
+        `expire`** trong lịch sử.
+      parameters:
+        - name: page
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100000, default: 1 }
+        - name: page_size
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+      responses:
+        '200':
+          description: Một trang lịch sử điểm
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LoyaltyTransactionPage' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+        '500': { $ref: '#/components/responses/InternalError' }
+        '503': { $ref: '#/components/responses/LoyaltyUnavailable' }
+
   /billing/top-ups/quote:
     get:
       tags: [top-ups]
@@ -1332,6 +1396,11 @@ components:
           schema: { $ref: '#/components/schemas/Error' }
     NotFound:
       description: '`not_found` — không có, hoặc không thuộc tài xế này (không phân biệt để tránh dò)'
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    LoyaltyUnavailable:
+      description: '`loyalty_unavailable` — server chạy không kèm module billing (T149)'
       content:
         application/json:
           schema: { $ref: '#/components/schemas/Error' }
@@ -2073,6 +2142,76 @@ components:
           type: array
           maxItems: 100
           items: { $ref: '#/components/schemas/CreditTransaction' }
+        total: { type: integer, minimum: 0 }
+        page: { type: integer, minimum: 1 }
+        page_size: { type: integer, minimum: 1, maximum: 100 }
+
+    LoyaltySummary:
+      type: object
+      additionalProperties: false
+      required: [status, points_available, points_expiring_soon, expiring_within_days, expiring_soon, points_earned_total, points_redeemed_total, as_of]
+      properties:
+        status:
+          type: string
+          enum: [active, none]
+          description: '`none` = chưa có tài khoản điểm'
+        points_available: { type: integer, minimum: 0, description: 'Điểm còn dùng được lúc as_of; bằng points_available của quote top-up' }
+        points_expiring_soon: { type: integer, minimum: 0, description: Tổng điểm của các lô trong expiring_soon }
+        expiring_within_days: { type: integer, const: 30 }
+        expiring_soon:
+          type: array
+          items: { $ref: '#/components/schemas/LoyaltyExpiringLot' }
+        points_earned_total: { type: integer, minimum: 0 }
+        points_redeemed_total: { type: integer, minimum: 0, description: Số ròng đã dùng (redeem − restore) }
+        as_of: { $ref: '#/components/schemas/Timestamp' }
+      examples:
+        - status: active
+          points_available: 1200
+          points_expiring_soon: 300
+          expiring_within_days: 30
+          expiring_soon: [{ expires_at: '2026-12-10T03:00:00.000Z', points: 300 }]
+          points_earned_total: 2500
+          points_redeemed_total: 600
+          as_of: '2026-11-25T08:00:00.000Z'
+
+    LoyaltyExpiringLot:
+      type: object
+      additionalProperties: false
+      required: [expires_at, points]
+      properties:
+        expires_at: { $ref: '#/components/schemas/Timestamp' }
+        points: { type: integer, minimum: 1, description: Phần còn lại của lô }
+
+    LoyaltyTransaction:
+      type: object
+      additionalProperties: false
+      required: [transaction_id, entry_no, transaction_type, points, expires_at, session_id, top_up_id, created_at]
+      properties:
+        transaction_id: { $ref: '#/components/schemas/Id' }
+        entry_no: { type: integer, minimum: 1 }
+        transaction_type:
+          type: string
+          enum: [earn, redeem, restore, expire, adjust]
+        points: { type: integer, description: 'Dương = cộng điểm, âm = trừ điểm; adjust luôn 0' }
+        expires_at:
+          oneOf: [{ $ref: '#/components/schemas/Timestamp' }, { type: 'null' }]
+          description: Hạn của lô mà dòng thuộc về; null với adjust và expire lúc đóng tài khoản
+        session_id: { oneOf: [{ $ref: '#/components/schemas/Id' }, { type: 'null' }] }
+        top_up_id: { oneOf: [{ $ref: '#/components/schemas/Id' }, { type: 'null' }] }
+        created_at: { $ref: '#/components/schemas/Timestamp' }
+      examples:
+        - { transaction_id: '42', entry_no: 5, transaction_type: adjust, points: 0, expires_at: null, session_id: null, top_up_id: '7', created_at: '2026-11-20T02:00:00.000Z' }
+        - { transaction_id: '41', entry_no: 4, transaction_type: redeem, points: -600, expires_at: '2027-03-01T03:00:00.000Z', session_id: null, top_up_id: '7', created_at: '2026-11-20T02:00:00.000Z' }
+
+    LoyaltyTransactionPage:
+      type: object
+      additionalProperties: false
+      required: [items, total, page, page_size]
+      properties:
+        items:
+          type: array
+          maxItems: 100
+          items: { $ref: '#/components/schemas/LoyaltyTransaction' }
         total: { type: integer, minimum: 0 }
         page: { type: integer, minimum: 1 }
         page_size: { type: integer, minimum: 1, maximum: 100 }

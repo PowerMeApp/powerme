@@ -21,6 +21,7 @@ import { CONFIG, CsmsConfig } from '../config.js';
 import { ConsoleCommands } from './console.commands.js';
 import { ConsoleError, createConsoleListener } from './console.http.js';
 import { ConsoleQueries } from './console.queries.js';
+import { LoyaltyService } from '../billing/loyalty.service.js';
 import { TopUpService } from '../billing/top-up.service.js';
 import { createVnpayListener, isVnpayPath } from '../billing/vnpay-ipn.http.js';
 import { createDriverListener } from '../driver/driver.http.js';
@@ -47,6 +48,8 @@ export class ConsoleServer implements OnModuleInit, OnModuleDestroy {
     @Optional() private readonly topUps?: TopUpService,
     /** FE-17: driver fault reports (UC-CHG-05) on the Driver API. */
     @Optional() private readonly faults?: FaultService,
+    /** T149: điểm thưởng của tài xế (BillingModule). */
+    @Optional() private readonly loyalty?: LoyaltyService,
   ) {}
 
   /** WF-05 (T119): the onboarding service, or 503 when this server was built without it (tests). */
@@ -138,8 +141,7 @@ export class ConsoleServer implements OnModuleInit, OnModuleDestroy {
             this.config.driverApi ?? { devAuth: false },
             undefined,
             undefined,
-            this.topUps,
-            this.faults,
+            { topUps: this.topUps, faults: this.faults, loyalty: this.loyalty },
           )
         : null;
     // FE-01a: /api/{auth,operator,admin}/v1 → operator-api (JWT, ADR-0018). Matched before the
