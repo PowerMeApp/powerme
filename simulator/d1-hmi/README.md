@@ -30,6 +30,7 @@ CP_IDS=RH24D1-00001,RH24D1-00002 CP_PASSWORDS=pw1,pw2 node simulator/d1-hmi/serv
 | `HMI_PORT` | `8100` | Cổng HMI |
 | `HMI_HOST` | `127.0.0.1` | Địa chỉ bind. HMI chưa có xác thực — chỉ đặt `0.0.0.0` trong container khi cổng chỉ được publish ra loopback của máy chủ (staging) |
 | `STALE_METERSTOP` | tắt | `1` = sau một lần rớt mạng, `StopTransaction` mang `meterStop` **cũ** (chỉ số lúc rớt) dù trụ vẫn sạc tiếp — tái hiện hiện tượng 3 của EXP-01 để CSMS ra phiên `review`. `npm run demo` của CSMS bật sẵn (`STALE_METERSTOP=0` để tắt) |
+| `OFFLINE_AUTH` | `normal` | T150 / BR-P52. `normal`: ba key `LocalAuthorizeOffline` (true), `LocalPreAuthorize`, `AllowOfflineTxForUnknownId` (false) ghi được, CSMS tắt được authorize offline sau Boot; khi đó thẻ quẹt lúc offline bị từ chối. `rejected`: ba key readonly = true → `ChangeConfiguration` Rejected, trụ nhận MỌI thẻ khi offline (dashboard bật cờ "Rủi ro thẻ offline"). `notsupported`: trụ không có ba key (unknownKey / NotSupported), cũng nhận mọi thẻ offline |
 | `RETRY_MS` `REPLAY_LOSS` `METER_INTERVAL` `PING_SEC` `REBOOT_MS` `SPEED` | 30000 / 0.25 / 10 / 30 / 3000 / 1 | Chủ yếu cho kiểm thử, áp cho mọi trụ; xem đầu `server.mjs` |
 
 ### Trang và API
@@ -186,10 +187,10 @@ Thời gian mô phỏng (bộ chọn ×1/×10/×20, mục "Tốc độ mô phỏ
 
 | # | Điểm | Chúng tôi chọn | Cần xác nhận |
 |---|---|---|---|
-| 1 | Danh sách thẻ cục bộ khi offline | Offline, trụ chấp nhận hai thẻ hợp lệ theo danh sách cục bộ (`DEMO-CARD-0001`, `DEMO-CARD-0002`), từ chối thẻ lạ. Thẻ ví (trụ tự trừ tiền) ngoài phạm vi từ T109 | Firmware có danh sách cục bộ không |
+| 1 | Danh sách thẻ cục bộ khi offline | Offline, trụ chấp nhận hai thẻ hợp lệ theo danh sách cục bộ (`DEMO-CARD-0001`, `DEMO-CARD-0002`), từ chối thẻ lạ — chỉ khi `LocalAuthorizeOffline=true`; CSMS T150 đặt `false` sau Boot nên thẻ offline bị từ chối (xem `OFFLINE_AUTH`). Thẻ ví (trụ tự trừ tiền) ngoài phạm vi từ T109 | Firmware có danh sách cục bộ không |
 | 2 | `idTag` của free vend (mật khẩu HMI) | `HMI-FREEVEND`, gửi thẳng `StartTransaction`, không `Authorize` | idTag thật (hoặc rỗng/mặc định), có Authorize không |
 | 3 | Measurand thật trong MeterValues | `Energy.Active.Import.Register` (Wh), `SoC` (Percent), `Power.Active.Import` (W), `Voltage` (V), `Current.Import` (A) | Trụ Ruihua thật gửi measurand nào, đơn vị nào |
-| 4 | Config key hỗ trợ | `HeartbeatInterval`, `MeterValueSampleInterval` (=10), `AuthorizeRemoteTxRequests`, `WebSocketPingInterval`, `ConnectionTimeOut`, `NumberOfConnectors`, `SupportedFeatureProfiles` (`Core,RemoteTrigger`), `ConnectorPhaseRotation` | Tập key thật; có `TransactionMessageAttempts`/`RetryInterval` không (SAP không có) |
+| 4 | Config key hỗ trợ | `HeartbeatInterval`, `MeterValueSampleInterval` (=10), `AuthorizeRemoteTxRequests`, `WebSocketPingInterval`, `ConnectionTimeOut`, `NumberOfConnectors`, `SupportedFeatureProfiles` (`Core,RemoteTrigger,SmartCharging` từ T150), `ConnectorPhaseRotation`, `AuthorizationCacheEnabled`, `LocalAuthListEnabled`, ba key authorize offline (T150). `SetChargingProfile` nhận `TxDefaultProfile` / `TxProfile` (W hoặc A, kiểu Relative tính từ đầu phiên) và giới hạn công suất mô phỏng; `ClearChargingProfile` | Tập key thật; có `TransactionMessageAttempts`/`RetryInterval` không (SAP không có) |
 | 5 | Wh số nguyên hay thập phân | Số nguyên Wh cho `meterStart`, `meterStop`, Energy.Active.Import.Register (SAP gửi thập phân, ví dụ 48.46) | Firmware thật |
 | 6 | Hành vi retry buffer | Mô hình EXP-01 như trên, gồm cả StatusNotification vào buffer (EXP-01 không quan sát) | Firmware thật; số mẫu mất, thứ tự, giới hạn buffer |
 | 7 | Reason khi pin đầy | `Other` (`EVDisconnected` dành cho rút súng giữa phiên; `Local` cho nút Dừng tại trụ) | Reason firmware thật gửi |

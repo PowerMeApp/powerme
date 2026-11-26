@@ -64,8 +64,16 @@ export function createStation(options = {}) {
     rebootMs: 3000,
     speed: 1,
     staleMeterStop: false, // STALE_METERSTOP=1: StopTransaction sau rớt mạng mang meterStop cũ (EXP-01 hiện tượng 3)
+    // T150 / BR-P52 — OFFLINE_AUTH: 'normal' (key ghi được, CSMS tắt được authorize offline),
+    // 'rejected' (key readonly = true → ChangeConfiguration Rejected), 'notsupported' (trụ không có
+    // key → unknownKey + NotSupported). Hai chế độ "cứng đầu" nhận MỌI thẻ khi offline.
+    offlineAuth: 'normal',
     ...options,
   };
+  if (!['normal', 'rejected', 'notsupported'].includes(opt.offlineAuth))
+    throw new Error(
+      `OFFLINE_AUTH không hợp lệ: "${opt.offlineAuth}" (normal | rejected | notsupported)`,
+    );
   const events = new EventEmitter();
   const log = [];
   const timeline = [];
@@ -89,9 +97,67 @@ export function createStation(options = {}) {
     ],
     ['ConnectionTimeOut', { value: '120', readonly: false, numeric: true }],
     ['NumberOfConnectors', { value: '2', readonly: true }],
-    ['SupportedFeatureProfiles', { value: 'Core,RemoteTrigger', readonly: true }],
+    ['SupportedFeatureProfiles', { value: 'Core,RemoteTrigger,SmartCharging', readonly: true }],
     ['ConnectorPhaseRotation', { value: '0.RST,1.RST,2.RST', readonly: true }],
+    ['AuthorizationCacheEnabled', { value: 'true', readonly: false, bool: true }],
+    ['LocalAuthListEnabled', { value: 'true', readonly: false, bool: true }],
   ]);
+  // T150: ba key authorize offline. Mặc định 'normal' giữ hành vi cũ (thẻ trong danh sách cục bộ được
+  // nhận khi offline, thẻ lạ bị từ chối) cho tới khi CSMS đổi chúng.
+  if (opt.offlineAuth !== 'notsupported') {
+    const ro = opt.offlineAuth === 'rejected';
+    CONFIG.set('LocalAuthorizeOffline', { value: 'true', readonly: ro, bool: true });
+    CONFIG.set('LocalPreAuthorize', { value: ro ? 'true' : 'false', readonly: ro, bool: true });
+    CONFIG.set('AllowOfflineTxForUnknownId', {
+      value: ro ? 'true' : 'false',
+      readonly: ro,
+      bool: true,
+    });
+  }
+  /** Key bool của trụ; key không có → `fallback` (hành vi firmware ẩn). */
+  const cfgBool = (k, fallback) => {
+    const v = CONFIG.get(k);
+    return v ? v.value.trim().toLowerCase() === 'true' : fallback;
+  };
+  /**
+   * T150: trụ offline có tự nhận thẻ không. `listed` = thẻ có trong danh sách cục bộ. Trụ không có key
+   * (notsupported) mô phỏng firmware nhận mọi thẻ khi offline.
+   */
+  const offlineAccepts = (listed) => {
+    const hidden = opt.offlineAuth === 'notsupported';
+    return (
+      (listed && cfgBool('LocalAuthorizeOffline', hidden)) ||
+      cfgBool('AllowOfflineTxForUnknownId', hidden)
+    );
+  };
+
+  // ── Smart Charging (T150): TxDefaultProfile / TxProfile, chargingRateUnit W hoặc A ─────────────
+  const profiles = { txDefault: new Map(), tx: new Map() }; // connectorId (0 = cả trụ) → profile
+  /** Giới hạn kW lúc này của phiên trên súng c; Infinity = không giới hạn. */
+  function profileCapKw(c) {
+    const tx = c.tx;
+    if (!tx) return Infinity;
+    const own = profiles.tx.get(c.id);
+    const p =
+      (tx.id != null && own?.transactionId === tx.id ? own : null) ??
+      profiles.txDefault.get(c.id) ??
+      profiles.txDefault.get(0);
+    if (!p) return Infinity;
+    const sch = p.chargingSchedule;
+    const elapsed = (sim.ms - tx.startSim) / 1000;
+    let limit = null;
+    for (const per of sch.chargingSchedulePeriod) if (per.startPeriod <= elapsed) limit = per.limit;
+    if (limit === null) return Infinity;
+    const kw = sch.chargingRateUnit === 'A' ? (limit * (c.last.v || 400)) / 1000 : limit / 1000;
+    if (kw <= 0 && !tx.cutByProfile) {
+      tx.cutByProfile = true;
+      tl(
+        'warn',
+        `Súng ${c.id}: ${p.chargingProfilePurpose} đưa công suất về 0 (giới hạn dự phòng)`,
+      );
+    }
+    return Math.max(0, kw);
+  }
   const cfgNum = (k) => Number(CONFIG.get(k).value);
 
   // ── Trạng thái súng ───────────────────────────────────────────────────────
@@ -462,7 +528,7 @@ export function createStation(options = {}) {
         continue;
       }
       const tx = c.tx;
-      const kw = (STATION_KW / active.length) * taper(c.vehicleSoc);
+      const kw = Math.min((STATION_KW / active.length) * taper(c.vehicleSoc), profileCapKw(c));
       const v = 350 + c.vehicleSoc * 0.7;
       const dWh = (kw * 1000 * dtSim) / 3600;
       tx.whF += dWh;
@@ -587,6 +653,7 @@ export function createStation(options = {}) {
     pushPoint(c, true);
     c.register = actualStop;
     c.tx = null;
+    profiles.tx.delete(c.id); // TxProfile hết hiệu lực khi phiên kết thúc (OCPP 1.6 §3.13.2)
     c.last = { kw: 0, v: 0, a: 0 };
     tx.final = { wh: tx.wh, cost: (tx.wh / 1000) * opt.unitPrice };
     c.lastSession = { ...tx.final, reason, idTag: tx.idTag };
@@ -679,6 +746,8 @@ export function createStation(options = {}) {
     net,
     CONFIG,
     cfgNum,
+    offlineAccepts,
+    profiles,
     emit,
     setStatus,
     idleStatus,

@@ -282,11 +282,24 @@ async function chargePoints(
     rated_power_kw: number | null;
     reports_soc: boolean;
     supports_reservation: boolean;
+    oa_id: string | null;
+    oa_epoch: number | null;
+    oa_completed_at: Date | null;
+    oa_risk: boolean | null;
+    oa_reason: string | null;
+    oa_values: Record<string, { value: string | null; readonly: boolean } | null> | null;
+    oa_changes: Record<string, string> | null;
+    oa_profiles: string | null;
+    oa_fallback: string | null;
   }>(
     `${FILTERED_CTE}
      SELECT count(*) OVER()::int AS total,f.id::text,f.serial_number,f.display_code,f.model,
        f.lifecycle,f.is_online,f.last_message_at,f.site_id::text,f.site_code,f.site_name,
        f.firmware_version,f.rated_power_kw::float8,f.reports_soc,f.supports_reservation,
+       oa.id::text AS oa_id,oa.epoch AS oa_epoch,oa.completed_at AS oa_completed_at,
+       oa.offline_card_risk AS oa_risk,oa.risk_reason AS oa_reason,oa.config_values AS oa_values,
+       oa.change_results AS oa_changes,oa.supported_feature_profiles AS oa_profiles,
+       oa.fallback_profile_status AS oa_fallback,
        coalesce((SELECT jsonb_agg(jsonb_build_object(
          'connector_id',c.id::text,'connector_no',c.connector_no,'connector_type',c.connector_type,
          'max_power_kw',c.max_power_kw::float8,'status',c.status,'status_updated_at',c.status_changed_at,
@@ -300,7 +313,11 @@ async function chargePoints(
            AND s.received_stopped_at IS NULL AND s.status IN ('pending','active','paused','stopping')
            ORDER BY s.id DESC LIMIT 1)
        ) ORDER BY c.connector_no) FROM connectors c WHERE c.charge_point_id=f.id),'[]'::jsonb) AS connectors
-     FROM filtered f ORDER BY f.site_code,f.serial_number LIMIT $10 OFFSET $11`,
+     FROM filtered f
+     -- T150 / BR-P52: lần kiểm authorize offline mới nhất của trụ (migration 0030).
+     LEFT JOIN LATERAL (SELECT * FROM charge_point_offline_auth_checks k
+       WHERE k.charge_point_id=f.id ORDER BY k.id DESC LIMIT 1) oa ON true
+     ORDER BY f.site_code,f.serial_number LIMIT $10 OFFSET $11`,
     [...filters, staleAfterMs, route.pageSize, (route.page - 1) * route.pageSize],
   );
   // A page past the end has no rows to carry count(*) OVER(), so count separately only then.
@@ -331,12 +348,29 @@ async function chargePoints(
           ? new Date(c['status_updated_at'] as string).toISOString()
           : null,
       })),
+      /**
+       * T150 / BR-P52: không xác nhận được rằng trụ đã tắt authorize offline. Trụ chưa từng được kiểm
+       * cũng là rủi ro (`not_checked`): CSMS không biết trụ sẽ làm gì với thẻ khi mất mạng.
+       */
+      offline_card_risk: r.oa_id === null ? true : r.oa_risk === true,
+      offline_card_risk_reason: r.oa_id === null ? 'not_checked' : r.oa_reason,
       /** Detail-only fields (screen 20); the list leaves them out (contract `ChargePoint`). */
       extra: {
         firmware_version: r.firmware_version,
         rated_power_kw: r.rated_power_kw,
         reports_soc: r.reports_soc,
         supports_reservation: r.supports_reservation,
+        offline_auth_check:
+          r.oa_id === null
+            ? null
+            : {
+                checked_at: r.oa_completed_at!.toISOString(),
+                epoch: r.oa_epoch,
+                config_values: r.oa_values,
+                change_results: r.oa_changes ?? {},
+                supported_feature_profiles: r.oa_profiles,
+                fallback_profile_status: r.oa_fallback,
+              },
       },
     })),
     total,

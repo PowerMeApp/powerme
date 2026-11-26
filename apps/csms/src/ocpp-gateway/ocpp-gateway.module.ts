@@ -22,6 +22,7 @@ import { InboundSerializer } from './inbound-serializer.js';
 import { OcppHandlers } from './ocpp-handlers.js';
 import { OcppMessageLogger } from './ocpp-message-logger.js';
 import { OcppServer } from './ocpp-server.js';
+import { OfflineAuthCheckService } from './offline-auth-check.service.js';
 import { OfflineGraceService } from './offline-grace.service.js';
 
 @Module({
@@ -37,6 +38,7 @@ import { OfflineGraceService } from './offline-grace.service.js';
     SessionTimersService,
     SessionReviewService,
     UnattributedSessionService,
+    OfflineAuthCheckService,
     OcppHandlers,
     OfflineGraceService,
     OcppServer,

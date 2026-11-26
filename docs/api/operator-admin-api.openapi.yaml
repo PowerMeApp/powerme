@@ -3025,7 +3025,7 @@ components:
             - type: 'null'
     ChargePoint:
       type: object
-      required: [id, serial_number, display_code, lifecycle, connected, is_online, last_message_at, site, connectors]
+      required: [id, serial_number, display_code, lifecycle, connected, is_online, last_message_at, site, connectors, offline_card_risk, offline_card_risk_reason]
       properties:
         id: { $ref: '#/components/schemas/Id' }
         serial_number: { type: string, description: 'OCPP identity, cuối URL /ocpp/{serial}' }
@@ -3040,6 +3040,42 @@ components:
             - $ref: '#/components/schemas/SiteRef'
             - type: 'null'
         connectors: { type: array, maxItems: 2, items: { $ref: '#/components/schemas/ConnectorLive' } }
+        offline_card_risk:
+          type: boolean
+          description: >-
+            T150 / BR-P52 — true khi CSMS không xác nhận được LocalAuthorizeOffline, LocalPreAuthorize và
+            AllowOfflineTxForUnknownId đều false (bị Rejected / NotSupported, key không có, timeout, hoặc
+            trụ chưa từng được kiểm). Thẻ lạ / thẻ bị khoá có thể sạc khi trụ mất mạng.
+        offline_card_risk_reason:
+          type: [string, 'null']
+          enum: [not_checked, no_response, key_missing, rejected, not_supported, reboot_required, change_failed, null]
+          description: Lý do ngắn; null khi offline_card_risk = false
+    OfflineAuthCheck:
+      type: object
+      description: T150 — lần kiểm cấu hình authorize offline mới nhất (sau BootNotification, migration 0030)
+      required: [checked_at, epoch, config_values, change_results, supported_feature_profiles, fallback_profile_status]
+      properties:
+        checked_at: { $ref: '#/components/schemas/Timestamp' }
+        epoch: { type: [integer, 'null'] }
+        config_values:
+          type: [object, 'null']
+          description: 'key → {value, readonly}; null = trụ không trả key (unknownKey). null cả đối tượng = GetConfiguration không có phản hồi'
+          additionalProperties:
+            oneOf:
+              - type: object
+                required: [value, readonly]
+                properties:
+                  value: { type: [string, 'null'] }
+                  readonly: { type: boolean }
+              - type: 'null'
+        change_results:
+          type: object
+          description: 'key → Accepted | Rejected | RebootRequired | NotSupported | timeout | error | skipped (đã là false)'
+          additionalProperties: { type: string }
+        supported_feature_profiles: { type: [string, 'null'] }
+        fallback_profile_status:
+          type: [string, 'null']
+          description: 'TxDefaultProfile dự phòng (OFFLINE_TX_FALLBACK_S > 0): status OCPP, unsupported (không có SmartCharging), null (tắt / không cần)'
     ChargePointPage:
       allOf:
         - $ref: '#/components/schemas/PageMeta'
@@ -3057,6 +3093,10 @@ components:
             rated_power_kw: { type: [number, 'null'] }
             reports_soc: { type: boolean, description: 'BR-P40 — trụ có gửi SoC' }
             supports_reservation: { type: boolean }
+            offline_auth_check:
+              oneOf:
+                - $ref: '#/components/schemas/OfflineAuthCheck'
+                - type: 'null'
             open_faults: { type: array, items: { $ref: '#/components/schemas/Fault' } }
             recent_commands:
               type: array
