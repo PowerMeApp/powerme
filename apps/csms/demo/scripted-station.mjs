@@ -36,7 +36,11 @@
  * Tuỳ chọn: --id RH24D1-00001  --url ws://localhost:9000/ocpp  --connector 1
  *           --interval-s 10 (nhịp MeterValues)  --offline-s 60 (độ dài đứt mạng)  --fast (3 s / 15 s)
  *           --tag <idTag>  --hold-s 60 (ds-09 / app / fault: seconds to stay connected)
- *           --tick-wh 170 (app: Wh cộng mỗi nhịp; 2500 để chạm giới hạn 10 kWh sau 4 nhịp)
+ *           --tick-wh 170 (app: Wh mỗi nhịp ở công suất đầy; 2500 để chạm giới hạn 10 kWh sau 4 nhịp)
+ *           --soc-start 20  --battery-kwh 75 (app, T154: SoC đầu phiên và dung lượng pin giả định.
+ *            Công suất giữ 100 % tới SoC 80 % rồi giảm tuyến tính còn 5 % ở 99 %, về 0 khi đầy —
+ *            cùng đường cong với simulator/d1-hmi/model.mjs. SoC và Power.Active.Import khớp số Wh
+ *            thật của nhịp, để app/CSMS ước tính được thời gian sạc xong)
  *           --heartbeat-s N (ép nhịp Heartbeat; mặc định theo interval CSMS trả ở Boot, 300 s)
  *           --reject-start (app)  --error-code InternalError  --reset accept|reject  --reboot-s 5 (fault)
  * Biến môi trường: CP_PASSWORD (mật khẩu Basic Auth của trụ; cần khi nối vào staging)
@@ -60,6 +64,20 @@ const CONNECTOR = Number(opt('connector', 1));
 const INTERVAL_S = Number(opt('interval-s', fast ? 3 : 10));
 const OFFLINE_S = Number(opt('offline-s', fast ? 15 : 60));
 const SAMPLE_WH = 170; // ~60 kW × 10 s; chỉ để số liệu đẹp, không có ý nghĩa vật lý
+
+/** T154: hệ số công suất theo SoC — 1 tới 80 %, giảm tuyến tính còn 0,05, đầy (100 %) thì 0. */
+const taper = (soc) =>
+  soc >= 100 ? 0 : soc <= 80 ? 1 : Math.max(0.05, 1 - ((soc - 80) / 20) * 0.95);
+
+/**
+ * T154: một nhịp sạc của xe giả định. Trả Wh của nhịp (làm tròn), SoC mới và công suất (W) khớp
+ * với Wh đó trong `intervalS` giây.
+ */
+function chargeTick({ soc, batteryWh, fullTickWh, intervalS }) {
+  const wh = Math.round(fullTickWh * taper(soc));
+  const next = Math.min(100, soc + (wh / batteryWh) * 100);
+  return { wh, soc: next, powerW: Math.round((wh / intervalS) * 3600) };
+}
 
 const now = () => new Date().toISOString();
 const log = (...a) => console.log(now(), `[${ID}]`, ...a);
@@ -177,7 +195,8 @@ async function dropLink() {
   await client.close({ force: true });
 }
 
-function meterValuesParams(connectorId, transactionId, wh, ts = now()) {
+/** `ev` (T154, kịch bản app): SoC và công suất thật của nhịp; thiếu thì giữ số cũ (kịch bản khác). */
+function meterValuesParams(connectorId, transactionId, wh, ts = now(), ev = null) {
   return {
     connectorId,
     transactionId,
@@ -187,11 +206,11 @@ function meterValuesParams(connectorId, transactionId, wh, ts = now()) {
         sampledValue: [
           { value: String(wh), measurand: 'Energy.Active.Import.Register', unit: 'Wh' },
           {
-            value: String(Math.min(100, 20 + Math.round(wh / 40))),
+            value: String(ev ? Math.floor(ev.soc) : Math.min(100, 20 + Math.round(wh / 40))),
             measurand: 'SoC',
             unit: 'Percent',
           },
-          { value: '60000', measurand: 'Power.Active.Import', unit: 'W' },
+          { value: String(ev ? ev.powerW : 60000), measurand: 'Power.Active.Import', unit: 'W' },
           { value: '400', measurand: 'Voltage', unit: 'V' },
           { value: '150', measurand: 'Current.Import', unit: 'A' },
         ],
@@ -217,9 +236,13 @@ async function startTx(connectorId, idTag, ts = now(), meterStart = 0) {
   return res.transactionId;
 }
 
-async function sendMeter(connectorId, transactionId, wh, ts) {
-  await client.call('MeterValues', meterValuesParams(connectorId, transactionId, wh, ts));
-  log(`  MeterValues tx=${transactionId} ${wh} Wh${ts ? ` (cp_timestamp ${ts})` : ''}`);
+async function sendMeter(connectorId, transactionId, wh, ts, ev = null) {
+  await client.call(
+    'MeterValues',
+    meterValuesParams(connectorId, transactionId, wh, ts ?? now(), ev),
+  );
+  const extra = ev ? ` SoC ${Math.floor(ev.soc)} % ${(ev.powerW / 1000).toFixed(1)} kW` : '';
+  log(`  MeterValues tx=${transactionId} ${wh} Wh${extra}${ts ? ` (cp_timestamp ${ts})` : ''}`);
 }
 
 async function stopTx(transactionId, idTag, meterStop, reason = 'Local', ts = now()) {
@@ -374,6 +397,10 @@ const SCENARIOS = {
   async app() {
     const holdS = Number(opt('hold-s', 600));
     const tickWh = Number(opt('tick-wh', SAMPLE_WH));
+    const socStart = Number(opt('soc-start', 20));
+    const batteryWh = Number(opt('battery-kwh', 75)) * 1000;
+    if (!(socStart >= 0 && socStart < 100) || !(batteryWh > 0))
+      throw new Error('--soc-start phải trong [0, 100), --battery-kwh phải > 0');
     const rejectStart = argv.includes('--reject-start');
     const done = [];
     let active = null; // { tx, idTag, connectorId, wh, stopping }
@@ -391,7 +418,7 @@ const SCENARIOS = {
 
     hooks.remoteStart = ({ connectorId = CONNECTOR, idTag }) => {
       if (rejectStart || active) return { status: 'Rejected' };
-      active = { tx: null, idTag, connectorId, wh: 0, stopping: false };
+      active = { tx: null, idTag, connectorId, wh: 0, soc: socStart, stopping: false };
       return {
         status: 'Accepted',
         then: async () => {
@@ -402,8 +429,15 @@ const SCENARIOS = {
           while (active === a && !a.stopping) {
             await sleep(INTERVAL_S * 1000);
             if (active !== a || a.stopping) break;
-            a.wh += tickWh;
-            await sendMeter(connectorId, a.tx, a.wh);
+            const step = chargeTick({
+              soc: a.soc,
+              batteryWh,
+              fullTickWh: tickWh,
+              intervalS: INTERVAL_S,
+            });
+            a.wh += step.wh;
+            a.soc = step.soc;
+            await sendMeter(connectorId, a.tx, a.wh, undefined, step);
           }
         },
       };
