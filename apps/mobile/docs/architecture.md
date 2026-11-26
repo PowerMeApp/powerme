@@ -1,5 +1,27 @@
 # Coding reference 2 — class, package và ranh giới WP3
 
+## T96 — shared starting-point guard, 26/11/2026
+
+`DiscoveryOriginSelector` and `DiscoveryVinFastOverride` render the existing shared
+`discoveryContextProvider` on Discover/Suggestions. The selector opens the existing
+`DiscoveryOriginPanel` in a scrollable keyboard-aware sheet; selection still passes
+through `DiscoveryContext.locate/selectAddress` with explicit transmission consent.
+The panel retains its notifier while busy and calls `cancelOriginUpdate()` on dispose,
+invalidating pending GPS/address generations without clearing an accepted origin.
+
+Suggestions watches search only with a selected origin and a submitted valid draft;
+missing-origin submit opens the picker. Origin/filter changes discard the submitted
+draft and Route consent. Selecting an origin never auto-submits a smart/Route request.
+SoC 0–100 validation, blank/≥80 contract fallback and separate explicit Route disclosure
+remain. `invalid_search` copy identifies inputs collectively, not always battery.
+No repository/API/backend/ranking/cache/dependency changes. `DiscoveryMap` still passes
+`fitResults: true` and the canonical origin; the generic camera-only surface is untouched.
+
+Evidence: actual API composition with HTTP/GPS fixtures, 62 focused checks including
+protected garage navigation, normal/narrow VI/EN presentation, and the existing
+capture harness's opt-in discovery group. This does not verify live tiles/GPS/providers.
+
+
 ## T148 — đồng bộ main 25/11/2026
 
 Nền cuối `2272b13ea109d3e05c7de6625d5952adc11056dd`; bộ 93 ca đã kiểm trên
@@ -387,3 +409,13 @@ Lịch sử dùng cùng ledger provider có phân trang với Tín dụng và ch
 - `CreditTopUpScreen` đọc số dư qua `chargingCreditProvider` và đưa lựa chọn nhanh vào cùng luồng báo giá. Khi dùng điểm, màn trạng thái hiển thị số tiền VNPay từ giao dịch đã đọc. `ConnectorFaultReportScreen` dùng biên nhận §15 và hiển thị riêng lỗi trùng 409, cổng không khả dụng và lỗi có thể thử lại. Hai màn dùng chung `DriverTaskPage` trong lớp trình bày.
 - Flutter url_launcher cung cấp mẫu giao tiếp với trình duyệt qua ACTION_VIEW và callback iOS, gồm trường hợp không có trình xử lý (BSD-3-Clause). Cầu nối PowerMe dùng MethodChannel sẵn có và chỉ nhận gateway đã xác minh. Không chép mã hoặc thêm SDK. [Android UrlLauncher.kt](https://github.com/flutter/packages/blob/main/packages/url_launcher/url_launcher_android/android/src/main/kotlin/io/flutter/plugins/urllauncher/UrlLauncher.kt), [iOS URLLauncherPlugin.swift](https://github.com/flutter/packages/blob/main/packages/url_launcher/url_launcher_ios/ios/url_launcher_ios/Sources/url_launcher_ios/URLLauncherPlugin.swift).
 - Stripe Node giữ idempotency key nhất quán khi retry (MIT). PowerMe dùng UUID đã có và giữ cả body qua lần thử lại do tài xế chọn. Adapter hiện tại dùng Dio và hợp đồng WP2, không thêm SDK hoặc chép mã. [Stripe RequestSender](https://github.com/stripe/stripe-node/blob/master/src/RequestSender.ts), [Stripe RequestSender tests](https://github.com/stripe/stripe-node/blob/master/test/RequestSender.spec.ts).
+
+### T96 follow-up — Android external-map intent, 26/11
+
+`powerme/station_maps/openDestination` retains its Dart guards and validated station
+lat/lng. MainActivity builds the fixed Maps Directions URL with Uri.Builder, prefers
+`com.google.android.apps.maps`, then retries the same browsable URL without a package
+on ActivityNotFound; absent receivers/security failures still return false. Existing
+coordinate validation/BigDecimal formatting and VNPay channel are unchanged. No new
+native helper, SDK, dependency, backend/provider request or in-app navigation engine.
+Native functional evidence and limits are recorded in README.
