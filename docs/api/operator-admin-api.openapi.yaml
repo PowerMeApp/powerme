@@ -2050,10 +2050,16 @@ paths:
       tags: [cards]
       operationId: listRfidCards
       x-roles: [admin]
-      x-status: planned
+      x-status: implemented
       x-owner: Ân
       x-refs: [UC-ADM-04, FR-15, BR-P15, 'Table 5 #30']
       summary: Sổ thẻ RFID
+      description: |
+        WP3/T146 local branch. Admin guard precedes method/path/query/body validation.
+        Exact case-sensitive literal prefix q (LIKE metacharacters escaped), unique id DESC
+        order. total/items share a per-response REPEATABLE READ snapshot; pages in separate
+        requests may change. IDs are positive bigint strings <=9223372036854775807.
+        Unknown/duplicate query keys and GET bodies return 400.
       parameters:
         - name: card_kind
           in: query
@@ -2079,20 +2085,44 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
+        '405':
+          description: Method not allowed; Allow is GET, POST, OPTIONS (collection) or PATCH, OPTIONS (card)
+          headers:
+            Allow:
+              schema: { type: string }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
     post:
       tags: [cards]
       operationId: registerRfidCard
       x-roles: [admin]
-      x-status: planned
+      x-status: implemented
       x-owner: Ân
       x-refs: [UC-ADM-04, FR-15, BR-P15, BR-P23]
       summary: Đăng ký thẻ (một loại, tối đa một tài xế)
+      description: |
+        UID is preserved exactly (including leading zeros), without trimming or decimal/hex
+        normalization; 1..20 Unicode scalar characters, nonblank, no control/surrogate.
+        Online with driver starts active, without driver unlinked. Registry free_vend starts
+        active without a driver; it does not configure a charge point free-vend tag.
+        Driver must exist in drivers/users with role driver. Unique UID races return 409.
       requestBody:
         required: true
         content:
           application/json:
             schema: { $ref: '#/components/schemas/RfidCardCreate' }
       responses:
+        '413':
+          description: payload_too_large (JSON over 16 KiB)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '415':
+          description: unsupported_media_type (application/json required)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
         '201':
           description: Đã đăng ký
           content:
@@ -2101,13 +2131,21 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
+        '405':
+          description: Method not allowed; Allow is GET, POST, OPTIONS (collection) or PATCH, OPTIONS (card)
+          headers:
+            Allow:
+              schema: { type: string }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
         '404':
           description: '`driver_not_found`'
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
         '409':
-          description: '`card_already_registered`'
+          description: '`card_already_registered` or `card_kind_has_no_driver`'
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
@@ -2117,13 +2155,18 @@ paths:
       tags: [cards]
       operationId: updateRfidCard
       x-roles: [admin]
-      x-status: planned
+      x-status: implemented
       x-owner: Ân
       x-refs: [UC-ADM-04, BR-P15, BR-P23]
       summary: Gắn / bỏ gắn tài xế, khoá / mở khoá thẻ
       description: |
         Không đổi được `card_identifier` và `card_kind` (BR-P15: đúng một loại). Khoá thẻ chỉ áp
         cho Authorize sau đó; phiên đang chạy không bị dừng.
+        Online linking activates an unlinked card, unlinking makes it unlinked. Blocked cards
+        stay blocked on reassign/unlink until explicit status=active. Online active requires
+        a linked driver after the patch (otherwise 400 invalid_input). Free_vend has no driver.
+        Row-locked transaction; issued_at unchanged, updated_at updated. No session/command/
+        billing mutations. Missing card is 404 not_found; missing driver is 404 driver_not_found.
       parameters:
         - name: cardId
           in: path
@@ -2135,6 +2178,16 @@ paths:
           application/json:
             schema: { $ref: '#/components/schemas/RfidCardPatch' }
       responses:
+        '413':
+          description: payload_too_large (JSON over 16 KiB)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '415':
+          description: unsupported_media_type (application/json required)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
         '200':
           description: Sau khi sửa
           content:
@@ -2143,7 +2196,19 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
-        '404': { $ref: '#/components/responses/NotFound' }
+        '405':
+          description: Method not allowed; Allow is GET, POST, OPTIONS (collection) or PATCH, OPTIONS (card)
+          headers:
+            Allow:
+              schema: { type: string }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '404':
+          description: 'not_found (card) or driver_not_found'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
         '409':
           description: '`card_kind_has_no_driver` (thẻ free_vend không gắn tài xế)'
           content:
