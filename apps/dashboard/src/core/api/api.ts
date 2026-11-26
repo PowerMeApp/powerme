@@ -36,6 +36,8 @@ import type {
   RevenueQuery,
   RevenueReport,
   SessionsActiveError,
+  TransactionPage,
+  TransactionQuery,
 } from '@powerme/shared';
 import { loggedOut, tokenRefreshed, type AuthState } from '../auth/authSlice';
 import { env } from '../config/env';
@@ -46,6 +48,8 @@ export const FAULT_PAGE_SIZE = 20;
 export const SESSION_PAGE_SIZE = 20;
 /** Rows per page on screen 18. */
 export const CHARGE_POINT_PAGE_SIZE = 20;
+/** Rows per page of the transaction list on screen 35 (the API default). */
+export const TRANSACTION_PAGE_SIZE = 50;
 
 /** Screen 18 filters; omitted = all (decommissioned hidden by the server, D24). */
 export interface ChargePointFilter {
@@ -255,6 +259,19 @@ export const api = createApi({
         responseHandler: (r) => (r.ok ? r.text() : r.json()),
       }),
     }),
+    // Screen 35 (UC-ADM-10): transaction list of T108b, one stopped session per row (contract §4.1).
+    adminTransactions: b.query<TransactionPage, TransactionQuery & { page: number }>({
+      query: ({ page, ...q }) =>
+        `admin/v1/transactions?${transactionSearch(q)}&page=${page}&page_size=${TRANSACTION_PAGE_SIZE}`,
+      providesTags: ['Revenue'],
+    }),
+    // Same filters, no paging (page / page_size → 400); whole filtered set plus a TOTAL line.
+    adminTransactionsCsv: b.mutation<string, TransactionQuery>({
+      query: (q) => ({
+        url: `admin/v1/transactions.csv?${transactionSearch(q)}`,
+        responseHandler: (r) => (r.ok ? r.text() : r.json()),
+      }),
+    }),
   }),
 });
 
@@ -276,6 +293,8 @@ export const {
   useResolveSessionMutation,
   useRevenueQuery,
   useRevenueCsvMutation,
+  useAdminTransactionsQuery,
+  useAdminTransactionsCsvMutation,
 } = api;
 
 export type RevenueScope = 'operator' | 'admin';
@@ -285,6 +304,16 @@ export function revenueSearch(q: RevenueQuery): string {
   const p = new URLSearchParams({ from: q.from, to: q.to, group_by: q.group_by });
   if (q.site_id) p.set('site_id', q.site_id);
   if (q.operator_id) p.set('operator_id', q.operator_id);
+  return p.toString();
+}
+
+/** Query string of the transaction routes, in a fixed order (JSON and CSV ask the same thing). */
+export function transactionSearch(q: TransactionQuery): string {
+  const p = new URLSearchParams({ from: q.from, to: q.to });
+  for (const k of ['operator_id', 'site_id', 'charge_point_id', 'kind', 'origin'] as const) {
+    const v = q[k];
+    if (v) p.set(k, v);
+  }
   return p.toString();
 }
 
@@ -319,6 +348,8 @@ export function errorMessage(err: unknown): string {
     // FE-07 revenue (T108).
     case 'invalid_period':
       return 'Kỳ báo cáo không hợp lệ: ngày đầu phải trước ngày cuối và dài tối đa 366 ngày';
+    case 'export_too_large':
+      return 'Quá 100 000 dòng, hãy chọn kỳ ngắn hơn hoặc lọc thêm';
   }
   if (e.status === 429) {
     const minutes = Math.max(1, Math.ceil((e.retryAfterS ?? 60) / 60));

@@ -72,3 +72,71 @@ export interface RevenueQuery {
   /** Admin only. */
   operator_id?: string;
 }
+
+/**
+ * Admin transaction list (T108b, Khang; screen 35 — UC-ADM-10). Source:
+ * apps/csms/src/operator-api/admin-transactions.ts, contract §4.1. One row = one stopped session.
+ */
+export type TransactionKind =
+  'csms_billed' | 'unsettled' | 'pending_reconciliation' | 'unattributed';
+/** DB enum `session_origin`. */
+export type TransactionOrigin = 'app_qr' | 'rfid' | 'hmi_password' | 'free_vend';
+
+export interface TransactionRow {
+  session_id: string;
+  /** OCPP transactionId. */
+  transaction_no: number;
+  kind: TransactionKind;
+  session_status: string;
+  payment_mode: string;
+  origin: TransactionOrigin;
+  operator_id: string;
+  operator_name: string;
+  site_id: string;
+  site_code: string;
+  site_name: string;
+  charge_point_id: string;
+  serial_number: string;
+  connector_no: number;
+  started_at: string;
+  stopped_at: string | null;
+  /** The moment that puts the session in the period (K3); `period_day` is its day, UTC+7. */
+  period_at: string;
+  period_day: string;
+  /** null = the meter reading is missing, not 0 Wh. */
+  energy_wh: number | null;
+  /** Only for `csms_billed`: |session_debit|. */
+  amount_vnd: number | null;
+  /** Only for `unsettled`: same codes as `RevenueUnsettled.by_reason`. */
+  unsettled_reason: string | null;
+  driver_id: string | null;
+  promotion_code: string | null;
+  /** Sent by the charge point after it reconnected. */
+  delivered_offline: boolean;
+}
+
+export interface TransactionPage {
+  from: string;
+  to: string;
+  currency: 'VND';
+  /** Rows of the whole filtered set; `items` is one page of them. */
+  total: number;
+  items: TransactionRow[];
+  /** Sums of the whole filtered set (not only this page). */
+  totals: RevenueBucket;
+  pending_reconciliation: { session_count: number };
+  unsettled: RevenueUnsettled;
+  generated_at: string;
+  page: number;
+  page_size: number;
+}
+
+export interface TransactionQuery {
+  from: string;
+  to: string;
+  operator_id?: string;
+  site_id?: string;
+  charge_point_id?: string;
+  kind?: TransactionKind;
+  origin?: TransactionOrigin;
+}
