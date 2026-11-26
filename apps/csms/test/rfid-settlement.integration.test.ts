@@ -29,6 +29,8 @@ import { hashChargePointPassword } from '../src/stations/charge-point-credential
 import { chargeTransaction } from '../src/sessions/charge-sql.js';
 import { migrate } from './helpers/apply-migrations.js';
 
+// Ngày biểu giá theo giờ Việt Nam như charge-settlement.service.ts — KHÔNG dùng current_date (theo
+// TimeZone của session, UTC trên CI): 00:00–07:00 giờ VN, current_date+1 đã là "hôm nay" ở VN.
 const url = process.env['MB03_TEST_DATABASE_URL'];
 const describeDb = url ? describe : describe.skip;
 const secret = randomBytes(32);
@@ -275,7 +277,7 @@ describeDb('T148 RFID settlement over OCPP and owner-scoped JWT HTTP', () => {
       [driver, other],
     );
     await q(
-      'UPDATE tariff_periods SET price_per_kwh_vnd=5000,effective_from=current_date-2,updated_at=now() WHERE operator_id=$1',
+      "UPDATE tariff_periods SET price_per_kwh_vnd=5000,effective_from=(now() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date-2,updated_at=now() WHERE operator_id=$1",
       [op],
     );
     await q(
@@ -605,7 +607,7 @@ describeDb('T148 RFID settlement over OCPP and owner-scoped JWT HTTP', () => {
     const s = await start();
     await meter(s.tx, 2000);
     await q(
-      'UPDATE tariff_periods SET effective_from=current_date+1,updated_at=now() WHERE operator_id=$1',
+      "UPDATE tariff_periods SET effective_from=(now() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date+1,updated_at=now() WHERE operator_id=$1",
       [op],
     );
     await stop(s.tx);
@@ -614,7 +616,7 @@ describeDb('T148 RFID settlement over OCPP and owner-scoped JWT HTTP', () => {
       reason: 'tariff_coverage_or_boundary_meter_required',
     });
     await q(
-      'UPDATE tariff_periods SET effective_from=current_date-2,updated_at=now() WHERE operator_id=$1',
+      "UPDATE tariff_periods SET effective_from=(now() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date-2,updated_at=now() WHERE operator_id=$1",
       [op],
     );
     expect(await settlement.settle(s.id)).toBe('posted');
