@@ -52,6 +52,18 @@ cat ~/.powerme-app-dev-db-password  # rồi gửi riêng cho dev
 
 `app_dev`: đăng nhập, `SELECT/INSERT/UPDATE/DELETE` mọi bảng `public` (cả bảng do migration sau tạo — `ALTER DEFAULT PRIVILEGES`), dùng sequence; **không** superuser, không tạo DB/role, không DDL (`CREATE/DROP/ALTER TABLE`), không `TRUNCATE`, chỉ đọc `_migrations`; tối đa 5 kết nối, câu lệnh quá 60 s bị cắt. Mật khẩu 48 ký tự hex, sinh ngẫu nhiên, nằm ở `~/.powerme-app-dev-db-password` (chmod 600, ngoài thư mục repo), không in ra, không lên argv.
 
+#### Role chỉ đọc `app_ro` (T153, 26/11/2026)
+
+Cho người chỉ cần **xem** dữ liệu staging (ví dụ Sơn kiểm phiên RFID / quyết toán T148 bằng `SELECT`), dùng `app_ro` thay cho `app_dev`. Cùng tunnel, chỉ đổi user trong `DATABASE_URL`:
+
+```bash
+./create-dev-db-role.sh --read-only   # chạy lại được; --read-only --rotate để đổi mật khẩu
+cat ~/.powerme-app-ro-db-password     # rồi gửi riêng
+# dev: postgres://app_ro:<mật khẩu nhận riêng>@127.0.0.1:5433/powerme
+```
+
+Hai lớp chặn, đã thử trên staging 26/11: (1) `default_transaction_read_only = on` → `INSERT`/`UPDATE`/`CREATE TABLE` báo "read-only transaction"; (2) chỉ có quyền `SELECT` → kể cả tự `SET default_transaction_read_only = off` thì `UPDATE sessions` / `DELETE FROM _migrations` vẫn "permission denied". Cùng giới hạn 5 kết nối, 60 s mỗi câu lệnh. Dữ liệu **trước migration 0029** (áp ở `review-26`, 25/11 10:06 UTC): bản sao lưu `backups/pre-review-26-20261125-100619.dump` trên VM — muốn xem thì Trí khôi phục vào một DB tạm, không đụng DB staging.
+
 ## 2. Việc của dev (Windows / macOS)
 
 ### a. Mở tunnel
