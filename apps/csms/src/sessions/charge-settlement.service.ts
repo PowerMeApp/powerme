@@ -1,5 +1,8 @@
 import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import type { PoolClient } from 'pg';
+import { LedgerPostRejected } from '../billing/billing-errors.js';
+import { CreditLedgerService } from '../billing/credit-ledger.service.js';
+import { LoyaltyService } from '../billing/loyalty.service.js';
 import {
   CONFIG,
   CsmsConfig,
@@ -353,13 +356,15 @@ export class ChargeSettlementService {
 
   constructor(
     @Inject(DB) private readonly db: Db,
+    private readonly ledger: CreditLedgerService,
+    private readonly loyalty: LoyaltyService,
     @Optional() @Inject(CHARGE_POLICY) private readonly policy?: ChargePolicy,
     @Optional() @Inject(CONFIG) private readonly config?: CsmsConfig,
   ) {
     if (policy) validateChargePolicy(policy);
   }
 
-  // WP3/T31: minimal settlement bridge in the WP5 domain, gated by WP2 evidence and an app intent.
+  // WP3/T148: all eligible sessions share one atomic ledger/loyalty path after reconciliation.
   private async post(
     sessionId: number,
   ): Promise<'posted' | 'already_posted' | 'pending' | 'ineligible'> {
@@ -370,7 +375,6 @@ export class ChargeSettlementService {
       );
       return 'pending';
     }
-    const expiry = this.policy.pointsExpiryMonths;
     return chargeTransaction(this.db, async (c) => {
       const pending = async (reason: string): Promise<'pending'> => {
         await c.query(
@@ -386,8 +390,8 @@ export class ChargeSettlementService {
         JOIN sites st ON st.id=cp.site_id WHERE s.id=$1 AND (
           (s.origin='app_qr'
             AND EXISTS(SELECT 1 FROM driver_charge_intents i WHERE i.session_id=s.id AND i.driver_id=s.driver_id))
-          -- BE-24 (F-12): phiên unattributed được operator gán tài xế (dấu vết append-only). Free vend
-          -- không bao giờ trừ tiền (BR-P08) dù dữ liệu có ra sao. Thẻ RFID csms_billed khác vẫn là G5.
+          -- WP3/T148: use captured session ownership, never the current card registry.
+          OR (s.origin='rfid' AND s.payment_mode='csms_billed' AND s.driver_id IS NOT NULL)
           OR (s.origin<>'free_vend' AND EXISTS(SELECT 1 FROM session_status_history h
             WHERE h.session_id=s.id AND h.event='UNATTRIBUTED_ASSIGNED')))
         FOR UPDATE OF s`,
@@ -456,44 +460,23 @@ export class ChargeSettlementService {
         ).rowCount
       )
         return pending('ledger_inconsistent');
-      await c.query(
-        'INSERT INTO loyalty_accounts(driver_id) VALUES($1) ON CONFLICT(driver_id) DO NOTHING',
-        [session.driver_id],
-      );
-      const loyalty = (
-        await c.query<{ id: string }>(
-          'SELECT id FROM loyalty_accounts WHERE driver_id=$1 FOR UPDATE',
-          [session.driver_id],
-        )
-      ).rows[0]!;
-      const balance = BigInt(account.balance_vnd) - amount;
       const points = amount / 1000n;
-      const debit = (
-        await c.query<{ id: string }>(
-          `
-        INSERT INTO credit_transactions(credit_account_id,entry_no,transaction_type,amount_vnd,balance_after_vnd,session_id)
-        SELECT $1,coalesce(max(entry_no),0)+1,'session_debit',$2,$3,$4 FROM credit_transactions
-        WHERE credit_account_id=$1 RETURNING id`,
-          [account.id, (-amount).toString(), balance.toString(), sessionId],
-        )
-      ).rows[0]!;
-      const earn = (
-        await c.query<{ id: string }>(
-          `
-        INSERT INTO loyalty_transactions(loyalty_account_id,entry_no,transaction_type,points,expires_at,session_id)
-        SELECT $1,coalesce(max(entry_no),0)+1,'earn',$2,now()+make_interval(months => $3),$4
-        FROM loyalty_transactions WHERE loyalty_account_id=$1 RETURNING id`,
-          [loyalty.id, points.toString(), expiry, sessionId],
-        )
-      ).rows[0]!;
-      await c.query(
-        `UPDATE credit_accounts SET balance_vnd=$2,status=CASE WHEN $2::bigint<0 THEN 'in_shortfall'::credit_account_status ELSE status END,
-        updated_at=now() WHERE id=$1`,
-        [account.id, balance.toString()],
-      );
-      await c.query(
-        'UPDATE loyalty_accounts SET points_balance=points_balance+$2,updated_at=now() WHERE id=$1',
-        [loyalty.id, points.toString()],
+      let debit;
+      try {
+        // WP3/T148: the caller's transaction locks session, then credit, then loyalty (D9).
+        debit = await this.ledger.post(c, Number(account.id), 'session_debit', -Number(amount), {
+          sessionId,
+        });
+      } catch (error) {
+        if (error instanceof LedgerPostRejected && error.reason === 'account_closed')
+          return pending('account_closed');
+        throw error;
+      }
+      const earn = await this.loyalty.earnForSession(
+        c,
+        Number(session.driver_id),
+        sessionId,
+        Number(points),
       );
       let cumulative = 0n;
       let allocated = 0n;

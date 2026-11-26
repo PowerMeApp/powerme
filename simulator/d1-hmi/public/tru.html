@@ -401,6 +401,19 @@
         .metrics {
           grid-template-columns: repeat(2, 1fr);
         }
+        /* QA-05: hàng nút trong bảng HMI của súng được xuống dòng thay vì đẩy trang cuộn ngang
+           (390 px trước đây rộng thêm ~37 px). Chỉ đổi bố cục, không đổi nút hay hành vi. */
+        .controls {
+          grid-template-columns: minmax(0, 1fr);
+        }
+        .row {
+          flex-wrap: wrap;
+        }
+        .row > select,
+        .row > input:not(.num) {
+          flex: 1 1 9rem;
+          min-width: 0;
+        }
       }
       /* ── QA-03: thanh trên, bộ chọn tốc độ, khối hành trình phiên ───────────── */
       a.back {
@@ -634,8 +647,8 @@
         <button id="truToggle" type="button" aria-expanded="true">Thu gọn</button>
       </div>
       <div class="tru-body">
-        <!-- Hình 3D (tru-3d.js, three.js). Ẩn khi không có WebGL / giảm chuyển động / tắt hoạt
-             ảnh — khi đó dùng hình SVG 2D bên dưới. -->
+        <!-- Hình 3D (tru-3d.js nạp bundle React + react-three-fiber /tru3d/tru3d.js). Ẩn khi không
+             có WebGL / giảm chuyển động / tắt hoạt ảnh / chưa build — khi đó dùng SVG 2D bên dưới. -->
         <div class="tru-3d" id="tru3d" hidden aria-label="Hình 3D trụ sạc, kéo chuột để xoay"></div>
         <svg
           class="tru-svg"

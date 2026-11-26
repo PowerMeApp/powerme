@@ -196,7 +196,7 @@ header button:hover:not(:disabled) { background: var(--accent); color: var(--pan
 <aside id="onboard" aria-label="Onboard Charge Point">
   <div class="dh"><h2>Onboard Charge Point</h2><button class="plain" id="ob-close" type="button">Close ✕</button></div>
   <form id="ob-form" autocomplete="off">
-    <label>Serial number (OCPP identity)<input name="serial" required pattern="[A-Za-z0-9._\-]{3,48}" placeholder="SIM-0005"></label>
+    <label>Serial number (OCPP identity)<input name="serial" required pattern="[A-Za-z0-9._\-]{3,25}" maxlength="25" placeholder="SIM-0005"></label>
     <label>Site id<input name="site" type="number" min="1" step="1" required></label>
     <label>Connectors<select name="n"><option value="2">2 (connector 1 and 2)</option><option value="1">1 (connector 1)</option></select></label>
     <button type="submit">Onboard</button>

@@ -62,6 +62,7 @@ jobs:
         include:
           - { name: powerme-csms, dockerfile: apps/csms/Dockerfile }
           - { name: powerme-simulator, dockerfile: simulator/d1-hmi/Dockerfile }
+          - { name: powerme-dashboard, dockerfile: apps/dashboard/Dockerfile }
     steps:
       - uses: actions/checkout@v7
         with:

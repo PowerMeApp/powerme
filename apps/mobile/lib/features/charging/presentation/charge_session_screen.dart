@@ -389,7 +389,8 @@ class _ChargeSessionViewState extends ConsumerState<_ChargeSessionView>
                   vehicle: attempt.vehicleLabel,
                 ),
             ],
-            if (issue != null ||
+            if (progress?.awaitingRfidSettlement == true ||
+                issue != null ||
                 progress?.inReview == true ||
                 awaitingStopMeter ||
                 waitingForStop)

@@ -108,10 +108,10 @@ class ChargeSessionReadout extends StatelessWidget {
   }
 }
 
-/// Phiên RFID/HMI/free-vend không trừ Charging Credit: không hiện tạm tính (tránh tài xế tưởng bị tính tiền).
+/// Ẩn tạm tính chưa được hỗ trợ; không suy ra nghĩa vụ thanh toán từ origin.
 String _estimateLabel(ChargeProgress progress, AppCopy copy) =>
-    !progress.billedThroughApp
-    ? copy.text('Không tính qua app', 'Not billed in app')
+    !progress.supportsCostEstimate
+    ? copy.text('Chưa có tạm tính', 'Estimate unavailable')
     : progress.costEstimateVnd == null
     ? copy.text('Chưa xác định', 'Unknown')
     : vnd(progress.costEstimateVnd, copy: copy);
@@ -158,7 +158,8 @@ class ChargeSessionMetrics extends StatelessWidget {
           ),
         ],
       ),
-      if (progress.billedThroughApp && progress.estimatedCostVnd != null) ...[
+      if (progress.supportsCostEstimate &&
+          progress.estimatedCostVnd != null) ...[
         const SizedBox(height: 12),
         ValueLine(
           copy.text('Chi phí (tạm tính, tối đa)', 'Estimated cost (maximum)'),
@@ -168,7 +169,7 @@ class ChargeSessionMetrics extends StatelessWidget {
       ],
       if (!summary) ...[
         const SizedBox(height: 12),
-        if (progress.billedThroughApp && progress.costEstimateVnd != null)
+        if (progress.supportsCostEstimate && progress.costEstimateVnd != null)
           Text(switch (progress.costQuality) {
             ChargeCostQuality.interpolated => copy.text(
               'Tạm tính có nội suy giữa các mốc biểu giá.',
@@ -313,7 +314,7 @@ class ChargeProgressCard extends StatelessWidget {
               ? copy.text('Chưa có số đo', 'No reading yet')
               : chargeEnergyLabel(energy, copy),
         ),
-        if (progress.billedThroughApp && progress.estimatedCostVnd != null)
+        if (progress.supportsCostEstimate && progress.estimatedCostVnd != null)
           ValueLine(
             copy.text('Chi phí (tạm tính, tối đa)', 'Estimated cost (maximum)'),
             vnd(progress.estimatedCostVnd, copy: copy),

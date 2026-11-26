@@ -83,6 +83,10 @@ export interface UnattributedQueueItem {
   session_id: number;
   transaction_no: number;
   station: string;
+  /** FE-12: ids and name for links to the charge point / station pages. */
+  charge_point_id: string;
+  site_id: string;
+  site_name: string;
   connector_no: number;
   id_tag: string;
   origin: string;
@@ -279,17 +283,26 @@ export class UnattributedSessionService {
   }
 
   /**
-   * Hàng đợi cho console: phiên unattributed đã đóng, chưa có quyết định (mới nhất trước). Chưa lọc
-   * theo operator — console chưa có đăng nhập (cùng mức GET /api/admin/sessions); mỗi dòng mang
-   * `operator_id`. Quyền chỉ kiểm khi GHI (assign/close).
+   * Hàng đợi: phiên unattributed đã đóng, chưa có quyết định (mới nhất trước). Console (chưa đăng
+   * nhập) gọi không có `operatorId` → mọi operator, mỗi dòng mang `operator_id`. FE-12 (màn 23,
+   * operator API có đăng nhập) truyền `operatorId` của token → chỉ phiên trên trụ của operator đó.
+   * Quyền GHI vẫn kiểm ở assign/close.
    */
-  async listPending(limit: number): Promise<UnattributedQueueItem[]> {
-    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 500)
+  async listPending(limit: number, operatorId?: number): Promise<UnattributedQueueItem[]> {
+    if (
+      !Number.isSafeInteger(limit) ||
+      limit < 1 ||
+      limit > 500 ||
+      (operatorId !== undefined && !(Number.isSafeInteger(operatorId) && operatorId > 0))
+    )
       throw new UnattributedSessionError('invalid_input');
     const { rows } = await this.db.$client.query<{
       id: string;
       transaction_no: number;
       serial_number: string;
+      charge_point_id: string;
+      site_id: string;
+      site_name: string;
       connector_no: number;
       id_tag: string;
       origin: string;
@@ -301,7 +314,8 @@ export class UnattributedSessionService {
       not_assignable_reason: UnattributedQueueItem['not_assignable_reason'];
       open_records: (string | null)[];
     }>(
-      `SELECT s.id,s.transaction_no,cp.serial_number,s.connector_no,s.id_tag,s.origin,s.status,
+      `SELECT s.id,s.transaction_no,cp.serial_number,cp.id::text AS charge_point_id,
+         st.id::text AS site_id,st.site_name,s.connector_no,s.id_tag,s.origin,s.status,
          s.energy_wh,s.delivered_offline,s.received_stopped_at,st.operator_id,
          ${NOT_ASSIGNABLE_SQL} AS not_assignable_reason,
          coalesce((SELECT array_agg(r.resolution ORDER BY r.record_no) FROM reconciliation_records r
@@ -313,13 +327,17 @@ export class UnattributedSessionService {
          AND s.status = ANY($2::session_status[])
          AND NOT EXISTS (SELECT 1 FROM session_status_history h
            WHERE h.session_id=s.id AND h.event = ANY($3::text[]))
+         AND ($4::bigint IS NULL OR st.operator_id=$4)
        ORDER BY s.received_stopped_at DESC,s.id DESC LIMIT $1`,
-      [limit, STOPPED_STATUSES, DECISION_EVENTS],
+      [limit, STOPPED_STATUSES, DECISION_EVENTS, operatorId ?? null],
     );
     return rows.map((r) => ({
       session_id: Number(r.id),
       transaction_no: r.transaction_no,
       station: r.serial_number,
+      charge_point_id: r.charge_point_id,
+      site_id: r.site_id,
+      site_name: r.site_name,
       connector_no: r.connector_no,
       id_tag: r.id_tag,
       origin: r.origin,

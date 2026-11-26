@@ -1,3 +1,5 @@
+import { CreditLedgerService } from '../src/billing/credit-ledger.service.js';
+import { LoyaltyService } from '../src/billing/loyalty.service.js';
 /**
  * BE-24 (F-12, FR-13, UC-OPS-05) — operator gán / đóng phiên `unattributed`, và route console giải
  * quyết phiên `review`, trên Postgres thật. Mã TC-F12-01..03 trong tên test để truy vết với BM04.
@@ -291,7 +293,12 @@ describeDb('BE-24 — phiên unattributed (F-12) và route review', () => {
       new ReconciliationService(db, CONFIG),
       CONFIG,
     );
-    settlement = new ChargeSettlementService(db, policy);
+    settlement = new ChargeSettlementService(
+      db,
+      new CreditLedgerService(db),
+      new LoyaltyService(policy),
+      policy,
+    );
     review = new SessionReviewService(db, settlement);
     service = new UnattributedSessionService(db, settlement);
     commands = new ConsoleCommands(db, new ConnectionRegistry(db), undefined, review, service);

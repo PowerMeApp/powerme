@@ -12,6 +12,7 @@ import {
   type FetchArgs,
 } from '@reduxjs/toolkit/query/react';
 import type {
+  AdminSummary,
   ApiErrorBody,
   ChargePointLifecycle,
   ChargePointPage,
@@ -26,6 +27,12 @@ import type {
   RefreshResponse,
   ResetRequest,
   ResetResponse,
+  AssignSessionRequest,
+  CloseSessionRequest,
+  ResolveSessionRequest,
+  SessionDecisionResponse,
+  SessionQueue,
+  SessionQueuePage,
   RevenueQuery,
   RevenueReport,
   SessionsActiveError,
@@ -37,6 +44,8 @@ import { env } from '../config/env';
 
 /** Rows per page on screen 21. */
 export const FAULT_PAGE_SIZE = 20;
+/** Rows per page on screen 23. */
+export const SESSION_PAGE_SIZE = 20;
 /** Rows per page on screen 18. */
 export const CHARGE_POINT_PAGE_SIZE = 20;
 /** Rows per page of the transaction list on screen 35 (the API default). */
@@ -138,13 +147,18 @@ const baseQuery: BaseQueryFn<string | FetchArgs, unknown, ApiError> = async (arg
 export const api = createApi({
   reducerPath: 'api',
   baseQuery,
-  tagTypes: ['Fault', 'Summary', 'ChargePoint', 'Revenue'],
+  tagTypes: ['Fault', 'Summary', 'ChargePoint', 'Session', 'Revenue', 'AdminSummary'],
   endpoints: (b) => ({
     login: b.mutation<LoginResponse, LoginRequest>({
       query: (body) => ({ url: 'auth/v1/login', method: 'POST', body }),
     }),
     operatorMe: b.query<DashboardMe, void>({ query: () => 'operator/v1/me' }),
     adminMe: b.query<DashboardMe, void>({ query: () => 'admin/v1/me' }),
+    // Screen 27 (FE-14, UC-ADM-07): platform counts.
+    adminSummary: b.query<AdminSummary, void>({
+      query: () => 'admin/v1/summary',
+      providesTags: ['AdminSummary'],
+    }),
     // Screen 21 (FE-04b, UC-OPS-03): FaultEvents of the signed-in staff's Operator.
     // One page of the server's order (D39); `page` is 1-based.
     operatorFaults: b.query<
@@ -201,6 +215,37 @@ export const api = createApi({
       query: (id) => `operator/v1/charge-points/${id}`,
       providesTags: ['ChargePoint', 'Fault'],
     }),
+    // Screen 23 (FE-12, UC-OPS-05): unattributed / review queues and the Operator's decisions.
+    // A decision also changes the queue counts on screen 17.
+    operatorSessions: b.query<SessionQueuePage, { queue: SessionQueue; page: number }>({
+      query: ({ queue, page }) =>
+        `operator/v1/sessions?queue=${queue}&page=${page}&page_size=${SESSION_PAGE_SIZE}`,
+      providesTags: ['Session'],
+    }),
+    assignSession: b.mutation<SessionDecisionResponse, { id: string } & AssignSessionRequest>({
+      query: ({ id, ...body }) => ({
+        url: `operator/v1/sessions/${id}/assign`,
+        method: 'POST',
+        body,
+      }),
+      invalidatesTags: ['Session', 'Summary'],
+    }),
+    closeSession: b.mutation<SessionDecisionResponse, { id: string } & CloseSessionRequest>({
+      query: ({ id, ...body }) => ({
+        url: `operator/v1/sessions/${id}/close`,
+        method: 'POST',
+        body,
+      }),
+      invalidatesTags: ['Session', 'Summary'],
+    }),
+    resolveSession: b.mutation<SessionDecisionResponse, { id: string } & ResolveSessionRequest>({
+      query: ({ id, ...body }) => ({
+        url: `operator/v1/sessions/${id}/resolve`,
+        method: 'POST',
+        body,
+      }),
+      invalidatesTags: ['Session', 'Summary'],
+    }),
     // Screens 25 / 35 (FE-07, UC-OPS-09 / UC-ADM-10): revenue report of T108 (BR-P46).
     revenue: b.query<RevenueReport, { scope: RevenueScope } & RevenueQuery>({
       query: ({ scope, ...q }) => `${scope}/v1/revenue?${revenueSearch(q)}`,
@@ -234,6 +279,7 @@ export const {
   useLoginMutation,
   useOperatorMeQuery,
   useAdminMeQuery,
+  useAdminSummaryQuery,
   useOperatorFaultsQuery,
   useAcknowledgeFaultMutation,
   useResetFaultMutation,
@@ -241,6 +287,10 @@ export const {
   useOperatorSummaryQuery,
   useOperatorChargePointsQuery,
   useOperatorChargePointQuery,
+  useOperatorSessionsQuery,
+  useAssignSessionMutation,
+  useCloseSessionMutation,
+  useResolveSessionMutation,
   useRevenueQuery,
   useRevenueCsvMutation,
   useAdminTransactionsQuery,

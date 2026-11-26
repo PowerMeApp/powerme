@@ -1,3 +1,5 @@
+import { CreditLedgerService } from '../src/billing/credit-ledger.service.js';
+import { LoyaltyService } from '../src/billing/loyalty.service.js';
 /**
  * BE-34 — quản lý xe của tài xế qua HTTP thật + Postgres riêng: `GET /vehicle-models`,
  * `POST /vehicles`, `PATCH /vehicles/{id}`, `DELETE /vehicles/{id}` (xoá mềm, migration 0018).
@@ -202,7 +204,17 @@ describeDb('BE-34 driver vehicles over HTTP and dedicated Postgres', () => {
       new ConsoleQueries(db, config, registry),
       new ConsoleCommands(db, registry),
       db,
-      new DriverChargingService(db, registry, new ChargeSettlementService(db, policy), policy),
+      new DriverChargingService(
+        db,
+        registry,
+        new ChargeSettlementService(
+          db,
+          new CreditLedgerService(db),
+          new LoyaltyService(policy),
+          policy,
+        ),
+        policy,
+      ),
     );
     await server.start();
     base = `http://127.0.0.1:${server.port}`;

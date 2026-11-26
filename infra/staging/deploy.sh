@@ -110,9 +110,9 @@ STEP="pull ảnh"
 log "Kéo ảnh $TAG_NEW"
 set_env TAG "$TAG_NEW"
 if [ "$SIM_ON" = true ]; then
-  docker compose pull csms simulator
+  docker compose pull csms dashboard simulator
 else
-  docker compose pull csms
+  docker compose pull csms dashboard
 fi
 
 STEP="khởi động Postgres"
@@ -138,9 +138,10 @@ if [ "$SEED" = true ]; then
 fi
 
 STEP="khởi động ứng dụng"
-if [ "$SIM_ON" = true ]; then log "Khởi động CSMS + Caddy + simulator"; else log "Khởi động CSMS + Caddy"; fi
+if [ "$SIM_ON" = true ]; then log "Khởi động CSMS + dashboard + Caddy + simulator"; else log "Khởi động CSMS + dashboard + Caddy"; fi
 APP_TOUCHED=true
-docker compose up -d csms caddy
+# BE-46: dashboard là file tĩnh; Caddy KHÔNG depends_on nó (thiếu dashboard → 502 ở trang, OCPP/API vẫn chạy).
+docker compose up -d csms dashboard caddy
 # BE-43: Caddyfile là bind mount MỘT FILE. `git checkout` thay file bằng inode mới, container vẫn giữ
 # inode cũ, nên `up -d` (và cả `caddy reload`) không thấy cấu hình mới — lần 17/11 hai đường VNPay
 # thêm ở review-15 vẫn chưa có trong Caddy sau 7 lần deploy. So mã băm và tạo lại container khi đổi
@@ -186,6 +187,8 @@ if [ -n "$TAG_OLD" ] && [ "$TAG_OLD" != "$TAG_NEW" ]; then
   set_env TAG "$TAG_OLD"
   docker compose pull csms
   docker compose up -d csms caddy
+  # Tag cũ (trước BE-46) không có image dashboard: bỏ qua, không làm hỏng việc lùi CSMS.
+  { docker compose pull dashboard && docker compose up -d dashboard; } || warn "Không có image dashboard cho $TAG_OLD — dashboard dừng ở bản hiện tại"
   if [ "$SIM_ON" = true ]; then docker compose up -d simulator; fi
   if wait_healthy 12; then
     warn "Đã lùi về $TAG_OLD và khoẻ. $TAG_NEW KHÔNG được triển khai."

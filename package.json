@@ -26,10 +26,15 @@
     "infra:up": "docker compose -f infra/docker-compose.yml up -d",
     "infra:down": "docker compose -f infra/docker-compose.yml down",
     "infra:logs": "docker compose -f infra/docker-compose.yml logs -f",
-    "infra:reset": "docker compose -f infra/docker-compose.yml down -v"
+    "infra:reset": "docker compose -f infra/docker-compose.yml down -v",
+    "sim:tru3d:build": "vite build --config simulator/d1-hmi/tru3d/vite.config.mjs"
   },
   "devDependencies": {
+    "@react-three/fiber": "9.8.2",
     "prettier": "^3.4.2",
-    "three": "0.187.0"
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
+    "three": "0.187.0",
+    "vite": "7.3.7"
   }
 }

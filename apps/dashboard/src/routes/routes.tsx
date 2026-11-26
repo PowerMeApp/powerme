@@ -13,6 +13,7 @@ import { ChargePointDetailPage } from '../pages/operator/ChargePointDetailPage';
 import { ChargePointListPage } from '../pages/operator/ChargePointListPage';
 import { FaultAlertsPage } from '../pages/operator/FaultAlertsPage';
 import { OperatorHomePage } from '../pages/operator/OperatorHomePage';
+import { SessionQueuePage } from '../pages/operator/SessionQueuePage';
 import { RevenuePage } from '../pages/operator/RevenuePage';
 import { StationPage } from '../pages/operator/StationPage';
 import { RequireRole } from './RequireRole';
@@ -38,6 +39,7 @@ export const routes: RouteObject[] = [
       { path: 'charge-points', element: <ChargePointListPage /> }, // 18
       { path: 'charge-points/:id', element: <ChargePointDetailPage /> }, // 20
       { path: 'faults', element: <FaultAlertsPage /> }, // 21
+      { path: 'sessions', element: <SessionQueuePage /> }, // 23
       { path: 'revenue', element: <RevenuePage /> }, // 25
       // Station detail (FE-07): outside Table 5, reached from screens 18, 20 and 25.
       { path: 'stations/:id', element: <StationPage /> },

@@ -4,6 +4,7 @@ import {
   AuthError,
   DASHBOARD_TOKEN_TTL_S,
   loadDashboardAuthConfig,
+  parseAllowedOrigins,
 } from './auth.js';
 
 const key = randomBytes(32).toString('base64');
@@ -66,4 +67,29 @@ describe('loadDashboardAuthConfig (FE-01a, ADR-0018)', () => {
       );
     },
   );
+});
+
+describe('BE-46 DASHBOARD_ALLOWED_ORIGINS', () => {
+  it('is empty when unset and lists exact https origins', () => {
+    expect(loadDashboardAuthConfig({}).allowedOrigins).toBeUndefined();
+    expect(parseAllowedOrigins(' https://a.example , https://b.example:8443')).toEqual([
+      'https://a.example',
+      'https://b.example:8443',
+    ]);
+    expect(
+      loadDashboardAuthConfig({ ...full, DASHBOARD_ALLOWED_ORIGINS: 'https://a.example' })
+        .allowedOrigins,
+    ).toEqual(['https://a.example']);
+  });
+
+  it.each([
+    'http://a.example',
+    'https://a.example/',
+    'https://a.example/x',
+    '*',
+    'a.example',
+    'https://a.example,',
+  ])('rejects %p', (raw) => {
+    expect(() => parseAllowedOrigins(raw)).toThrow('DASHBOARD_ALLOWED_ORIGINS');
+  });
 });

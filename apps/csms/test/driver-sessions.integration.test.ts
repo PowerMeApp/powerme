@@ -1,3 +1,5 @@
+import { CreditLedgerService } from '../src/billing/credit-ledger.service.js';
+import { LoyaltyService } from '../src/billing/loyalty.service.js';
 import { randomBytes } from 'node:crypto';
 import { createServer, type Server } from 'node:http';
 import { type AddressInfo } from 'node:net';
@@ -252,7 +254,12 @@ describeDb('T146 owned sessions over real HTTP/JWT and isolated PostgreSQL', () 
     service = new DriverChargingService(
       db,
       registry,
-      new ChargeSettlementService(db, policy),
+      new ChargeSettlementService(
+        db,
+        new CreditLedgerService(db),
+        new LoyaltyService(policy),
+        policy,
+      ),
       policy,
     );
     http = createServer(

@@ -1,0 +1,293 @@
+/* tru3d.css — khung 3D "Ethereal Glass" (QA-04). Được bundle chèn vào <head> khi nạp được 3D;
+   không nạp được bundle thì không có file này và trang dùng hình SVG 2D như cũ.
+   Font: chỉ font hệ thống có sẵn (không tải từ CDN). Chỉ animate transform/opacity. */
+
+#tru .tru-3d {
+  --t3-ink: #eef2f7;
+  --t3-muted: rgba(226, 233, 242, 0.56);
+  --t3-hair: rgba(255, 255, 255, 0.1);
+  --t3-font:
+    'Segoe UI Variable Text', 'Segoe UI', system-ui, -apple-system, 'Noto Sans', 'Ubuntu',
+    sans-serif;
+  --t3-mono: 'Cascadia Mono', Consolas, ui-monospace, 'SF Mono', monospace;
+  max-width: 1280px;
+  margin: 0.4rem auto 0;
+  border-radius: 20px;
+  overflow: hidden;
+  /* cùng màu nền với cảnh 3D (Floor.jsx BG) để mép canvas không lộ */
+  background: #040506;
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.06),
+    0 30px 80px -40px rgba(0, 0, 0, 0.7);
+  color: var(--t3-ink);
+  font-family: var(--t3-font);
+}
+#tru .t3-stage {
+  position: relative;
+  height: clamp(360px, 40vw, 600px);
+}
+/* Vignette rất nhẹ phủ lên canvas (dưới lớp nhãn): nền chìm vào đen ở bốn góc */
+#tru .t3-stage::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  background: radial-gradient(125% 95% at 50% 46%, transparent 58%, rgba(0, 0, 0, 0.5) 100%);
+}
+#tru .t3-canvas {
+  position: absolute !important;
+  inset: 0;
+  cursor: grab;
+  touch-action: none;
+}
+#tru .t3-canvas:active {
+  cursor: grabbing;
+}
+:root.big #tru .t3-stage {
+  height: clamp(420px, 46vw, 720px);
+}
+
+/* ── Lớp chữ phủ ────────────────────────────────────────────────────────── */
+#tru .t3-ov {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+  font-size: 0.86rem;
+  line-height: 1.25;
+}
+#tru .t3-pill {
+  position: absolute;
+  padding: 4px;
+  border-radius: 22px;
+  border: 1px solid var(--t3-hair);
+  background: rgba(255, 255, 255, 0.025);
+  max-width: min(46%, 380px);
+  backdrop-filter: blur(14px) saturate(1.2);
+  -webkit-backdrop-filter: blur(14px) saturate(1.2);
+}
+#tru .t3-core {
+  border-radius: 18px;
+  padding: 0.6rem 0.85rem 0.65rem;
+  background: linear-gradient(180deg, rgba(22, 27, 34, 0.86), rgba(10, 12, 16, 0.86));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.09),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.03);
+  animation: t3-in 520ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+#tru .t3-a {
+  left: 18px;
+  top: 18px;
+}
+#tru .t3-b {
+  right: 18px;
+  top: 18px;
+}
+#tru .t3-net {
+  left: 18px;
+  bottom: 16px;
+  border-radius: 999px;
+  max-width: calc(100% - 36px);
+}
+#tru .t3-net .t3-core {
+  border-radius: 999px;
+  padding: 0.4rem 0.85rem;
+}
+#tru .t3-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.55rem;
+}
+#tru .t3-row b {
+  font-weight: 650;
+  letter-spacing: 0.01em;
+}
+#tru .t3-st {
+  color: var(--c);
+  font-weight: 560;
+}
+#tru .t3-tag {
+  font-size: 0.74rem;
+  padding: 0.1rem 0.5rem;
+  border-radius: 999px;
+  color: var(--t3-ink);
+  background: rgba(255, 255, 255, 0.06);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+  font-variant-numeric: tabular-nums;
+}
+#tru .t3-speed {
+  font-family: var(--t3-mono);
+}
+#tru .t3-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--c);
+  box-shadow: 0 0 12px 1px var(--c);
+  flex: none;
+}
+#tru .t3-metrics {
+  display: flex;
+  gap: 1.1rem;
+  margin-top: 0.5rem;
+  font-variant-numeric: tabular-nums;
+}
+#tru .t3-m {
+  display: flex;
+  align-items: baseline;
+  gap: 0.25rem;
+}
+#tru .t3-v {
+  font-size: 1.35rem;
+  font-weight: 300;
+  letter-spacing: -0.01em;
+  font-variant-numeric: tabular-nums;
+}
+#tru .t3-u {
+  color: var(--t3-muted);
+  font-size: 0.74rem;
+}
+#tru .t3-bar {
+  margin-top: 0.5rem;
+  height: 3px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+}
+#tru .t3-bar i {
+  display: block;
+  height: 100%;
+  background: var(--c);
+  transform-origin: left center;
+  transition: transform 900ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+#tru .t3-note {
+  margin-top: 0.3rem;
+  color: var(--t3-muted);
+  font-size: 0.8rem;
+}
+#tru .t3-hint {
+  position: absolute;
+  right: 22px;
+  bottom: 24px;
+  font-size: 0.74rem;
+  color: rgba(226, 233, 242, 0.38);
+  letter-spacing: 0.02em;
+}
+
+/* Nhịp chấm trạng thái: bám kiểu nháy trong README (chỉ opacity) */
+#tru .t3-dot-Preparing {
+  animation: t3-slow 2s ease-in-out infinite;
+}
+#tru .t3-dot-Charging {
+  animation: t3-breathe 3s ease-in-out infinite;
+}
+#tru .t3-dot-SuspendedEV {
+  animation: t3-blink 1.6s steps(1, end) infinite;
+}
+#tru .t3-dot-SuspendedEVSE {
+  animation: t3-double 2s steps(1, end) infinite;
+}
+#tru .t3-dot-Faulted {
+  animation: t3-blink 0.5s steps(1, end) infinite;
+}
+#tru .t3-net-connecting {
+  animation: t3-slow 1s ease-in-out infinite;
+}
+#tru .t3-net-half {
+  animation: t3-double 1.2s steps(1, end) infinite;
+}
+@keyframes t3-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes t3-slow {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.25;
+  }
+}
+@keyframes t3-breathe {
+  0%,
+  100% {
+    opacity: 0.45;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+@keyframes t3-blink {
+  0% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.15;
+  }
+}
+@keyframes t3-double {
+  0% {
+    opacity: 1;
+  }
+  10% {
+    opacity: 0.15;
+  }
+  20% {
+    opacity: 1;
+  }
+  30% {
+    opacity: 0.15;
+  }
+}
+
+/* ── Dưới 768 px: khung cao hơn, nhãn gọn, không cuộn ngang ──────────── */
+@media (max-width: 767px) {
+  #tru .tru-3d {
+    border-radius: 16px;
+  }
+  #tru .t3-stage {
+    height: min(96vw, 460px);
+  }
+  #tru .t3-ov {
+    font-size: 0.78rem;
+  }
+  #tru .t3-pill {
+    max-width: calc(50% - 16px);
+  }
+  #tru .t3-a {
+    left: 10px;
+    top: 10px;
+  }
+  #tru .t3-b {
+    right: 10px;
+    top: 10px;
+  }
+  #tru .t3-net {
+    left: 10px;
+    bottom: 10px;
+    max-width: calc(100% - 20px);
+  }
+  #tru .t3-core {
+    padding: 0.45rem 0.6rem 0.5rem;
+  }
+  #tru .t3-metrics {
+    flex-wrap: wrap;
+    gap: 0.2rem 0.7rem;
+  }
+  #tru .t3-v {
+    font-size: 1.05rem;
+  }
+  #tru .t3-hint {
+    display: none;
+  }
+}

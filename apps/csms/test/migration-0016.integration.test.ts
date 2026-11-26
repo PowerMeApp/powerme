@@ -1,3 +1,5 @@
+import { CreditLedgerService } from '../src/billing/credit-ledger.service.js';
+import { LoyaltyService } from '../src/billing/loyalty.service.js';
 /**
  * Test tích hợp migration 0016 (BE-23 / T110): bỏ thẻ RFID ví (`rfid_card_kind.wallet`) và
  * `payment_mode.station_wallet` theo quyết định T109.
@@ -368,7 +370,14 @@ describeDb('migration 0016 — bỏ thẻ wallet và payment_mode station_wallet
       });
 
       beforeAll(() => {
-        service = new UnattributedSessionService(db, new ChargeSettlementService(db));
+        service = new UnattributedSessionService(
+          db,
+          new ChargeSettlementService(
+            db,
+            new CreditLedgerService(db),
+            new LoyaltyService({ pointsExpiryMonths: 12 }),
+          ),
+        );
       });
 
       it('gán tài xế cho phiên station_wallet cũ đã dừng → already_resolved; không giao dịch credit, payment_mode giữ unattributed', async () => {

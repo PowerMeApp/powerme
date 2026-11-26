@@ -241,7 +241,7 @@ export type BodyResult<T> = { ok: true; value: T } | ({ ok: false } & RouteError
 
 const CONNECTOR_TYPES = ['ccs2', 'chademo', 'gbt', 'type2'] as const;
 /** OCPP identity = Basic-auth user name (same rule as the service and the T98 contract). */
-const SERIAL_RE = /^[A-Za-z0-9._-]{3,48}$/;
+const SERIAL_RE = /^[A-Za-z0-9._-]{3,25}$/;
 /** numeric(7, 2) columns (rated_power_kw, max_power_kw). */
 const MAX_KW = 99_999.99;
 
@@ -274,7 +274,7 @@ export interface RegisterBody {
 function serialField(v: Record<string, unknown>): BodyResult<string> {
   const serial = v['serial_number'];
   if (typeof serial !== 'string' || !SERIAL_RE.test(serial.trim())) {
-    return badBody('serial_number must be 3–48 chars [A-Za-z0-9._-]');
+    return badBody('serial_number must be 3–25 chars [A-Za-z0-9._-]');
   }
   return { ok: true, value: serial.trim() };
 }

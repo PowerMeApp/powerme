@@ -86,6 +86,10 @@ jobs:
       - name: Build
         run: npm run build
 
+      # Hình trụ 3D của simulator (QA-04) không phải workspace nên `npm run build` không chạm tới
+      - name: Build hình trụ 3D (simulator)
+        run: npm run sim:tru3d:build
+
   # App tài xế (Flutter) nằm ngoài npm workspaces nên job trên không chạm tới.
   # Ghim đúng phiên bản trong apps/mobile/.metadata (3.44.2 = c9a6c484).
   flutter:

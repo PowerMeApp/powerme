@@ -99,7 +99,7 @@ function Totals({ report }: { report: RevenueReport }) {
       <section className="card tile" aria-label="Doanh thu">
         <h2>Doanh thu</h2>
         <p className="tile-number">{formatVnd(t.csms_billed_revenue_vnd)}</p>
-        <p className="muted small">Phiên đã đối soát và đã trừ tiền (BR-P46)</p>
+        <p className="muted small">Từ các phiên đã đối soát và đã trừ tiền</p>
       </section>
       <section className="card tile" aria-label="Phiên tính tiền">
         <h2>Phiên tính tiền</h2>

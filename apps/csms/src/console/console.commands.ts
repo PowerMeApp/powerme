@@ -33,8 +33,8 @@ import {
 } from '../sessions/unattributed-session.service.js';
 import { AssignInput, CloseInput, ConsoleError, ResolveInput } from './console.http.js';
 
-/** Mô tả ngắn cho từng mã lỗi quyết định (BE-24). */
-const DECISION_DETAIL: Record<SessionReviewErrorCode | UnattributedErrorCode, string> = {
+/** Mô tả ngắn cho từng mã lỗi quyết định (BE-24). Dùng chung với operator API (FE-12, màn 23). */
+export const DECISION_DETAIL: Record<SessionReviewErrorCode | UnattributedErrorCode, string> = {
   invalid_input:
     'Tham số không hợp lệ (mã lý do: a-z, 0-9, _, tối đa 40 ký tự; ghi chú 1–500 ký tự)',
   forbidden: 'Người gọi không phải nhân viên vận hành đang hoạt động',
@@ -60,8 +60,9 @@ export class ConsoleCommands {
     /** WF-04. Optional để test BE-08 cũ dựng console không cần nó (khi đó API sự cố trả 503). */
     @Optional() faultService?: FaultService,
     /** BE-24. Optional cùng lý do; thiếu thì các API hàng đợi/quyết định trả 503. */
-    @Optional() private readonly review?: SessionReviewService,
-    @Optional() private readonly unattributed?: UnattributedSessionService,
+    /** Also handed to the operator API for screen 23 (FE-12), so both paths share one service. */
+    @Optional() readonly review?: SessionReviewService,
+    @Optional() readonly unattributed?: UnattributedSessionService,
   ) {
     this.faultActions = new FaultActions(db, registry, faultService);
   }

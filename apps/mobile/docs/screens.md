@@ -1,5 +1,42 @@
 # Coding reference 1 — màn hình và chức năng WP3
 
+## T148 — đồng bộ main 25/11/2026
+
+Nền cuối `2272b13ea109d3e05c7de6625d5952adc11056dd`; bộ 93 ca đã kiểm trên
+`81b7433f`, mobile source giữ nguyên khi rebase; giữ #211 chặn
+active/can_stop khi đã received stop và ẩn tạm tính RFID chưa hỗ trợ. Capability
+`supportsCostEstimate` chỉ quyết định hiển thị tạm tính; “Chưa có tạm tính” /
+“Estimate unavailable” không phủ nhận billing. Pending → posted vẫn đọc bảng kê
+thật và hiển thị debit/điểm server, với budget 120 giây và lifecycle guards cũ.
+Focused charging/RFID/session/four-mode/start-stop **93/93 pass**, exit 0 trên base 81b7433f; không phải full Flutter hoặc native/hardware/staging acceptance. Bằng chứng
+publication và kiểm tra cuối: [T148](../../../docs/tasks/t148-rfid-settlement.md).
+Các số liệu 24/11 bên dưới là lịch sử, gồm bản migration T148 cũ số 0028; code hiện
+là 0029 sau refund 0028, không chỉnh `_migrations` hay DB runtime cũ.
+
+
+## T148 — stopped RFID pending → statement, 24/11 (current local slice)
+
+Views 6/7/9 → FR-05/08/16/17, UC-CHG-04/UC-PAY-02, BR-P08/34/45,
+NFR-SEC-01/US-01 → PKG-3 Charging, existing ChargeProgress/controller/session
+screen and owned statement reader (CD-1/SD-1a/b separation; current Driver API).
+Confirmed stopped billable RFID pending keeps bounded read-only polling, honest
+pending copy and manual Refresh; posted loads its actual statement once. Review,
+unknown/legacy and nonbillable states preserve their guards. No RFID Stop/retry,
+fake app start/vehicle or client debit/points math.
+
+Two-minute UI budget starts at the first accepted pending reading, includes hidden
+and background time, and does not restart on manual refresh. Background performs
+no reads. Refresh remains usable after expiry/resume; canceled/late responses do
+not create a statement or overlap requests. Budget is not a server cutoff.
+
+Local evidence: 10 new RFID cases and related existing regressions **75/75**, exit 0;
+2 capture tests / 4 images cover pending/posted at 390px/100% VI and 320px/200% EN.
+Refresh is at least 48dp. Known narrow bottom-tab text overlap remains outside
+scope; 320px posted image shows the top of scrollable content. Final analyzer,
+format, hashes and limits are linked from README. At phase-two acceptance runtime still awaited upgrade. Phase 3 subsequently
+upgraded local after verified backup; see [current T148](../../../docs/tasks/t148-rfid-settlement.md).
+T146 notes below are historical and superseded for T148 settlement.
+
 ## T146 — all-origin owned sessions, 24/11 (local implementation)
 
 This section supersedes the historical ledger-only History and app-start-only progress descriptions below. Views 5/6/7/9 → FR-04/05/08/16/17, UC-CHG-04/UC-PAY-02, BR-P08/15/17/34/45, NFR-SEC-01/US-01 → PKG-3 Charging/History, current CD-1/SD-1a/b intent/progress separation and the canonical Driver API §5/OpenAPI 0.15.0. The read-only discovery/selection extensions are documented in architecture.md; the diagrams' older planned/mock footers do not override today's API composition.
@@ -9,7 +46,7 @@ This section supersedes the historical ledger-only History and app-start-only pr
 - Physical stop retains status/final Wh; an ineligible/unbilled RFID session does not poll forever or invent a zero debit/points. Future actual posted statements use the existing owned statement reader. Lifecycle guards still require closed/reconciled, final stop and no review before showing a final statement.
 - History reads `view=all`, including unsettled RFID. Compact cards use source/status/date and actual energy/statement amount, with session details retaining unknown vehicle. Null is unavailable; actual zero remains zero. Final statement buttons require lifecycle eligibility as well as `statement_available`. Loading/empty/error/retry and previous/next pages are connected. Credit's ledger/money logic is unchanged.
 
-Acceptance evidence: the 27 new synthetic cases cover typed decoding, bigint strings/nulls/future enums/wrong JSON types, auth A→logout→B, explicit/automatic selection guards, target-scoped stop keys, 0/1/multiple/page discovery, cancellation/resume/5s/no-overlap, late QR/edit protection, no-vehicle RFID navigation with no charge/stop POST, physical stop bounds, future settled RFID and statement ownership failure. Existing QR/four-mode/stop/camera/navigation tests remain. VI/EN are tested at 390px/100% and 320px/200%, including 48dp actions. Final check results are in README; staging/Android device/accessibility certification/physical reader and T148 remain pending.
+Acceptance evidence: the 27 new synthetic cases cover typed decoding, bigint strings/nulls/future enums/wrong JSON types, auth A→logout→B, explicit/automatic selection guards, target-scoped stop keys, 0/1/multiple/page discovery, cancellation/resume/5s/no-overlap, late QR/edit protection, no-vehicle RFID navigation with no charge/stop POST, physical stop bounds, future settled RFID and statement ownership failure. Existing QR/four-mode/stop/camera/navigation tests remain. VI/EN are tested at 390px/100% and 320px/200%, including 48dp actions. Final check results are in README; staging/Android device/accessibility certification/physical reader and T148 were pending at T146 acceptance; see the current T148 slice above.
 
 ## T96 — garage navigation runtime fix, 23/11
 

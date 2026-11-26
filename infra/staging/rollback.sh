@@ -111,6 +111,8 @@ else
   docker compose pull csms
 fi
 docker compose up -d csms caddy
+# BE-46: tag trước BE-46 không có image dashboard — bỏ qua, không làm hỏng việc lùi CSMS.
+{ docker compose pull dashboard && docker compose up -d dashboard; } || warn "Không có image dashboard cho tag này — giữ bản đang chạy"
 if [ "$SIM_ON" = true ]; then docker compose up -d simulator; fi
 
 if wait_healthy 30; then

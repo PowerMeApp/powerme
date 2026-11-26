@@ -25,17 +25,21 @@ Hạ tầng staging theo kiến trúc ARCH-2 (Report 4, Figure 2): **một VPS U
 | `create-dev-db-role.sh` | Tạo role Postgres `app_dev` (đọc/ghi bảng, không DDL/superuser) cho dev |
 | `../../apps/csms/Dockerfile` | Ảnh `powerme-csms` (nhiều tầng, base `node:24.18.1-alpine3.24`, user `node`, có `HEALTHCHECK`) |
 | `../../simulator/d1-hmi/Dockerfile` | Ảnh `powerme-simulator` (trụ giả lập D1 + HMI) |
+| `../../apps/dashboard/Dockerfile`, `Caddyfile` | Ảnh `powerme-dashboard` (BE-46): build Vite, phục vụ file tĩnh bằng Caddy nội bộ :8080 |
 | `../../.github/workflows/deploy-staging.yml` | Build ảnh khi đẩy tag, deploy qua SSH khi bật `STAGING_ENABLED` |
 | `../../apps/csms/scripts/migrate.mjs`, `seed-demo.mjs` | Migrate và seed chạy bên trong ảnh csms |
 
 ```
 internet ──443/80──▶ Caddy ──/ocpp/*──▶ csms:9000 (OCPP-J, Basic Auth kiểm lúc upgrade) ──▶ postgres:5432
                        │──/health──▶ csms:3000/health            (chỉ đường dẫn này)
-                       └── còn lại: một dòng chữ
+                       │──/api/driver/v1/*──▶ csms:3000           (BE-45: Driver API, JWT tài xế)
+                       │──/api/{auth,operator,admin}/v1/*──▶ csms:3000 (BE-46: Operator/Admin API, JWT dashboard)
+                       │──/api… khác──▶ 404 tại Caddy             (console chưa xác thực KHÔNG ra)
+                       └── còn lại──▶ dashboard:8080              (BE-46: trang dashboard, file tĩnh)
 VPS 127.0.0.1:3000 ──▶ console vận hành (KHÔNG ra internet; xem bằng SSH tunnel)
 VPS 127.0.0.1:8100 ──▶ HMI simulator   (profile sim; cũng chỉ qua SSH tunnel)
-VPS 127.0.0.1:3000/api/driver/v1 ──▶ Driver API cho app tài xế (cùng listener console; dev vào bằng tunnel, DEV-ACCESS.md)
-VPS 127.0.0.1:3000/api/{auth,operator,admin}/v1 ──▶ đăng nhập dashboard (T128, FE-01a; cùng listener, chỉ qua tunnel)
+VPS 127.0.0.1:3000/api/driver/v1 ──▶ Driver API cho app tài xế (cùng listener console; từ BE-45 cũng ra internet qua Caddy)
+VPS 127.0.0.1:3000/api/{auth,operator,admin}/v1 ──▶ Operator/Admin API (cùng listener; từ BE-46 cũng ra internet qua Caddy)
 VPS 127.0.0.1:5432 ──▶ postgres     (BE-27; chỉ loopback, dev vào bằng tunnel với role app_dev)
 ```
 
@@ -233,7 +237,7 @@ Cách gỡ (chưa làm): cho CSMS gọi VNPay qua một proxy đặt ở Việt 
 
 ## Đăng nhập dashboard (T128, FE-01a)
 
-Màn 16 (staff Operator) và 26 (Admin) gọi `POST /api/auth/v1/login`, rồi `GET /api/operator/v1/me` hoặc `GET /api/admin/v1/me` với `Authorization: Bearer <token>` (access 900 s, làm mới bằng `POST /api/auth/v1/refresh` tới 12 giờ sau đăng nhập — T125; hợp đồng: [`docs/api/OPERATOR-ADMIN-API-HOP-DONG.md`](../../docs/api/OPERATOR-ADMIN-API-HOP-DONG.md)). Các route này nằm trên **cùng listener cổng 3000 với console chưa xác thực**, nên chỉ vào bằng SSH tunnel như console và Driver API. **Không thêm `/api/*` vào Caddyfile**: proxy `/api` ra internet là mở luôn `/api/admin/*` của console (ngắt kết nối trụ, RemoteStop, onboarding) cho mọi người — chờ tới khi console có xác thực hoặc tách listener.
+Màn 16 (staff Operator) và 26 (Admin) gọi `POST /api/auth/v1/login`, rồi `GET /api/operator/v1/me` hoặc `GET /api/admin/v1/me` với `Authorization: Bearer <token>` (access 900 s, làm mới bằng `POST /api/auth/v1/refresh` tới 12 giờ sau đăng nhập — T125; hợp đồng: [`docs/api/OPERATOR-ADMIN-API-HOP-DONG.md`](../../docs/api/OPERATOR-ADMIN-API-HOP-DONG.md)). Các route này nằm trên **cùng listener cổng 3000 với console chưa xác thực**. Từ BE-46 chúng ra internet qua Caddy theo **đúng ba tiền tố có JWT** (mục "Dashboard ra internet"). **Vẫn không thêm `/api/*` vào Caddyfile**: proxy cả `/api` là mở luôn `/api/admin/*` của console (ngắt kết nối trụ, RemoteStop, onboarding) cho mọi người.
 
 **Bật trên VM có `.env` cũ** (người có quyền `deploy`):
 
@@ -262,7 +266,7 @@ TOKEN=$(curl -s -X POST http://127.0.0.1:3000/api/auth/v1/login -H 'content-type
 curl -s http://127.0.0.1:3000/api/operator/v1/me -H "authorization: Bearer $TOKEN"   # 200; /api/admin/v1/me với token này → 403
 ```
 
-**CORS qua tunnel: không bị chặn.** `operator-api.http.ts` chỉ nhận header `Origin` khớp `http(s)://localhost|127.0.0.1|[::1]` với **mọi cổng**, và bỏ qua kiểm khi không có `Origin`. Qua tunnel: `curl`/Postman không gửi `Origin` → chạy; dashboard chạy Vite trên máy dev (`CSMS_URL=http://127.0.0.1:3000 npm run dev -w @powerme/dashboard`, hoặc cổng tunnel khác) gọi `/api` cùng origin qua proxy của Vite, `Origin` là `http://127.0.0.1:5173`/`http://localhost:5173` → hợp lệ; gọi thẳng `http://127.0.0.1:3000` từ trang `localhost:<cổng bất kỳ>` cũng hợp lệ. Chỉ origin thật như `https://<DOMAIN>` bị 403 `forbidden_origin` — việc của FE-01d khi dashboard được host thật, không phải của staging hiện tại.
+**CORS qua tunnel: không bị chặn.** `operator-api.http.ts` chỉ nhận header `Origin` khớp `http(s)://localhost|127.0.0.1|[::1]` với **mọi cổng**, và bỏ qua kiểm khi không có `Origin`. Qua tunnel: `curl`/Postman không gửi `Origin` → chạy; dashboard chạy Vite trên máy dev (`CSMS_URL=http://127.0.0.1:3000 npm run dev -w @powerme/dashboard`, hoặc cổng tunnel khác) gọi `/api` cùng origin qua proxy của Vite, `Origin` là `http://127.0.0.1:5173`/`http://localhost:5173` → hợp lệ; gọi thẳng `http://127.0.0.1:3000` từ trang `localhost:<cổng bất kỳ>` cũng hợp lệ. Origin khác bị 403 `forbidden_origin`; từ BE-46 `https://<DOMAIN>` được nhận qua `DASHBOARD_ALLOWED_ORIGINS` (cố định trong compose).
 
 ## Bảo mật: những điều thật
 
@@ -276,7 +280,7 @@ curl -s http://127.0.0.1:3000/api/operator/v1/me -H "authorization: Bearer $TOKE
 ## Rủi ro và giới hạn thật
 
 1. **Console vận hành không xác thực.** Ai có SSH vào VPS (hoặc chạy được container trong mạng compose) là ngắt được kết nối trụ và gửi RemoteStop. Chỉ chấp nhận được vì không ra internet.
-2. **Chưa host dashboard.** Đăng nhập dashboard (FE-01a, T128) chỉ có ở API và chỉ qua tunnel; bản build dashboard chưa có dịch vụ/route Caddy. Driver API cho app có (BE-21/22) nhưng **không** ra internet: cùng listener với console chưa xác thực, nên chỉ vào bằng SSH tunnel (DEV-ACCESS.md). Ra internet cho app thật cần tách listener hoặc xác thực console trước.
+2. **Dashboard ra internet từ BE-46**, Driver API từ BE-45 — chỉ các tiền tố có JWT; console vẫn chung listener và vẫn không ra internet (Caddy trả 404 mọi `/api…` khác).
 3. **Một máy, không HA.** Postgres và CSMS cùng VPS; VPS chết là staging chết. CSMS giữ trạng thái kết nối trong RAM nên mỗi lần restart trụ nối lại (ân hạn `OFFLINE_GRACE_S`).
 4. **Sao lưu chỉ nằm trên cùng VPS** (`backups/`, 10 bản, chụp trước mỗi deploy). Mất VPS là mất cả dữ liệu lẫn sao lưu. Chưa có sao lưu định kỳ hay ngoài máy.
 5. **Chưa có giám sát/cảnh báo.** `/health` công khai cho phép gắn dịch vụ giám sát ngoài (ví dụ UptimeRobot) — chưa gắn. Chưa gom log; Docker giữ 5×10 MB mỗi dịch vụ.
@@ -309,6 +313,26 @@ curl -s http://127.0.0.1:3000/api/operator/v1/me -H "authorization: Bearer $TOKE
 - Hành vi trên Ubuntu 24.04 (bash 5.2 thì cùng họ với bản đã thử, nhưng `flock`, `docker compose` plugin, `curl` chưa thử thật); simulator nối qua wss thật; hairpin NAT.
 - `pg_dump`/`pg_restore` thật qua `docker compose exec` (script chỉ được thử với bản giả).
 
-## Khi WP4 có dashboard
+## Driver API ra internet (BE-45, 25/11/2026)
 
-Thêm lại: Dockerfile cho `apps/dashboard`, dịch vụ `dashboard` trong compose, `handle` mặc định trong Caddyfile proxy tới nó, dòng matrix trong workflow, và (chỉ khi đã có xác thực) route `/api/*` / `/realtime*`.
+App tài xế trên điện thoại thật dùng bản release, chỉ nhận `https`, nên không gọi được Driver API qua tunnel. Caddy mở **đúng** tiền tố `https://<DOMAIN>/api/driver/v1/*` (quyết định của Trí theo uỷ quyền của Ân). Cấu hình app: `API_BASE_URL = https://<DOMAIN>/api/driver/v1`.
+
+Vì sao không mở luôn console dù chung listener cổng 3000:
+
+- Caddy chỉ khớp `/api/driver/v1/*` (sau khi chuẩn hoá đường dẫn); mọi đường khác vẫn rơi về dòng chữ mặc định. **Vẫn không thêm `/api/*`.**
+- CSMS (`console.server.ts`) chuyển MỌI URL bắt đầu `/api/driver/` sang listener Driver API; listener này khớp route chính xác, nên không bao giờ rơi vào console.
+- Lớp chặn ở Caddy: URI gốc chứa `..`, `%2e`, `%2f` hoặc `%5c` → 400 trước khi proxy. Ca nguy hiểm `/api/admin/../driver/v1/x` (chuẩn hoá thì khớp Driver API nhưng URI gốc là đường vòng) bị chặn. Đã thử trên Caddy 2.11.7 cùng bản staging: đường hợp lệ qua; `../` và `%2e%2e` rơi về dòng chữ; `%2F`, `%5c` và `/api/admin/../driver/…` → 400.
+- Mọi route trừ `/auth/*` cần JWT tài xế; CORS chỉ nhận origin localhost nên trang web lạ bị 403 `forbidden_origin` (app native không gửi `Origin`).
+- `DRIVER_API_TRUST_PROXY: 'true'` cố định trong compose: bộ khoá đăng nhập theo IP (20 lần sai / 60 s → khoá 15 phút) và `vnp_IpAddr` lấy IP client từ giá trị cuối của `X-Forwarded-For` do Caddy thêm. Thiếu dòng này mọi tài xế chung IP của Caddy và một người lạ khoá được đăng nhập của cả nhóm.
+
+Giới hạn: đăng ký tài khoản (`/auth/register`) cũng ra internet — ai biết URL đều tạo được tài khoản tài xế trên staging (có giới hạn theo IP). Chấp nhận cho demo; muốn khoá thì chặn `/api/driver/v1/auth/register` ở Caddy.
+
+## Dashboard ra internet (BE-46, 25/11/2026)
+
+Hội đồng và nhóm xem dashboard ở `https://<DOMAIN>/` (màn 16 staff: `/operator/login`, màn 26 admin: `/admin/login`; tài khoản mẫu ở mục "Đăng nhập dashboard"). Quyết định của Trí theo uỷ quyền của Ân.
+
+- **Image `powerme-dashboard`** (`apps/dashboard/Dockerfile`): `vite build` rồi Caddy nội bộ phục vụ `/srv` trên :8080 (không TLS, không admin API, chỉ `expose` trong mạng compose). `/assets/*` cache 1 năm (tên có hash), file thiếu → 404; đường khác → `index.html` (SPA), `no-store`. CSP `default-src 'self'` (không CDN), `frame-ancestors 'none'`.
+- **Caddy chính**: `/api/{driver,auth,operator,admin}/v1/*` → csms:3000; mọi `/api…` khác → 404 tại Caddy; còn lại → dashboard. Chặn 400 trước khi proxy khi URI gốc có `..`/`%2e`/`%2f`/`%5c`, không bắt đầu đúng chữ thường `/api/<…>/v1/`, hoặc có `%` trong path — vì Caddy khớp không phân biệt hoa/thường còn CSMS thì có (`/API/driver/v1/x` lọt qua Caddy sẽ rơi vào console; đã thử trên staging review-25: console trả 404, không lộ gì, nhưng vẫn chặn).
+- **CSMS**: `DASHBOARD_ALLOWED_ORIGINS=https://${DOMAIN}` (chỉ origin https chính xác, sai định dạng thì CSMS không khởi động). Đăng nhập dashboard (5 lần sai / email+IP) lấy IP từ giá trị cuối `X-Forwarded-For` khi `DRIVER_API_TRUST_PROXY=true` — cùng lý do BE-45. Console (`/api/admin/*` không `v1`) vẫn chỉ nhận Origin localhost.
+- **Deploy/rollback**: `deploy.sh` kéo và bật `csms dashboard caddy`; Caddy không `depends_on` dashboard (dashboard hỏng → trang 502, OCPP/API vẫn chạy). Lùi về tag trước BE-46 (không có image dashboard) thì bỏ qua dashboard, chỉ cảnh báo.
+- **Đã thử** trên VM bằng `caddy:2.11.7-alpine` với hai Caddyfile (cổng tạm, không đụng staging): API hợp lệ qua; `/API/…`, `/api/ADMIN/…`, `/%61pi/…`, `%2F` → 400; `..`, `%2e%2e`, `/api/admin/stations`, `/api`, `/api/driver/v2/x` → 404; `/`, `/operator/charge-points` → index.html; asset có → 200, thiếu → 404; header CSP/X-Frame-Options/no-store có.
