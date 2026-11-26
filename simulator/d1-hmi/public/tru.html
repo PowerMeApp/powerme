@@ -401,6 +401,19 @@
         .metrics {
           grid-template-columns: repeat(2, 1fr);
         }
+        /* QA-05: hàng nút trong bảng HMI của súng được xuống dòng thay vì đẩy trang cuộn ngang
+           (390 px trước đây rộng thêm ~37 px). Chỉ đổi bố cục, không đổi nút hay hành vi. */
+        .controls {
+          grid-template-columns: minmax(0, 1fr);
+        }
+        .row {
+          flex-wrap: wrap;
+        }
+        .row > select,
+        .row > input:not(.num) {
+          flex: 1 1 9rem;
+          min-width: 0;
+        }
       }
       /* ── QA-03: thanh trên, bộ chọn tốc độ, khối hành trình phiên ───────────── */
       a.back {

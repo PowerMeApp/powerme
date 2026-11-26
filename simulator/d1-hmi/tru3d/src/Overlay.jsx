@@ -89,7 +89,7 @@ function NetPill({ s }) {
   );
 }
 
-export default function Overlay({ store }) {
+export default function Overlay({ store, lite }) {
   const s = useSyncExternalStore(store.subscribe, store.get);
   if (!s) return null;
   const [a, b] = s.connectors;
@@ -98,7 +98,9 @@ export default function Overlay({ store }) {
       {a && <GunPill c={a} side="a" />}
       {b && <GunPill c={b} side="b" />}
       <NetPill s={s} />
-      <div className="t3-hint">Kéo để xoay · nhấp đúp để về góc ban đầu</div>
+      <div className="t3-hint">
+        Kéo để xoay · nhấp đúp để về góc ban đầu{lite ? ' · chế độ nhẹ' : ''}
+      </div>
     </div>
   );
 }

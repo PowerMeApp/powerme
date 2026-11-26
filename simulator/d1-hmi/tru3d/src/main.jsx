@@ -1,14 +1,15 @@
 // main.jsx — điểm vào bundle hình trụ 3D (QA-04). tru-3d.js (loader) import file build và gọi mount().
 //
-//   const ctl = mount(box, { onFail })
+//   const ctl = mount(box, { onFail, quality })   // quality: 'auto' | 'lite' | 'hq' (xem Effects.jsx)
 //   ctl.update(snapshot)   // mỗi snapshot SSE "state" — cùng dữ liệu với hình SVG 2D
 //   ctl.setActive(bool)    // false → frameloop "never": không vẽ khung nào (ẩn tab, thu gọn, tắt 3D)
 //
 // Không có nguồn dữ liệu nào khác ngoài snapshot được đưa vào; không gọi API điều khiển trụ.
 import { Canvas } from '@react-three/fiber';
-import { Component, StrictMode } from 'react';
+import { Component, StrictMode, useSyncExternalStore } from 'react';
 import { createRoot } from 'react-dom/client';
 import * as THREE from 'three';
+import Effects from './Effects.jsx';
 import Overlay from './Overlay.jsx';
 import Scene from './Scene.jsx';
 import { readPalette } from './motion.js';
@@ -22,6 +23,27 @@ function createStore(initial) {
     get: () => snap,
     set(s) {
       snap = s;
+      for (const f of subs) f();
+    },
+    subscribe(f) {
+      subs.add(f);
+      return () => subs.delete(f);
+    },
+  };
+}
+
+// Chất lượng vẽ: 'high' (bloom + phản chiếu) hoặc 'lite'. Chỉ đi một chiều high → lite.
+function createQuality(mode) {
+  const m = mode === 'lite' || mode === 'hq' ? mode : 'auto';
+  let level = m === 'lite' ? 'lite' : 'high';
+  const subs = new Set();
+  return {
+    mode: m,
+    get: () => level,
+    downgrade() {
+      if (level === 'lite' || m === 'hq') return;
+      level = 'lite';
+      console.info('Hình 3D: FPS thấp — chuyển chế độ nhẹ (tắt bloom và phản chiếu)');
       for (const f of subs) f();
     },
     subscribe(f) {
@@ -45,31 +67,34 @@ class Guard extends Component {
   }
 }
 
-function App({ store, active, onFail }) {
+function App({ store, quality, active, onFail }) {
+  const level = useSyncExternalStore(quality.subscribe, quality.get);
+  const high = level === 'high';
   return (
     <div className="t3-stage">
       <Guard onFail={onFail}>
         <Canvas
           className="t3-canvas"
           frameloop={active ? 'always' : 'never'}
-          dpr={[1, 2]}
-          gl={{ antialias: true, alpha: true, powerPreference: 'high-performance' }}
-          camera={{ fov: 30, near: 0.1, far: 80, position: [0, 2.6, 12.4] }}
+          dpr={high ? [1, 2] : 1}
+          gl={{ antialias: true, alpha: false, powerPreference: 'high-performance' }}
+          camera={{ fov: 30, near: 0.1, far: 80, position: [0, 3.4, 17] }}
           onCreated={({ gl }) => {
             gl.toneMapping = THREE.ACESFilmicToneMapping;
-            gl.toneMappingExposure = 1.05;
-            gl.setClearColor(0x000000, 0);
+            gl.toneMappingExposure = 1.0;
+            gl.outputColorSpace = THREE.SRGBColorSpace;
           }}
         >
-          <Scene store={store} />
+          <Scene store={store} high={high} />
+          <Effects quality={quality} high={high} />
         </Canvas>
       </Guard>
-      <Overlay store={store} />
+      <Overlay store={store} lite={!high} />
     </div>
   );
 }
 
-export function mount(box, { initial, onFail } = {}) {
+export function mount(box, { initial, onFail, quality: mode } = {}) {
   if (!document.getElementById('tru3d-css')) {
     const tag = document.createElement('style');
     tag.id = 'tru3d-css';
@@ -77,6 +102,7 @@ export function mount(box, { initial, onFail } = {}) {
     document.head.appendChild(tag);
   }
   const store = createStore(initial);
+  const quality = createQuality(mode);
   const host = document.createElement('div');
   host.className = 't3-host';
   box.appendChild(host);
@@ -85,7 +111,7 @@ export function mount(box, { initial, onFail } = {}) {
   const render = () =>
     root.render(
       <StrictMode>
-        <App store={store} active={active} onFail={onFail} />
+        <App store={store} quality={quality} active={active} onFail={onFail} />
       </StrictMode>,
     );
   render();
