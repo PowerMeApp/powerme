@@ -157,3 +157,14 @@ loopback HTTP listener. `/stations?sort=smart` implements the user-prioritized b
 Smart ranking uses disclosed range/road/wait/charge assumptions, not live Vietmap travel or billing.
 `npm run test:driver-discovery` runs discovery and smart HTTP suites in separate new databases;
 CI invokes that runner explicitly. Full charging HTTP, OTP and mobile remain deferred.
+
+## WP3/T146 — Admin RFID API
+
+GET/POST /api/admin/v1/rfid-cards and PATCH /api/admin/v1/rfid-cards/{cardId} use the existing
+HTTP listener and Admin JWT/RolesGuard. The card registry preserves exact reader UIDs and blocks;
+it does not stop existing sessions. See [contract §3.8a](../../docs/api/OPERATOR-ADMIN-API-HOP-DONG.md#38a-wp3t146--sổ-thẻ-rfid-26112026).
+The secret-free [Postman collection](postman/PowerMe-T146-Admin-RFID.postman_collection.json) and
+[empty local template](postman/PowerMe-T146-Local.postman_environment.json) require private local
+credentials. Do not sync/export populated credentials or tokens to a shared workspace.
+Focused isolated suite: npm run test:driver-discovery -w @powerme/csms -- test/admin-rfid-cards.integration.test.ts
+with the explicit MB03 owned-local test admin connection/creation opt-in. No application DB is reset.
