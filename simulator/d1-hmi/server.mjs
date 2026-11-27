@@ -47,9 +47,17 @@ function stationList() {
   if (env.CP_IDS) {
     const ids = env.CP_IDS.split(',').map((s) => s.trim());
     const pws = (env.CP_PASSWORDS ?? '').split(',').map((s) => s.trim());
-    return ids.map((id, i) => ({ id, password: pws[i] || undefined }));
+    // QA-08: tên hiển thị (vd. tên trạm) cùng thứ tự CP_IDS; trống → chỉ hiện identity.
+    const names = (env.CP_NAMES ?? '').split(',').map((s) => s.trim());
+    return ids.map((id, i) => ({ id, password: pws[i] || undefined, name: names[i] || null }));
   }
-  return [{ id: env.CP_ID ?? 'RH24D1-00001', password: env.CP_PASSWORD || undefined }];
+  return [
+    {
+      id: env.CP_ID ?? 'RH24D1-00001',
+      password: env.CP_PASSWORD || undefined,
+      name: env.CP_NAME?.trim() || null,
+    },
+  ];
 }
 const list = stationList();
 for (const { id } of list) {
@@ -80,13 +88,13 @@ const tongClients = new Set();
 
 // Mỗi trụ: station + tập client SSE riêng. Trang một trụ chỉ nhận dữ liệu của trụ đó.
 const stations = new Map();
-for (const { id, password } of list) {
+for (const { id, password, name } of list) {
   const station = createStation({
     ...common,
     cpId: id,
     ...(password ? { authPassword: password } : {}),
   });
-  const entry = { id, station, clients: new Set() };
+  const entry = { id, name, station, clients: new Set() };
   // Đẩy snapshot khi có thay đổi nhưng không quá ~7 lần/giây.
   let pending = false;
   station.events.on('change', () => {
@@ -96,7 +104,7 @@ for (const { id, password } of list) {
     setTimeout(() => {
       pending = false;
       if (!entry.clients.size) return;
-      const snap = station.snapshot();
+      const snap = snapOf(entry);
       for (const r of entry.clients) send(r, 'state', snap);
     }, 150);
   });
@@ -111,10 +119,16 @@ for (const { id, password } of list) {
 const first = stations.values().next().value;
 
 // ── Trang tổng: tóm tắt nhỏ, không có nhật ký/hành trình ───────────────────
-function summary(st) {
-  const s = st.snapshot();
+/** Snapshot của một trụ kèm tên hiển thị (QA-08). */
+function snapOf(entry) {
+  return { ...entry.station.snapshot(), name: entry.name };
+}
+
+function summary(entry) {
+  const s = snapOf(entry);
   return {
     cpId: s.cpId,
+    name: s.name,
     net: { state: s.net.state, halfOpen: s.net.halfOpen, nextRetrySec: s.net.nextRetrySec },
     speed: s.speed,
     clockAheadSec: s.clockAheadSec,
@@ -137,7 +151,7 @@ function summary(st) {
 }
 const tong = () => ({
   csmsUrl: common.csmsUrl,
-  stations: [...stations.values()].map((e) => summary(e.station)),
+  stations: [...stations.values()].map((e) => summary(e)),
 });
 let tongPending = false;
 function scheduleTong() {
@@ -177,7 +191,7 @@ const sseHead = {
 function openStationSse(entry, req, res) {
   res.writeHead(200, sseHead);
   const st = entry.station;
-  send(res, 'hello', { state: st.snapshot(), log: st.logHistory(), series: st.series() });
+  send(res, 'hello', { state: snapOf(entry), log: st.logHistory(), series: st.series() });
   entry.clients.add(res);
   req.on('close', () => entry.clients.delete(res));
 }
@@ -315,13 +329,13 @@ const server = http.createServer(async (req, res) => {
       return notFound(res);
     }
     if (parts[0] === 'api' && parts.length === 2) {
-      if (get && parts[1] === 'state') return json(res, 200, first.station.snapshot());
+      if (get && parts[1] === 'state') return json(res, 200, snapOf(first));
       if (req.method === 'POST') return act(first, parts[1], req, res);
     }
     if (parts[0] === 'api' && parts.length === 3) {
       const entry = stations.get(parts[1]);
       if (!entry) return notFound(res);
-      if (get && parts[2] === 'state') return json(res, 200, entry.station.snapshot());
+      if (get && parts[2] === 'state') return json(res, 200, snapOf(entry));
       if (req.method === 'POST') return act(entry, parts[2], req, res);
     }
     notFound(res);

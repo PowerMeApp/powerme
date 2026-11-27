@@ -48,6 +48,22 @@ const ALL = [
   'PMAPP-TD-02B',
   'PMAPP-TD-03A',
 ];
+// QA-08: tên hiển thị = tên trạm + công suất trụ (theo apps/csms/demo/seed-app.sql).
+const NAMES = {
+  'PMAPP-BT-01A': 'PowerMe Landmark 81 · DC 120 kW',
+  'PMAPP-PN-01A': 'PowerMe Phan Xich Long · DC 30 kW',
+  'PMAPP-Q1-01A': 'PowerMe Ben Thanh · DC 120 kW',
+  'PMAPP-Q1-01B': 'PowerMe Ben Thanh · AC 22 kW',
+  'PMAPP-Q10-01A': 'PowerMe Van Hanh Mall · AC 7 kW',
+  'PMAPP-Q3-01A': 'PowerMe Ho Con Rua · DC 60 kW',
+  'PMAPP-Q7-01A': 'VinFast Crescent Mall · DC 150 kW',
+  'PMAPP-TB-01A': 'VinFast Cong Hoa · DC 60 kW',
+  'PMAPP-TD-01A': 'PowerMe Thao Dien · DC 50 kW',
+  'PMAPP-TD-01B': 'PowerMe Thao Dien · AC 22 kW',
+  'PMAPP-TD-02A': 'VinFast Vinhomes Grand Park · DC 60 kW',
+  'PMAPP-TD-02B': 'VinFast Vinhomes Grand Park · AC 11 kW',
+  'PMAPP-TD-03A': 'PowerMe Nha Van hoa Sinh vien · DC 60 kW',
+};
 const EXCEPTIONS = [
   ['PMAPP-Q1-01A', 'fault', { connector: 2, errorCode: 'ConnectorLockFailure' }],
   ['PMAPP-TD-02A', 'fault', { connector: 1, errorCode: 'GroundFailure' }],
@@ -87,6 +103,7 @@ const child = spawn(process.execPath, [server], {
     HMI_PORT: String(port),
     CP_IDS: ids.join(','),
     CP_PASSWORDS: ids.map(() => password).join(','),
+    CP_NAMES: ids.map((id) => NAMES[id] ?? '').join(','),
   },
 });
 const stop = () => child.kill('SIGINT');

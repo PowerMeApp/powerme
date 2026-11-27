@@ -318,3 +318,14 @@ h3 {
     scroll-behavior: auto !important;
   }
 }
+
+/* QA-08: identity OCPP hiện nhỏ dưới tên trạm (tên làm tiêu đề, serial để đối chiếu log/CSMS). */
+.cp-serial {
+  display: block;
+  margin-top: 4px;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0;
+  color: var(--color-body-gray, #747679);
+}

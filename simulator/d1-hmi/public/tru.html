@@ -817,8 +817,8 @@
       <section class="card" id="tru" aria-label="Hình minh hoạ trụ sạc">
         <div class="tru-head">
           <div class="hero-title">
-            <div class="eyebrow">Trụ sạc PowerMe · DC 120 kW, hai súng</div>
-            <h1>Trụ <span id="cpId">...</span></h1>
+            <div class="eyebrow" id="cpEyebrow">Trụ sạc PowerMe · DC 120 kW, hai súng</div>
+            <h1 id="cpTitle">Trụ <span id="cpId">...</span></h1>
             <div class="sub">
               CSMS <span id="csms">...</span> · đồng hồ trụ (mô phỏng)
               <span id="simTime">...</span> · <span id="clockAhead">...</span>
@@ -1372,7 +1372,12 @@
         } catch (e) {
           console.error(e);
         }
-        $('cpId').textContent = s.cpId;
+        if (s.name) {
+          // QA-08: có tên trạm → tên làm tiêu đề, identity OCPP thành dòng nhỏ.
+          $('cpTitle').innerHTML = `${esc(s.name)} <span class="cp-serial">${esc(s.cpId)}</span>`;
+          document.title = `${s.name} · ${s.cpId}`;
+          $('cpEyebrow').textContent = 'Trụ sạc giả lập (mô hình D1, hai súng)';
+        } else $('cpId').textContent = s.cpId;
         $('csms').textContent = s.csmsUrl;
         $('simTime').textContent = s.simTime.replace('T', ' ').slice(0, 19) + ' UTC';
         $('clockAhead').textContent = ahead(s.clockAheadSec);

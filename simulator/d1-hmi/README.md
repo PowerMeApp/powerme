@@ -103,6 +103,7 @@ Mở `http://127.0.0.1:8141/` (trang tổng) hoặc `/tru/<serial>` (từng tr�
 - **Vì sao chạy trên máy mình, không host:** đầu đọc RFID USB "gõ phím" vào trình duyệt của máy cắm nó, và `swipeReader` chỉ nhận yêu cầu loopback (#214).
 - **Mật khẩu:** một mật khẩu chung cho 13 trụ, đặt trong DB của CSMS đích (staging: Trí đặt 27/11, khác mật khẩu trụ demo, gốc ở `~/.powerme-app-stations-password` trên VM; local: `seed`). Chỉ đi qua biến môi trường, không dán chat/commit.
 - **Khi tắt:** các trụ mất kết nối; sau khoảng 15 phút CSMS mở cảnh báo Offline cho từng trụ (BR-P50) trên màn 21. Trước buổi demo hãy tắt sớm và đóng các cảnh báo đó.
+- **Tên hiển thị (QA-08):** script truyền `CP_NAMES` (tên trạm + công suất, theo `seed-app.sql`), nên trang tổng và trang trụ hiện "PowerMe Ben Thanh · DC 120 kW" làm tiêu đề, identity OCPP (`PMAPP-Q1-01A`) là dòng nhỏ bên dưới để đối chiếu log/CSMS. `server.mjs` nhận `CP_NAMES=tên1,tên2,…` cùng thứ tự `CP_IDS` (hoặc `CP_NAME` khi một trụ); trống thì chỉ hiện identity như trước.
 - Hai trụ 1 súng (`PMAPP-PN-01A`, `PMAPP-Q1-01B`): simulator vẫn giả 2 súng; CSMS bỏ qua súng không có trong DB.
 
 ## Trang từng trụ — cho người test app tài xế (QA-03)
