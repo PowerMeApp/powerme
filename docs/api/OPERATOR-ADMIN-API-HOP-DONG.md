@@ -406,7 +406,7 @@ thuộc Platform Administration; Operator xem doanh thu trạm mình qua `/opera
 
 | Endpoint | Role | UC / FR / BR | Trạng thái · người làm | Ghi chú |
 |---|---|---|---|---|
-| `GET /admin/v1/users` | admin | UC-ADM-01, FR-14, BR-P05 | planned · Trí | lọc role, trạng thái, operator, `q` |
+| `GET /admin/v1/users` | admin | UC-ADM-01, FR-14, BR-P05 | **implemented** T161 · Nghĩa · `admin-users.ts` | lọc `role`, `account_status`, `operator_id`, `q`; xem §3.8b |
 | `POST /admin/v1/users` | admin | UC-ADM-01/02, BR-P16 | planned · Trí | chỉ `operator_staff`/`admin`; tài xế tự đăng ký (consent BR-P05) |
 | `GET /admin/v1/users/{id}` | admin | UC-ADM-01 | planned · Trí | |
 | `PATCH /admin/v1/users/{id}` | admin | UC-ADM-01 | planned · Trí | họ tên, điện thoại |
@@ -485,6 +485,23 @@ Collection và template rỗng: apps/csms/postman/PowerMe-T146-Admin-RFID.postma
 PowerMe-T146-Local.postman_environment.json. Không import credentials/token vào workspace cloud.
 Script login chỉ dùng pm.variables.set (trong một Collection Runner run); Send riêng lẻ phải
 điền giá trị private local/current, shared vẫn rỗng. Không ghi token vào collection/global/shared env.
+
+### 3.8b T161 — danh sách tài khoản `GET /admin/v1/users` (27/11/2026)
+
+Làm trước cho ô chọn tài xế của màn 30 (RFID Cards): `?role=driver&account_status=active&q=…`.
+Các route khác của §3.8 (tạo, sửa, đổi role, khoá / mở khoá) vẫn planned (Trí).
+
+- Sau RolesGuard Admin; sai phương thức 405. Bộ lọc đều tuỳ chọn, mỗi key tối đa một lần, key
+  lạ / giá trị sai → 400 `invalid_input`: `role` ∈ `driver|operator_staff|admin`,
+  `account_status` ∈ `active|suspended|closed`, `operator_id` (nhân viên của Operator đó),
+  `q`, `page` (1–10000), `page_size` (1–100, mặc định 50).
+- `q` 2–100 ký tự (bỏ khoảng trắng đầu cuối): email hoặc họ tên **chứa** `q`, không phân biệt
+  hoa thường; `%`, `_`, `\` là ký tự thường. Thêm cho T161: hoặc số điện thoại **bằng** `q` sau
+  khi chuẩn hoá BE-30 (`0901…`, `84901…`, `+84 901…` cùng một số).
+- Trả `UserAccountPage` (OpenAPI): `operator` và `staff_role` chỉ có với `operator_staff`,
+  còn lại `null`. Thứ tự `id DESC`; total / items cùng snapshot REPEATABLE READ.
+- Không lọc dữ liệu lab (NFR-03 / RQ1) như `GET /admin/v1/summary`; tìm theo `q` nên ít gặp.
+- Test: `test/t161-admin-users.integration.test.ts` (8 ca HTTP / Postgres).
 
 ### 3.9 Tổng quan nền tảng (5) và ngoại lệ thanh toán (8)
 
@@ -891,7 +908,7 @@ trạng thái (2xx/4xx nghiệp vụ khác với 401/403). Ba điều kiện c�
 | 50 | `GET /api/admin/v1/revenue.csv` | 401 | 403 | 403 | ✓ | planned |
 | 51 | `GET /api/admin/v1/transactions` | 401 | 403 | 403 | ✓ | planned |
 | 52 | `GET /api/admin/v1/transactions.csv` | 401 | 403 | 403 | ✓ | planned |
-| 53 | `GET /api/admin/v1/users` | 401 | 403 | 403 | ✓ | planned |
+| 53 | `GET /api/admin/v1/users` | 401 | 403 | 403 | ✓ | implemented (T161) |
 | 54 | `POST /api/admin/v1/users` | 401 | 403 | 403 | ✓ | planned |
 | 55 | `GET /api/admin/v1/users/{userId}` | 401 | 403 | 403 | ✓ | planned |
 | 56 | `PATCH /api/admin/v1/users/{userId}` | 401 | 403 | 403 | ✓ | planned |

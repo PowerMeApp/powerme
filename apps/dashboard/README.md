@@ -38,7 +38,8 @@ npm run build -w @powerme/dashboard
 | 18–25 | Charge Points, Onboarding, Charge Point Detail, Fault Alerts, Maintenance Tickets, Unattributed Sessions, Pricing & Promotions, Station Revenue | `/operator/…` | FE-02 … FE-07, FE-12, FE-13 |
 | 26 | Login — Admin Console | `/admin/login` | FE-01b |
 | 27 | Admin Dashboard (hub) | `/admin` | FE-01b (khung; số liệu ở FE-14) |
-| 28–33 | Users & Roles, Charge Point Registry, RFID Cards, Billing Exceptions, … | `/admin/…` | FE-09, FE-14, FE-15 |
+| 30 | RFID Cards (Card Registry, UC-ADM-04) | `/admin/rfid-cards` | T161 (API T146 + tìm tài xế `GET /api/admin/v1/users`) |
+| 28, 29, 31–33 | Users & Roles, Charge Point Registry, Network Monitor, Billing Exceptions, Refund / Retry | `/admin/…` | FE-09, FE-15 |
 
 ## Quy tắc
 
