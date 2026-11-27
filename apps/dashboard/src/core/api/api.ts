@@ -16,6 +16,7 @@ import type {
   ApiErrorBody,
   ChargePointLifecycle,
   ChargePointPage,
+  CreateRfidCardRequest,
   OperatorChargePointDetail,
   OperatorSummary,
   DashboardMe,
@@ -25,6 +26,9 @@ import type {
   LoginResponse,
   OperatorFaultList,
   RefreshResponse,
+  RfidCard,
+  RfidCardPage,
+  RfidCardQuery,
   ResetRequest,
   ResetResponse,
   AssignSessionRequest,
@@ -38,6 +42,8 @@ import type {
   SessionsActiveError,
   TransactionPage,
   TransactionQuery,
+  UpdateRfidCardRequest,
+  UserAccountPage,
 } from '@powerme/shared';
 import { loggedOut, tokenRefreshed, type AuthState } from '../auth/authSlice';
 import { env } from '../config/env';
@@ -50,6 +56,10 @@ export const SESSION_PAGE_SIZE = 20;
 export const CHARGE_POINT_PAGE_SIZE = 20;
 /** Rows per page of the transaction list on screen 35 (the API default). */
 export const TRANSACTION_PAGE_SIZE = 50;
+/** Rows per page on screen 30. */
+export const RFID_PAGE_SIZE = 20;
+/** Matches shown by the driver picker of screen 30. */
+export const DRIVER_SEARCH_SIZE = 10;
 
 /** Screen 18 filters; omitted = all (decommissioned hidden by the server, D24). */
 export interface ChargePointFilter {
@@ -147,7 +157,7 @@ const baseQuery: BaseQueryFn<string | FetchArgs, unknown, ApiError> = async (arg
 export const api = createApi({
   reducerPath: 'api',
   baseQuery,
-  tagTypes: ['Fault', 'Summary', 'ChargePoint', 'Session', 'Revenue', 'AdminSummary'],
+  tagTypes: ['Fault', 'Summary', 'ChargePoint', 'Session', 'Revenue', 'AdminSummary', 'RfidCard'],
   endpoints: (b) => ({
     login: b.mutation<LoginResponse, LoginRequest>({
       query: (body) => ({ url: 'auth/v1/login', method: 'POST', body }),
@@ -272,6 +282,36 @@ export const api = createApi({
         responseHandler: (r) => (r.ok ? r.text() : r.json()),
       }),
     }),
+    // Screen 30 (T161, UC-ADM-04): RFID card registry of T146 (contract §3.8a). A change also
+    // changes the card counts of screen 27 (T161 point 5).
+    adminRfidCards: b.query<RfidCardPage, RfidCardQuery & { page: number }>({
+      query: ({ page, ...f }) => {
+        const p = new URLSearchParams();
+        if (f.status) p.set('status', f.status);
+        if (f.card_kind) p.set('card_kind', f.card_kind);
+        if (f.q?.trim()) p.set('q', f.q.trim());
+        p.set('page', String(page));
+        p.set('page_size', String(RFID_PAGE_SIZE));
+        return `admin/v1/rfid-cards?${p}`;
+      },
+      providesTags: ['RfidCard'],
+    }),
+    createRfidCard: b.mutation<RfidCard, CreateRfidCardRequest>({
+      query: (body) => ({ url: 'admin/v1/rfid-cards', method: 'POST', body }),
+      invalidatesTags: ['RfidCard', 'AdminSummary'],
+    }),
+    updateRfidCard: b.mutation<RfidCard, { id: string } & UpdateRfidCardRequest>({
+      query: ({ id, ...body }) => ({ url: `admin/v1/rfid-cards/${id}`, method: 'PATCH', body }),
+      invalidatesTags: ['RfidCard', 'AdminSummary'],
+    }),
+    // Driver picker of screen 30: active drivers by name, email or phone (T161, admin-users.ts).
+    driverSearch: b.query<UserAccountPage, string>({
+      query: (q) => {
+        const p = new URLSearchParams({ role: 'driver', account_status: 'active', q: q.trim() });
+        p.set('page_size', String(DRIVER_SEARCH_SIZE));
+        return `admin/v1/users?${p}`;
+      },
+    }),
   }),
 });
 
@@ -295,6 +335,10 @@ export const {
   useRevenueCsvMutation,
   useAdminTransactionsQuery,
   useAdminTransactionsCsvMutation,
+  useAdminRfidCardsQuery,
+  useCreateRfidCardMutation,
+  useUpdateRfidCardMutation,
+  useDriverSearchQuery,
 } = api;
 
 export type RevenueScope = 'operator' | 'admin';

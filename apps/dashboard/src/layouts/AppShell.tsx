@@ -79,6 +79,15 @@ export function AppShell() {
               <CountBadge count={pendingSessions} label="phiên cần xử lý" />
             </NavLink>
           )}
+          {admin && (
+            <NavLink
+              to="/admin/rfid-cards"
+              className={({ isActive }) => `nav-link${isActive ? ' active' : ''}`}
+            >
+              <Icon name="card" />
+              <span>Thẻ RFID</span>
+            </NavLink>
+          )}
           <NavLink
             to={admin ? '/admin/revenue' : '/operator/revenue'}
             className={({ isActive }) => `nav-link${isActive ? ' active' : ''}`}

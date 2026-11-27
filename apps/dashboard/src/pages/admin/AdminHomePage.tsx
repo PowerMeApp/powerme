@@ -242,6 +242,9 @@ export function AdminHomePage() {
                     <h2>Thẻ RFID</h2>
                     <p className="tile-number">{formatCount(cards)}</p>
                     <Counts rows={CARD_GROUPS} values={s.rfid_cards} />
+                    <Link className="tile-link" to="/admin/rfid-cards">
+                      Xem chi tiết →
+                    </Link>
                   </section>
                 )}
               </div>

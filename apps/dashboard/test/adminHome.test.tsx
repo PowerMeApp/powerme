@@ -77,6 +77,11 @@ describe('Tổng quan nền tảng (màn 27)', () => {
     const cards = within(screen.getByRole('region', { name: 'Thẻ RFID' }));
     expect(cards.getByText('Bị chặn')).toBeInTheDocument();
     expect(cards.queryByText('Chưa gắn tài xế')).toBeNull();
+    // T161: the tile opens screen 30.
+    expect(cards.getByRole('link', { name: 'Xem chi tiết →' })).toHaveAttribute(
+      'href',
+      '/admin/rfid-cards',
+    );
     // D36: the billing exceptions tile comes with FE-09, even when the API has counts.
     expect(screen.queryByRole('region', { name: /thanh toán/i })).toBeNull();
     expect(screen.queryByText(/hoá đơn/i)).toBeNull();

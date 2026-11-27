@@ -689,3 +689,26 @@ table.revenue-table tfoot td {
   border: 1px solid var(--danger);
   box-shadow: 0 0 0 1px var(--danger-soft);
 }
+
+/* T161 — screen 30 RFID Cards: register button on the title row, driver picker. */
+.page-head .page-action {
+  margin-left: auto;
+}
+.picked-driver {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.driver-results {
+  margin: 6px 0 0;
+  padding: 0;
+  list-style: none;
+  max-height: 240px;
+  overflow-y: auto;
+}
+.driver-results .btn {
+  width: 100%;
+  justify-content: flex-start;
+  text-align: left;
+}
