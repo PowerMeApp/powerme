@@ -16,6 +16,8 @@
  *   GET  /api/admin/v1/me     admin
  *   GET  /api/admin/v1/summary  admin  (FE-14, screen 27, admin-platform.ts)
  *   GET  /api/admin/v1/users?role=driver&q=  admin  (T161 driver search for screen 30, admin-users.ts)
+ *   POST /api/admin/v1/users, GET|PATCH …/users/{id}, PUT …/users/{id}/role, POST …/lock|unlock
+ *        admin  (FE-19, screen 28, admin-user-actions.ts)
  *   GET  /api/admin/v1/network/charge-points, GET /api/admin/v1/operators  admin  (FE-18, screen 31,
  *        admin-network.ts, admin-operators.ts)
  *   POST /api/operator/v1/charge-points/onboard, GET|POST /api/admin/v1/charge-points  (BE-44, WF-05,
@@ -47,6 +49,7 @@ import {
 } from './admin-transactions.js';
 import { matchRfidRoute, runRfidRoute } from './admin-rfid-cards.js';
 import { matchUsersRoute, searchUsers } from './admin-users.js';
+import { matchUserAction, runUserAction } from './admin-user-actions.js';
 import { listNetwork, matchNetworkRoute } from './admin-network.js';
 import { listOperators, matchOperatorsRoute } from './admin-operators.js';
 import { listSites, matchSitesRoute } from './operator-sites.js';
@@ -283,6 +286,18 @@ export function createOperatorApiListener(
     if (operatorsRoute) {
       allow(req, res, 'GET');
       return send(res, 200, await listOperators(db, operatorsRoute));
+    }
+    const userAction = surface === 'admin' ? matchUserAction(rest ?? '', req.method) : null;
+    if (userAction) {
+      if (!userAction.methods.includes(req.method ?? '')) {
+        res.setHeader('Allow', `${userAction.methods.join(', ')}, OPTIONS`);
+        throw new AuthError(405, 'method_not_allowed');
+      }
+      // Only the list (GET /users) takes a query string.
+      if (url.search) throw new AuthError(400, 'invalid_input');
+      const body = req.method === 'GET' ? undefined : await readJsonObject(req, res);
+      const result = await runUserAction(db, principal.userId, userAction, req.method!, body);
+      return send(res, result.status, result.body);
     }
     const usersRoute = surface === 'admin' ? matchUsersRoute(rest ?? '', url.searchParams) : null;
     if (usersRoute) {
