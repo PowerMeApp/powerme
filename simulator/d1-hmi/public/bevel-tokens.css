@@ -376,3 +376,9 @@ h3 {
   font-size: 12px;
   color: var(--color-body-gray, #747679);
 }
+
+/* QA-09: ô "Tiền" trên HMI không còn số tự tính — chỉ chữ chỉ dẫn. */
+.metric .v.v-note {
+  font-size: 18px;
+  letter-spacing: 0;
+}

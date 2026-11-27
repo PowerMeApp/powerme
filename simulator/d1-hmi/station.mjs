@@ -56,7 +56,9 @@ export function createStation(options = {}) {
   const opt = {
     csmsUrl: 'ws://localhost:9000/ocpp',
     cpId: 'RH24D1-00001',
-    unitPrice: 3500, // đ/kWh — chỉ để hiển thị, CSMS mới là nguồn sự thật
+    // đ/kWh GIẢ ĐỊNH, chỉ dùng cho chế độ "Theo số tiền" (trụ tự dừng). HMI KHÔNG hiện tiền: tiền thật
+    // do CSMS tính theo biểu giá từng khung giờ khi quyết toán (QA-09) — OCPP 1.6 không gửi giá xuống trụ.
+    unitPrice: 3500,
     password: '123456', // mật khẩu HMI mẫu (giả) — KHÁC credential OCPP bên dưới
     authPassword: undefined, // CP_PASSWORD: mật khẩu Basic Auth gửi CSMS khi nối (OCPP Security Profile 2); bỏ trống = không gửi
     retryMs: 30_000, // EXP-01: thử lại cố định 30 s
@@ -655,7 +657,12 @@ export function createStation(options = {}) {
     c.tx = null;
     profiles.tx.delete(c.id); // TxProfile hết hiệu lực khi phiên kết thúc (OCPP 1.6 §3.13.2)
     c.last = { kw: 0, v: 0, a: 0 };
-    tx.final = { wh: tx.wh, cost: (tx.wh / 1000) * opt.unitPrice };
+    // QA-09: giữ cả thời lượng phiên vừa xong (trước đây HMI về 00:00 trong khi kWh còn).
+    tx.final = {
+      wh: tx.wh,
+      cost: (tx.wh / 1000) * opt.unitPrice,
+      elapsed: Math.floor((sim.ms - tx.startSim) / 1000),
+    };
     c.lastSession = { ...tx.final, reason, idTag: tx.idTag };
     const j = tx.journey;
     if (j) {
@@ -773,7 +780,7 @@ export function createStation(options = {}) {
     const tx = c.tx;
     const wh = tx ? tx.wh : (c.lastSession?.wh ?? 0);
     const cost = tx ? (tx.wh / 1000) * opt.unitPrice : (c.lastSession?.cost ?? 0);
-    const elapsed = tx ? Math.floor((sim.ms - tx.startSim) / 1000) : 0;
+    const elapsed = tx ? Math.floor((sim.ms - tx.startSim) / 1000) : (c.lastSession?.elapsed ?? 0);
     let limitHit = false;
     if (tx) {
       const { type, value } = c.mode;
