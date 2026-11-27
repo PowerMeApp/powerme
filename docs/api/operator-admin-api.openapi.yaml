@@ -286,8 +286,9 @@ paths:
       tags: [onboarding]
       operationId: listOperatorSites
       x-roles: [operator_staff]
-      x-status: planned
-      x-owner: Ân
+      x-status: implemented
+      x-source: 'operator-api/operator-sites.ts (FE-02)'
+      x-owner: Nghĩa (FE-02)
       x-refs: [UC-OPS-01, BR-P11, 'Table 5 #19']
       summary: Các site của operator người gọi (ô chọn site trong sheet onboarding)
       parameters:
@@ -3148,7 +3149,10 @@ components:
       required: [serial_number, site_id, connectors]
       properties:
         serial_number: { type: string, pattern: '^[A-Za-z0-9._-]{3,25}$' }
-        site_id: { $ref: '#/components/schemas/Id' }
+        site_id:
+          type: integer
+          minimum: 1
+          description: 'Code hiện tại (parseOnboardBody) chỉ nhận số nguyên, không nhận Id dạng chuỗi (FE-02)'
         connectors:
           type: array
           minItems: 1
