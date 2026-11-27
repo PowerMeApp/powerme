@@ -6,6 +6,7 @@
  * `held_vnd` là tiền đang giữ trước cho các start intent còn mở, cùng điều kiện mà
  * `DriverChargingService.start` trừ khi kiểm BR-P18, nên `available_vnd` khớp số app sẽ bị kiểm.
  */
+import { heldCreditSql, unresolvedRfidSql } from '../sessions/credit-availability.js';
 import type { Db } from '../db/db.module.js';
 import { DriverApiError } from './driver-auth.js';
 
@@ -15,6 +16,8 @@ export type DriverCreditStatus = 'active' | 'in_shortfall' | 'closed' | 'none';
 export interface DriverCreditSummary {
   balance_vnd: number;
   held_vnd: number;
+  unresolved_rfid_sessions: number;
+  blocking_rfid_sessions: number;
   available_vnd: number;
   status: DriverCreditStatus;
   updated_at: Date | null;
@@ -48,10 +51,13 @@ export async function creditSummary(db: Db, driverId: string): Promise<DriverCre
       status: string | null;
       updated_at: Date | null;
       held_vnd: string;
+      unresolved_rfid_sessions: string;
+      blocking_rfid_sessions: string;
     }>(
       `SELECT a.balance_vnd,a.status,a.updated_at,
-        (SELECT coalesce(sum(i.reserved_vnd),0) FROM driver_charge_intents i
-          WHERE i.driver_id=$1 AND i.state NOT IN ('rejected','settled','released')) AS held_vnd
+        ${heldCreditSql('d.driver_id')} AS held_vnd,
+        ${unresolvedRfidSql('d.driver_id', 'NULL', false)} AS unresolved_rfid_sessions,
+        ${unresolvedRfidSql('d.driver_id')} AS blocking_rfid_sessions
        FROM (SELECT $1::bigint AS driver_id) d LEFT JOIN credit_accounts a ON a.driver_id=d.driver_id`,
       [driverId],
     )
@@ -61,6 +67,8 @@ export async function creditSummary(db: Db, driverId: string): Promise<DriverCre
   return {
     balance_vnd: balance,
     held_vnd: held,
+    unresolved_rfid_sessions: Number(row.unresolved_rfid_sessions),
+    blocking_rfid_sessions: Number(row.blocking_rfid_sessions),
     available_vnd: balance - held,
     status: (row.status ?? 'none') as DriverCreditStatus,
     updated_at: row.updated_at,

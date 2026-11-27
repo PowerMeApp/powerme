@@ -281,7 +281,10 @@ tới khi `settlement_state = posted` thì gọi `GET /sessions/{id}/statement` 
 Phiên RFID/HMI dừng tại trụ (route trả 404).
 
 **Credit (UC-PAY-02).** `GET /credit` → `{balance_vnd, held_vnd, available_vnd, status, updated_at}`;
-hiện `available_vnd` là số có thể dùng để sạc, `held_vnd` là "đang giữ cho phiên".
+available_vnd = balance_vnd − held_vnd; held_vnd gồm QR intent và RFID hold còn mở.
+Bổ sung unresolved_rfid_sessions (mọi phiên RFID chưa có cặp statement/debit) và
+blocking_rfid_sessions (nghĩa vụ không có hold dương); blocking >0 chặn start/refund dù tiền
+available dương. Không biến chi phí chưa biết thành tiền giữ. [RFID protection](../tasks/rfid-credit-protection.md).
 `status = none` → tài xế chưa có ví (chưa tạo top-up nào; từ T32 Phần 5, tạo top-up là có ví dù chưa trả). `GET /credit/transactions?page=1&page_size=20`
 → sổ cái mới nhất trước; dòng `session_debit` có `session_id` để mở bảng kê.
 

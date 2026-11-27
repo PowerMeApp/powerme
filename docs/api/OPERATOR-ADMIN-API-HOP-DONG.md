@@ -952,3 +952,7 @@ trạng thái (2xx/4xx nghiệp vụ khác với 401/403). Ba điều kiện c�
 | 74 | `POST /api/admin/v1/billing/e-invoices/{invoiceId}/retry` | 401 | 403 | 403 | ✓ | planned |
 | 75 | `GET /api/admin/v1/billing/refunds` | 401 | 403 | 403 | ✓ | planned |
 | 76 | `POST /api/admin/v1/billing/refunds/{refundId}/retry` | 401 | 403 | 403 | ✓ | planned |
+
+## RFID credit protection — 27/11/2026
+
+Operator CP detail và Admin summary có `rfid_credit_protection` độc lập recent_commands: total, exhausted_stops, held_vnd chuỗi bigint, limit=50 và items. Items chứa session/connector, hold/state/reason, stop reason/state/attempts/limit/last command/due/exhausted/error, account và settlement reason. Exhausted ưu tiên, không bị mất sau 20 lệnh mới; Operator scope qua site, trụ khác 404. Phiên active không đưa vào revenue/unsettled. [Luồng và giới hạn](../tasks/rfid-credit-protection.md), schema `RfidCreditProtection` trong OpenAPI.

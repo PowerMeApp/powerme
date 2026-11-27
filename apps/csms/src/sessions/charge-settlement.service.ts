@@ -563,6 +563,10 @@ export class ChargeSettlementService {
         "UPDATE driver_charge_intents SET state='settled',reserved_vnd=0,version=version+1,updated_at=now() WHERE session_id=$1 AND state<>'settled'",
         [sessionId],
       );
+      await c.query(
+        "UPDATE rfid_credit_holds SET state='released',released_at=now(),updated_at=now() WHERE session_id=$1 AND state='held'",
+        [sessionId],
+      );
       return 'posted';
     });
   }

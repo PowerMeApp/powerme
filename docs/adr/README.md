@@ -29,3 +29,5 @@ Dùng [_template.md](_template.md) làm khuôn.
 | [0016](0016-offline-grace-and-charge-point-connectivity.md) | Offline grace period, review on conflict, connectivity split from lifecycle | Accepted | 24/10/2026 · recorded 26/10/2026 | Orphan only after `OFFLINE_GRACE_S` (120 s); `closed → review`; `is_online` separate from lifecycle; module placement (PR #44) |
 | [0018](0018-dang-nhap-dashboard-jwt.md) | Đăng nhập dashboard (Operator, Admin) bằng JWT, mật khẩu scrypt | Chấp nhận | 11/11/2026 · sửa mục 3, chấp nhận 16/11/2026 | Một `POST /api/auth/v1/login`; access JWT HS256 900 s + refresh 12 h (`/api/auth/v1/refresh`, T125) khoá riêng; RolesGuard kiểm DB mỗi request; sai role → 403 (F-13) |
 | [0019](0019-bao-loi-cua-tai-xe.md) | Tài xế báo lỗi súng: nhãn, ẩn súng và t8 `SESSION_COMPLETED` | Đề xuất | 11/11/2026 | BR-P42 tạo sự cố `driver_report` ẩn súng; đóng bằng Available, Operator, hoặc phiên hoàn tất bình thường (t8); nhãn ở tra mã QR |
+
+| [0020](0020-rfid-credit-protection.md) | RFID session holds and durable credit cutoff | Accepted for local implementation | 27/11/2026 | Shared QR/RFID coverage, bounded internal stop jobs and settlement-only release |

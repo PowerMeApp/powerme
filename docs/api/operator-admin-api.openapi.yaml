@@ -3175,8 +3175,9 @@ components:
       allOf:
         - $ref: '#/components/schemas/ChargePoint'
         - type: object
-          required: [open_faults, recent_commands]
+          required: [open_faults, recent_commands, rfid_credit_protection]
           properties:
+            rfid_credit_protection: { $ref: '#/components/schemas/RfidCreditProtection' }
             firmware_version: { type: [string, 'null'] }
             rated_power_kw: { type: [number, 'null'] }
             reports_soc: { type: boolean, description: 'BR-P40 — trụ có gửi SoC' }
@@ -4036,10 +4037,43 @@ components:
         status: { type: string, enum: [active, blocked] }
 
     # ---- admin tóm tắt / ngoại lệ thanh toán ---------------------------------------------------
+    RfidCreditProtection:
+      type: object
+      required: [total, exhausted_stops, held_vnd, limit, items]
+      properties:
+        total: { type: integer, minimum: 0 }
+        exhausted_stops: { type: integer, minimum: 0 }
+        held_vnd: { type: string, pattern: '^[0-9]+$' }
+        limit: { type: integer, const: 50 }
+        items:
+          type: array
+          maxItems: 50
+          items:
+            type: object
+            required: [session_id, charge_point_id, connector_no, session_status, credit_status, held_vnd, hold_state, hold_reason, stop_state, stop_reason, attempts, attempt_limit, current_command_id, last_error, next_attempt_at, exhausted_at, settlement_reason]
+            properties:
+              session_id: { type: string }
+              charge_point_id: { type: string }
+              connector_no: { type: integer }
+              session_status: { type: string }
+              credit_status: { type: [string, 'null'] }
+              held_vnd: { type: [string, 'null'], description: Initial budget; collection total counts only held rows }
+              hold_state: { type: [string, 'null'], enum: [held, released, null] }
+              hold_reason: { type: [string, 'null'] }
+              stop_state: { type: [string, 'null'], enum: [pending, inflight, awaiting_stop, retry, exhausted, completed, null] }
+              stop_reason: { type: [string, 'null'] }
+              attempts: { type: [integer, 'null'], minimum: 0 }
+              attempt_limit: { type: [integer, 'null'], minimum: 1 }
+              current_command_id: { type: [string, 'null'] }
+              last_error: { type: [string, 'null'] }
+              next_attempt_at: { type: [string, 'null'], format: date-time }
+              exhausted_at: { type: [string, 'null'], format: date-time }
+              settlement_reason: { type: [string, 'null'] }
     AdminSummary:
       type: object
-      required: [operators, sites, network, users, charge_points, rfid_cards, billing_exceptions]
+      required: [operators, sites, network, users, charge_points, rfid_cards, billing_exceptions, rfid_credit_protection]
       properties:
+        rfid_credit_protection: { $ref: '#/components/schemas/RfidCreditProtection' }
         operators:
           type: object
           description: 'Thống kê chung (20/11): số Operator, trong đó đang hoạt động'

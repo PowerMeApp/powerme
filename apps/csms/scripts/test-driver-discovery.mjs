@@ -19,6 +19,8 @@ const suites = [
   'test/driver-auth.integration.test.ts',
   'test/driver-charges.integration.test.ts',
   'test/rfid-settlement.integration.test.ts',
+  'test/rfid-credit-cutoff.integration.test.ts',
+  'test/migration-0031.integration.test.ts',
   'test/migration-0029.integration.test.ts',
   'test/driver-sessions.integration.test.ts',
   'test/driver-vehicles.integration.test.ts',

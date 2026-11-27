@@ -191,6 +191,7 @@ describeDb('FE-14 admin platform summary (screen 27, UC-ADM-07)', () => {
     const r = await get('/summary', tokens['admin']);
     expect(r.status).toBe(200);
     expect(r.body).toEqual({
+      rfid_credit_protection: { total: 0, exhausted_stops: 0, held_vnd: '0', limit: 50, items: [] },
       operators: { total: 1, active: 1 },
       sites: 1,
       network: {
