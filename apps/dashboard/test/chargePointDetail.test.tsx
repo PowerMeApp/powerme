@@ -62,6 +62,16 @@ const DETAIL: OperatorChargePointDetail = {
   rated_power_kw: 120,
   reports_soc: true,
   supports_reservation: false,
+  offline_card_risk: false,
+  offline_card_risk_reason: null,
+  offline_auth_check: {
+    checked_at: recent,
+    epoch: 3,
+    config_values: {},
+    change_results: { LocalAuthorizeOffline: 'Accepted' },
+    supported_feature_profiles: 'Core',
+    fallback_profile_status: null,
+  },
   open_faults: [fault],
   recent_commands: [
     {
@@ -117,6 +127,36 @@ describe('Chi tiết trụ sạc (màn 20)', () => {
     expect(cmds.getByText('Reset')).toBeInTheDocument();
     expect(cmds.getByText('Cả trụ')).toBeInTheDocument();
     expect(cmds.getByText('Trụ từ chối')).toBeInTheDocument();
+  });
+
+  it('[TC-BRP52-05] T150: explains the offline card risk, or says it was switched off', async () => {
+    fakeCsms({
+      [DETAIL_URL]: {
+        status: 200,
+        body: {
+          ...DETAIL,
+          offline_card_risk: true,
+          offline_card_risk_reason: 'not_supported',
+          offline_auth_check: {
+            ...DETAIL.offline_auth_check!,
+            change_results: { AllowOfflineTxForUnknownId: 'NotSupported' },
+          },
+        },
+      },
+      [FAULTS_URL]: faults,
+    });
+    renderApp('/operator/charge-points/5', session(STAFF));
+    const note = await screen.findByRole('note', { name: 'Rủi ro thẻ offline' });
+    expect(note).toHaveTextContent(/NotSupported/);
+    expect(note).toHaveTextContent(/thẻ lạ hoặc thẻ đã khoá/);
+    expect(note).toHaveTextContent(/Lần kiểm cuối/);
+  });
+
+  it('T150: a confirmed check shows one muted line and no warning', async () => {
+    fakeCsms({ [DETAIL_URL]: { status: 200, body: DETAIL }, [FAULTS_URL]: faults });
+    renderApp('/operator/charge-points/5', session(STAFF));
+    expect(await screen.findByText(/Đã tắt authorize offline trên trụ/)).toBeInTheDocument();
+    expect(screen.queryByRole('note', { name: 'Rủi ro thẻ offline' })).toBeNull();
   });
 
   it('acknowledges a fault from the detail page', async () => {
