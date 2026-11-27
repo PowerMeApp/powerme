@@ -99,6 +99,19 @@ export interface CsmsConfig {
   offlineAlertS?: number;
   /** G10: nhịp quét trụ im lặng (giây). Không khai báo = {@link DEFAULT_OFFLINE_ALERT_SWEEP_S}. */
   offlineAlertSweepS?: number;
+  /**
+   * T150 / BR-P52: sau mỗi BootNotification, đọc (GetConfiguration) và tắt (ChangeConfiguration)
+   * LocalAuthorizeOffline, LocalPreAuthorize, AllowOfflineTxForUnknownId. Không khai báo = true.
+   */
+  offlineAuthCheckEnabled?: boolean;
+  /** T150: hạn chờ mỗi lệnh của bước kiểm (giây). Không khai báo = 15. */
+  offlineAuthCheckTimeoutS?: number;
+  /**
+   * T150: giới hạn dự phòng. > 0 → trụ có rủi ro thẻ offline và hỗ trợ SmartCharging nhận
+   * TxDefaultProfile đưa công suất về 0 sau N giây kể từ đầu phiên; phiên bắt đầu online được CSMS
+   * ghi đè bằng TxProfile. 0 = TẮT (mặc định).
+   */
+  offlineTxFallbackS?: number;
 }
 
 /**
@@ -162,6 +175,14 @@ function graceEnv(env: NodeJS.ProcessEnv, key: string, fallback: number): number
     throw new Error(
       `Biến môi trường ${key} phải là số nguyên giây >= 0 (0 = tắt ân hạn): "${env[key]}"`,
     );
+  return n;
+}
+
+/** T150: số nguyên giây >= 0 cho giới hạn dự phòng; 0 / không khai báo = tắt. */
+function fallbackEnv(env: NodeJS.ProcessEnv, key: string): number {
+  const n = intEnv(env, key, 0);
+  if (!Number.isInteger(n) || n < 0)
+    throw new Error(`Biến môi trường ${key} phải là số nguyên giây >= 0 (0 = tắt): "${env[key]}"`);
   return n;
 }
 
@@ -237,6 +258,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): CsmsConfig {
       'OFFLINE_ALERT_SWEEP_S',
       DEFAULT_OFFLINE_ALERT_SWEEP_S,
     ),
+    offlineAuthCheckEnabled: boolEnv(env, 'OFFLINE_AUTH_CHECK_ENABLED', true),
+    offlineAuthCheckTimeoutS: positiveSecondsEnv(env, 'OFFLINE_AUTH_CHECK_TIMEOUT_S', 15),
+    offlineTxFallbackS: fallbackEnv(env, 'OFFLINE_TX_FALLBACK_S'),
   };
 }
 

@@ -16,8 +16,11 @@ import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 
 export const BLOOM = { strength: 0.5, radius: 0.6, threshold: 0.62, knee: 0.45 };
+// Cảnh sáng (QA-06): sàn trắng và thân xe sáng đã gần 1,0 → nâng ngưỡng để chỉ vật phát sáng HDR
+// (×3) loé, giảm cường độ để quầng không làm bệt nền trời.
+export const BLOOM_LIGHT = { strength: 0.32, radius: 0.5, threshold: 1.15, knee: 0.3 };
 
-export default function Effects({ quality, high }) {
+export default function Effects({ quality, high, light }) {
   const { gl, scene, camera, size, viewport, setDpr } = useThree();
   const fx = useMemo(() => {
     const rt = new THREE.WebGLRenderTarget(4, 4, {
@@ -26,18 +29,19 @@ export default function Effects({ quality, high }) {
     });
     const composer = new EffectComposer(gl, rt);
     composer.addPass(new RenderPass(scene, camera));
+    const B = light ? BLOOM_LIGHT : BLOOM;
     const bloom = new UnrealBloomPass(
       new THREE.Vector2(256, 256),
-      BLOOM.strength,
-      BLOOM.radius,
-      BLOOM.threshold,
+      B.strength,
+      B.radius,
+      B.threshold,
     );
     // ngưỡng có "đầu gối" mềm thay vì cắt cứng 0,01 → quầng không lởm chởm khi đèn nháy
-    bloom.highPassUniforms.smoothWidth.value = BLOOM.knee;
+    bloom.highPassUniforms.smoothWidth.value = B.knee;
     composer.addPass(bloom);
     composer.addPass(new OutputPass());
     return { composer, bloom };
-  }, [gl, scene, camera]);
+  }, [gl, scene, camera, light]);
   useEffect(() => {
     fx.composer.setPixelRatio(viewport.dpr);
     fx.composer.setSize(size.width, size.height);

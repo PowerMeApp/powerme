@@ -15,7 +15,7 @@ import {
   useOperatorChargePointsQuery,
 } from '../../core/api/api';
 import { ConnectorList, isOffline } from '../../features/chargePoints/ConnectorList';
-import { ago, LIFECYCLE, useNow } from '../../features/chargePoints/format';
+import { ago, LIFECYCLE, OFFLINE_CARD_RISK, useNow } from '../../features/chargePoints/format';
 import { MAX_SEARCH, useDebounced } from '../../core/search/search';
 
 export const LIST_POLL_MS = 5000;
@@ -39,6 +39,14 @@ function Row({ cp, now }: { cp: OperatorChargePoint; now: number }) {
           {cp.serial_number}
           {cp.model ? ` · ${cp.model}` : ''}
         </div>
+        {cp.offline_card_risk && (
+          <span
+            className="pill major small"
+            title={`Rủi ro thẻ offline: ${OFFLINE_CARD_RISK[cp.offline_card_risk_reason ?? 'not_checked']}`}
+          >
+            Rủi ro thẻ offline
+          </span>
+        )}
       </td>
       <td>
         <Link to={`/operator/stations/${cp.site.id}`}>{cp.site.site_name}</Link>

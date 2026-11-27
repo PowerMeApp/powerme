@@ -242,6 +242,59 @@ describeDb('T108b admin transaction routes (UC-ADM-10; K9, K10)', () => {
     expect(csv.text).toContain(`,'=SUM(A1),`);
   });
 
+  it('T158 exposes only terminal account_closed in Admin JSON, CSV and revenue', async () => {
+    const sid = ids['A.promo']!;
+    const path = `/admin/v1/transactions?${NOV}&kind=unsettled&operator_id=${ids['opA']}`;
+    try {
+      await db.$client.query(
+        "UPDATE charge_settlement_jobs SET state='ineligible',reason='account_closed' WHERE session_id=$1",
+        [sid],
+      );
+      const json = await admin(path);
+      expect(json.status).toBe(200);
+      expect(json.body.items).toContainEqual(
+        expect.objectContaining({
+          session_id: sid,
+          kind: 'unsettled',
+          unsettled_reason: 'account_closed',
+          amount_vnd: null,
+        }),
+      );
+      expect(json.body.unsettled.by_reason).toEqual({
+        account_closed: 1,
+        ineligible: 1,
+        posted_without_debit: 1,
+      });
+      expect(json.body.totals.csms_billed_revenue_vnd).toBe(0);
+      const csv = await admin(path.replace('/transactions?', '/transactions.csv?'));
+      expect(csv.status).toBe(200);
+      const rows = parseCsv(csv.text.slice(1));
+      expect(rows.find((r) => r[0] === sid)![rows[0]!.indexOf('unsettled_reason')]).toBe(
+        'account_closed',
+      );
+      const revenue = await admin(
+        `/admin/v1/revenue?${NOV}&group_by=operator&operator_id=${ids['opA']}`,
+      );
+      expect(revenue.status).toBe(200);
+      expect(revenue.body.unsettled.by_reason.account_closed).toBe(1);
+      expect(revenue.body.totals.csms_billed_revenue_vnd).toBe(105000);
+      await db.$client.query(
+        "UPDATE charge_settlement_jobs SET reason='other_terminal_reason' WHERE session_id=$1",
+        [sid],
+      );
+      const generic = await admin(path);
+      expect(generic.body.items).toContainEqual(
+        expect.objectContaining({ session_id: sid, unsettled_reason: 'ineligible' }),
+      );
+      expect(generic.body.unsettled.by_reason).toEqual({ ineligible: 2, posted_without_debit: 1 });
+    } finally {
+      await db.$client.query(
+        "UPDATE charge_settlement_jobs SET state='pending',reason='promotion_unsupported' WHERE session_id=$1",
+        [sid],
+      );
+    }
+  });
+
   it('CSV with a null meter reading: empty cells, no shifted columns, TOTAL skips null (§4.1)', async () => {
     const q = `from=2026-10-01&to=2026-10-31&operator_id=${ids['opA']}`;
     const json = await admin(`/admin/v1/transactions?${q}`);

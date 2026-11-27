@@ -4,6 +4,10 @@
 //   ctl.update(snapshot)   // mỗi snapshot SSE "state" — cùng dữ liệu với hình SVG 2D
 //   ctl.setActive(bool)    // false → frameloop "never": không vẽ khung nào (ẩn tab, thu gọn, tắt 3D)
 //
+// Giao diện (QA-06): giao diện sáng → cảnh SÁNG trên canvas trong suốt (nền là gradient Hero Sky của
+// khung CSS, sàn trắng mờ dần, bóng tiếp xúc, quầng màu trạng thái nhẹ); giao diện tối → cảnh tối cũ
+// trong thẻ Charcoal. Chọn một lần lúc mount theo --t3-scene (motion.js readSceneTheme).
+//
 // Không có nguồn dữ liệu nào khác ngoài snapshot được đưa vào; không gọi API điều khiển trụ.
 import { Canvas } from '@react-three/fiber';
 import { Component, StrictMode, useSyncExternalStore } from 'react';
@@ -12,7 +16,7 @@ import * as THREE from 'three';
 import Effects from './Effects.jsx';
 import Overlay from './Overlay.jsx';
 import Scene from './Scene.jsx';
-import { readPalette } from './motion.js';
+import { readPalette, readSceneTheme } from './motion.js';
 import css from './tru3d.css?inline';
 
 function createStore(initial) {
@@ -67,7 +71,7 @@ class Guard extends Component {
   }
 }
 
-function App({ store, quality, active, onFail }) {
+function App({ store, quality, active, onFail, light }) {
   const level = useSyncExternalStore(quality.subscribe, quality.get);
   const high = level === 'high';
   return (
@@ -77,16 +81,18 @@ function App({ store, quality, active, onFail }) {
           className="t3-canvas"
           frameloop={active ? 'always' : 'never'}
           dpr={high ? [1, 2] : 1}
-          gl={{ antialias: true, alpha: false, powerPreference: 'high-performance' }}
+          gl={{ antialias: true, alpha: light, powerPreference: 'high-performance' }}
           camera={{ fov: 30, near: 0.1, far: 80, position: [0, 3.4, 17] }}
           onCreated={({ gl }) => {
             gl.toneMapping = THREE.ACESFilmicToneMapping;
-            gl.toneMappingExposure = 1.0;
+            gl.toneMappingExposure = light ? 1.05 : 1.0;
             gl.outputColorSpace = THREE.SRGBColorSpace;
+            // cảnh sáng: xoá về trong suốt để lộ gradient Hero Sky của khung CSS phía sau canvas
+            if (light) gl.setClearColor(0x000000, 0);
           }}
         >
-          <Scene store={store} high={high} />
-          <Effects quality={quality} high={high} />
+          <Scene store={store} high={high} light={light} />
+          <Effects quality={quality} high={high} light={light} />
         </Canvas>
       </Guard>
       <Overlay store={store} lite={!high} />
@@ -103,6 +109,9 @@ export function mount(box, { initial, onFail, quality: mode } = {}) {
   }
   const store = createStore(initial);
   const quality = createQuality(mode);
+  const light = readSceneTheme() === 'light';
+  box.classList.toggle('t3-light', light);
+  box.classList.toggle('t3-dark', !light);
   const host = document.createElement('div');
   host.className = 't3-host';
   box.appendChild(host);
@@ -111,7 +120,7 @@ export function mount(box, { initial, onFail, quality: mode } = {}) {
   const render = () =>
     root.render(
       <StrictMode>
-        <App store={store} quality={quality} active={active} onFail={onFail} />
+        <App store={store} quality={quality} active={active} onFail={onFail} light={light} />
       </StrictMode>,
     );
   render();
