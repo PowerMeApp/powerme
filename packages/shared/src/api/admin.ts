@@ -1,3 +1,4 @@
+import type { RfidCreditProtection } from './rfid-protection.js';
 /**
  * Admin platform overview (FE-14, screen 27) — types only, snake_case as on the wire.
  * Source: apps/csms/src/operator-api/admin-platform.ts.
@@ -6,6 +7,7 @@ import type { ChargePointLifecycle } from './monitoring.js';
 
 /** GET /api/admin/v1/summary */
 export interface AdminSummary {
+  rfid_credit_protection?: RfidCreditProtection;
   /** Platform statistics (20/11). */
   operators: { total: number; active: number };
   sites: number;

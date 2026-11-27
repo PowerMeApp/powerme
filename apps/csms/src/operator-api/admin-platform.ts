@@ -1,3 +1,4 @@
+import { rfidProtectionOverview } from './rfid-protection-overview.js';
 /**
  * Admin platform overview (FE-14, UC-ADM-07, screen 27; OPERATOR-DASHBOARD-PLAN D33, D36) behind
  * RolesGuard `admin`:
@@ -133,7 +134,9 @@ export async function runAdminSummary(db: Db, { offlineAfterMs }: MonitoringThre
   ).rows;
   const open_faults = { total: faults.length, critical: 0, major: 0, minor: 0, none: 0 };
   for (const f of faults) open_faults[guideFor(f.error_code).severity] += 1;
+  const protection = await rfidProtectionOverview(db, REAL_CP);
   return {
+    rfid_credit_protection: protection,
     operators: { total: net!.operators, active: net!.active_operators },
     sites: net!.sites,
     network: {

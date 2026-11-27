@@ -1,3 +1,4 @@
+import type { RfidCreditProtection } from './rfid-protection.js';
 /**
  * Operator charge point monitoring (FE-03, screens 17 and 18) — types only, snake_case as on the
  * wire. Source: apps/csms/src/operator-api/operator-monitoring.ts.
@@ -91,6 +92,7 @@ export interface RemoteCommandRow {
 
 /** GET /api/operator/v1/charge-points/{id} (FE-05, screen 20). */
 export interface OperatorChargePointDetail extends OperatorChargePoint {
+  rfid_credit_protection?: RfidCreditProtection;
   firmware_version: string | null;
   rated_power_kw: number | null;
   /** BR-P40: the charge point sends SoC. */

@@ -159,3 +159,14 @@ describe('Tổng quan nền tảng (màn 27)', () => {
     expect(ops.getByText('7')).toBeInTheDocument();
   });
 });
+
+it('WP3 shows durable exhausted RFID protection independently of revenue and billing tiles', async () => {
+  const { RFID_PROTECTION } = await import('./rfidProtectionFixture');
+  fakeCsms(routes({ ...SUMMARY, rfid_credit_protection: RFID_PROTECTION } as AdminSummary));
+  renderApp('/admin', session(ADMIN));
+  const region = within(await screen.findByRole('region', { name: 'Bảo vệ credit RFID' }));
+  expect(region.getByText('Đã hết lượt tự động dừng')).toBeInTheDocument();
+  expect(region.getByText('4 / 4')).toBeInTheDocument();
+  expect(region.getByText('72')).toBeInTheDocument();
+  expect(region.getByText('Tài khoản đã đóng, còn nghĩa vụ')).toBeInTheDocument();
+});

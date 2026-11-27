@@ -927,7 +927,7 @@ paths:
       description: |
         Chỉ đọc (UC-PAY-02, màn hình 9). `balance_vnd` là snapshot `credit_accounts.balance_vnd`,
         luôn bằng tổng `amount_vnd` của sổ cái. `held_vnd` là tiền đang giữ trước cho start intent
-        còn mở (BR-P18); `available_vnd = balance_vnd − held_vnd` là số CSMS dùng khi kiểm mức khởi
+        còn mở và RFID hold (BR-P18); `available_vnd = balance_vnd − held_vnd` là số CSMS dùng khi kiểm mức khởi
         đầu. Tài xế chưa có ví (đăng ký BE-21 không tạo ví) → 200 với số 0 và `status = none`;
         GET không tạo ví. Không có query.
       responses:
@@ -2103,11 +2103,13 @@ components:
     CreditSummary:
       type: object
       additionalProperties: false
-      required: [balance_vnd, held_vnd, available_vnd, status, updated_at]
+      required: [balance_vnd, held_vnd, available_vnd, status, updated_at, unresolved_rfid_sessions, blocking_rfid_sessions]
       properties:
         balance_vnd: { type: integer, description: 'Có thể âm khi ví in_shortfall' }
-        held_vnd: { type: integer, minimum: 0, description: Đang giữ trước cho start intent còn mở }
+        held_vnd: { type: integer, minimum: 0, description: Tổng QR intent và RFID hold còn mở }
         available_vnd: { type: integer, description: balance_vnd − held_vnd }
+        unresolved_rfid_sessions: { type: integer, minimum: 0, description: RFID chưa có cặp statement và debit }
+        blocking_rfid_sessions: { type: integer, minimum: 0, description: Nghĩa vụ RFID không có hold dương chặn start và refund dù available_vnd dương }
         status:
           type: string
           enum: [active, in_shortfall, closed, none]

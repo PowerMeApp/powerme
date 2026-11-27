@@ -1,3 +1,4 @@
+import { availableCreditSql, unresolvedRfidSql } from '../sessions/credit-availability.js';
 /**
  * TopUpService — SD-2a: tài xế tạo top-up VNPay (T32 Phần 5, decisions D2); SD-2b: IPN cộng tiền
  * (T32 Phần 6, D3).
@@ -504,16 +505,17 @@ export class TopUpService implements BackgroundWork, OnModuleInit {
       const amountVnd = Number(top.amount_vnd);
       // Cùng công thức `sessions/card-eligibility.ts`, đọc dưới khoá `credit_accounts`.
       const available = (
-        await c.query<{ available_vnd: string }>(
-          `SELECT a.balance_vnd - coalesce((SELECT sum(i.reserved_vnd) FROM driver_charge_intents i
-             WHERE i.driver_id = a.driver_id AND i.state NOT IN ('rejected','settled','released')),0)
-             AS available_vnd
+        await c.query<{ available_vnd: string; unresolved: string }>(
+          `SELECT ${availableCreditSql('a.driver_id', 'a.balance_vnd')} AS available_vnd,
+             ${unresolvedRfidSql('a.driver_id')} AS unresolved
            FROM credit_accounts a WHERE a.id = $1`,
           [account.id],
         )
       ).rows[0]!;
       const step = this.stm.apply(top.status, 'ADMIN_REFUND', {
-        balanceCoversAmount: Number(available.available_vnd) >= amountVnd,
+        balanceCoversAmount:
+          Number(available.unresolved) === 0 &&
+          BigInt(available.available_vnd) >= BigInt(amountVnd),
       });
       if (step.outcome === 'rejected') throw new RefundNotAllowed('insufficient_available_balance');
       await c.query(

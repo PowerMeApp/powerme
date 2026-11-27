@@ -1,3 +1,4 @@
+import { availableCreditSql, unresolvedRfidSql } from './credit-availability.js';
 /**
  * SessionsService — cửa duy nhất ghi vào `sessions`, `meter_values`, `session_pauses`,
  * `connector_status_events`, `connectors.status` (WF-03 mục 4).
@@ -165,11 +166,12 @@ export class SessionsService {
       throw new Error(`connectorId ${req.connectorId} không tồn tại trên trụ ${ctx.identity}`);
     }
     const cpStartedAt = new Date(req.timestamp);
-    const tag = await this.classifyIdTag(ctx.chargePointId, req.idTag);
     const status = this.stateMachine.apply(null, 'START_TRANSACTION'); // T13 #2
     const frame = this.frameRef('StartTransaction', ctx);
 
     return this.db.transaction(async (tx) => {
+      await tx.execute(sql`SELECT id FROM connectors WHERE id=${connector.id} FOR UPDATE`);
+      const tag = await this.classifyIdTag(tx, ctx.chargePointId, req.idTag);
       // WP3/T31: correlate a durable app intent; only this frame supplies session meter/time.
       let app = (
         await tx.execute<{
@@ -181,6 +183,8 @@ export class SessionsService {
           duration_minutes: string | null;
           amount_limit_vnd: string | null;
           session_id: string | null;
+          state: string;
+          connector_released_at: Date | null;
         }>(sql`SELECT i.* FROM driver_charge_intents i JOIN remote_commands r ON r.id=i.command_id
         WHERE i.id_tag=${req.idTag} AND i.connector_id=${connector.id}
         AND r.charge_point_id=${ctx.chargePointId} AND i.session_id IS NULL
@@ -278,10 +282,87 @@ export class SessionsService {
         return { transactionId: existing.transactionNo, duplicate: true };
       }
 
+      if (
+        !appStart &&
+        !reusedApp &&
+        tag.origin === 'rfid' &&
+        tag.paymentMode === 'csms_billed' &&
+        tag.driverId !== null
+      ) {
+        const account = (
+          await tx.execute<{
+            id: string;
+            balance_vnd: string;
+          }>(sql`SELECT id,balance_vnd FROM credit_accounts
+          WHERE driver_id=${tag.driverId} FOR UPDATE`)
+        ).rows[0];
+        const eligibility = await evaluateOnlineCard(tx, tag.driverId, this.policy, created.id);
+        if (!eligibility.eligible && !isBillableWhenDenied(eligibility.reason)) {
+          await tx.execute(
+            sql`UPDATE sessions SET payment_mode='unattributed',driver_id=NULL WHERE id=${created.id}`,
+          );
+          tag.cardDenied = eligibility.reason;
+        } else if (account) {
+          const coverage = (
+            await tx.execute<{ available: string; blocked: string }>(sql`SELECT
+            ${sql.raw(availableCreditSql(String(tag.driverId), 'a.balance_vnd', String(created.id)))} AS available,
+            ${sql.raw(unresolvedRfidSql(String(tag.driverId), String(created.id)))} AS blocked
+            FROM credit_accounts a WHERE a.id=${account.id}`)
+          ).rows[0]!;
+          const live =
+            (
+              await tx.execute(sql`SELECT 1 FROM charge_points cp JOIN charge_point_connections e
+            ON e.charge_point_id=cp.id AND e.epoch=cp.current_epoch WHERE cp.id=${ctx.chargePointId}
+            AND cp.current_epoch=${ctx.epoch} AND cp.is_online AND e.closed_at IS NULL AND e.opened_at=${ctx.epochOpenedAt}
+            AND ${ctx.receivedAt}::timestamptz>=e.opened_at
+            AND NOT EXISTS(SELECT 1 FROM sessions other WHERE other.connector_id=${connector.id}
+              AND other.id<>${created.id} AND other.received_stopped_at IS NULL
+              AND other.status IN ('pending','active','paused','stopping','orphaned','review'))`)
+            ).rows.length > 0 &&
+            !ctx.replay.replayed &&
+            Math.abs(ctx.receivedAt.getTime() - cpStartedAt.getTime()) <=
+              this.config.replaySkewThresholdS * 1000;
+          const funded =
+            live &&
+            eligibility.eligible &&
+            Number(coverage.blocked) === 0 &&
+            BigInt(coverage.available) >= BigInt(this.policy.minimumStartVnd);
+          await tx.execute(sql`INSERT INTO rfid_credit_holds(session_id,credit_account_id,amount_vnd,reason)
+            VALUES(${created.id},${account.id},${funded ? coverage.available : '0'},${!live ? 'offline_obligation' : funded ? 'live_start' : 'insufficient_credit'})`);
+          if (live && !funded)
+            await tx.execute(sql`INSERT INTO rfid_stop_jobs(session_id,reason,attempt_limit)
+            VALUES(${created.id},'insufficient_credit',${1 + (this.policy.remoteStopRetryMax ?? 3)}) ON CONFLICT DO NOTHING`);
+        }
+      }
       if (appStart) {
+        // WP3: late restoration serializes with RFID holds and refunds; physical evidence always persists.
+        await tx.execute(
+          sql`SELECT id FROM credit_accounts WHERE driver_id=${appStart.driver_id} FOR UPDATE`,
+        );
+        const coverage = (
+          await tx.execute<{ available: string; blocked: string; required: string }>(sql`SELECT
+          ${sql.raw(availableCreditSql('i.driver_id', 'a.balance_vnd', 'i.session_id', 'i.id'))} AS available,
+          ${sql.raw(unresolvedRfidSql('i.driver_id'))} AS blocked,
+          greatest(i.reserved_vnd,coalesce(r.released_vnd,0)) AS required FROM driver_charge_intents i
+          JOIN credit_accounts a ON a.driver_id=i.driver_id LEFT JOIN driver_start_recoveries r ON r.intent_id=i.id
+          WHERE i.id=${appStart.id}`)
+        ).rows[0];
+        const late =
+          appStart.connector_released_at !== null ||
+          ['released', 'rejected'].includes(appStart.state);
+        const underfunded =
+          late &&
+          (!coverage ||
+            Number(coverage.blocked) > 0 ||
+            BigInt(coverage.available) < BigInt(this.policy.minimumStartVnd) ||
+            BigInt(coverage.required) === 0n ||
+            BigInt(coverage.available) < BigInt(coverage.required));
+        if (underfunded)
+          await tx.execute(sql`INSERT INTO session_status_history(session_id,from_status,to_status,event,actor)
+          VALUES(${created.id},'active','active','UNDERFUNDED_LATE_START','system')`);
         // WP3/T31: pending belongs to the command intent; STM-1 #2 records observed session start.
         await tx.execute(sql`UPDATE driver_charge_intents SET session_id=${created.id},state='effect',rejection_reason=NULL,
-          billing_review_required=(connector_released_at IS NOT NULL OR state='rejected'),
+          billing_review_required=(connector_released_at IS NOT NULL OR state='rejected' OR ${underfunded}),
           reserved_vnd=greatest(reserved_vnd,coalesce((SELECT released_vnd FROM driver_start_recoveries WHERE intent_id=${appStart.id}),0)),version=version+1,updated_at=now()
           WHERE id=${appStart.id}`);
         await tx.execute(sql`INSERT INTO driver_charge_intent_events(intent_id,event)
@@ -403,7 +484,12 @@ export class SessionsService {
       if (session.chargePointId !== ctx.chargePointId)
         throw new Error('session_charge_point_mismatch');
       const cpStoppedAt = parseChargePointTime(req.timestamp);
-      if (session.meterStopWh !== null || !OPEN_STATUSES.includes(session.status)) {
+      const firstReviewStop = session.status === 'review' && !session.receivedStoppedAt;
+      if (
+        session.receivedStoppedAt ||
+        (!firstReviewStop &&
+          (session.meterStopWh !== null || !OPEN_STATUSES.includes(session.status)))
+      ) {
         if (session.receivedStoppedAt) {
           const expectedMeter = req.meterStop >= session.meterStartWh ? req.meterStop : null;
           if (expectedMeter !== session.meterStopWh) {
@@ -456,6 +542,26 @@ export class SessionsService {
         .where(eq(sessions.id, session.id));
       if (replayed) await this.reconciliation.recordReplay(tx, session.id, frame, ctx.replay);
 
+      // WP3: physical Stop is evidence; an existing financial review still requires operator resolution.
+      if (firstReviewStop) {
+        await this.recordHistory(
+          tx,
+          session.id,
+          'review',
+          'review',
+          'STOP_TRANSACTION',
+          ctx.receivedAt,
+          { note: this.frameNote(ctx) },
+        );
+        if (this.reconciliation.enabled) {
+          const verdict = await this.evaluateSession(tx, { ...session, meterStopWh, cpStoppedAt });
+          await this.reconciliation.recordVerdict(tx, session.id, verdict, {
+            kind: 'stop',
+            replayed,
+          });
+        }
+        return;
+      }
       // T13 #9/#10/#11: active | paused | stopping → closed. orphaned giữ nguyên để đi #16/#16a.
       let status = session.status;
       if (status !== 'orphaned') {
@@ -963,6 +1069,7 @@ export class SessionsService {
    * khi thẻ không Accepted), rfid_card_id giữ lại để operator lần ra thẻ nào.
    */
   private async classifyIdTag(
+    ex: Tx,
     chargePointId: number,
     idTag: string,
   ): Promise<{
@@ -976,11 +1083,12 @@ export class SessionsService {
     /** BE-19: thẻ `online` active nhưng không đạt BR-P23/BR-P18 lúc phiên bắt đầu; null nếu đạt/không áp dụng. */
     cardDenied: CardDenyReason | null;
   }> {
-    const [card] = await this.db
+    const [card] = await ex
       .select()
       .from(rfidCards)
       .where(eq(rfidCards.cardIdentifier, idTag))
-      .limit(1);
+      .limit(1)
+      .for('share');
     if (card && card.status !== 'active') {
       return {
         origin: card.cardKind === 'free_vend' ? 'free_vend' : 'rfid',
@@ -1000,7 +1108,7 @@ export class SessionsService {
       let cardDenied: CardDenyReason | null = null;
       let billable = true;
       if (card.cardKind === 'online') {
-        const e = await evaluateOnlineCard(this.db, card.driverId, this.policy);
+        const e = await evaluateOnlineCard(ex, card.driverId, this.policy);
         if (!e.eligible) {
           cardDenied = e.reason;
           billable = isBillableWhenDenied(e.reason);
@@ -1018,7 +1126,7 @@ export class SessionsService {
         cardDenied,
       };
     }
-    const [cp] = await this.db
+    const [cp] = await ex
       .select({ freeVendTag: chargePoints.freeVendTag })
       .from(chargePoints)
       .where(eq(chargePoints.id, chargePointId))

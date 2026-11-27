@@ -212,6 +212,11 @@ export const sessions = pgTable(
     }),
     index('sessions_connector_id_received_started_at_idx').on(t.connectorId, t.receivedStartedAt),
     index('sessions_driver_id_idx').on(t.driverId),
+    index('sessions_unpaid_rfid_driver_idx')
+      .on(t.driverId, t.id)
+      .where(
+        sql`${t.origin}='rfid' AND ${t.paymentMode}='csms_billed' AND ${t.driverId} IS NOT NULL`,
+      ),
     index('sessions_vehicle_id_idx').on(t.vehicleId),
     index('sessions_promotion_id_idx').on(t.promotionId),
     index('sessions_rfid_card_id_idx').on(t.rfidCardId),

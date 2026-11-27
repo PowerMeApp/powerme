@@ -1,3 +1,4 @@
+import { RfidProtection } from '../../components/RfidProtection';
 /**
  * Screen 20 — Charge Point Detail (FE-05, UC-OPS-02 / UC-OPS-04), from GET
  * /api/operator/v1/charge-points/{id}: header with lifecycle and "last seen" (D22), capabilities,
@@ -144,6 +145,7 @@ export function ChargePointDetailPage() {
       <h2 className="section-title">Sự cố của trụ sạc</h2>
       <FaultTable chargePointId={data.id} defaultStatus="all" />
 
+      <RfidProtection data={data.rfid_credit_protection} />
       <h2 className="section-title">Lệnh gần đây</h2>
       {data.recent_commands.length === 0 ? (
         <div className="card">

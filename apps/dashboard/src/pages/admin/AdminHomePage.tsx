@@ -1,3 +1,4 @@
+import { RfidProtection } from '../../components/RfidProtection';
 /**
  * Screen 27 — Admin Dashboard (hub, FE-14, UC-ADM-07). Greeting from /me, then:
  *   - platform statistics (20/11): revenue of the current month from T108's
@@ -151,6 +152,7 @@ export function AdminHomePage() {
       </div>
       {summary.error && !s && <p role="alert">{errorMessage(summary.error)}</p>}
       {empty && <p className="muted">Nền tảng chưa có tài khoản, trụ sạc hay thẻ RFID nào.</p>}
+      <RfidProtection data={s?.rfid_credit_protection} />
       {s && !empty && (
         <>
           <h2 className="section-title">Thống kê chung</h2>
