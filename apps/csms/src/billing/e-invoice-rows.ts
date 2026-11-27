@@ -12,8 +12,7 @@
  */
 import type { LedgerClient } from './credit-ledger.service.js';
 import { EInvoiceStateMachine, EInvoiceStatus } from './e-invoice-state-machine.js';
-import { RETRY_LIMIT } from './refund-state-machine.js';
-import { nextRetry } from './retry-schedule.js';
+import { nextRetry, RETRY_LIMIT } from './retry-schedule.js';
 
 /** `BackgroundWork.name` của việc xuất hoá đơn (D7). */
 export const E_INVOICE_ISSUE_WORK = 'e-invoice-issue';
