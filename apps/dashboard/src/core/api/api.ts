@@ -28,6 +28,9 @@ import type {
   OnboardResult,
   OperatorFaultList,
   RefreshResponse,
+  RegisterDeviceRequest,
+  RegistryChargePoint,
+  RegistryChargePointPage,
   RfidCard,
   RfidCardPage,
   RfidCardQuery,
@@ -61,6 +64,8 @@ export const CHARGE_POINT_PAGE_SIZE = 20;
 export const TRANSACTION_PAGE_SIZE = 50;
 /** Rows per page on screen 30. */
 export const RFID_PAGE_SIZE = 20;
+/** Rows per page of the device registry. */
+export const REGISTRY_PAGE_SIZE = 20;
 /** Matches shown by the driver picker of screen 30. */
 export const DRIVER_SEARCH_SIZE = 10;
 
@@ -160,7 +165,16 @@ const baseQuery: BaseQueryFn<string | FetchArgs, unknown, ApiError> = async (arg
 export const api = createApi({
   reducerPath: 'api',
   baseQuery,
-  tagTypes: ['Fault', 'Summary', 'ChargePoint', 'Session', 'Revenue', 'AdminSummary', 'RfidCard'],
+  tagTypes: [
+    'Fault',
+    'Summary',
+    'ChargePoint',
+    'Session',
+    'Revenue',
+    'AdminSummary',
+    'RfidCard',
+    'Registry',
+  ],
   endpoints: (b) => ({
     login: b.mutation<LoginResponse, LoginRequest>({
       query: (body) => ({ url: 'auth/v1/login', method: 'POST', body }),
@@ -314,6 +328,25 @@ export const api = createApi({
       query: ({ id, ...body }) => ({ url: `admin/v1/rfid-cards/${id}`, method: 'PATCH', body }),
       invalidatesTags: ['RfidCard', 'AdminSummary'],
     }),
+    // Device registry: registered charge points of the whole platform, newest first. Registering
+    // one also changes the charge point counts of the admin home page.
+    adminRegistry: b.query<
+      RegistryChargePointPage,
+      { page: number; lifecycle?: ChargePointLifecycle }
+    >({
+      query: ({ page, lifecycle }) => {
+        const p = new URLSearchParams();
+        if (lifecycle) p.set('lifecycle', lifecycle);
+        p.set('page', String(page));
+        p.set('page_size', String(REGISTRY_PAGE_SIZE));
+        return `admin/v1/charge-points?${p}`;
+      },
+      providesTags: ['Registry'],
+    }),
+    registerDevice: b.mutation<RegistryChargePoint, RegisterDeviceRequest>({
+      query: (body) => ({ url: 'admin/v1/charge-points', method: 'POST', body }),
+      invalidatesTags: ['Registry', 'AdminSummary'],
+    }),
     // Driver picker of screen 30: active drivers by name, email or phone (T161, admin-users.ts).
     driverSearch: b.query<UserAccountPage, string>({
       query: (q) => {
@@ -351,6 +384,8 @@ export const {
   useCreateRfidCardMutation,
   useUpdateRfidCardMutation,
   useDriverSearchQuery,
+  useAdminRegistryQuery,
+  useRegisterDeviceMutation,
 } = api;
 
 export type RevenueScope = 'operator' | 'admin';

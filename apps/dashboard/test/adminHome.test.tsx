@@ -74,6 +74,10 @@ describe('Tổng quan nền tảng (màn 27)', () => {
     expect(cps.getByText('13')).toBeInTheDocument();
     expect(cps.getByText('Đã đăng ký')).toBeInTheDocument();
     expect(cps.queryByText('Đã gỡ')).toBeNull();
+    expect(cps.getByRole('link', { name: 'Xem chi tiết →' })).toHaveAttribute(
+      'href',
+      '/admin/charge-points',
+    );
     const cards = within(screen.getByRole('region', { name: 'Thẻ RFID' }));
     expect(cards.getByText('Bị chặn')).toBeInTheDocument();
     expect(cards.queryByText('Chưa gắn tài xế')).toBeNull();
