@@ -297,7 +297,7 @@ describe('Doanh thu (màn 25, Operator)', () => {
     });
     const { user } = renderApp(`/operator/revenue${PERIOD}`, session(STAFF));
     // The button is disabled until the report has loaded: wait for that, then click.
-    const download = await screen.findByRole('button', { name: 'Tải CSV' });
+    const download = await screen.findByRole('button', { name: 'Tải tệp bảng tính (CSV)' });
     await waitFor(() => expect(download).toBeEnabled());
     await user.click(download);
     await waitFor(() =>

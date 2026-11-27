@@ -57,7 +57,7 @@ describe('Thẻ RFID (màn 30)', () => {
     const seen = fakeCsms({ [LIST]: { status: 200, body: CARDS } });
     renderApp('/admin/rfid-cards', session(ADMIN));
     const linked = within(await screen.findByRole('row', { name: 'Thẻ 04A1B2C2' }));
-    expect(linked.getByText('Online')).toBeInTheDocument();
+    expect(linked.getByText('Thẻ trả phí')).toBeInTheDocument();
     expect(linked.getByText('Đang dùng')).toBeInTheDocument();
     expect(linked.getByText('Nguyễn Thị Lan')).toBeInTheDocument();
     expect(linked.getByText('lan@powerme.test')).toBeInTheDocument();

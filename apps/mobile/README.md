@@ -1,5 +1,71 @@
 # @powerme/mobile — App tài xế PowerMe (WP3)
 
+## T96 — điểm đi Discover → gợi ý, 26/11/2026
+
+Local bounded bugfix in the user-run checkout, branch `wp3/t96-diem-di-goi-y`,
+from fetched `origin/main` **20fa134324804336232d4297a0b3d00ba15792d3**.
+Discover/Suggestions now expose the existing shared starting point (GPS/address)
+and the non-VinFast “Hiện thêm trạm VinFast” override without a fold. Missing-origin
+submission opens the existing consent panel and sends no smart request. Selection
+alone does not authorize Route ranking; the explicit suggestion button/disclosure
+still controls that consent. Origin/filter changes clear submitted results. Panel
+dismissal cancels late origin updates; clear, default-vehicle and auth guards remain.
+GPS uses the existing device repository without Vietmap reverse lookup. Invalid-search
+copy no longer assumes every rejected search has an invalid battery value.
+
+Sources: current [requirements index](../../docs/requirements/README.md),
+[SRS §3.3.1/BR-P03](../../docs/requirements/report3-srs.md),
+[Driver API §16](../../docs/api/DRIVER-API-HOP-DONG.md), existing mobile controllers,
+adapters and tests. Routine bugfix; no external implementation/research or new package.
+Backend algorithm/provider cache, generic VietmapSurface, dependencies, assets,
+native configuration and local API/env/keys are unchanged.
+
+Actual local verification (existing SDK/cache; process-local TMP/TEMP under
+`E:/Project/PowerMe/.review/t96-origin-20261126`, no dependency resolution):
+
+| Check | Result / external log |
+| --- | --- |
+| RED before product patch | 2 expected failures: unwanted smart HTTP request; hidden override (`red.log`) |
+| Final focused tests | **62/62 pass**, exit 0 (`focused-final.log`); command below |
+| Touched Dart formatting | **9 files / 0 changes**, exit 0 (`format-check.log`) |
+| `flutter analyze --no-pub` | **No issues**, exit 0, 10.0s (`analyze-final.log`); one new-test brace lint corrected |
+| One capture batch | **3/3 pass / 12 PNGs**, exit 0 (`capture.log`); 390px/100% VI, 320px/200% VI/EN |
+| Whitespace / staging | `git diff --check` clean; nothing staged |
+
+```powershell
+& E:/MobileDev/Flutter/bin/flutter.bat test --no-pub test/discovery_origin_regression_test.dart test/driver_discovery_widget_test.dart test/driver_discovery_api_test.dart test/vietmap_setup_test.dart test/driver_garage_navigation_test.dart test/ui_consistency_test.dart test/driver_api_widget_test.dart --timeout 60s --reporter expanded
+& E:/MobileDev/Flutter/bin/flutter.bat analyze --no-pub
+& E:/MobileDev/Flutter/bin/flutter.bat test --no-pub tool/capture_ui_consistency_test.dart --dart-define=POWERME_DISCOVERY_CAPTURE=true --dart-define=POWERME_CONSISTENCY_CAPTURE=E:/Project/PowerMe/.review/t96-origin-20261126/captures --dart-define=POWERME_PREVIEW_FONTS=E:/MobileDev/Flutter/bin/cache/artifacts/material_fonts --reporter expanded
+```
+
+Earlier affected-harness failures were corrected by scrolling in the actual control
+order and settling focus/layout before taps; all existing assertions, including 48dp,
+are retained. The first broad run was stopped while a new test awaited a provider
+write without pumping; that test now uses the existing unawaited/pump pattern.
+Blank/≥80% SoC fallback still has an accepted origin and no Route consent; 0/decimal
+values preserve valid payloads. New cases cover GPS without places calls, every location
+failure → manual address/name search, cancellation/late effects, clear → no stale
+recommendations/no coordinate-free smart requests, shared override toggles and scope reset.
+
+Captures and hashes are outside git: `captures/manifest.json`,
+`captures/discover-review.png`, `captures/suggestions-review.png` under the review folder.
+Both contact sheets were inspected; primary also opened four original PNGs and accepted
+the bounded UI. Existing 320px/200% bottom-tab label overlap remains outside this slice;
+some scrolled frames clip headings under existing chrome. These are offscreen API/GPS
+fixtures with SDK fonts and unavailable-map UI, not device screenshots, live tiles,
+actual GPS permissions, provider failures or staging proof. No keyboard/native launch,
+live API/DB/financial action, commit, push or deployment was performed in this slice.
+The protected garage test's SHA256 remains
+`b0852da9421727fbafb1df50a2cd0b971a40a987fcb73b1f97e1db4435ad114f`.
+
+Manual device acceptance, once the primary authorizes the separate local runtime:
+choose a starting point on Discover after reading the disclosure; deny GPS and use
+Choose address as an alternative. Open Suggestions, enter a valid battery level and
+read the Route disclosure before submitting. Confirm GPS/address persists, clear it
+and verify results disappear and submission prompts again. Toggle VinFast off/on/off
+with a non-VinFast vehicle, then change default vehicle/logout to verify scope reset.
+
+
 ## T148 — đồng bộ main 25/11/2026
 
 Nền cuối `2272b13ea109d3e05c7de6625d5952adc11056dd`; bộ 93 ca đã kiểm trên
@@ -423,3 +489,25 @@ Verification: fresh origin fetch succeeded with network permission; HEAD...origi
 To try: Stop and Run Android again after plugin installation; open Scan QR and allow Camera. Supported QR content: `powerme:connector:station-powerme-center/1` (or enter `station-powerme-center/1`). Review charging mode/limit on the next screen before confirming.
 
 Final visual correction: denied/error camera hides the teal scan-frame overlay. Regenerated and inspected qr-connect-vi.png; analyzer clean, 8/8 navigation/QR tests and 1/1 capture test passed after this presentation-only correction. Full 85/85 suite was run immediately before the overlay correction.
+
+## T96 follow-up — external Maps destination, 26/11/2026
+
+Android `MainActivity.openStationMap` now sends a Maps Directions HTTPS URL with
+`api=1`, the validated station `destination` and `travelmode=driving`; installed
+Google Maps is preferred, then the same unpackaged browsable URL on ActivityNotFound.
+Finite/range/null checks and locale-independent coordinates remain; no origin,
+`dir_action=navigate`, SDK/key/dependency or VNPay change. The earlier “native
+configuration unchanged” statement describes the preceding origin slice only.
+
+Already-run evidence: targeted external-map widget regression 1/1; fresh Android
+debug APK build passed (33.4s); actual rebuilt Pixel_6 button → Maps activity carried
+`destination=10.866%2C106.801`, and Directions displayed the station destination.
+A reused Maps task initially exposed its old geo base intent; that failed artifact
+was relabelled. One fresh task then passed the native intent assertion. User confirmed
+it works. No automatic navigation or charging/payment; absent-Maps/browser fallback
+and real GPS navigation were not exercised. Existing 62-test/analyzer/capture evidence
+above remains the preceding slice's proof; no full-suite/staging claim or repeat run.
+Official protocol: [Maps URLs](https://developers.google.com/maps/documentation/urls/get-started)
+and [Android Maps intents](https://developer.android.com/guide/components/google-maps-intents).
+No external code copied. Sanitized native evidence remains outside Git under
+`E:/Project/PowerMe/.review/t96-external-destination-20261126`.

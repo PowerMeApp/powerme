@@ -1,5 +1,27 @@
 # Coding reference 1 — màn hình và chức năng WP3
 
+## T96 — điểm đi Discover → gợi ý, 26/11/2026
+
+Views 3/4/15 → FR-03/21, UC-CHG-01/07, SRS §3.3.1/BR-P03, BR-P33/41,
+NFR-SEC-01/US-01 → PKG-3 Stations, existing DiscoveryContext and API search/route.
+Discover and Suggestions expose a compact starting-point selector (GPS or selected
+address) using DiscoveryOriginPanel's explicit PowerMe/Vietmap disclosures. No GPS
+permission or coordinate transmission starts on login; map center is not an origin.
+Missing-origin suggestion submission opens the picker without requesting or rendering
+the backend's name-only top three. Removing/changing origin or the override clears
+submitted recommendations and Route consent; a fresh explicit submission is required.
+Non-VinFast vehicles expose “Hiện thêm trạm VinFast” without a fold, default off;
+the same shared flag reaches map/list/suggestions/route. VinFast vehicle behavior is
+unchanged. Closing an origin panel cancels its pending update; existing clear,
+vehicle/auth scope and generation guards remain. GPS does not require address resolve.
+
+Local fixture regressions: RED reproduced the unwanted smart request and hidden
+switch; final focused API/widget/location/navigation/presentation checks **62/62 pass**.
+Blank/≥80%/zero/decimal SoC behavior, separate Route consent, typed provider errors,
+unknown road metrics, GPS failure → address/name search, late GPS/address guards and
+scope/override reset are covered. Verification/capture details and limitations are in
+README. This is local fixture evidence; actual GPS/provider/staging acceptance is pending.
+
 ## T146 — guard dừng và tạm tính theo capability
 
 Views 6/7/9 → FR-04/05/08/16/17, UC-CHG-03/04, UC-PAY-02, BR-P08/34/45,
@@ -310,3 +332,11 @@ View 10 → FR-02, UC-ACC-03, BR-P03/17, NFR-US-02/SEC-01 → PKG-3 Profile và 
 - **Tài khoản** · View 10 → FR-02, UC-ACC-03, BR-P03/17, NFR-SEC-01 → Profile/Payments, `ProfileScreen` và `VehicleDashboard`. Hồ sơ, tín dụng khả dụng, lịch sử, nhà xe, khám phá và đăng xuất dùng dữ liệu và route hiện có. Email hiện khi có trong hồ sơ; `GET /me` hiện chỉ trả tên trong nhóm thông tin liên hệ dùng cho giao diện.
 
 Kiểm local bằng transport fixture và scanner fake trên Flutter 3.44.2. Format 169 file sạch, analyzer sạch, 43 ca tập trung và 182 ca toàn bộ pass. Hai ca review widget pass, gồm render 390 × 844 vào `build/stitch-core-ui-review/` và kiểm cuộn, focus, vùng chạm ở 320 px/200%. Thiết bị và staging còn chờ smoke.
+
+### T96 follow-up — external destination, 26/11
+
+View 4 → FR-03/21, UC-CHG-01/07, SRS §3.7 external handoff → Android MainActivity.
+The existing external-map button now pre-fills the canonical station destination
+in Maps Directions, with browser URL fallback; no app-origin requirement or automatic
+navigation. Fresh APK, 1 targeted widget case and actual Pixel_6 Maps intent/UI passed;
+user confirmed. Browser-without-Maps/staging/real navigation remain unverified.

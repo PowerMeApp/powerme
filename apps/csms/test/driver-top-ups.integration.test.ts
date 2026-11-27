@@ -489,4 +489,91 @@ describeDb('T32 Phần 5: route top-up tài xế qua HTTP', () => {
       });
     });
   });
+
+  describe('refund_status (T32 Phần 10a): chỉ ở GET /top-ups/{id}', () => {
+    let adminId: string;
+    let me: string;
+    beforeAll(async () => {
+      me = await jwt(await newDriver());
+      adminId = String(
+        (
+          await q(
+            "INSERT INTO users(email,full_name,role) VALUES('p10a-admin@t32p5.test','A','admin') RETURNING id",
+          )
+        )[0]!['id'],
+      );
+      await q('INSERT INTO admins(user_id) VALUES($1)', [adminId]);
+    });
+
+    /** Top-up của tài xế riêng `me` tạo qua POST, rồi chuyển `refunded` (POST lại cùng key vẫn trả nó). */
+    async function refundedTopUp(): Promise<{ id: string; key: string }> {
+      const key = `p10a-key-${++seq}`;
+      const res = await post({ amount_vnd: 100_000 }, { key, bearer: me });
+      const id = ((await res.json()) as { top_up_id: string }).top_up_id;
+      await q(
+        `UPDATE top_ups SET status='refunded', completed_at=now(), refunded_at=now(),
+           gateway_transaction_no=$2, next_attempt_at=NULL WHERE id=$1`,
+        [id, String(90_000_000 + seq)],
+      );
+      return { id, key };
+    }
+    const addRefund = (topUpId: string, kind: string, status: string) =>
+      q(
+        `INSERT INTO refunds (top_up_id, kind, amount_vnd, status, requested_by, next_attempt_at,
+           completed_at, confirmed_via_query, last_error_kind, last_attempt_at)
+         VALUES ($1, $2::refund_kind, 100000, $3::refund_status, $4,
+           CASE WHEN $3 = 'requested' THEN now() END,
+           CASE WHEN $3 = 'done' THEN now() END, $3 = 'done',
+           CASE WHEN $3 = 'failed' THEN 'data'::e_invoice_error_kind END,
+           CASE WHEN $3 = 'failed' THEN now() END)`,
+        [topUpId, kind, status, adminId],
+      );
+    const refundStatus = async (id: string) => {
+      const res = await get(`${PATH}/${id}`, me);
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as Record<string, unknown>;
+      return 'refund_status' in body ? body['refund_status'] : 'absent';
+    };
+
+    it('chưa có refund → không có key refund_status', async () => {
+      const { id } = await refundedTopUp();
+      const res = await get(`${PATH}/${id}`, me);
+      const body = (await res.json()) as Record<string, unknown>;
+      expect(body).not.toHaveProperty('refund_status');
+      expect(body['status']).toBe('refunded');
+    });
+
+    it.each(['requested', 'done', 'failed'])(
+      'refund top_up %s → refund_status cùng giá trị',
+      async (s) => {
+        const { id } = await refundedTopUp();
+        await addRefund(id, 'top_up', s);
+        expect(await refundStatus(id)).toBe(s);
+      },
+    );
+
+    it('refund late_payment không ảnh hưởng refund_status', async () => {
+      const { id } = await refundedTopUp();
+      await q(
+        `UPDATE top_ups SET late_gateway_ref=$2, late_paid_at=now(), late_amount_vnd=50000
+         WHERE id=$1`,
+        [id, String(95_000_000 + seq)],
+      );
+      await addRefund(id, 'late_payment', 'failed');
+      expect(await refundStatus(id)).toBe('absent');
+      await addRefund(id, 'top_up', 'requested');
+      expect(await refundStatus(id)).toBe('requested');
+    });
+
+    it('POST (tạo mới và gửi lại cùng key) không có refund_status', async () => {
+      const { id, key } = await refundedTopUp();
+      await addRefund(id, 'top_up', 'done');
+      const again = await post({ amount_vnd: 100_000 }, { key, bearer: me });
+      expect(again.status).toBe(200);
+      expect((await again.json()) as Record<string, unknown>).not.toHaveProperty('refund_status');
+      const fresh = await post({ amount_vnd: 100_000 }, { bearer: me });
+      expect(fresh.status).toBe(201);
+      expect((await fresh.json()) as Record<string, unknown>).not.toHaveProperty('refund_status');
+    });
+  });
 });

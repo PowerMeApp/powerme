@@ -114,9 +114,9 @@ describe('Chi tiết trụ sạc (màn 20)', () => {
     expect(info.getByText('1.4.2')).toBeInTheDocument();
     expect(info.getByText('120 kW')).toBeInTheDocument();
     const c1 = within(screen.getByRole('region', { name: 'Súng 1' }));
-    expect(c1.getByText('Faulted · GroundFailure')).toBeInTheDocument();
+    expect(c1.getByText('Lỗi · GroundFailure')).toBeInTheDocument();
     const c2 = within(screen.getByRole('region', { name: 'Súng 2' }));
-    expect(c2.getByText('Charging')).toBeInTheDocument();
+    expect(c2.getByText('Đang sạc')).toBeInTheDocument();
     expect(c2.getByText(/Đang có phiên 88/)).toBeInTheDocument();
     // Fault history: the screen 21 table filtered to this charge point, all statuses.
     expect(await screen.findByRole('row', { name: 'Sự cố #1007' })).toBeInTheDocument();
@@ -146,8 +146,8 @@ describe('Chi tiết trụ sạc (màn 20)', () => {
       [FAULTS_URL]: faults,
     });
     renderApp('/operator/charge-points/5', session(STAFF));
-    const note = await screen.findByRole('note', { name: 'Rủi ro thẻ offline' });
-    expect(note).toHaveTextContent(/NotSupported/);
+    const note = await screen.findByRole('note', { name: 'Rủi ro thẻ khi mất kết nối' });
+    expect(note).toHaveTextContent(/không cho đổi cấu hình thẻ khi mất kết nối/);
     expect(note).toHaveTextContent(/thẻ lạ hoặc thẻ đã khoá/);
     expect(note).toHaveTextContent(/Lần kiểm cuối/);
   });
@@ -155,8 +155,10 @@ describe('Chi tiết trụ sạc (màn 20)', () => {
   it('T150: a confirmed check shows one muted line and no warning', async () => {
     fakeCsms({ [DETAIL_URL]: { status: 200, body: DETAIL }, [FAULTS_URL]: faults });
     renderApp('/operator/charge-points/5', session(STAFF));
-    expect(await screen.findByText(/Đã tắt authorize offline trên trụ/)).toBeInTheDocument();
-    expect(screen.queryByRole('note', { name: 'Rủi ro thẻ offline' })).toBeNull();
+    expect(
+      await screen.findByText(/Đã tắt chấp nhận thẻ khi mất kết nối trên trụ/),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole('note', { name: 'Rủi ro thẻ khi mất kết nối' })).toBeNull();
   });
 
   it('acknowledges a fault from the detail page', async () => {
@@ -205,4 +207,21 @@ describe('Chi tiết trụ sạc (màn 20)', () => {
       '/operator/charge-points/5',
     );
   });
+});
+
+it('WP3 shows persistent RFID stop reason and held amount beyond recent commands', async () => {
+  const { RFID_PROTECTION } = await import('./rfidProtectionFixture');
+  fakeCsms({
+    [DETAIL_URL]: {
+      status: 200,
+      body: { ...DETAIL, recent_commands: [], rfid_credit_protection: RFID_PROTECTION },
+    },
+    [FAULTS_URL]: faults,
+  });
+  renderApp('/operator/charge-points/5', session(STAFF));
+  const region = within(await screen.findByRole('region', { name: 'Bảo vệ credit RFID' }));
+  expect(region.getByText('Đã hết lượt tự động dừng')).toBeInTheDocument();
+  expect(region.getByText('Chạm ngưỡng credit')).toBeInTheDocument();
+  expect(region.getByText('200.000 ₫')).toBeInTheDocument();
+  expect(region.getByText('881')).toBeInTheDocument();
 });

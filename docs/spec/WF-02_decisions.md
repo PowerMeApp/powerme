@@ -1,6 +1,6 @@
 # WF-02 – Quyết định thiết kế
 
-> Đặt tại `docs/spec/WF-02_decisions.md`. Cập nhật: 25/11/2026 (D5, "Còn mở" theo T144: nhà cung cấp SePay eInvoice); 24/11/2026 (D1 nghĩa `done`; "Còn mở": điều kiện của Ân, kết quả querydr sandbox, Phần 10 dự kiến 25/11); 23/11/2026 (D1, D7, "Còn mở" theo T32 Phần 9a; "Còn mở": VNPay trả lời 18/11, giả định vnp_Amount khi khuyến mãi); 17/11/2026 (D3, D5, D7, "Còn mở" theo T32 Phần 7); 14/11/2026 (D2, D3, D4, D7, "Còn mở" theo T32 Phần 8; D3, D4, D7, D8 theo T32 Phần 6 13/11; D2 theo T32 Phần 5, 12/11).
+> Đặt tại `docs/spec/WF-02_decisions.md`. Cập nhật: 27/11/2026 (D1, D10, "Còn mở" theo hoàn thủ công D-AC, review #212 của Ân); 25/11/2026 (D5, "Còn mở" theo T144: nhà cung cấp SePay eInvoice; D1 thứ tự kiểm, D10 hợp đồng thật, "Còn mở" theo T32 Phần 10a); 24/11/2026 (D1 nghĩa `done`; "Còn mở": điều kiện của Ân, kết quả querydr sandbox, Phần 10 dự kiến 25/11); 23/11/2026 (D1, D7, "Còn mở" theo T32 Phần 9a; "Còn mở": VNPay trả lời 18/11, giả định vnp_Amount khi khuyến mãi); 17/11/2026 (D3, D5, D7, "Còn mở" theo T32 Phần 7); 14/11/2026 (D2, D3, D4, D7, "Còn mở" theo T32 Phần 8; D3, D4, D7, D8 theo T32 Phần 6 13/11; D2 theo T32 Phần 5, 12/11).
 > **Nguồn chính là diagram trong `diagrams/report4/class/CD-2/` + `diagrams/report4/sequence/SD-2a…2f/`** (CD-2, SD-2a…2f v2.0, 01/11/2026, bản đã chia sẻ vào tài liệu chung của nhóm). File này chỉ ghi lại:
 > (1) những điểm trong diagram mà code phải bám, viết ra cho dễ tra;
 > (2) cách khớp diagram với repo hiện tại;
@@ -23,6 +23,8 @@ STM-4 TopUp, STM-5 CreditAccount, STM-7 EInvoice (cũng dùng cho InvoiceAdjustm
 
 ## D1. Hoàn tiền: ghi quyết định trước, chuyển tiền sau (SD-2e, STM-10)
 
+⊕ **Từ 26/11 hoàn tiền làm thủ công** (quyết định D-AC, SRS BR-P51 ở PR #228). Chăm sóc khách hàng hoàn trên cổng merchant VNPay; Admin ghi nhận kết quả trong PowerMe: `requested` → `done` khi nhập mã hoàn của cổng, `failed` kèm lý do, làm lại `failed` → `requested`. **PowerMe không gửi lệnh refund sang VNPay.** Phần 1 bên dưới (quyết định hoàn: trừ ví, trả điểm, tạo refund `requested`) vẫn giữ. Phần 2 (gửi refund qua VNPay), worker `refund-send`, `RefundService.send` / `retry` và `VnpayAdapter.refund` đang có trên main là luồng cũ của #208, sẽ gỡ ở PR "ghi nhận hoàn thủ công" (xem "Còn mở").
+
 **Phần 1: Admin ghi nhận hoàn**, một DB transaction trong `TopUpService.refund(topUpId, adminId)`:
 - Kiểm tra top-up `credited` và **số dư khả dụng** ≥ số tiền; sai thì `RefundNotAllowed(reason)` → 409 / 422 `{reason}`.
 - ⊕ **Số dư khả dụng** (chốt 09/11) = `balance_vnd` − Σ `reserved_vnd` của `driver_charge_intents` của tài xế chưa kết thúc (`state NOT IN ('rejected','settled','released')`), cùng công thức `src/sessions/card-eligibility.ts` (BE-19). Thiếu → `RefundNotAllowed('insufficient_available_balance')`.
@@ -43,7 +45,7 @@ STM-4 TopUp, STM-5 CreditAccount, STM-7 EInvoice (cũng dùng cho InvoiceAdjustm
 ⊕ **Cài đặt T32 Phần 9a (Khang chốt 23/11).** Code: `billing/refund.service.ts`, `billing/vnpay.adapter.ts` (`refundRequest`, `classifyRefundResponse`, `classifyRefundQueryResponse`), `TopUpService.refund` / `refundLatePayment`, migration 0028. Chưa có route (Phần 10); điều chỉnh hoá đơn ở Phần 9b.
 
 - **Ba số khi hoàn top-up (theo SD-2e):** sổ cái và guard số dư khả dụng dùng `amount_vnd`; VNPay hoàn `amount_paid_vnd` (`refunds.amount_vnd`); điểm trả qua `restoreForTopUp`. Ví dụ: nạp 100.000, điểm 20.000, trả 80.000 → ví −100.000, VNPay hoàn 80.000, điểm được trả lại.
-- **Điều kiện trước khi quyết định hoàn:** VNPay chưa cấu hình → `RefundNotAllowed('payment_unconfigured')` trước khi đổi bất cứ gì, để không có ca trừ ví rồi refund nằm chờ vô hạn. Thứ tự kiểm sau đó: `not_found`, `account_closed`, `not_refundable`, `insufficient_available_balance`. Khoản trễ: `not_found`, `no_late_payment`, `already_requested`.
+- **Điều kiện trước khi quyết định hoàn:** VNPay chưa cấu hình → `RefundNotAllowed('payment_unconfigured')` trước khi đổi bất cứ gì, để không có ca trừ ví rồi refund nằm chờ vô hạn. Thứ tự kiểm sau đó: `not_found`, `account_closed`, `not_refundable`, `insufficient_available_balance`. Khang chốt 27/11 (review #212 của Ân): bỏ guard `gateway_transaction_no` NULL đã thêm ở Phần 10a, vì chỉ cần khi gửi lệnh hoàn qua VNPay. Khoản trễ: `not_found`, `no_late_payment`, `already_requested`.
 - **Tham số gửi theo kind:**
 
   | kind | `vnp_TxnRef` | `vnp_TransactionNo` | `vnp_TransactionDate` | `vnp_Amount` | `vnp_TransactionType` |
@@ -75,7 +77,7 @@ STM-4 TopUp, STM-5 CreditAccount, STM-7 EInvoice (cũng dùng cho InvoiceAdjustm
   - `unfinished_claims > 1` nghĩa là lượt trước giữ chỗ mà chưa ghi được kết quả, có thể đã gửi rồi sập, nên không được coi là lượt đầu.
   - Kết quả querydr: 02 / 03 khớp mã giao dịch gốc của kind và số tiền, TS 00 / 05 / 06 → `done`, `confirmed_via_query = true`, `gateway_refund_no` NULL (0028), log `refund_done_via_query`; TS 09 → `failed` (`data`); 01 / 00 cùng mã → theo bảng trên; còn lại (không xác thực được, RC 94 / 99, mã khác, sai số tiền, lỗi mạng) → lỗi tạm thời, không gửi.
   - 01 / 00 **không** chứng minh là chưa hoàn: tài liệu VNPay không ghi querydr có đổi sang 02 / 03 sau khi hoàn, cũng không ghi giới hạn tổng tiền hoàn. Nên lượt tự động không gửi. Thà hết lượt rồi `failed` để Admin xem, còn hơn hoàn hai lần.
-- **Admin retry là khẳng định "đã kiểm trên cổng VNPay là chưa hoàn".** `failed → requested` (#5), giữ `attempt_count`, `unfinished_claims = 0`, `next_attempt_at = now()`. Lượt ngay sau đó được gửi đúng một lần nếu querydr thấy 01 / 00. **Phần 10 phải hiện cảnh báo này trên nút retry.**
+- **Admin retry là khẳng định "đã kiểm trên cổng VNPay là chưa hoàn".** `failed → requested` (#5), giữ `attempt_count`, `unfinished_claims = 0`, `next_attempt_at = now()`. Lượt ngay sau đó được gửi đúng một lần nếu querydr thấy 01 / 00. (Luồng cũ #208; từ 26/11 không có route retry refund, xem đoạn hoàn thủ công ở đầu D1.)
 - **Hết lượt giữ chỗ** (`onExhausted`, D7): `requested → failed` (#4), `attempt_count = max(attempt_count + 1, RETRY_LIMIT)`, `last_error_kind = 'transient'`, `last_error_message = 'retry_exhausted'`, log error, không gọi VNPay.
 - **Tắt có kiểm soát:** đã có kết quả từ VNPay thì vẫn chạy tx2 dù signal đã abort, vì bỏ một kết quả `accepted` có thể dẫn tới hoàn hai lần qua Admin retry. Runner chờ lượt đang chạy xong trước khi `DbModule` đóng pool. Lời gọi bị abort giữa chừng tính là lỗi tạm thời một lượt.
 - **Khoá ở tx2 khi `done`:** `top_ups` (`late_payment`) hoặc `credit_accounts` (`account_closure`) rồi mới `lockLeased(refunds)`, cùng thứ tự với đường tạo refund, tránh deadlock; khoá `credit_accounts` cũng làm tuần tự việc kiểm "refund closure cuối cùng".
@@ -496,18 +498,41 @@ Ledger closed giữ pending/account_closed theo D6. Xem [T148](../tasks/t148-rfi
 - **Sổ cái khi trừ tiền phiên sạc:** billing làm `CreditLedgerService.post` và `LoyaltyService.earnForSession`. Sau khi Phần 3 merge, WP3 (Sơn) thay SQL thô trong `charge-settlement.service.ts` bằng lời gọi hai hàm này. Tới lúc đó code WP3 giữ nguyên, billing không sửa file của WP3. Mọi nơi ghi sổ khoá `credit_accounts FOR UPDATE` trước khi tính `entry_no`.
 - **Tạo tài khoản:** `ensureAccounts(driverId)` idempotent (tạo `credit_accounts` + `loyalty_accounts`, `INSERT … ON CONFLICT DO NOTHING`). Luồng đăng ký tài xế (khi có) gọi hàm này; billing tự gọi khi tạo top-up.
 
-## D10. Hợp đồng admin với dashboard (`wp4/fe-01-dashboard-shell`, chưa merge, dùng mock)
+## D10. Hợp đồng Admin billing (T32 Phần 10a, chốt 25/11, sửa 27/11)
 
-| Dashboard gọi | Dùng cho | Cần thống nhất với WP4 (theo diagram) |
+Thay bảng mock của `wp4/fe-01-dashboard-shell` (dashboard chưa gọi API billing nào). Route ở `apps/csms/src/operator-api/admin-billing.ts`, cùng listener `/api/admin/v1/*` với T108 (JWT dashboard, RolesGuard `admin`).
+
+**Chung cho mọi route:**
+- 401 khi không đăng nhập, 403 khi không phải admin (operator_staff, driver);
+- có query string thì 400 `invalid_input`;
+- sai method thì 405 kèm `Allow`; route có body mà Content-Type khác JSON thì 415; body quá 16 KiB thì 413;
+- id sai dạng (không phải số nguyên dương, không số 0 đầu, ≤ 15 chữ số) hoặc body sai dạng / có key lạ thì 400 `invalid_input`;
+- lỗi trả `{error, detail}`, id là chuỗi, tiền là số nguyên VND, thời điểm theo ISO 8601 UTC;
+- chưa nạp BillingModule thì 503 `billing_unavailable`.
+
+**Tên lỗi giữ đúng DB: `last_error_kind` là `transient | data`** (đã chốt; không ánh xạ sang `temporary | rejected` của mock).
+
+**Chưa có bảng audit:** mỗi hành động Admin ghi một log có cấu trúc kèm `admin_id`: `e_invoice_admin_retry`, `top_up_admin_recheck`, `top_up_exception_reviewed`, `payment_conflict_reviewed`.
+
+| Route | Thành công | Lỗi |
 |---|---|---|
-| `GET /api/admin/billing/top-ups?status=credited` | top-up có thể hoàn | ⊕ Loại top-up của tài khoản `closed`: đóng tài khoản không đổi trạng thái top-up nên chúng vẫn `credited`, nhưng số dư đã được hoàn qua `account_closure` (D6) |
-| `POST /api/admin/billing/top-ups/{id}/refund` | hoàn top-up (SD-2e) | Dashboard đang mong `{status:'refunded', refundedVnd, pointsRestored}`; SD-2e trả **202 `{refundId, status:'requested'}`**. ⊕ Lý do từ chối mới (D1): `insufficient_available_balance` (số dư khả dụng không đủ), `account_closed` (409) |
-| `GET /api/admin/billing/top-ups/late-payments` | khoản trễ | |
-| `POST /api/admin/billing/top-ups/{id}/late-refund` | hoàn khoản trễ | Dashboard mong `{lateRefundedAt}`; theo SD-2e trả `{refundId, status:'requested'}`, `lateRefundedAt` chỉ có khi refund `done` |
-| `GET /api/admin/billing/e-invoices?status=needs_review`, `POST …/e-invoices/{id}/retry` | retry hoá đơn (SD-2c) | Dashboard dùng `lastErrorKind: 'temporary' \| 'rejected'`; DB dùng `transient \| data`. Chốt một bộ tên |
-| (chưa có) | refund `failed` + `POST …/refunds/{id}/retry`, **gồm cả `account_closure`** | WP4 cần thêm mục này. Retry một lượt, không reset bộ đếm (D1) |
+| `GET /billing/exceptions` | 200, xem cấu trúc bên dưới | |
+| `POST /billing/e-invoices/{id}/retry` | 202 `{e_invoice_id, status: "requested", attempt_count}` | 404 `not_found`; 409 `invalid_state` (không ở `needs_review`) |
+| `POST /billing/top-ups/{id}/recheck` | 200 `{top_up_id, result}`, `result` ∈ `late_payment_recorded` / `already_recorded` / `conflicting_result` / `not_paid`; `still_unresolved` có thêm `reason`, `response_code?`, `transaction_status?`, `retry_after_minutes: 15`, `hint` | 404 `not_found`; 409 `not_eligible` kèm `reason` (`not_expired` / `no_unresolved_exception` / `already_reviewed`); 503 `payment_unconfigured` |
+| `POST /billing/top-ups/{id}/exception-reviewed` | 200 `{top_up_id, exception_kind, exception_reviewed_at, already_reviewed}`; lần lặp cũng 200, trả mốc cũ, `already_reviewed: true` | 404 `not_found`; 409 `no_exception` |
+| `POST /billing/payment-conflicts/{id}/review`, body `{"note": "<…>"}` (trim, 1–1000 ký tự) | 200 `{conflict_id, reviewed_at, reviewed_by, review_note}` (`reviewed_by` = admin của token) | 400 note rỗng / quá dài; 404 `not_found`; 409 `already_reviewed` |
 
-Không còn route Admin hoàn tài khoản đóng: hệ thống tự hoàn lúc tài xế đóng (D6, chốt 09/11).
+**`GET /billing/exceptions`.** Trả `{generated_at, limit: 200, late_payments, invoices_needs_review, top_up_exceptions, payment_conflicts}`. Mỗi mục có dạng `{total, items}`: tối đa 200 dòng, mới nhất trước, `total` là số dòng thật của mục. Cả bốn mục đọc trong cùng một snapshot. Không có mục refund `failed` (hoàn thủ công, D1). Mỗi item có `driver: {driver_id, full_name, phone_number}`.
+- `late_payments`: `late_gateway_ref IS NOT NULL` và chưa có dòng `refunds` `late_payment` của top-up (kể cả dòng đó `failed`). Không lọc `status`: có cả `failed` / `credited` / `refunded` / `expired` (D4). Trường: `top_up_id, gateway_reference, status, late_amount_vnd, late_gateway_ref, late_paid_at`.
+- `invoices_needs_review`: `e_invoices.status = 'needs_review'`. Trường: `e_invoice_id, top_up_id, amount_vnd, attempt_count, last_error_kind, last_error_message, updated_at`.
+- `top_up_exceptions`: `exception_kind IS NOT NULL AND exception_reviewed_at IS NULL` (`loyalty_error`, `unresolved_04`, `unresolved_07`, `retry_exhausted`). Trường: `top_up_id, gateway_reference, status, exception_kind, amount_paid_vnd, completed_at`.
+- `payment_conflicts`: `top_up_payment_conflicts.reviewed_at IS NULL`. Trường: `conflict_id, top_up_id, gateway_reference, gateway_transaction_no, amount_vnd, paid_at, source, reason, created_at`. Không có nút hoàn.
+
+**Thứ tự nút trên dashboard.** Sau "Đã xem" (`exception-reviewed`), "Kiểm tra lại" trả `409 not_eligible` / `already_reviewed`. Đây là hành vi có sẵn của `recheckTopUp`. Vì vậy dashboard phải cho "Kiểm tra lại" trước "Đã xem". Recheck trả `still_unresolved` (thường do RC 94: VNPay chặn querydr lặp) thì dashboard báo Admin thử lại sau khoảng 15 phút.
+
+**App tài xế.** `GET /api/driver/v1/billing/top-ups/{id}` có trường tuỳ chọn `refund_status` (`requested` / `done` / `failed`, của refund `kind = top_up`). Không có key nghĩa là chưa có refund kind top_up. Trường này chỉ ở GET, không có ở POST. App hiện "Đang hoàn tiền" khi `status = refunded` mà `refund_status` khác `done` (`docs/api/DRIVER-API-HOP-DONG.md` §14).
+
+**Còn mở — ghi nhận hoàn thủ công (PR sau):** route tạo yêu cầu hoàn, confirm / fail / redo và danh sách refund chờ CSKH; xem mục cùng tên ở "Còn mở". Không có route Admin hoàn tài khoản đóng: hệ thống tự hoàn lúc tài xế đóng (D6, chốt 09/11).
 
 ## D11. Hết hạn điểm (BR-P36, SRS job #18) ⊕
 
@@ -611,7 +636,15 @@ Chốt 09/11: WP5 làm job hết hạn điểm.
   - **Giới hạn:** hai tab dùng chung một phiên ẩn danh, chưa thử hai trình duyệt / thiết bị. Refund không chạy được trên sandbox, nên chưa biết querydr hiển thị gì sau khi hoàn.
 
   **Khang quyết định 24/11:** không thêm `vnp_TransactionNo` vào `queryRefundState`, giữ nguyên code.
-- **Phần 10** (route retry refund của Admin, đường xử lý duy nhất cho refund `failed`) dự kiến 25/11/2026.
+- **Phần 10a** (route Admin billing, D10): PR #212, nhánh `wp5/t32-api-admin-billing`. Sửa 27/11 theo review của Ân: bỏ route retry refund, mục `failed_refunds` và guard thiếu mã giao dịch (hoàn thủ công, D1).
+- **Còn mở — ghi nhận hoàn thủ công (PR sau)** (D-AC, SRS BR-P51; dự kiến, chưa chốt tên route / method):
+  - tạo yêu cầu hoàn top-up / khoản trễ: top-up trừ credit, trả điểm như `TopUpService.refund` hiện có; khoản trễ không trừ credit, không trả điểm; danh sách "top-up có thể hoàn" loại top-up của tài khoản `closed` (D6);
+  - confirm: nhập mã hoàn của cổng (duy nhất) → `done`, kích hoạt hoá đơn điều chỉnh của #213, báo tài xế MSG25; fail: lý do → `failed`; redo: `failed` → `requested`;
+  - danh sách refund đang chờ CSKH (`requested` + `failed`) thay cho `failed_refunds`;
+  - gỡ worker `refund-send`, `RefundService.send` / `retry`, `VnpayAdapter.refund`.
+  - Hợp đồng operator-admin (`docs/api/OPERATOR-ADMIN-API-HOP-DONG.md`, `operator-admin-api.openapi.yaml`) đã bỏ route retry refund và `failed_refunds` (27/11); `GET /admin/v1/billing/refunds?status=failed` định nghĩa lại ở PR này. `GET /api/admin/v1/summary` (FE-14, `operator-api/admin-platform.ts`) vẫn đếm `billing_exceptions.failed_refunds` (`refunds.status = 'failed'`): giữ nguyên vì refund `failed` vẫn có trong luồng thủ công; PR này xem lại có đổi sang `requested` + `failed` không.
+  - **Staging không gọi được VNPay sandbox** (Trí đo 25/11): hết áp dụng cho refund, vì luồng thủ công không gọi VNPay; vẫn đúng cho querydr / recheck.
+  - **Trần tổng refund mỗi giao dịch** (review Trí mục 3): vẫn cần khi có nhiều refund cùng `vnp_TxnRef` (`top_up`, `late_payment`, `account_closure`), tổng không vượt số đã trả; kiểm lúc tạo yêu cầu hoàn và ở Phần 11.
 - Cách tạo `CreditAccount` + `LoyaltyAccount` khi tài xế đăng ký (WF-05 gọi billing hay billing nghe event).
 - Chiều gọi `session_debit` và loyalty `earn` từ WF-01/03.
 - **Đóng tài khoản khi còn phiên chưa quyết toán** (phát hiện ở T32 Phần 3): định nghĩa "chưa xong" ở D6 (c) — intent chưa kết thúc (gồm `pending` của BE-18), phiên (kể cả phiên thẻ RFID) chưa ở trạng thái cuối về tiền (kể cả `review` do hard cap), hoặc `charge_settlement_jobs.state = 'pending'`. Không chặn thì job quyết toán chạy sau khi đóng bị `CreditLedgerService.post` từ chối (`account_closed`) và kẹt `pending`. Thống nhất `SessionQuery.hasUnsettledSession(driverId)` với Sơn / Trí trước Phần 11.

@@ -15,3 +15,5 @@ export * from './billing.js';
 export * from './ops.js';
 export * from './ocpp-log.js';
 export * from './relations.js';
+
+export * from './rfid-credit.js';

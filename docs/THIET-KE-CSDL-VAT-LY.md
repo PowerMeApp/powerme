@@ -525,3 +525,7 @@ DB demo đã có 0000 (dựng trước khi có `_migrations`) được ghi nhậ
 3. **`session_status_history` chỉ ghi chuyển do `SessionsService` thực hiện.** Chuyển #1, #3, #4, #7, #8, #9a, #17 và `HARD_CAP_EXCEEDED` chưa có trigger thật (xem `docs/ITERATION-1-WF03.md` mục 4) nên chưa sinh dòng; khi cài, mọi chỗ gọi `stateMachine.apply` phải đi qua cùng `transition()`.
 4. **`remote_commands` mới có bảng.** Không có code ghi/đọc; cột `status` và các CHECK là thiết kế, chưa qua vòng đời thật (BE-04).
 5. **Bản ghi đối soát cũ** (trước 0001) giữ dạng `meter_gap` + tiền tố `resolution`; không migrate dữ liệu cũ sang `conflict`/`late_sample` để không sửa bản ghi đối soát đã có người xem. Console có nhánh tương thích.
+
+## RFID credit protection — migration 0031
+
+`rfid_credit_holds`: PK/FK session_id, FK credit_account_id, amount_vnd bigint ≥0, held/released, reason, created_at/updated_at/released_at; release state and timestamp agree. Account FK index plus partial outstanding(account,session). `rfid_stop_jobs`: PK/FK session_id, reason, state, attempts, immutable attempt_limit, FK current_command_id, next_attempt_at, exhausted_at, last_error and timestamps. attempts bounded by positive limit; exhausted requires timestamp. Command FK and partial due indexes. Partial sessions(driver_id,id) for owned RFID csms_billed exposure. No historical reservations or financial writes; [migration journal](NHAT-KY-MIGRATION-0031.md), [ADR 0020](adr/0020-rfid-credit-protection.md).

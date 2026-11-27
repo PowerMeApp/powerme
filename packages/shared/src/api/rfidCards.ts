@@ -1,5 +1,5 @@
 /**
- * RFID card registry (UC-ADM-04, screen 30) and the user list its driver picker uses — types only, snake_case
+ * RFID card registry (UC-ADM-04, screen 30) — types only (the driver picker's `UserAccount` is in users.ts), snake_case
  * as on the wire. Sources: apps/csms/src/operator-api/admin-rfid-cards.ts (T146, contract §3.8a)
  * and admin-users.ts (T161).
  */
@@ -44,27 +44,4 @@ export interface CreateRfidCardRequest {
 export interface UpdateRfidCardRequest {
   driver_id?: string | null;
   status?: 'active' | 'blocked';
-}
-
-export type UserAccountStatus = 'active' | 'suspended' | 'closed';
-
-/** One row of GET /api/admin/v1/users (OpenAPI `UserAccount`). */
-export interface UserAccount {
-  id: string;
-  email: string;
-  full_name: string;
-  phone_number: string | null;
-  role: 'driver' | 'operator_staff' | 'admin';
-  account_status: UserAccountStatus;
-  operator: { id: string; legal_name: string } | null;
-  staff_role: 'manager' | 'technician' | null;
-  created_at: string;
-}
-
-/** GET /api/admin/v1/users (OpenAPI `UserAccountPage`). */
-export interface UserAccountPage {
-  items: UserAccount[];
-  total: number;
-  page: number;
-  page_size: number;
 }

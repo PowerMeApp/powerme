@@ -199,3 +199,7 @@ Evidence private: `E:/Project/PowerMe/.review/t148-rfid-settlement-20261124/`:
 `runtime-backup.json`, cold source/copy manifests, `runtime-before.json`,
 `runtime-after.json`, `runtime-stability.json`, `runtime-listeners.json`.
 `FINAL-HANDOFF.md` và `final-manifest.json` ghi APK/device status và check exits cuối.
+
+## RFID credit protection 27/11/2026
+
+Giới hạn hold/cutoff lịch sử ở trên được xử lý bởi [RFID credit protection](rfid-credit-protection.md) và migration 0031, phụ thuộc T158. Không thay kết quả/evidence lịch sử; public RFID Stop và Flutter estimate capability giữ nguyên. D6 closure vẫn ngoài scope.
