@@ -230,6 +230,7 @@ void main() {
               )
               .first;
           Future<void> reveal(Finder target) async {
+            await tester.pumpAndSettle();
             if (target.evaluate().isEmpty) {
               await tester.scrollUntilVisible(
                 target,
@@ -237,10 +238,14 @@ void main() {
                 scrollable: scrollable(),
               );
             }
-            await tester.ensureVisible(target);
+            await Scrollable.ensureVisible(
+              tester.element(target),
+              alignment: .5,
+            );
             await tester.pump();
           }
 
+          await selectConsistencyOrigin(tester);
           final submit = find.byKey(const Key('submit-smart-search'));
           await reveal(find.byKey(const Key('suggestion-soc')));
           await tester.enterText(find.byKey(const Key('suggestion-soc')), '30');
