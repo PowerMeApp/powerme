@@ -1,24 +1,24 @@
 @startuml STM-10
 !include _style.iuml
-title STM-10 (System level) — Lifecycle of a Refund\nrefunds.status · v1.1 · 10/11/2026
+title STM-10 (System level) — Lifecycle of a Refund\nrefunds.status · v2.0 · 26/11/2026 · manual refund (decision D-AC)
 
-[*] --> requested : / send refund to\noriginal source
+[*] --> requested : Admin creates the refund request,\nor the system closes the account\n/ debit Charging Credit, return\nredeemed points, list for customer service
 note left of requested
-  created by the Admin (kind top_up,
-  late_payment) or by the system when a
-  Driver closes the account (account_closure);
-  one per top-up for top_up and late_payment,
-  closure refunds can be several per top-up
+  kind top_up or late_payment: created by the Admin;
+  kind account_closure: created by the system when
+  a Driver closes the account. All wait in the same
+  customer-service list (Billing Exceptions).
+  Customer service refunds the amount in the
+  VNPay merchant portal, outside PowerMe.
 end note
-requested : attempt fails [transient and attempts < 4]\n/ record error
-requested : after(retry delay) [last attempt failed]\n/ query gateway, send again if not received
-requested --> done : gateway confirms\n/ request adjustment invoice\n(STM-7), notify Driver
-requested --> failed : attempt fails [rejected\nor attempts ≥ 4]\n/ list on Billing Exceptions,\nnotify Admin
-failed --> requested : Admin retries\n/ one attempt,\ncounter not reset
+requested --> done : Admin enters the gateway refund number\n[number not recorded before]\n/ request adjustment invoice (STM-7),\nnotify Driver (MSG25)
+requested --> failed : Admin marks failed\n[gateway refused the refund]\n/ record reason
+failed --> requested : Admin redoes the refund
 done --> [*]
 note right of failed
-  A failed refund is only retried,
-  never put back on the balance.
-  Retry delays: 5 min, 30 min, 2 h.
+  The money stays with the refund request;
+  it is never put back on the balance.
+  No automatic sending, gateway query
+  or retry for refunds.
 end note
 @enduml
