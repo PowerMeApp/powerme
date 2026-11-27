@@ -1,9 +1,9 @@
-/* tru3d.css — khung 3D và lớp chữ phủ (QA-04 → QA-06). Được bundle chèn vào <head> khi nạp được 3D;
+/* tru3d.css — khung 3D và lớp chữ phủ (QA-04 → QA-10). Được bundle chèn vào <head> khi nạp được 3D;
    không nạp được bundle thì không có file này và trang dùng hình SVG 2D như cũ.
-   QA-06 (style "Bevel"): hai biến thể theo lớp main.jsx gắn lên #tru3d —
-     .t3-light (mặc định, giao diện sáng): canvas trong suốt đặt thẳng trên gradient Hero Sky của
-       khung #tru; nhãn là capsule trắng mờ (blur), chữ Ink, chấm màu trạng thái.
-     .t3-dark (giao diện tối): cảnh tối cũ trong một "Elevated dark card" Charcoal, bóng md-2.
+   Hai biến thể theo lớp main.jsx gắn lên #tru3d (chọn theo --t3-scene của bevel-tokens.css) —
+     .t3-dark (mặc định từ QA-10, như dashboard): cảnh tối trong ô lõm hairline của thẻ hero Graphite.
+     .t3-light (?theme=light): canvas trong suốt đặt thẳng trên nền thẻ hero sáng; nhãn là capsule
+       trắng mờ (blur), chữ --ink, chấm màu trạng thái.
    Token (--ink, --gray, --paper, --r-*) lấy từ /static/bevel-tokens.css, có giá trị dự phòng.
    Font: chỉ font hệ thống có sẵn (không tải từ CDN). Chỉ animate transform/opacity. */
 
@@ -22,14 +22,15 @@
   color: var(--t3-ink);
   font-family: var(--t3-font);
 }
-/* Biến thể tối: thẻ Charcoal nổi, cùng màu nền với cảnh 3D (Floor.jsx BG) để mép canvas không lộ */
+/* Biến thể tối (mặc định từ QA-10): ô lõm trong thẻ hero Graphite, cùng màu nền với cảnh 3D
+   (Floor.jsx BG) để mép canvas không lộ; viền hairline như mọi ô lõm của trang */
 #tru .tru-3d.t3-dark {
-  --t3-ink: #ebf0f8;
-  --t3-muted: rgba(235, 240, 248, 0.58);
-  --t3-pill: rgba(22, 24, 29, 0.78);
+  --t3-ink: #f5f3ec;
+  --t3-muted: #b9bcba;
+  --t3-pill: rgba(20, 20, 20, 0.78);
   --t3-tag: rgba(255, 255, 255, 0.08);
   background: #040506;
-  box-shadow: var(--shadow-md2, 0 2px 16px 0 rgba(0, 0, 0, 0.15));
+  box-shadow: inset 0 0 0 1px var(--hairline, rgba(255, 255, 255, 0.08));
 }
 #tru .t3-stage {
   position: relative;
@@ -78,13 +79,14 @@
   background: var(--t3-pill);
   box-shadow:
     var(--inset-hi, inset 0 1px 0 rgba(255, 255, 255, 0.9)),
+    0 0 0 1px var(--hairline, rgba(255, 255, 255, 0.08)),
     0 8px 24px -16px rgba(0, 0, 0, 0.25);
   backdrop-filter: blur(16px) saturate(1.3);
   -webkit-backdrop-filter: blur(16px) saturate(1.3);
 }
 #tru .t3-core {
   padding: 14px 18px 16px;
-  animation: t3-in 520ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation: t3-in 520ms cubic-bezier(0.32, 0.72, 0, 1) both;
 }
 #tru .t3-a {
   left: 20px;
@@ -176,7 +178,7 @@
   border-radius: inherit;
   background: var(--c);
   transform-origin: left center;
-  transition: transform 900ms cubic-bezier(0.22, 1, 0.36, 1);
+  transition: transform 900ms cubic-bezier(0.32, 0.72, 0, 1);
 }
 #tru .t3-note {
   margin-top: 6px;

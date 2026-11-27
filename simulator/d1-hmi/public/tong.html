@@ -7,7 +7,8 @@
     từng trụ /tru/<cpId> (nơi có HMI bấm được). Dữ liệu qua SSE /tong/events, không polling.
   VÌ SAO TÁCH: người test app tài xế cần thấy nhanh "trụ nào đang làm gì" trước khi mở một trụ.
   GIẢ ĐỊNH: mọi chữ đến từ OCPP/CSMS qua esc() trước khi vào HTML. Màu trạng thái giống tru.html.
-  GIAO DIỆN (QA-06): token chung ở /static/bevel-tokens.css (style "Bevel": nền trắng, thẻ Cloud).
+  GIAO DIỆN (QA-10): token chung ở /static/bevel-tokens.css — bộ màu PowerMe tối như dashboard
+    (nền #0A0A0A, thẻ Graphite hai lớp, nút pill teal); ?theme=light cho bản sáng.
 -->
 <html lang="vi">
   <head>
@@ -23,80 +24,116 @@
         width: min(100% - 2 * var(--s3), 1520px);
         margin: 0 auto;
       }
-      /* Cloudlight Hero: nền Hero Sky, tiêu đề Ink lớn, chữ phụ Body Gray */
+      /* Đầu trang: thẻ Graphite có ánh teal/gold rất nhạt ở hai góc, hairline */
       .hero {
         margin-top: var(--s3);
-        padding: var(--s6) var(--s6) var(--s5);
-        border-radius: var(--r-card-lg);
+        padding: var(--s5) var(--s5) var(--s4);
+        border-radius: var(--r-card);
         background: var(--hero-sky);
+        box-shadow:
+          var(--inset-hi),
+          0 0 0 1px var(--hairline),
+          var(--shadow-soft);
+      }
+      .hero .kicker {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        margin: 0 0 14px;
+        font-size: 0.8125rem;
+        font-weight: 550;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        color: var(--pm-gold);
+      }
+      :root[data-theme='light'] .hero .kicker {
+        color: #7a6418;
       }
       .hero h1 {
         margin: 0;
-        font-size: clamp(2.25rem, 4.6vw, 4rem);
-        line-height: 1;
+        font-size: clamp(2rem, 3.6vw, 3rem);
+        line-height: 1.05;
         letter-spacing: -0.03em;
       }
       .hero p {
-        margin: var(--s2) 0 0;
-        max-width: 60ch;
+        margin: 12px 0 0;
+        max-width: 70ch;
         color: var(--gray);
-        font-size: 1.125rem;
-        line-height: 1.4;
+        font-size: 1rem;
+        line-height: 1.5;
       }
       .hero p span {
         color: var(--ink);
+        font-family: var(--mono);
+        font-size: 0.875rem;
         font-weight: 500;
         overflow-wrap: anywhere;
       }
       .sec-label {
-        margin: var(--s10) 0 var(--s3);
-        font-size: 1.5rem;
-        line-height: 0.9;
-        letter-spacing: -0.24px;
+        margin: var(--s6) 0 var(--s3);
+        font-size: 1.25rem;
+        line-height: 1.2;
+        letter-spacing: -0.02em;
       }
       main {
         display: grid;
         grid-template-columns: repeat(auto-fill, minmax(min(100%, 34rem), 1fr));
-        gap: var(--s3);
+        gap: var(--s4);
+        padding: 7px;
       }
+      /* Thẻ trụ: thẻ hai lớp (vỏ 6px nền trắng ~3 % + hairline, lõi Graphite có highlight inset) */
       .cp {
-        background: var(--cloud);
+        background: var(--pm-graphite);
         border-radius: var(--r-card);
         padding: var(--s4);
         min-width: 0;
+        box-shadow:
+          var(--inset-hi),
+          0 0 0 1px var(--hairline),
+          0 0 0 6px var(--shell),
+          0 0 0 7px var(--hairline),
+          var(--shadow-soft);
       }
       .cp-head {
         display: flex;
-        align-items: center;
+        align-items: flex-start;
         gap: var(--s2);
         flex-wrap: wrap;
         margin-bottom: var(--s1);
       }
       .cp-head h2 {
-        font-size: 2rem;
-        line-height: 1;
+        font-size: 1.625rem;
+        line-height: 1.15;
         margin: 0;
         flex: 1;
         overflow-wrap: anywhere;
       }
+      .cp-head .bv-badge {
+        margin-top: 4px;
+      }
       .meta {
-        font-size: 0.9375rem;
+        font-size: 0.875rem;
         color: var(--gray);
+        margin-bottom: 6px;
+      }
+      .meta:last-of-type {
         margin-bottom: var(--s3);
       }
       .meta b {
         color: var(--alert);
-        font-weight: 500;
+        font-weight: 550;
       }
       .guns {
         display: grid;
         grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-        gap: var(--s2);
+        gap: 12px;
       }
+      /* Ô súng: lõm nhẹ trong thẻ (nền tối hơn + hairline) */
       .gun {
-        background: var(--paper);
+        background: var(--pm-well);
         border-radius: var(--r-img);
-        padding: 20px;
+        box-shadow: inset 0 0 0 1px var(--hairline);
+        padding: 18px;
         min-width: 0;
       }
       .gun .name {
@@ -109,79 +146,82 @@
         letter-spacing: -0.01em;
         margin-bottom: var(--s2);
       }
-      .gun .name .bv-badge {
-        background: var(--cloud);
-      }
       .gun .big {
-        font-size: 2.25rem;
-        font-weight: 600;
+        font-size: 2rem;
+        font-weight: 650;
         letter-spacing: -0.03em;
         line-height: 1;
         font-variant-numeric: tabular-nums;
       }
       .gun .big small {
-        font-size: 0.9375rem;
+        font-size: 0.875rem;
         font-weight: 500;
         letter-spacing: 0;
         color: var(--gray);
         margin-left: 4px;
       }
       .gun .nums {
-        margin-top: 6px;
+        margin-top: 8px;
         font-variant-numeric: tabular-nums;
-        font-size: 0.9375rem;
+        font-size: 0.875rem;
         color: var(--gray);
       }
       .gun .nums b {
         color: var(--ink);
-        font-weight: 500;
+        font-weight: 550;
       }
       .gun .bar {
         margin-top: var(--s2);
-        height: 6px;
+        height: 4px;
         border-radius: var(--r-pill);
-        background: var(--cloud);
+        background: var(--hairline-strong);
         overflow: hidden;
       }
       .gun .bar i {
         display: block;
         height: 100%;
         border-radius: inherit;
-        background: var(--green);
+        background: var(--pm-teal);
       }
       .gun .hint {
-        font-size: 0.875rem;
+        font-size: 0.8125rem;
         color: var(--gray);
         margin-top: 12px;
-        line-height: 1.35;
+        line-height: 1.4;
       }
-      /* Charcoal Pill */
+      /* Nút pill teal (nút chính của dashboard/app: nền teal, chữ đen) */
       a.open {
         display: inline-flex;
         align-items: center;
         gap: 8px;
         margin-top: var(--s3);
-        padding: 12px 22px;
+        padding: 11px 20px;
         border-radius: var(--r-btn);
-        background: var(--charcoal);
-        color: var(--on-charcoal);
-        font-weight: 500;
+        background: var(--pm-teal);
+        color: var(--pm-on-teal);
+        font-weight: 600;
+        font-size: 0.9375rem;
         text-decoration: none;
-        transition: transform 0.15s ease;
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.25);
+        transition: transform var(--dur) var(--ease);
       }
       a.open:hover {
         transform: translateY(-1px);
       }
+      a.open:active {
+        transform: scale(0.98);
+      }
       a.open:focus-visible {
-        outline: 3px solid var(--blue);
-        outline-offset: 3px;
+        outline: none;
+        box-shadow: var(--focus-ring);
       }
       #err {
         margin-top: var(--s3);
         padding: 14px 20px;
         border-radius: var(--r-img);
         background: var(--alert-soft);
-        color: var(--alert);
+        box-shadow: inset 0 0 0 1px var(--alert-line);
+        color: var(--ink);
         font-weight: 500;
       }
       #err[hidden] {
@@ -194,16 +234,18 @@
         }
         .hero {
           padding: var(--s4) var(--s3);
-          border-radius: var(--r-card);
         }
         .hero p {
-          font-size: 1rem;
+          font-size: 0.9375rem;
         }
         .sec-label {
-          margin-top: var(--s6);
+          margin-top: var(--s5);
         }
         .cp {
-          padding: var(--s3);
+          padding: 20px;
+        }
+        .cp-head h2 {
+          font-size: 1.375rem;
         }
         .guns {
           grid-template-columns: minmax(0, 1fr);
@@ -217,10 +259,11 @@
         ><span class="bv-mark" aria-hidden="true"></span>PowerMe · Trụ giả lập D1</span
       >
       <span class="bv-spacer"></span>
-      <span class="bv-badge" id="count" style="--c: var(--green)">...</span>
+      <span class="bv-badge" id="count" style="--c: var(--pm-teal)">...</span>
     </nav>
     <div class="wrap">
       <header class="hero">
+        <p class="kicker">Công cụ kiểm thử · OCPP 1.6J</p>
         <h1>Trụ sạc giả lập D1</h1>
         <p>
           CSMS <span id="csms">...</span> · bấm "Mở trang trụ" để xem phiên sạc, kWh, nhật ký OCPP
