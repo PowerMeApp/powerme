@@ -299,7 +299,7 @@ export class SessionsService {
         const eligibility = await evaluateOnlineCard(tx, tag.driverId, this.policy, created.id);
         if (!eligibility.eligible && !isBillableWhenDenied(eligibility.reason)) {
           await tx.execute(
-            sql`UPDATE sessions SET payment_mode='unattributed',driver_id=NULL WHERE id=${created.id}`,
+            sql`UPDATE sessions SET payment_mode='unattributed',driver_id=NULL,updated_at=now() WHERE id=${created.id}`,
           );
           tag.cardDenied = eligibility.reason;
         } else if (account) {
