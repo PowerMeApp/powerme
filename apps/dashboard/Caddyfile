@@ -11,8 +11,9 @@
 		X-Content-Type-Options nosniff
 		X-Frame-Options DENY
 		Referrer-Policy no-referrer
-		# Không tải gì từ origin khác (không CDN, không font ngoài); API cùng origin.
-		Content-Security-Policy "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
+		# Chỉ một origin ngoài: Vietmap (style, tile, font, icon của bản đồ màn 18, FE-03c). Vietmap GL
+		# chạy worker từ blob:. API cùng origin; không CDN, không font ngoài.
+		Content-Security-Policy "default-src 'self'; img-src 'self' data: blob: https://maps.vietmap.vn; style-src 'self' 'unsafe-inline'; connect-src 'self' https://maps.vietmap.vn; worker-src 'self' blob:; child-src blob:; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
 	}
 
 	# File build có hash trong tên: cache lâu. File thiếu → 404 thật, không trả index.html.

@@ -1,8 +1,9 @@
 /**
- * Screen 18 map (FE-03c) — pure model: one pin per Charging Station, coloured by the worst state
- * of its charge points. Kept free of the map library so it can be unit tested in jsdom.
+ * Screen 18 map — pure model: one pin per Charging Station, coloured by the worst state of its
+ * charge points. Kept free of the map library so it can be unit tested in jsdom.
  */
 import type { ConnectorLive, OperatorChargePoint } from '@powerme/shared';
+import { isOffline } from './ConnectorList';
 
 /** Worst first: Offline overrides every status (D20), then faults, then use. */
 export type SiteTone = 'offline' | 'critical' | 'major' | 'busy' | 'ok' | 'empty';
@@ -15,12 +16,12 @@ export const TONE_ORDER: readonly SiteTone[] = [
   'empty',
 ];
 export const TONE_LABEL: Record<SiteTone, string> = {
-  offline: 'Offline',
-  critical: 'Có Connector Faulted',
-  major: 'Có Connector Unavailable / Reserved',
+  offline: 'Mất kết nối',
+  critical: 'Có súng lỗi',
+  major: 'Có súng không dùng được / đã đặt chỗ',
   busy: 'Đang dùng',
   ok: 'Sẵn sàng',
-  empty: 'Chưa có Connector',
+  empty: 'Chưa có súng',
 };
 
 export interface MapSite {
@@ -32,9 +33,6 @@ export interface MapSite {
   tone: SiteTone;
   chargePoints: OperatorChargePoint[];
 }
-
-export const isOffline = (cp: OperatorChargePoint) =>
-  !cp.is_online || cp.connectors.some((c) => c.status_quality === 'offline');
 
 function connectorTone(c: ConnectorLive): SiteTone {
   if (c.status_quality === 'offline') return 'offline';

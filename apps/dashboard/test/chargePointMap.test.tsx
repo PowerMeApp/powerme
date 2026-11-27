@@ -63,6 +63,8 @@ const cp = (id: string, over: Partial<OperatorChargePoint> = {}): OperatorCharge
       active_session_id: null,
     },
   ],
+  offline_card_risk: false,
+  offline_card_risk_reason: null,
   ...over,
 });
 const faulted = cp('2', {
@@ -126,37 +128,31 @@ describe('Bản đồ Charge Point (màn 18, FE-03c)', () => {
     vi.stubEnv('VITE_VIETMAP_TILE_KEY', '');
     const seen = fakeCsms({ [LIST_URL]: page([cp('1'), faulted, thuDuc, noCoords]) });
     const { user } = renderApp('/operator/charge-points', session(STAFF));
-    await screen.findByRole('row', { name: 'Charge Point PM-1' });
-    await user.selectOptions(screen.getByRole('combobox', { name: 'Kết nối' }), 'Online');
+    await screen.findByRole('row', { name: 'Trụ sạc PM-1' });
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Kết nối' }), 'Đang kết nối');
     await user.click(screen.getByRole('button', { name: 'Bản đồ' }));
     expect(screen.getByRole('button', { name: 'Bản đồ' })).toHaveAttribute('aria-pressed', 'true');
     await waitFor(() =>
       expect(seen.some((r) => r.search === '?online=true&page=1&page_size=100')).toBe(true),
     );
-    expect(await screen.findByText(/Chưa cấu hình key bản đồ Vietmap/)).toBeInTheDocument();
+    expect(await screen.findByText(/Chưa cấu hình khoá bản đồ Vietmap/)).toBeInTheDocument();
     expect(screen.queryByTestId('vietmap')).toBeNull();
-    expect(screen.getByText(/1 Charging Station chưa có toạ độ/)).toBeInTheDocument();
+    expect(screen.getByText(/1 trạm sạc chưa có toạ độ/)).toBeInTheDocument();
 
-    const panel = within(
-      screen.getByRole('complementary', { name: 'Charging Station trên bản đồ' }),
-    );
+    const panel = within(screen.getByRole('complementary', { name: 'Trạm sạc trên bản đồ' }));
     await user.click(panel.getByRole('button', { name: /Trạm Quận 1/ }));
-    const chosen = within(
-      screen.getByRole('complementary', { name: 'Charging Station Trạm Quận 1' }),
-    );
-    expect(chosen.getByText(/Có Connector Faulted/)).toBeInTheDocument();
+    const chosen = within(screen.getByRole('complementary', { name: 'Trạm sạc Trạm Quận 1' }));
+    expect(chosen.getByText(/Có súng lỗi/)).toBeInTheDocument();
     expect(chosen.getByRole('link', { name: 'PM-2' })).toHaveAttribute(
       'href',
       '/operator/charge-points/2',
     );
-    expect(chosen.getByText('Faulted · GroundFailure')).toBeInTheDocument();
-    await user.click(chosen.getByRole('button', { name: '‹ Tất cả trạm' }));
-    expect(
-      screen.getByRole('complementary', { name: 'Charging Station trên bản đồ' }),
-    ).toBeInTheDocument();
+    expect(chosen.getByText('Lỗi · GroundFailure')).toBeInTheDocument();
+    await user.click(chosen.getByRole('button', { name: 'Tất cả trạm' }));
+    expect(screen.getByRole('complementary', { name: 'Trạm sạc trên bản đồ' })).toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: 'Danh sách' }));
-    await screen.findByRole('row', { name: 'Charge Point PM-1' });
+    await screen.findByRole('row', { name: 'Trụ sạc PM-1' });
   });
 
   it('with a key: Vietmap pins, a pin opens its station, more than 100 warns, a tile error shows', async () => {
@@ -165,12 +161,10 @@ describe('Bản đồ Charge Point (màn 18, FE-03c)', () => {
     const { user } = renderApp('/operator/charge-points?view=map', session(STAFF));
     const map = within(await screen.findByTestId('vietmap'));
     expect(map.getByRole('button', { name: 'ghim Trạm Thủ Đức' })).toHaveClass('tone-offline');
-    expect(screen.getByText(/Bản đồ chỉ hiện 3 \/ 140 Charge Point/)).toBeInTheDocument();
+    expect(screen.getByText(/Bản đồ chỉ hiện 3 \/ 140 trụ sạc/)).toBeInTheDocument();
     await user.click(map.getByRole('button', { name: 'ghim Trạm Thủ Đức' }));
-    const chosen = within(
-      screen.getByRole('complementary', { name: 'Charging Station Trạm Thủ Đức' }),
-    );
-    expect(chosen.getAllByText('Offline').length).toBeGreaterThan(0);
+    const chosen = within(screen.getByRole('complementary', { name: 'Trạm sạc Trạm Thủ Đức' }));
+    expect(chosen.getAllByText('Mất kết nối').length).toBeGreaterThan(0);
     expect(chosen.getByRole('link', { name: 'PM-3' })).toHaveAttribute(
       'href',
       '/operator/charge-points/3',
@@ -185,9 +179,7 @@ describe('Bản đồ Charge Point (màn 18, FE-03c)', () => {
     const { user } = renderApp('/operator/charge-points?view=map', session(STAFF));
     await user.click(await screen.findByRole('button', { name: 'không có webgl' }));
     expect(await screen.findByRole('alert')).toHaveTextContent(/không bật được WebGL/);
-    const panel = within(
-      screen.getByRole('complementary', { name: 'Charging Station trên bản đồ' }),
-    );
+    const panel = within(screen.getByRole('complementary', { name: 'Trạm sạc trên bản đồ' }));
     await user.click(panel.getByRole('button', { name: /Trạm Thủ Đức/ }));
     expect(screen.getByRole('link', { name: 'PM-3' })).toBeInTheDocument();
   });

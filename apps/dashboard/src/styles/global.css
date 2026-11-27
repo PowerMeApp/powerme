@@ -775,19 +775,7 @@ textarea.input {
   }
 }
 
-/* FE-03c — screen 18 map. Pin colours follow the pill tones (Offline muted, Faulted danger…). */
-.segmented {
-  display: flex;
-  gap: 6px;
-  align-self: flex-end;
-}
-.notice {
-  margin: 0 0 12px;
-  padding: 10px 14px;
-  border-radius: var(--radius-input);
-  background: var(--warning-soft);
-  color: var(--warning);
-}
+/* Screen 18 map. Pin colours follow the badge tones (Offline muted, Faulted danger…). */
 .map-layout {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 340px;
@@ -846,6 +834,10 @@ textarea.input {
   cursor: pointer;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
 }
+.map-pin:focus-visible {
+  outline: 3px solid var(--teal);
+  outline-offset: 2px;
+}
 .map-pin.selected {
   outline: 3px solid var(--text);
   outline-offset: 1px;
@@ -865,6 +857,10 @@ textarea.input {
 .tone-offline,
 .tone-empty {
   background: var(--muted);
+}
+.site-panel {
+  position: sticky;
+  top: 16px;
 }
 .site-panel h2 {
   margin: 0 0 4px;
