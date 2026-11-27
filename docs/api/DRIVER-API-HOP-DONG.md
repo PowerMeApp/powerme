@@ -140,13 +140,18 @@ bearer, chỉ nhận `application/json` ≤ 16 KiB, trường lạ → 400:
 | `/auth/register` | `email`, `password` (8–128), `full_name`, `phone_number?` (chuẩn hoá E.164, §6a), `consent_version`, `consent: true` | 201 + token như login | 400 `consent_required` (không ghi gì, BR-P05), `invalid_email`, `invalid_password`, `invalid_input`; 409 `email_taken`, `phone_taken` |
 | `/auth/login` | `email` **hoặc** `phone_number` (đúng một), `password` | 200 `{access_token, token_type: Bearer, expires_in: 900, refresh_token, refresh_expires_in}` | 400 `invalid_input` (cả hai / không có định danh); 401 `invalid_credentials` (sai định danh = sai mật khẩu); 403 `account_locked`; 429 `too_many_attempts` |
 | `/auth/refresh` | `refresh_token` | 200 `{access_token, token_type, expires_in}` | 401 `invalid_refresh_token`; 403 `account_locked` / `forbidden` |
+| `/auth/logout` (BE-49) | `refresh_token` | 204, không có body | 400 `invalid_input` (khoá lạ); 401 `invalid_refresh_token` (sai chữ ký / hết hạn / là access token) |
 
 - Access token đúng chuẩn verify ở trên (HS256, `typ: JWT`, `role: driver`, 900 s), nên dùng ngay với
   `/me`, `/stations`. Refresh token cùng khoá nhưng `typ: refresh+jwt`, `token_use: refresh`, không có
   `role`: không dùng làm access token và ngược lại. Sống `DRIVER_API_REFRESH_TTL_S` (mặc định 30 ngày,
   1 giờ–90 ngày), không xoay vòng: hết hạn thì đăng nhập lại.
-- Không có bảng refresh token: không thu hồi từng token, logout = app xoá token. Khoá tài khoản
-  (`account_status` ≠ `active`) có hiệu lực ngay vì refresh và mọi request đều kiểm DB.
+- **Đăng xuất (BE-49, UC-ACC-05):** mọi token mang claim `ver` = `users.token_version` (migration
+  0033). `POST /auth/logout` tăng số này → mọi access + refresh token đã phát cho tài xế đó, **trên mọi
+  thiết bị**, bị từ chối ngay ở request kế tiếp (không phải đợi 15 phút). Không có bảng refresh token
+  nên không đăng xuất riêng một máy. Gửi lại cùng token → vẫn 204 (idempotent). Token phát trước BE-49
+  (không có `ver`) coi là `ver = 0`, nên deploy không đăng xuất ai. Khoá tài khoản (`account_status` ≠
+  `active`) cũng có hiệu lực ngay vì refresh và mọi request đều kiểm DB.
 - Tài khoản khoá: 403 `account_locked` (F-13 "tài khoản khoá không đăng nhập được"), chỉ trả khi mật
   khẩu đúng — để app hiện "tài khoản bị khoá, liên hệ hỗ trợ" mà người dò mật khẩu không biết được.
 - Giới hạn thử sai: 5 lần / 60 s theo định danh đã chuẩn hoá (email lowercase, hoặc số E.164) + IP,
@@ -197,6 +202,39 @@ Content-Type: application/json
 - **Ngoài phạm vi:** OTP/SMS (không có nhà cung cấp SMS, không xác minh số là của người đăng ký) và
   Google/Firebase — để sau Defense 1.1 (ADR-0017). Số điện thoại hiện chỉ là định danh đăng nhập
   thay email, không chứng minh sở hữu số. Chưa có route đổi số / đổi mật khẩu.
+
+### 6b. Sửa hồ sơ và đăng xuất (BE-49, cho Sơn — màn hình 13 và nút Đăng xuất)
+
+**`GET /api/driver/v1/me/profile`** (Bearer) → 200 `{user_id, full_name, email, phone_number}`
+(`phone_number` E.164 hoặc `null`). Tách khỏi `GET /me` vì `/me` là bootstrap app gọi thường xuyên và
+cố ý không có trường riêng tư.
+
+**`PATCH /api/driver/v1/me/profile`** (Bearer, `Content-Type: application/json`) — UC-ACC-02.
+
+| Khoá | Luật |
+|---|---|
+| `full_name` | trim, 1–100 ký tự, không ký tự điều khiển |
+| `phone_number` | chuẩn hoá E.164 như đăng ký (§6a: `0912 345 678` → `+84912345678`); `null` = gỡ số |
+
+- Ít nhất một khoá; khoá khác (kể cả `email`) → 400 `invalid_input`. Email là định danh đăng nhập và
+  chưa có luồng xác minh nên không đổi được.
+- 200 trả hồ sơ sau khi sửa (cùng hình dạng `GET /me/profile`). `full_name` mới cũng hiện ở `GET /me`.
+- 409 `phone_taken`: số thuộc tài khoản khác; không trường nào bị đổi (gửi kèm `full_name` cũng không).
+  Gửi lại đúng số của chính mình → 200.
+- Sau khi gỡ số, đăng nhập bằng số đó không còn được; email vẫn được.
+
+**`POST /api/driver/v1/auth/logout`** — UC-ACC-05. Body `{"refresh_token": "…"}`, không cần header
+`Authorization`. 204 = đã thu hồi.
+
+App làm theo thứ tự:
+1. Gọi `logout` với refresh token đang lưu (bỏ qua kết quả: 204, 401 hay lỗi mạng đều đi tiếp).
+2. **Luôn** xoá access + refresh token cục bộ, về màn đăng nhập.
+3. Thiết bị khác của cùng tài xế sẽ nhận 401 ở request kế tiếp; refresh cũng 401 → về màn đăng nhập
+   như khi refresh hết hạn (app đã xử lý ca này).
+
+**Đóng tài khoản** (UC-ACC-02, `GET /me/account/close-preview` + `POST /me/account/close`) **chưa có**:
+Khang làm theo SD-2f / D6 (`docs/spec/WF-02_decisions.md`, T32 Phần 11) sau khi PR hoàn tiền thủ công
+merge.
 
 ## 7. Lỗi: từ `ChargingError.code` sang HTTP
 

@@ -61,7 +61,13 @@ const BASE = '/api/driver/v1';
 const LOCAL_ORIGIN = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/;
 /** BE-21/BE-22: body JSON của /auth/* và POST /charges tối đa 16 KiB (refresh token ≤ 8192 ký tự, form đăng ký). */
 const AUTH_BODY_LIMIT = 16 * 1024;
-const AUTH_ROUTES = ['register', 'login', 'refresh'] as const;
+// BE-49: logout thu hồi mọi token của tài xế (tăng users.token_version, migration 0033).
+const AUTH_ROUTES = ['register', 'login', 'refresh', 'logout'] as const;
+/**
+ * BE-49 (UC-ACC-02, màn 13): hồ sơ có email / số điện thoại tách khỏi `GET /me` — `/me` là bootstrap
+ * app gọi thường xuyên và cố ý không trả trường riêng tư (test MB03 driver-smart).
+ */
+const PROFILE_PATH = `${BASE}/me/profile`;
 
 export function createDriverListener(
   db: Db,
@@ -103,7 +109,9 @@ export function createDriverListener(
           chargeRouteMethod(preflightPath) === 'POST' ||
           topUpRouteMethod(preflightPath) === 'POST' ||
           FAULT_REPORT_PATH.test(preflightPath);
-        const vehicleAllow = vehicleRouteAllow(preflightPath);
+        // BE-49: PATCH /me/profile cần Content-Type như route xe.
+        const vehicleAllow =
+          preflightPath === PROFILE_PATH ? 'GET, PATCH, OPTIONS' : vehicleRouteAllow(preflightPath);
         res.setHeader(
           'Access-Control-Allow-Methods',
           vehicleAllow ?? (write ? 'POST, OPTIONS' : 'GET, OPTIONS'),
@@ -231,6 +239,29 @@ export function createDriverListener(
           setAllow: (methods) => res.setHeader('Allow', methods),
         });
         send(res, result.status, result.body);
+        return;
+      }
+      if (path === PROFILE_PATH) {
+        if (req.method !== 'GET' && req.method !== 'PATCH') {
+          res.setHeader('Allow', 'GET, PATCH, OPTIONS');
+          throw new DriverApiError(405, 'method_not_allowed');
+        }
+        if (url.search) throw new DriverApiError(400, 'invalid_input');
+        if (req.method === 'PATCH') {
+          const body = await readJsonObject(req, res);
+          if (!(await accounts.updateProfile(driverId, body)))
+            throw new DriverApiError(403, 'forbidden');
+        }
+        const profile = (
+          await db.$client.query(
+            `SELECT u.id::text AS user_id,u.full_name,u.email,u.phone_number FROM users u
+             JOIN drivers d ON d.user_id=u.id
+             WHERE u.id=$1 AND u.role='driver' AND u.account_status='active'`,
+            [driverId],
+          )
+        ).rows[0];
+        if (!profile) throw new DriverApiError(403, 'forbidden');
+        send(res, 200, profile);
         return;
       }
       const connector = new RegExp(`^${BASE}/connectors/by-code/([^/]+)/([^/]+)$`).exec(path);
@@ -396,7 +427,7 @@ export function createDriverListener(
   }
 
   /**
-   * BE-21: POST /auth/register | /auth/login | /auth/refresh — không cần bearer. Chỉ nhận
+   * BE-21: POST /auth/register | /auth/login | /auth/refresh (BE-49: | /auth/logout) — không cần bearer. Chỉ nhận
    * `application/json`, body tối đa AUTH_BODY_LIMIT, object JSON phẳng; lỗi theo mẫu DriverApiError.
    */
   async function handleAuth(req: IncomingMessage, res: ServerResponse, route: string) {
@@ -420,7 +451,11 @@ export function createDriverListener(
     const ip = driverClientIp(req, config);
     if (route === 'register') send(res, 201, await accounts.register(body, ip));
     else if (route === 'login') send(res, 200, await accounts.login(body, ip));
-    else send(res, 200, await accounts.refresh(body));
+    else if (route === 'refresh') send(res, 200, await accounts.refresh(body));
+    else {
+      await accounts.logout(body);
+      send(res, 204, null);
+    }
   }
 }
 

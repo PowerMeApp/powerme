@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: PowerMe CSMS — Driver API
-  version: 0.16.0
+  version: 0.17.0
   summary: Hợp đồng REST cho app tài xế (T77, phiếu v1.3 §3.2g)
   description: |
     Hợp đồng giữa CSMS (WP2) và app tài xế Flutter (WP3) cho trạng thái súng sạc, thời gian còn lại,
@@ -158,8 +158,8 @@ paths:
         Refresh token là JWT HS256 riêng (header `typ: refresh+jwt`, claim `token_use: refresh`,
         không có `role`), sống `DRIVER_API_REFRESH_TTL_S` (mặc định 30 ngày) tính từ lúc đăng nhập.
         Access token không dùng làm refresh và ngược lại. Mỗi lần refresh kiểm lại DB: role driver,
-        có dòng `drivers`, `account_status = active`. Không có bảng refresh token nên không thu hồi
-        từng token; logout = app xoá token. Hết hạn refresh → đăng nhập lại.
+        có dòng `drivers`, `account_status = active`, và claim `ver` khớp `users.token_version`
+        (BE-49: đã đăng xuất → 401 `invalid_refresh_token`). Hết hạn refresh → đăng nhập lại.
       security: []
       requestBody:
         required: true
@@ -174,11 +174,48 @@ paths:
               schema: { $ref: '#/components/schemas/AccessToken' }
         '400': { $ref: '#/components/responses/AuthBadRequest' }
         '401':
-          description: '`invalid_refresh_token` — sai chữ ký, hết hạn, sai loại token hoặc user không còn'
+          description: '`invalid_refresh_token` — sai chữ ký, hết hạn, sai loại token, user không còn hoặc đã đăng xuất (BE-49)'
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
         '403': { $ref: '#/components/responses/AccountLocked' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '405': { $ref: '#/components/responses/AuthMethodNotAllowed' }
+        '413': { $ref: '#/components/responses/PayloadTooLarge' }
+        '415': { $ref: '#/components/responses/UnsupportedMediaType' }
+        '503': { $ref: '#/components/responses/AuthUnavailable' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /auth/logout:
+    post:
+      tags: [auth]
+      operationId: logoutDriver
+      x-status: implemented — BE-49
+      summary: Đăng xuất — thu hồi mọi token của tài xế trên mọi thiết bị (UC-ACC-05)
+      description: |
+        Body là refresh token (không dùng access token vì lúc đăng xuất access token 15 phút thường đã
+        hết hạn). Token hợp lệ → CSMS tăng `users.token_version` (migration 0033); mọi access token và
+        refresh token đã phát cho tài xế này, **trên mọi thiết bị**, bị từ chối từ request kế tiếp
+        (401 `unauthorized` / `invalid_refresh_token`). Không có bảng refresh token nên không đăng xuất
+        riêng một máy.
+
+        Idempotent: gửi lại cùng refresh token (đã bị thu hồi) → vẫn 204, không thu hồi thêm. Tài khoản
+        bị khoá vẫn đăng xuất được. **App luôn xoá token cục bộ**, kể cả khi nhận 401 hay lỗi mạng.
+        Token phát trước BE-49 không có claim `ver` được coi là `ver = 0` nên deploy không đăng xuất ai.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RefreshRequest' }
+      responses:
+        '204': { description: Đã thu hồi (hoặc đã thu hồi từ trước) }
+        '400': { $ref: '#/components/responses/AuthBadRequest' }
+        '401':
+          description: '`invalid_refresh_token` — sai chữ ký, sai dạng, hết hạn hoặc là access token'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
         '404': { $ref: '#/components/responses/NotFound' }
         '405': { $ref: '#/components/responses/AuthMethodNotAllowed' }
         '413': { $ref: '#/components/responses/PayloadTooLarge' }
@@ -299,9 +336,9 @@ paths:
       x-status: implemented — MB03 backend discovery slice
       description: |
         Chỉ đọc tài xế từ JWT và DB, không nhận identity từ query. Token lấy từ `/auth/login`,
-        `/auth/register` hoặc `/auth/refresh` (BE-21). Không có OTP, cập nhật profile hoặc
-        truy vấn phiên trong slice này. `vehicles[]` chỉ gồm xe **chưa gỡ** (BE-34), xe mặc định
-        đứng đầu rồi theo thứ tự thêm; thêm / gỡ / đổi mặc định qua `/vehicles` (BE-34).
+        `/auth/register` hoặc `/auth/refresh` (BE-21). `vehicles[]` chỉ gồm xe **chưa gỡ** (BE-34),
+        xe mặc định đứng đầu rồi theo thứ tự thêm; thêm / gỡ / đổi mặc định qua `/vehicles` (BE-34).
+        Cố ý không có trường riêng tư (email, số điện thoại): xem / sửa qua `/me/profile` (BE-49).
       responses:
         '200':
           description: Own driver and vehicles
@@ -312,6 +349,61 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '405': { $ref: '#/components/responses/MethodNotAllowed' }
+        '503': { $ref: '#/components/responses/AuthUnavailable' }
+        '500': { $ref: '#/components/responses/InternalError' }
+  /me/profile:
+    get:
+      tags: [stations]
+      operationId: getOwnDriverProfile
+      summary: Hồ sơ của tài xế đang đăng nhập — họ tên, email, số điện thoại (màn 13)
+      x-status: implemented — BE-49
+      description: |
+        Tách khỏi `GET /me` để bootstrap app không mang trường riêng tư. Không nhận query (có → 400).
+      responses:
+        '200':
+          description: Hồ sơ
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DriverProfile' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+        '503': { $ref: '#/components/responses/AuthUnavailable' }
+        '500': { $ref: '#/components/responses/InternalError' }
+    patch:
+      tags: [stations]
+      operationId: updateOwnDriverProfile
+      summary: Sửa họ tên / số điện thoại (UC-ACC-02, màn 13)
+      x-status: implemented — BE-49
+      description: |
+        Body có ít nhất một trong `full_name`, `phone_number`; khoá khác (kể cả `email`) → 400
+        `invalid_input`. `full_name` trim, 1–100 ký tự, không ký tự điều khiển. `phone_number` chuẩn hoá
+        E.164 như đăng ký (§6a hợp đồng); `null` gỡ số (vẫn đăng nhập bằng email). Số của tài khoản
+        khác → 409 `phone_taken`, không đổi trường nào. Email là định danh đăng nhập và chưa có luồng
+        xác minh nên **không** đổi được qua API này. Trả lại hồ sơ sau khi sửa (như `GET`).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DriverProfileUpdate' }
+      responses:
+        '200':
+          description: Hồ sơ sau khi sửa
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DriverProfile' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+        '409':
+          description: '`phone_taken` — số đã thuộc tài khoản khác'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '413': { $ref: '#/components/responses/PayloadTooLarge' }
+        '415': { $ref: '#/components/responses/UnsupportedMediaType' }
         '503': { $ref: '#/components/responses/AuthUnavailable' }
         '500': { $ref: '#/components/responses/InternalError' }
   /vehicle-models:
@@ -1646,6 +1738,27 @@ components:
         vehicles:
           type: array
           items: { $ref: '#/components/schemas/OwnVehicle' }
+
+    DriverProfile:
+      type: object
+      additionalProperties: false
+      required: [user_id, full_name, email, phone_number]
+      properties:
+        user_id: { $ref: '#/components/schemas/Id' }
+        full_name: { type: string }
+        email: { type: string, description: Không sửa được qua PATCH }
+        phone_number: { type: [string, 'null'], description: 'E.164, vd. +84901234567' }
+
+    DriverProfileUpdate:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        full_name: { type: string, minLength: 1, maxLength: 100 }
+        phone_number:
+          type: [string, 'null']
+          description: Chuẩn hoá E.164 như đăng ký; null gỡ số
+      example: { full_name: Nguyễn Văn A, phone_number: '0901234567' }
 
     VehicleModel:
       type: object

@@ -30,6 +30,10 @@ const url = process.env.MB03_TEST_DATABASE_URL;
     ))
       copyFileSync(path.join(MIGRATIONS_DIR, file), path.join(prior, file));
     await migrate(db.$client, prior);
+    copyFileSync(
+      path.join(MIGRATIONS_DIR, '0031_rfid-credit-protection.sql'),
+      path.join(prior, '0031_rfid-credit-protection.sql'),
+    );
     const op = await id(
       "INSERT INTO operators(tax_code,legal_name) VALUES('M0031','Fixture') RETURNING id",
     );
@@ -79,8 +83,8 @@ const url = process.env.MB03_TEST_DATABASE_URL;
       'charge_point_offline_auth_checks',
     ];
     const before = await Promise.all(tables.map((t) => q('SELECT * FROM ' + t + ' ORDER BY 1')));
-    expect(await migrate(db.$client)).toEqual(['0031_rfid-credit-protection']);
-    expect(await migrate(db.$client)).toEqual([]);
+    expect(await migrate(db.$client, prior)).toEqual(['0031_rfid-credit-protection']);
+    expect(await migrate(db.$client, prior)).toEqual([]);
     await q(readFileSync(path.join(MIGRATIONS_DIR, '0031_rfid-credit-protection.sql'), 'utf8'));
     expect(await Promise.all(tables.map((t) => q('SELECT * FROM ' + t + ' ORDER BY 1')))).toEqual(
       before,

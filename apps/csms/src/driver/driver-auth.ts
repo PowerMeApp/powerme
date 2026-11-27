@@ -32,6 +32,16 @@ export class DriverApiError extends Error {
   }
 }
 
+/**
+ * BE-49: số trong claim `ver` (so với `users.token_version`, migration 0033). Token phát trước BE-49
+ * không có claim → 0, bằng DEFAULT của cột, nên deploy không đăng xuất ai. Sai kiểu → ném lỗi.
+ */
+export function tokenVersionClaim(raw: unknown): number {
+  if (raw === undefined) return 0;
+  if (typeof raw !== 'number' || !Number.isSafeInteger(raw) || raw < 0) throw new Error('ver');
+  return raw;
+}
+
 export function databaseId(raw: unknown): string {
   if (
     typeof raw !== 'string' ||
@@ -107,6 +117,8 @@ export async function authenticateDriver(
   ).length;
   const header = req.headers.authorization;
   let subject: string;
+  /** null = đăng nhập dev (X-Driver-Id), không có token để so. */
+  let version: number | null = null;
   if (header !== undefined) {
     if (
       authorizationCount !== 1 ||
@@ -135,6 +147,7 @@ export async function authenticateDriver(
       )
         throw new DriverApiError(401, 'unauthorized');
       if (payload.role !== 'driver') throw new DriverApiError(403, 'forbidden');
+      version = tokenVersionClaim(payload['ver']);
     } catch (error) {
       if (error instanceof DriverApiError && error.status === 403) throw error;
       throw new DriverApiError(401, 'unauthorized');
@@ -149,11 +162,14 @@ export async function authenticateDriver(
   // WP3: roles and account state are checked against DB on every request.
   const row = (
     await db.$client.query(
-      `SELECT u.role,u.account_status,d.user_id FROM users u LEFT JOIN drivers d ON d.user_id=u.id WHERE u.id=$1`,
+      `SELECT u.role,u.account_status,u.token_version,d.user_id FROM users u LEFT JOIN drivers d ON d.user_id=u.id WHERE u.id=$1`,
       [subject],
     )
   ).rows[0];
   if (!row) throw new DriverApiError(401, 'unauthorized');
+  // BE-49: tài xế đã đăng xuất sau khi token này được phát → token chết như hết hạn.
+  if (version !== null && row.token_version !== version)
+    throw new DriverApiError(401, 'unauthorized');
   if (row.role !== 'driver' || row.account_status !== 'active' || !row.user_id)
     throw new DriverApiError(403, 'forbidden');
   return subject;

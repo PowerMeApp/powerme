@@ -522,6 +522,230 @@ describeDb('BE-21 driver register / login / refresh over HTTP and dedicated Post
     });
   });
 
+  describe('BE-49 — đăng xuất thu hồi token (UC-ACC-05) và sửa profile (UC-ACC-02)', () => {
+    const PROFILE = '/api/driver/v1/me/profile';
+    async function getProfile(token: string) {
+      const response = await fetch(`${base}${PROFILE}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      return { response, body: (await response.json()) as any };
+    }
+    async function patchMe(token: string, body: unknown, contentType = 'application/json') {
+      const response = await fetch(`${base}${PROFILE}`, {
+        method: 'PATCH',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': contentType },
+        body: typeof body === 'string' ? body : JSON.stringify(body),
+      });
+      const text = await response.text();
+      return { response, body: text ? (JSON.parse(text) as any) : null };
+    }
+    const version = async (email: string) =>
+      (await q('SELECT token_version FROM users WHERE email=$1', [email]))[0]!.token_version;
+
+    it('logout revokes every access and refresh token of the driver, on every device', async () => {
+      const email = 'dang.xuat@example.invalid';
+      await post('register', registration(email));
+      expect(await version(email)).toBe(0);
+      const phoneA = await post('login', { email, password: PASSWORD });
+      const phoneB = await post('login', { email, password: PASSWORD });
+      expect((await me(phoneA.body.access_token)).response.status).toBe(200);
+      expect((await me(phoneB.body.access_token)).response.status).toBe(200);
+
+      const out = await post('logout', { refresh_token: phoneA.body.refresh_token });
+      expect(out.response.status).toBe(204);
+      expect(out.text).toBe('');
+      expect(await version(email)).toBe(1);
+      // Thiết bị A và B: access token chết ngay (không đợi hết 15 phút), refresh token cũng chết.
+      for (const device of [phoneA, phoneB]) {
+        const res = await me(device.body.access_token);
+        expect([res.response.status, res.body.error]).toEqual([401, 'unauthorized']);
+        const refresh = await post('refresh', { refresh_token: device.body.refresh_token });
+        expect([refresh.response.status, refresh.body.error]).toEqual([
+          401,
+          'invalid_refresh_token',
+        ]);
+      }
+      // Gửi lại cùng token (app thử lại khi rớt mạng) → vẫn 204, không tăng thêm.
+      expect(
+        (await post('logout', { refresh_token: phoneA.body.refresh_token })).response.status,
+      ).toBe(204);
+      expect(
+        (await post('logout', { refresh_token: phoneB.body.refresh_token })).response.status,
+      ).toBe(204);
+      expect(await version(email)).toBe(1);
+      // Đăng nhập lại: token mới mang ver 1 và dùng được; refresh của nó cũng được.
+      const again = await post('login', { email, password: PASSWORD });
+      expect((await me(again.body.access_token)).response.status).toBe(200);
+      expect(
+        (await post('refresh', { refresh_token: again.body.refresh_token })).response.status,
+      ).toBe(200);
+    });
+
+    it('keeps tokens issued before BE-49 (no ver claim) valid until the first logout', async () => {
+      const email = 'token.cu@example.invalid';
+      await post('register', registration(email));
+      const id = String(
+        (await q('SELECT id::text AS id FROM users WHERE email=$1', [email]))[0]!.id,
+      );
+      const now = Math.floor(Date.now() / 1000);
+      const legacyAccess = await new SignJWT({ role: 'driver' })
+        .setProtectedHeader({ alg: 'HS256', typ: 'JWT' })
+        .setSubject(id)
+        .setIssuer(issuer)
+        .setAudience(audience)
+        .setIssuedAt(now)
+        .setExpirationTime(now + 900)
+        .sign(secret);
+      const legacyRefresh = await new SignJWT({ token_use: 'refresh' })
+        .setProtectedHeader({ alg: 'HS256', typ: 'refresh+jwt' })
+        .setSubject(id)
+        .setIssuer(issuer)
+        .setAudience(audience)
+        .setIssuedAt(now)
+        .setExpirationTime(now + 3600)
+        .sign(secret);
+      expect((await me(legacyAccess)).response.status).toBe(200);
+      expect((await post('refresh', { refresh_token: legacyRefresh })).response.status).toBe(200);
+      expect((await post('logout', { refresh_token: legacyRefresh })).response.status).toBe(204);
+      expect((await me(legacyAccess)).response.status).toBe(401);
+      expect((await post('refresh', { refresh_token: legacyRefresh })).response.status).toBe(401);
+      // ver sai kiểu (chuỗi, âm) → như token giả.
+      for (const ver of ['1', -1, 1.5]) {
+        const bad = await new SignJWT({ role: 'driver', ver })
+          .setProtectedHeader({ alg: 'HS256', typ: 'JWT' })
+          .setSubject(id)
+          .setIssuer(issuer)
+          .setAudience(audience)
+          .setIssuedAt(now)
+          .setExpirationTime(now + 900)
+          .sign(secret);
+        expect((await me(bad)).response.status).toBe(401);
+      }
+    });
+
+    it('logout refuses access tokens, forged or malformed tokens and unknown fields', async () => {
+      const email = 'dang.xuat.sai@example.invalid';
+      const reg = await post('register', registration(email));
+      for (const token of [reg.body.access_token, 'not-a-jwt', 42]) {
+        const res = await post('logout', { refresh_token: token });
+        expect([res.response.status, res.body.error]).toEqual([401, 'invalid_refresh_token']);
+      }
+      const extra = await post('logout', { refresh_token: reg.body.refresh_token, all: true });
+      expect([extra.response.status, extra.body.error]).toEqual([400, 'invalid_input']);
+      expect(await version(email)).toBe(0);
+      // Tài khoản bị khoá vẫn đăng xuất được (thu hồi token là việc an toàn).
+      await q("UPDATE users SET account_status='suspended' WHERE email=$1", [email]);
+      expect(
+        (await post('logout', { refresh_token: reg.body.refresh_token })).response.status,
+      ).toBe(204);
+      expect(await version(email)).toBe(1);
+      // 0033: CHECK token_version >= 0.
+      await expect(
+        q('UPDATE users SET token_version=-1 WHERE email=$1', [email]),
+      ).rejects.toMatchObject({ constraint: 'users_token_version_check' });
+    });
+
+    it('GET/PATCH /me/profile shows and updates name and phone, and validates input', async () => {
+      const email = 'ho.so@example.invalid';
+      const reg = await post('register', registration(email));
+      const token = reg.body.access_token as string;
+      const before = (await q('SELECT updated_at FROM users WHERE email=$1', [email]))[0]!
+        .updated_at as Date;
+
+      const first = await getProfile(token);
+      expect(first.response.status).toBe(200);
+      expect(first.response.headers.get('cache-control')).toBe('no-store');
+      expect(Object.keys(first.body).sort()).toEqual(
+        ['email', 'full_name', 'phone_number', 'user_id'].sort(),
+      );
+      expect(first.body).toMatchObject({ full_name: 'Tài Xế Thử', email, phone_number: null });
+      const named = await patchMe(token, { full_name: '  Nguyễn Văn Mới  ' });
+      expect(named.response.status).toBe(200);
+      expect(named.body).toEqual({ ...first.body, full_name: 'Nguyễn Văn Mới' });
+      expect((await getProfile(token)).body).toEqual(named.body);
+      // GET /me vẫn không có trường riêng tư (MB03), chỉ thấy tên mới.
+      const bootstrap = await me(token);
+      expect(bootstrap.body.full_name).toBe('Nguyễn Văn Mới');
+      expect(bootstrap.body).not.toHaveProperty('email');
+      expect(bootstrap.body).not.toHaveProperty('phone_number');
+      const after = (await q('SELECT updated_at FROM users WHERE email=$1', [email]))[0]!
+        .updated_at as Date;
+      expect(after.getTime()).toBeGreaterThan(before.getTime());
+
+      const phoned = await patchMe(token, { phone_number: '0911 222 333' });
+      expect([phoned.response.status, phoned.body.phone_number]).toEqual([200, '+84911222333']);
+      // Đăng nhập được bằng số mới.
+      expect(
+        (await post('login', { phone_number: '0911222333', password: PASSWORD })).response.status,
+      ).toBe(200);
+      // Gửi lại đúng số của chính mình → 200, không phải phone_taken.
+      expect((await patchMe(token, { phone_number: '+84911222333' })).response.status).toBe(200);
+      // Số của tài khoản khác (tai.xe đăng ký +84901234567) → 409, không đổi gì.
+      const taken = await patchMe(token, { full_name: 'Không Được', phone_number: '0901234567' });
+      expect([taken.response.status, taken.body.error]).toEqual([409, 'phone_taken']);
+      expect((await getProfile(token)).body).toMatchObject({
+        full_name: 'Nguyễn Văn Mới',
+        phone_number: '+84911222333',
+      });
+      // null gỡ số.
+      const removed = await patchMe(token, { phone_number: null });
+      expect([removed.response.status, removed.body.phone_number]).toEqual([200, null]);
+
+      const bad: [unknown, number, string][] = [
+        [{}, 400, 'invalid_input'],
+        [{ email: 'moi@example.invalid' }, 400, 'invalid_input'],
+        [{ full_name: '   ' }, 400, 'invalid_input'],
+        [{ full_name: 'x'.repeat(101) }, 400, 'invalid_input'],
+        [{ full_name: 'a\u0007b' }, 400, 'invalid_input'],
+        [{ full_name: null }, 400, 'invalid_input'],
+        [{ phone_number: '901234567' }, 400, 'invalid_input'],
+        [{ phone_number: 84901234567 }, 400, 'invalid_input'],
+        [{ role: 'admin' }, 400, 'invalid_input'],
+        ['[]', 400, 'invalid_input'],
+      ];
+      for (const [body, status, code] of bad) {
+        const res = await patchMe(token, body);
+        expect([res.response.status, res.body.error]).toEqual([status, code]);
+      }
+      const form = await patchMe(token, 'full_name=x', 'application/x-www-form-urlencoded');
+      expect([form.response.status, form.body.error]).toEqual([415, 'unsupported_media_type']);
+      const noAuth = await fetch(`${base}${PROFILE}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ full_name: 'Ai Đó' }),
+      });
+      expect(noAuth.status).toBe(401);
+      const put = await fetch(`${base}${PROFILE}`, {
+        method: 'PUT',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: '{}',
+      });
+      expect(put.status).toBe(405);
+      expect(put.headers.get('allow')).toBe('GET, PATCH, OPTIONS');
+      const query = await fetch(`${base}${PROFILE}?x=1`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      expect(query.status).toBe(400);
+      // PATCH /me (không có /profile) không tồn tại: /me vẫn chỉ GET.
+      const oldPath = await fetch(`${base}/api/driver/v1/me`, {
+        method: 'PATCH',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ full_name: 'X Y' }),
+      });
+      expect(oldPath.status).toBe(405);
+      const preflight = await fetch(`${base}${PROFILE}`, {
+        method: 'OPTIONS',
+        headers: { Origin: 'http://localhost:5173' },
+      });
+      expect(preflight.status).toBe(204);
+      expect(preflight.headers.get('access-control-allow-methods')).toBe('GET, PATCH, OPTIONS');
+      expect(preflight.headers.get('access-control-allow-headers')).toContain('Content-Type');
+      // Sau khi đăng xuất, token cũ không sửa được profile.
+      await post('logout', { refresh_token: reg.body.refresh_token });
+      expect((await patchMe(token, { full_name: 'Sau Đăng Xuất' })).response.status).toBe(401);
+    });
+  });
+
   it('enforces POST, JSON content type, body size and known routes', async () => {
     const get = await post('login', null, {}, 'GET');
     expect([get.response.status, get.body.error]).toEqual([405, 'method_not_allowed']);
@@ -539,7 +763,7 @@ describeDb('BE-21 driver register / login / refresh over HTTP and dedicated Post
       const res = await post('login', raw);
       expect([res.response.status, res.body.error]).toEqual([400, 'invalid_input']);
     }
-    const unknown = await post('logout', {});
+    const unknown = await post('nope', {});
     expect([unknown.response.status, unknown.body.error]).toEqual([404, 'not_found']);
     const preflight = await fetch(`${base}/api/driver/v1/auth/login`, {
       method: 'OPTIONS',

@@ -5,7 +5,18 @@
  * `drivers`, `operator_staff`. T11 ban đầu KHÔNG có `admins`; Ân duyệt 31/10/2026 ("ERD Alignment
  * Decisions", Physical ERD v1.0) thêm `admins` (migration 0011) cho đủ ba subtype.
  */
-import { bigint, index, pgTable, text, timestamp, unique, varchar } from 'drizzle-orm/pg-core';
+import { sql } from 'drizzle-orm';
+import {
+  bigint,
+  check,
+  index,
+  integer,
+  pgTable,
+  text,
+  timestamp,
+  unique,
+  varchar,
+} from 'drizzle-orm/pg-core';
 import { staffRoleEnum, userAccountStatusEnum, userRoleEnum } from './enums.js';
 import { operators } from './stations.js';
 
@@ -21,6 +32,8 @@ export const users = pgTable(
     accountStatus: userAccountStatusEnum('account_status').notNull().default('active'),
     /** Băm scrypt (`scrypt$N$r$p$salt$hash`, ADR-0011); null khi chưa đặt mật khẩu. */
     passwordHash: text('password_hash'),
+    /** BE-49 (0033): tăng khi tài xế đăng xuất; token có claim `ver` khác số này bị từ chối. */
+    tokenVersion: integer('token_version').notNull().default(0),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
@@ -28,6 +41,7 @@ export const users = pgTable(
   (t) => [
     unique('users_email_key').on(t.email),
     unique('users_phone_number_key').on(t.phoneNumber),
+    check('users_token_version_check', sql`${t.tokenVersion} >= 0`),
   ],
 );
 
