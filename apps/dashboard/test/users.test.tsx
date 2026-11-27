@@ -101,9 +101,7 @@ describe('Tài khoản & vai trò (màn 28)', () => {
     expect(errorUnder(dialog.getByLabelText('Đơn vị vận hành'))).toHaveTextContent(
       'Chọn đơn vị vận hành',
     );
-    expect(errorUnder(dialog.getByLabelText('Email'))).toHaveTextContent(
-      'Email không hợp lệ',
-    );
+    expect(errorUnder(dialog.getByLabelText('Email'))).toHaveTextContent('Email không hợp lệ');
     expect(errorUnder(dialog.getByLabelText('Mật khẩu ban đầu'))).toHaveTextContent(
       'Ít nhất 8 ký tự',
     );
