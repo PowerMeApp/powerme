@@ -83,6 +83,8 @@ class DiscoveryContext extends Notifier<DiscoveryContextState> {
     );
   }
 
+  void cancelOriginUpdate() => _cancelOriginUpdate();
+
   void clearOrigin() {
     _cancelOriginUpdate();
     state = DiscoveryContextState(includeVinFastOnly: state.includeVinFastOnly);
