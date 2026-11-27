@@ -21,3 +21,25 @@ afterEach(() => {
     /* jsdom always has sessionStorage */
   }
 });
+
+// Mantine (FE redesign) reads matchMedia and ResizeObserver, which jsdom does not implement.
+Object.defineProperty(window, 'matchMedia', {
+  writable: true,
+  value: (query: string) => ({
+    matches: false,
+    media: query,
+    onchange: null,
+    addListener: () => {},
+    removeListener: () => {},
+    addEventListener: () => {},
+    removeEventListener: () => {},
+    dispatchEvent: () => false,
+  }),
+});
+class TestResizeObserver {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+}
+window.ResizeObserver = TestResizeObserver;
+window.HTMLElement.prototype.scrollIntoView = () => {};

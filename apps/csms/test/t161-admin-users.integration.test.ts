@@ -204,9 +204,10 @@ describeDb('T161 GET /api/admin/v1/users (driver picker of screen 30)', () => {
     }
   });
 
-  it('admin only: 401 without a token, 403 for operator staff, 405 for POST', async () => {
+  it('admin only: 401 without a token, 403 for operator staff, 405 for DELETE', async () => {
     expect((await get('?role=driver&q=nguyen')).status).toBe(401);
     expect((await get('?role=driver&q=nguyen', tokens['staff'])).status).toBe(403);
-    expect((await get('?role=driver&q=nguyen', tokens['admin'], 'POST')).status).toBe(405);
+    // POST /users is the create route since FE-19; DELETE is not a method of /users.
+    expect((await get('?role=driver&q=nguyen', tokens['admin'], 'DELETE')).status).toBe(405);
   });
 });

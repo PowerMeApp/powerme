@@ -109,12 +109,12 @@ describeDb('T148 RFID settlement over OCPP and owner-scoped JWT HTTP', () => {
       status: 'Available',
     });
   }
-  async function start(connectorId = 1, tag = card) {
+  async function start(connectorId = 1, tag = card, expectedAuthorize = 'Accepted') {
     await available(connectorId);
     const auth = (await station.call('Authorize', { idTag: tag })) as {
       idTagInfo: { status: string };
     };
-    expect(auth.idTagInfo.status).toBe('Accepted');
+    expect(auth.idTagInfo.status).toBe(expectedAuthorize);
     const result = (await station.call('StartTransaction', {
       connectorId,
       idTag: tag,
@@ -272,6 +272,16 @@ describeDb('T148 RFID settlement over OCPP and owner-scoped JWT HTTP', () => {
     otherToken = await jwt(other);
   });
   beforeEach(async () => {
+    driver = await id(
+      "INSERT INTO users(email,full_name,role) VALUES($1,'RFID fixture','driver') RETURNING id",
+      ['case-' + randomBytes(5).toString('hex') + '@t148.invalid'],
+    );
+    await q(
+      "INSERT INTO drivers(user_id,consent_version,consent_given_at) VALUES($1,'t148',now())",
+      [driver],
+    );
+    await q('INSERT INTO credit_accounts(driver_id) VALUES($1)', [driver]);
+    token = await jwt(driver);
     await q(
       "UPDATE credit_accounts SET status='active',closed_at=NULL,updated_at=now() WHERE driver_id IN ($1,$2)",
       [driver, other],
@@ -313,6 +323,49 @@ describeDb('T148 RFID settlement over OCPP and owner-scoped JWT HTTP', () => {
     }
     Logger.overrideLogger(['log', 'error', 'warn', 'debug', 'verbose']);
   });
+
+  it('WP3 real OCPP cutoff releases inbound ACK before Stop evidence and retains hold until settlement', async () => {
+    const current = await start();
+    expect(
+      (
+        await q('SELECT amount_vnd,state FROM rfid_credit_holds WHERE session_id=$1', [current.id])
+      )[0],
+    ).toEqual({ amount_vnd: '200000', state: 'held' });
+    let received = false;
+    station.handle('RemoteStopTransaction', async ({ params }) => {
+      expect(params).toEqual({ transactionId: current.tx });
+      received = true;
+      await stop(current.tx, 39000);
+      return { status: 'Accepted' };
+    });
+    await meter(current.tx, 39000);
+    await until(async () => received, Boolean);
+    await until(
+      async () =>
+        (await q('SELECT state FROM rfid_stop_jobs WHERE session_id=$1', [current.id]))[0]?.state,
+      (v) => v === 'completed',
+    );
+    await until(
+      async () => effects(current.id),
+      (v) => v.debit === 1 && v.earn === 1 && v.statement === 1,
+    );
+    expect(
+      (await q('SELECT state FROM rfid_credit_holds WHERE session_id=$1', [current.id]))[0].state,
+    ).toBe('released');
+    expect(await effects(current.id)).toEqual({ debit: 1, earn: 1, statement: 1 });
+    console.log(
+      JSON.stringify({
+        evidence: 'WP3 owned WebSocket cutoff',
+        frames: await q(
+          `SELECT action,direction,message_type,count(*)::int AS count
+      FROM ocpp_message_log WHERE charge_point_id=$1 GROUP BY action,direction,message_type ORDER BY action NULLS LAST,direction,message_type`,
+          [cp],
+        ),
+      }),
+    );
+    station.handle('RemoteStopTransaction', async () => ({ status: 'Accepted' }));
+  });
+
   it('posts one RFID debit, earn and statement without an app intent or default vehicle', async () => {
     expect(await q('SELECT 1 FROM vehicles WHERE driver_id=$1', [driver])).toEqual([]);
     const s = await start();
@@ -519,7 +572,7 @@ describeDb('T148 RFID settlement over OCPP and owner-scoped JWT HTTP', () => {
 
   it('serializes multiple RFID sessions on one account and permits deeper BR-P20 shortfall', async () => {
     const a = await start(1),
-      b = await start(2);
+      b = await start(2, card, 'Blocked');
     await meter(a.tx, 2000, 1);
     await meter(b.tx, 2000, 2);
     await injectFailure('charging_statements');

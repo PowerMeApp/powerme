@@ -2,6 +2,23 @@
 import { useEffect, useState } from 'react';
 import type { ChargePointLifecycle, ConnectorLive, OfflineCardRiskReason } from '@powerme/shared';
 
+/**
+ * Vietnamese label of each raw OCPP 1.6 connector status; the raw value stays in the tooltip for
+ * technicians (D21).
+ */
+export const CONNECTOR_STATUS: Record<string, string> = {
+  Available: 'Sẵn sàng',
+  Preparing: 'Đang chuẩn bị',
+  Charging: 'Đang sạc',
+  SuspendedEV: 'Xe tạm dừng',
+  SuspendedEVSE: 'Trụ tạm dừng',
+  Finishing: 'Đang kết thúc',
+  Reserved: 'Đã đặt chỗ',
+  Unavailable: 'Không dùng được',
+  Faulted: 'Lỗi',
+};
+export const statusLabel = (s: string) => CONNECTOR_STATUS[s] ?? s;
+
 export const LIFECYCLE: Record<ChargePointLifecycle, string> = {
   registered: 'Đã đăng ký',
   awaiting_connection: 'Chờ kết nối',
@@ -15,13 +32,14 @@ export const LIFECYCLE: Record<ChargePointLifecycle, string> = {
  * its own while offline (a blocked or unknown card could then charge and leave a shortfall).
  */
 export const OFFLINE_CARD_RISK: Record<OfflineCardRiskReason, string> = {
-  not_checked: 'chưa kiểm cấu hình thẻ offline (trụ chưa khởi động lại từ khi có bước kiểm)',
-  no_response: 'trụ không trả lời GetConfiguration / ChangeConfiguration',
-  key_missing: 'trụ không có key cấu hình thẻ offline',
-  rejected: 'trụ từ chối tắt authorize offline (Rejected)',
-  not_supported: 'trụ không cho đổi key cấu hình thẻ offline (NotSupported)',
-  reboot_required: 'trụ cần khởi động lại để tắt authorize offline',
-  change_failed: 'lệnh tắt authorize offline lỗi',
+  not_checked:
+    'chưa kiểm cấu hình thẻ khi mất kết nối (trụ chưa khởi động lại từ khi có bước kiểm)',
+  no_response: 'trụ không trả lời lệnh đọc / đổi cấu hình',
+  key_missing: 'trụ không có mục cấu hình thẻ khi mất kết nối',
+  rejected: 'trụ từ chối tắt chấp nhận thẻ khi mất kết nối',
+  not_supported: 'trụ không cho đổi cấu hình thẻ khi mất kết nối',
+  reboot_required: 'trụ cần khởi động lại để tắt chấp nhận thẻ khi mất kết nối',
+  change_failed: 'lệnh tắt chấp nhận thẻ khi mất kết nối bị lỗi',
 };
 
 /** Pill tone for a connector's raw OCPP status; Offline overrides it (D20). */

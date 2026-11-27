@@ -4,19 +4,24 @@
  * paged on the server (FAULT_PAGE_SIZE rows). Polling (D5): 3 s, 1 s while a fault on the page is
  * resetting so t5 / t6 show quickly. Realtime push is a known gap (W2).
  */
+import { Loader, Table } from '@mantine/core';
 import { useState } from 'react';
 import type { FaultListStatus } from '@powerme/shared';
 import { errorMessage, FAULT_PAGE_SIZE, useOperatorFaultsQuery } from '../../core/api/api';
+import { DataTable, EmptyState } from '../../ui/DataTable';
+import { FilterBar, SelectFilter } from '../../ui/FilterBar';
+import { Notice } from '../../ui/Notice';
+import { Pager, pageCount } from '../../ui/Pager';
 import { FaultRow } from './FaultRow';
 
 export const POLL_MS = 3000;
 export const FAST_POLL_MS = 1000;
 
-const FILTERS: [FaultListStatus, string][] = [
+const FILTERS: readonly (readonly [FaultListStatus, string])[] = [
   ['open', 'Đang mở'],
   ['raised', 'Mới'],
   ['acknowledged', 'Đã xác nhận'],
-  ['resetting', 'Đang reset'],
+  ['resetting', 'Đang khởi động lại'],
   ['resolved', 'Đã xử lý'],
   ['all', 'Tất cả'],
 ];
@@ -38,7 +43,7 @@ export function FaultTable({
   );
   const faults = data?.items ?? [];
   const total = data?.total ?? 0;
-  const pages = Math.max(1, Math.ceil(total / FAULT_PAGE_SIZE));
+  const pages = pageCount(total, FAULT_PAGE_SIZE);
   const resetting = faults.some((f) => f.status === 'resetting');
   if (resetting !== fast) setFast(resetting);
   // Rows can leave the filter while polling; never stay on a page past the end.
@@ -50,88 +55,60 @@ export function FaultTable({
 
   return (
     <>
-      <div className="filters">
-        <label className="field">
-          Trạng thái
-          <select
-            className="input"
-            value={status}
-            onChange={(e) => {
-              setStatus(e.target.value as FaultListStatus);
-              setPage(1);
-            }}
-          >
-            {FILTERS.map(([id, label]) => (
-              <option key={id} value={id}>
-                {label}
-              </option>
-            ))}
-          </select>
-        </label>
-      </div>
+      <FilterBar>
+        <SelectFilter
+          label="Trạng thái"
+          value={status}
+          options={FILTERS}
+          onChange={(v) => {
+            setStatus(v);
+            setPage(1);
+          }}
+        />
+      </FilterBar>
       {isLoading ? (
-        <p className="muted">Đang tải…</p>
+        <Loader size="sm" aria-label="Đang tải…" />
       ) : error && !data ? (
-        <p role="alert">{errorMessage(error)}</p>
+        <Notice tone="error">{errorMessage(error)}</Notice>
       ) : faults.length === 0 ? (
-        <div className="card">
-          <p className="muted">
-            {status === 'open'
-              ? chargePointId
-                ? 'Trụ sạc này không có sự cố đang mở.'
-                : 'Không có cảnh báo. Mọi connector đang hoạt động bình thường.'
-              : 'Không có sự cố ở trạng thái này.'}
-          </p>
-        </div>
+        <EmptyState>
+          {status === 'open'
+            ? chargePointId
+              ? 'Trụ sạc này không có sự cố đang mở.'
+              : 'Không có cảnh báo. Mọi súng đang hoạt động bình thường.'
+            : 'Không có sự cố ở trạng thái này.'}
+        </EmptyState>
       ) : (
-        <div className="card table-card">
-          <div className="table-wrap">
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th scope="col">#</th>
-                  <th scope="col">Sự cố</th>
-                  <th scope="col">Trụ sạc</th>
-                  <th scope="col">Mức độ</th>
-                  <th scope="col">Trạng thái</th>
-                  <th scope="col">Phát sinh</th>
-                  <th scope="col">Thao tác</th>
-                </tr>
-              </thead>
-              <tbody>
-                {faults.map((f) => (
-                  <FaultRow key={f.id} fault={f} />
-                ))}
-              </tbody>
-            </table>
-          </div>
-          <nav className="pager" aria-label="Phân trang">
-            <span className="muted">
-              Hiển thị {first}–{last} / {total}
-            </span>
-            <div className="btn-row">
-              <button
-                type="button"
-                className="btn small ghost"
-                disabled={page <= 1}
-                onClick={() => setPage(page - 1)}
-              >
-                ‹ Trước
-              </button>
-              <span className="pager-page">
-                Trang {page} / {pages}
-              </span>
-              <button
-                type="button"
-                className="btn small ghost"
-                disabled={page >= pages}
-                onClick={() => setPage(page + 1)}
-              >
-                Sau ›
-              </button>
-            </div>
-          </nav>
-        </div>
+        <DataTable
+          minWidth={980}
+          footer={
+            <Pager
+              first={first}
+              last={last}
+              total={total}
+              page={page}
+              pages={pages}
+              onPage={setPage}
+            />
+          }
+        >
+          <Table.Thead>
+            <Table.Tr>
+              <Table.Th scope="col">#</Table.Th>
+              <Table.Th scope="col">Sự cố</Table.Th>
+              <Table.Th scope="col">Trụ sạc</Table.Th>
+              <Table.Th scope="col">Mức độ</Table.Th>
+              <Table.Th scope="col">Trạng thái</Table.Th>
+              <Table.Th scope="col">Phát sinh</Table.Th>
+              <Table.Th scope="col">Thao tác</Table.Th>
+            </Table.Tr>
+          </Table.Thead>
+          <Table.Tbody>
+            {faults.map((f) => (
+              <FaultRow key={f.id} fault={f} />
+            ))}
+          </Table.Tbody>
+        </DataTable>
       )}
     </>
   );

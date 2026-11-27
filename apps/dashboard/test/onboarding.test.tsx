@@ -42,8 +42,8 @@ async function openSheet(routes: Parameters<typeof fakeCsms>[0]) {
     ...routes,
   });
   const r = renderApp('/operator/charge-points', session(STAFF));
-  await r.user.click(await screen.findByRole('button', { name: 'Onboard trụ sạc' }));
-  const dialog = within(screen.getByRole('dialog', { name: 'Onboard trụ sạc' }));
+  await r.user.click(await screen.findByRole('button', { name: 'Đưa trụ vào vận hành' }));
+  const dialog = within(screen.getByRole('dialog', { name: 'Đưa trụ vào vận hành' }));
   await dialog.findByRole('option', { name: 'HCM-DEMO-01 · Trạm Demo Q1' });
   return { ...r, seen, dialog };
 }
@@ -52,22 +52,24 @@ describe('Onboard trụ sạc (màn 19)', () => {
   it("opens from screen 18 and lists the Operator's stations; a bad serial is caught first", async () => {
     const { user, seen, dialog } = await openSheet({});
     expect(dialog.getByRole('option', { name: 'HCM-DEMO-02 · Trạm Demo Q7' })).toBeInTheDocument();
-    await user.type(dialog.getByLabelText('Serial'), 'ab');
-    await user.click(dialog.getByRole('button', { name: 'Onboard' }));
-    expect(dialog.getByRole('alert')).toHaveTextContent('Serial 3–25 ký tự');
+    await user.type(dialog.getByLabelText('Số seri'), 'ab');
+    await user.click(dialog.getByRole('button', { name: 'Đưa vào vận hành' }));
+    expect(dialog.getByRole('alert')).toHaveTextContent('Số seri 3–25 ký tự');
     expect(seen.some((r) => r.method === 'POST')).toBe(false);
   });
 
   it('posts serial, site_id as a number and the connectors; shows the credential once', async () => {
     const { user, seen, dialog } = await openSheet({ [ONBOARD]: { status: 201, body: RESULT } });
-    await user.type(dialog.getByLabelText('Serial'), ' SIM-0005 ');
+    await user.type(dialog.getByLabelText('Số seri'), ' SIM-0005 ');
     await user.selectOptions(dialog.getByLabelText('Trạm sạc'), '7');
     await user.selectOptions(dialog.getByLabelText('Loại súng 2'), 'chademo');
     await user.type(dialog.getByLabelText('Công suất súng 1 (kW, tuỳ chọn)'), '120');
     const lists = seen.filter((r) => r.path === '/api/operator/v1/charge-points').length;
-    await user.click(dialog.getByRole('button', { name: 'Onboard' }));
+    await user.click(dialog.getByRole('button', { name: 'Đưa vào vận hành' }));
 
-    const cred = within(await screen.findByRole('dialog', { name: 'Credential của trụ sạc' }));
+    const cred = within(
+      await screen.findByRole('dialog', { name: 'Thông tin đăng nhập của trụ sạc' }),
+    );
     expect(seen.find((r) => r.method === 'POST')!.body).toEqual({
       serial_number: 'SIM-0005',
       site_id: 7,
@@ -98,18 +100,18 @@ describe('Onboard trụ sạc (màn 19)', () => {
     await user.click(cred.getByRole('button', { name: 'Đã lưu, đóng' }));
     expect(screen.queryByRole('dialog')).toBeNull();
     expect(screen.queryByText(RESULT.password)).toBeNull();
-    await user.click(screen.getByRole('button', { name: 'Onboard trụ sạc' }));
-    expect(screen.getByRole('dialog', { name: 'Onboard trụ sạc' })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Đưa trụ vào vận hành' }));
+    expect(screen.getByRole('dialog', { name: 'Đưa trụ vào vận hành' })).toBeInTheDocument();
     expect(screen.queryByText(RESULT.password)).toBeNull();
   });
 
   it('one connector only when "Bỏ súng 2" is used', async () => {
     const { user, seen, dialog } = await openSheet({ [ONBOARD]: { status: 201, body: RESULT } });
-    await user.type(dialog.getByLabelText('Serial'), 'SIM-0005');
+    await user.type(dialog.getByLabelText('Số seri'), 'SIM-0005');
     await user.click(dialog.getByRole('button', { name: 'Bỏ súng 2' }));
     expect(dialog.queryByLabelText('Loại súng 2')).toBeNull();
-    await user.click(dialog.getByRole('button', { name: 'Onboard' }));
-    await screen.findByRole('dialog', { name: 'Credential của trụ sạc' });
+    await user.click(dialog.getByRole('button', { name: 'Đưa vào vận hành' }));
+    await screen.findByRole('dialog', { name: 'Thông tin đăng nhập của trụ sạc' });
     expect((seen.find((r) => r.method === 'POST')!.body as any).connectors).toEqual([
       { connector_no: 1, connector_type: 'ccs2' },
     ]);
@@ -117,13 +119,13 @@ describe('Onboard trụ sạc (màn 19)', () => {
 
   it('D43: each invalid field shows its message in red right beneath it', async () => {
     const { user, seen, dialog } = await openSheet({});
-    const serial = dialog.getByLabelText('Serial');
+    const serial = dialog.getByLabelText('Số seri');
     const kw1 = dialog.getByLabelText('Công suất súng 1 (kW, tuỳ chọn)');
     await user.type(kw1, '-5');
-    await user.click(dialog.getByRole('button', { name: 'Onboard' }));
+    await user.click(dialog.getByRole('button', { name: 'Đưa vào vận hành' }));
     // Both errors at once, each under its own field, red (.form-error), field marked invalid.
     expect(serial).toHaveAttribute('aria-invalid', 'true');
-    expect(errorUnder(serial)).toHaveTextContent('Serial 3–25 ký tự');
+    expect(errorUnder(serial)).toHaveTextContent('Số seri 3–25 ký tự');
     expect(errorUnder(serial)).toHaveClass('form-error');
     expect(serial.parentElement).toContainElement(errorUnder(serial));
     expect(kw1).toHaveAttribute('aria-invalid', 'true');
@@ -146,15 +148,15 @@ describe('Onboard trụ sạc (màn 19)', () => {
         body: { error: 'serial_not_registered', detail: 'SIM-9999 is not in the registry' },
       },
     });
-    const serial = dialog.getByLabelText('Serial');
+    const serial = dialog.getByLabelText('Số seri');
     await user.type(serial, 'SIM-9999');
-    await user.click(dialog.getByRole('button', { name: 'Onboard' }));
+    await user.click(dialog.getByRole('button', { name: 'Đưa vào vận hành' }));
     // The CSMS refusal goes under the field it is about (AD-8 "refuse with reason").
     await waitFor(() =>
-      expect(errorUnder(serial)).toHaveTextContent('Serial chưa được Admin đăng ký'),
+      expect(errorUnder(serial)).toHaveTextContent('Số seri chưa được quản trị viên đăng ký'),
     );
     expect(errorUnder(serial)).toHaveClass('form-error');
-    expect(screen.getByRole('dialog', { name: 'Onboard trụ sạc' })).toBeInTheDocument();
+    expect(screen.getByRole('dialog', { name: 'Đưa trụ vào vận hành' })).toBeInTheDocument();
   });
 
   it('an Operator with no station cannot onboard; Escape cancels the form', async () => {
@@ -163,10 +165,10 @@ describe('Onboard trụ sạc (màn 19)', () => {
       [SITES]: { status: 200, body: { items: [], total: 0, page: 1, page_size: 100 } },
     });
     const { user } = renderApp('/operator/charge-points', session(STAFF));
-    await user.click(await screen.findByRole('button', { name: 'Onboard trụ sạc' }));
+    await user.click(await screen.findByRole('button', { name: 'Đưa trụ vào vận hành' }));
     const dialog = within(screen.getByRole('dialog'));
-    expect(await dialog.findByText('Operator chưa có trạm sạc nào.')).toBeInTheDocument();
-    expect(dialog.getByRole('button', { name: 'Onboard' })).toBeDisabled();
+    expect(await dialog.findByText('Đơn vị vận hành chưa có trạm sạc nào.')).toBeInTheDocument();
+    expect(dialog.getByRole('button', { name: 'Đưa vào vận hành' })).toBeDisabled();
     await user.keyboard('{Escape}');
     expect(screen.queryByRole('dialog')).toBeNull();
   });

@@ -19,6 +19,8 @@ import 'package:driver_app/features/profile/data/api_profile_repository.dart';
 import 'package:driver_app/features/profile/domain/driver_profile.dart';
 import 'package:driver_app/features/stations/application/connector_lookup_controller.dart';
 import 'package:driver_app/features/stations/application/stations_controller.dart';
+import 'package:driver_app/features/stations/application/map_location_controller.dart';
+import 'package:driver_app/features/stations/domain/map_location.dart';
 import 'package:driver_app/features/stations/data/api_connector_lookup_repository.dart';
 import 'package:driver_app/features/stations/data/api_station_repository.dart';
 import 'package:flutter/widgets.dart';
@@ -80,6 +82,7 @@ Future<ProviderContainer> mountConsistencyApp(
   final container = ProviderContainer(
     overrides: [
       apiRouterProvider.overrideWithValue(true),
+      mapLocationRepositoryProvider.overrideWithValue(_ConsistencyLocation()),
       authRepositoryProvider.overrideWithValue(
         ApiAuthRepository(session, consentVersion: null),
       ),
@@ -144,4 +147,29 @@ class _LocalizedProfile extends ProfileController {
       ),
     );
   }
+}
+
+class _ConsistencyLocation implements MapLocationRepository {
+  @override
+  Future<MapLocation> current() async => const MapLocation(10.77, 106.66);
+}
+
+Future<void> selectConsistencyOrigin(WidgetTester tester) async {
+  final selector = find.byKey(const Key('open-discovery-origin'));
+  if (selector.evaluate().isEmpty) {
+    await tester.scrollUntilVisible(
+      selector,
+      160,
+      scrollable: find.byType(Scrollable).first,
+    );
+  }
+  await Scrollable.ensureVisible(tester.element(selector), alignment: .5);
+  await tester.pump();
+  await tester.tap(selector);
+  await tester.pumpAndSettle();
+  final location = find.byKey(const Key('discovery-use-location'));
+  await Scrollable.ensureVisible(tester.element(location), alignment: .5);
+  await tester.pump();
+  await tester.tap(location);
+  await tester.pumpAndSettle();
 }

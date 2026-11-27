@@ -93,6 +93,12 @@ export class OcppHandlers {
             (params as StartTransactionRequest).connectorId,
             transactionId,
           );
+        if (this.driverCharging)
+          setImmediate(() => {
+            void this.driverCharging!.onMeter(transactionId).catch(() =>
+              this.logger.error('WP3 start protection pending; recovery will retry'),
+            );
+          });
         // ADR-0012: phiên đã diễn ra thì luôn ghi nhận → luôn Accepted, kể cả idTag lạ.
         return { transactionId, idTagInfo: { status: 'Accepted' } };
       }
