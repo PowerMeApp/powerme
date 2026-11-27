@@ -515,6 +515,51 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/InvalidTransition' }
 
+  /admin/v1/network/charge-points:
+    get:
+      tags: [monitoring]
+      operationId: listNetworkChargePoints
+      x-roles: [admin]
+      x-status: implemented
+      x-source: 'operator-api/admin-network.ts (FE-18)'
+      x-owner: Nghĩa (FE-18)
+      x-refs: [UC-ADM-07, BR-P38, BR-P39, 'Table 5 #31']
+      summary: Trụ sạc của mọi operator, trạng thái trực tiếp và sự cố đang mở (màn 31)
+      description: |
+        Cùng truy vấn và trường như listOperatorChargePoints, không giới hạn operator; thêm
+        `operator` và `open_faults`. Dữ liệu lab (operator LOADTEST01) bị loại như GET /admin/v1/summary.
+        Chưa có uptime / utilisation (BR-P43).
+      parameters:
+        - name: operator_id
+          in: query
+          schema: { $ref: '#/components/schemas/Id' }
+        - name: site_id
+          in: query
+          schema: { $ref: '#/components/schemas/Id' }
+        - name: lifecycle
+          in: query
+          schema: { $ref: '#/components/schemas/ChargePointLifecycle' }
+        - name: online
+          in: query
+          schema: { type: boolean }
+        - name: charge_point_q
+          in: query
+          schema: { type: string, maxLength: 100 }
+        - name: site_q
+          in: query
+          schema: { type: string, maxLength: 100 }
+        - $ref: '#/components/parameters/page'
+        - $ref: '#/components/parameters/pageSize'
+      responses:
+        '200':
+          description: Trụ sạc của mọi operator
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/NetworkChargePointPage' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
   /admin/v1/charge-points:
     get:
       tags: [onboarding]
@@ -2028,8 +2073,9 @@ paths:
       tags: [accounts]
       operationId: listOperators
       x-roles: [admin]
-      x-status: planned
-      x-owner: Trí
+      x-status: implemented
+      x-source: 'operator-api/admin-operators.ts (FE-18)'
+      x-owner: Nghĩa (FE-18)
       x-refs: [UC-ADM-02, BR-P11, BR-P16]
       summary: Operator đối tác (để gán nhân viên và lọc báo cáo)
       parameters:
@@ -3053,6 +3099,26 @@ components:
           required: [items]
           properties:
             items: { type: array, items: { $ref: '#/components/schemas/ChargePoint' } }
+    NetworkChargePoint:
+      allOf:
+        - $ref: '#/components/schemas/ChargePoint'
+        - type: object
+          required: [operator, open_faults]
+          properties:
+            operator: { $ref: '#/components/schemas/OperatorRef' }
+            open_faults:
+              type: object
+              required: [total, top_severity]
+              properties:
+                total: { type: integer, minimum: 0 }
+                top_severity: { type: [string, 'null'], enum: [critical, major, minor, none, null] }
+    NetworkChargePointPage:
+      allOf:
+        - $ref: '#/components/schemas/PageMeta'
+        - type: object
+          required: [items]
+          properties:
+            items: { type: array, items: { $ref: '#/components/schemas/NetworkChargePoint' } }
     ChargePointDetail:
       allOf:
         - $ref: '#/components/schemas/ChargePoint'

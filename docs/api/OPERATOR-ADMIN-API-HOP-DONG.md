@@ -329,6 +329,7 @@ tách theo bề mặt — refresh token không mang `role`, role đọc lại t�
 | `POST /operator/v1/charge-points/onboard` | operator_staff | UC-OPS-01, FR-09, STM-3 #2, SD-5a | **done** BE-44 · `charge-point-onboarding.ts` → `ChargePointOnboardingService.onboard` · Trí (route) / Ân (service) | body như console T119 (`OnboardRequest`); actor = staff của token (manager và technician đều được); site phải thuộc operator của token (DB) → khác 403 `site_of_other_operator`, site không có → 404 `site_not_found` (code và OpenAPI); **`site_id` trong body phải là số nguyên** (`parseOnboardBody`), dù OpenAPI ghi `Id` dạng chuỗi — màn 19 gửi số (FE-02); 201, mật khẩu hiện **một lần**, `no-store`, không log; 409 `serial_not_registered` / `already_onboarded`. Đường dẫn có `/onboard` (giống console) thay cho `POST /operator/v1/charge-points` bản nháp, để không chung đường dẫn với `GET` giám sát. Console `/api/operator/charge-points/onboard` vẫn giữ cho demo |
 | `POST /operator/v1/charge-points/{id}/disable` | operator_staff | STM-3 #4, ADR-0016 | planned · Ân | chỉ có `ChargePointLifecyclePolicy`, chưa có service ghi DB |
 | `POST /operator/v1/charge-points/{id}/enable` | operator_staff | STM-3 #5 | planned · Ân | |
+| `GET /admin/v1/network/charge-points` | admin | UC-ADM-07, BR-P38/P39, Table 5 #31 | **implemented** FE-18 · Nghĩa · `admin-network.ts` | màn 31: trụ của mọi operator (trừ dữ liệu lab), cùng trường trực tiếp như `GET /operator/v1/charge-points` (súng, Offline, `status_quality`) + `operator {id, legal_name}` + `open_faults {total, top_severity}`; lọc như màn 18 + `operator_id`; chưa có uptime / utilisation (BR-P43, chờ API metrics) |
 | `GET /admin/v1/charge-points` | admin | UC-ADM-03, UC-ADM-07, FR-15 | **partial** BE-44 · `charge-point-onboarding.ts` · Trí | đã làm: `lifecycle`, `page`/`page_size`, mới nhất trước, `RegistryChargePoint` (kèm operator, site; không bao giờ có băm/mật khẩu); chưa làm: `operator_id`, `q` (→ 400 `invalid_input`); màn 29 (FE-15) lọc theo `lifecycle` |
 | `POST /admin/v1/charge-points` | admin | UC-ADM-03, FR-15, STM-3 #1 | **done** BE-44 · `charge-point-onboarding.ts` → `ChargePointOnboardingService.registerDevice` · Trí (route) / Ân (service) | body như console T119 (`RegisterDeviceRequest`); actor = admin của token; 201 `RegistryChargePoint`; 409 `serial_already_registered`. Console `POST /api/admin/charge-points` vẫn giữ cho demo. Màn 29 (FE-15) gọi route này từ nút "Đăng ký trụ" |
 | `GET /admin/v1/charge-points/{id}` | admin | UC-ADM-03 | planned · Ân | |
@@ -413,7 +414,7 @@ thuộc Platform Administration; Operator xem doanh thu trạm mình qua `/opera
 | `PUT /admin/v1/users/{id}/role` | admin | UC-ADM-02, BR-P16 | planned · Trí | một role mỗi user; tài xế không đổi role được (409) |
 | `POST /admin/v1/users/{id}/lock` | admin | UC-ADM-01, F-13 | planned · Trí | `active → suspended`, có hiệu lực ở request kế tiếp |
 | `POST /admin/v1/users/{id}/unlock` | admin | UC-ADM-01, F-13 | planned · Trí | `closed` không mở lại |
-| `GET /admin/v1/operators` | admin | UC-ADM-02, BR-P11 | planned · Trí | để gán nhân viên và lọc báo cáo |
+| `GET /admin/v1/operators` | admin | UC-ADM-02, BR-P11 | **implemented** FE-18 · Nghĩa · `admin-operators.ts` | để gán nhân viên và lọc báo cáo (màn 31, 28); `status`, `page`/`page_size` (1–100, mặc định 50), sắp theo tên; không có operator lab (LOADTEST01) |
 | `GET /admin/v1/rfid-cards` | admin | UC-ADM-04, FR-15, BR-P15 | **implemented local (chưa merge/deploy)** WP3/T146 · `admin-rfid-cards.ts` | |
 | `POST /admin/v1/rfid-cards` | admin | UC-ADM-04, BR-P15, BR-P23 | **implemented local (chưa merge/deploy)** WP3/T146 · `admin-rfid-cards.ts` | `card_kind` ∈ `online`, `free_vend` |
 | `PATCH /admin/v1/rfid-cards/{id}` | admin | UC-ADM-04, BR-P15 | **implemented local (chưa merge/deploy)** WP3/T146 · `admin-rfid-cards.ts` | gắn/bỏ tài xế, khoá/mở; không đổi loại |
@@ -915,7 +916,8 @@ trạng thái (2xx/4xx nghiệp vụ khác với 401/403). Ba điều kiện c�
 | 57 | `PUT /api/admin/v1/users/{userId}/role` | 401 | 403 | 403 | ✓ | planned |
 | 58 | `POST /api/admin/v1/users/{userId}/lock` | 401 | 403 | 403 | ✓ | planned |
 | 59 | `POST /api/admin/v1/users/{userId}/unlock` | 401 | 403 | 403 | ✓ | planned |
-| 60 | `GET /api/admin/v1/operators` | 401 | 403 | 403 | ✓ | planned |
+| 60 | `GET /api/admin/v1/operators` | 401 | 403 | 403 | ✓ | implemented (FE-18) |
+| 60a | `GET /api/admin/v1/network/charge-points` | 401 | 403 | 403 | ✓ | implemented (FE-18) |
 | 61 | `GET /api/admin/v1/rfid-cards` | 401 | 403 | 403 | ✓ | implemented local (chưa merge/deploy) · WP3/T146 |
 | 62 | `POST /api/admin/v1/rfid-cards` | 401 | 403 | 403 | ✓ | implemented local (chưa merge/deploy) · WP3/T146 |
 | 63 | `PATCH /api/admin/v1/rfid-cards/{cardId}` | 401 | 403 | 403 | ✓ | implemented local (chưa merge/deploy) · WP3/T146 |

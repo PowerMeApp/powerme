@@ -193,6 +193,9 @@ export function AdminHomePage() {
                     <span className="muted">Không có sự cố đang mở.</span>
                   )}
                 </p>
+                <Link className="tile-link" to="/admin/network">
+                  Xem chi tiết →
+                </Link>
               </section>
             )}
             {s.operators.total > 0 && (

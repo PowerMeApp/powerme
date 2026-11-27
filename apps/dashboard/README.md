@@ -41,7 +41,8 @@ npm run build -w @powerme/dashboard
 | 27 | Admin Dashboard (hub) | `/admin` | FE-01b (khung; số liệu ở FE-14) |
 | 29 | Device Registry (UC-ADM-03) | `/admin/charge-points` | FE-15 (API BE-44 `GET`/`POST /api/admin/v1/charge-points`; chỉ xem + đăng ký serial, chưa sửa) |
 | 30 | RFID Cards (Card Registry, UC-ADM-04) | `/admin/rfid-cards` | T161 (API T146 + tìm tài xế `GET /api/admin/v1/users`) |
-| 28, 31–33 | Users & Roles, Network Monitor, Billing Exceptions, Refund / Retry | `/admin/…` | FE-09 |
+| 31 | Charge Point Network Monitor (UC-ADM-07) | `/admin/network` | FE-18 (`GET /api/admin/v1/network/charge-points`, `GET /api/admin/v1/operators`; chưa có uptime / utilisation, chờ API metrics) |
+| 28, 32–33 | Users & Roles, Billing Exceptions, Refund / Retry | `/admin/…` | FE-19, FE-09 |
 
 ## Quy tắc
 

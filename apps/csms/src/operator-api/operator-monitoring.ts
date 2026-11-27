@@ -24,7 +24,11 @@
 import { FaultActionError, type FaultActions, type FaultActor } from '../console/fault-actions.js';
 import type { Db } from '../db/db.module.js';
 import type { ConnectionRegistry } from '../ocpp-gateway/connection-registry.js';
-import { guideFor } from '../stations/faults/error-code-guide.js';
+import {
+  compareSeverity,
+  guideFor,
+  type FaultSeverity,
+} from '../stations/faults/error-code-guide.js';
 import { AuthError } from '../users/auth.js';
 import type { Principal } from '../users/roles-guard.js';
 import { toDto } from './operator-faults.js';
@@ -61,6 +65,8 @@ export type MonitoringRoute =
       siteQ: string | null;
       page: number;
       pageSize: number;
+      /** FE-18 admin network list only: `operator_id` filter; null = every Operator. */
+      operatorId?: string | null;
     }
   | { kind: 'detail'; id: string }
   | { kind: 'summary' };
@@ -79,6 +85,18 @@ export function matchMonitoringRoute(rest: string, query: URLSearchParams): Moni
     return { kind: 'detail', id: detail[1]! };
   }
   if (rest !== '/charge-points') return null;
+  return parseChargePointList(query, false);
+}
+
+/**
+ * The list filters of screen 18; with `admin` (FE-18, screen 31) also `operator_id`. Unknown or
+ * repeated keys → 400.
+ */
+export function parseChargePointList(
+  query: URLSearchParams,
+  admin: boolean,
+): Extract<MonitoringRoute, { kind: 'charge-points' }> {
+  const keys = [...query.keys()];
   const allowed = [
     'site_id',
     'lifecycle',
@@ -87,9 +105,11 @@ export function matchMonitoringRoute(rest: string, query: URLSearchParams): Moni
     'site_q',
     'page',
     'page_size',
+    ...(admin ? ['operator_id'] : []),
   ];
   if (keys.some((k) => !allowed.includes(k)) || new Set(keys).size !== keys.length)
     throw new AuthError(400, 'invalid_input');
+  const operatorId = query.get('operator_id');
   const siteId = query.get('site_id');
   const lifecycle = query.get('lifecycle');
   const online = query.get('online');
@@ -99,6 +119,7 @@ export function matchMonitoringRoute(rest: string, query: URLSearchParams): Moni
   const pageSize = intParam(query.get('page_size'), DEFAULT_PAGE_SIZE);
   if (
     (siteId !== null && !/^[1-9][0-9]{0,18}$/.test(siteId)) ||
+    (operatorId !== null && !/^[1-9][0-9]{0,18}$/.test(operatorId)) ||
     (lifecycle !== null && !(LIFECYCLES as readonly string[]).includes(lifecycle)) ||
     (online !== null && online !== 'true' && online !== 'false') ||
     [cpQ, siteQ].some((t) => t.length > MAX_QUERY || /[\x00-\x1f\x7f]/.test(t)) ||
@@ -115,6 +136,7 @@ export function matchMonitoringRoute(rest: string, query: URLSearchParams): Moni
     siteQ: siteQ ? searchText(siteQ) : null,
     page,
     pageSize,
+    ...(admin ? { operatorId } : {}),
   };
 }
 
@@ -135,21 +157,29 @@ function intParam(raw: string | null, fallback: number): number {
   return /^[1-9][0-9]{0,5}$/.test(raw) ? Number(raw) : NaN;
 }
 
+/**
+ * Lab data kept on staging (NFR-03 load test Operator); never counted or listed across Operators
+ * (review #169). An Operator-scoped query never sees it anyway.
+ */
+export const TEST_OPERATOR_TAX_CODE = 'LOADTEST01';
+
 /** `offline` for a charge point row aliased `cp` ($2 = offline threshold in ms). */
 export const OFFLINE_SQL = `(NOT cp.is_online OR cp.last_message_at IS NULL
   OR cp.last_message_at < now()-($2::bigint*interval '1 millisecond'))`;
 
 /**
- * The Operator's charge points after the list filters ($1 operator, $2 offline ms, $3 lifecycle,
+ * The Operator's charge points after the list filters ($1 operator — null = every Operator but the
+ * lab one (FE-18, Admin only), $2 offline ms, $3 lifecycle,
  * $4 site, $5 online, $6 one charge point id, $7 charge point search, $8 station search; both
  * normalised). `decommissioned` only when asked for (D24) or when one charge point is asked for by
  * id (screen 20). Each search matches a substring of the code / serial (charge point) or code /
  * name (station), or the exact id.
  */
 const FILTERED_CTE = `WITH cps AS (
-  SELECT cp.*,st.site_code,st.site_name,${OFFLINE_SQL} AS offline
-  FROM charge_points cp JOIN sites st ON st.id=cp.site_id
-  WHERE st.operator_id=$1
+  SELECT cp.*,st.site_code,st.site_name,op.id AS operator_id,op.legal_name AS operator_name,
+    ${OFFLINE_SQL} AS offline
+  FROM charge_points cp JOIN sites st ON st.id=cp.site_id JOIN operators op ON op.id=st.operator_id
+  WHERE ($1::bigint IS NULL AND op.tax_code<>'${TEST_OPERATOR_TAX_CODE}' OR st.operator_id=$1)
     AND (($3::text IS NULL AND ($6::bigint IS NOT NULL OR cp.lifecycle<>'decommissioned'))
       OR cp.lifecycle::text=$3)
     AND ($4::bigint IS NULL OR st.id=$4)
@@ -174,7 +204,7 @@ export async function runMonitoringRoute(
   if (route.kind === 'summary') return summary(db, operatorId, thresholds);
   if (route.kind === 'charge-points') {
     const page = await chargePoints(db, operatorId, route, thresholds, registry);
-    return { ...page, items: page.items.map(({ extra: _extra, ...cp }) => cp) };
+    return { ...page, items: page.items.map(({ extra: _extra, admin: _admin, ...cp }) => cp) };
   }
   return detail(db, principal, route.id, thresholds, registry, faults);
 }
@@ -228,7 +258,7 @@ async function detail(
       [id],
     ),
   ]);
-  const { extra, ...base } = cp;
+  const { extra, admin: _admin, ...base } = cp;
   return {
     ...base,
     ...extra,
@@ -247,9 +277,14 @@ async function detail(
   };
 }
 
-async function chargePoints(
+/**
+ * One page of charge points. `operatorId` scopes to one Operator (screens 18 / 20, and the Operator
+ * filter of screen 31); null = every Operator (screen 31). Rows carry `operator` and the open
+ * faults' codes in `admin` for the network list.
+ */
+export async function chargePoints(
   db: Db,
-  operatorId: string,
+  operatorId: string | null,
   route: Extract<MonitoringRoute, { kind: 'charge-points' }>,
   { staleAfterMs, offlineAfterMs }: MonitoringThresholds,
   registry?: ConnectionRegistry,
@@ -277,6 +312,9 @@ async function chargePoints(
     site_id: string;
     site_code: string;
     site_name: string;
+    operator_id: string;
+    operator_name: string;
+    open_fault_codes: (string | null)[];
     connectors: Record<string, unknown>[];
     firmware_version: string | null;
     rated_power_kw: number | null;
@@ -286,6 +324,9 @@ async function chargePoints(
     `${FILTERED_CTE}
      SELECT count(*) OVER()::int AS total,f.id::text,f.serial_number,f.display_code,f.model,
        f.lifecycle,f.is_online,f.last_message_at,f.site_id::text,f.site_code,f.site_name,
+       f.operator_id::text,f.operator_name,
+       coalesce((SELECT jsonb_agg(fe.error_code) FROM fault_events fe
+         WHERE fe.charge_point_id=f.id AND fe.status<>'resolved'),'[]'::jsonb) AS open_fault_codes,
        f.firmware_version,f.rated_power_kw::float8,f.reports_soc,f.supports_reservation,
        coalesce((SELECT jsonb_agg(jsonb_build_object(
          'connector_id',c.id::text,'connector_no',c.connector_no,'connector_type',c.connector_type,
@@ -337,6 +378,11 @@ async function chargePoints(
         rated_power_kw: r.rated_power_kw,
         reports_soc: r.reports_soc,
         supports_reservation: r.supports_reservation,
+      },
+      /** Network list only (FE-18): the Operator and the open faults by severity. */
+      admin: {
+        operator: { id: r.operator_id, legal_name: r.operator_name },
+        open_faults: openFaults(r.open_fault_codes),
       },
     })),
     total,
@@ -429,4 +475,14 @@ async function summary(db: Db, operatorId: string, { offlineAfterMs }: Monitorin
     unattributed_sessions: queues!.unattributed,
     uncertain_starts: queues!.uncertain,
   };
+}
+
+/** Open faults of one charge point: total and the most severe (null when none). */
+function openFaults(codes: (string | null)[]) {
+  let top: FaultSeverity | null = null;
+  for (const code of codes) {
+    const severity = guideFor(code).severity;
+    if (top === null || compareSeverity(severity, top) < 0) top = severity;
+  }
+  return { total: codes.length, top_severity: top };
 }

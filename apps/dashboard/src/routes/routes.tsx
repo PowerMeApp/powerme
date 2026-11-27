@@ -9,6 +9,7 @@ import { AppShell } from '../layouts/AppShell';
 import { AdminHomePage } from '../pages/admin/AdminHomePage';
 import { AdminRevenuePage } from '../pages/admin/AdminRevenuePage';
 import { DeviceRegistryPage } from '../pages/admin/DeviceRegistryPage';
+import { NetworkMonitorPage } from '../pages/admin/NetworkMonitorPage';
 import { RfidCardsPage } from '../pages/admin/RfidCardsPage';
 import { LoginPage } from '../pages/LoginPage';
 import { ChargePointDetailPage } from '../pages/operator/ChargePointDetailPage';
@@ -59,6 +60,7 @@ export const routes: RouteObject[] = [
       { index: true, element: <AdminHomePage /> }, // 27
       { path: 'charge-points', element: <DeviceRegistryPage /> }, // 29
       { path: 'rfid-cards', element: <RfidCardsPage /> }, // 30
+      { path: 'network', element: <NetworkMonitorPage /> }, // 31
       { path: 'revenue', element: <AdminRevenuePage /> }, // 35
       { path: '*', element: <Navigate to="/admin" replace /> },
     ],
