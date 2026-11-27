@@ -2,8 +2,8 @@
 !include ../_style.iuml
 skinparam nodesep 40
 skinparam ranksep 50
-title CD-3 (Software level, CSMS) — Class diagram of WF-03: lost connection, replay and reconciliation\nFrom apps/csms/src at origin/main ce3902c · Behaviour: SD-3a, SD-3b · State: STM-1
-footer Owner: Ngô Văn Minh Trí (WP2) · v2.0 · 01/11/2026 · names = code · main members only
+title CD-3 (Software level, CSMS) — Class diagram of WF-03: lost connection, replay and reconciliation\nFrom apps/csms/src at origin/main d168348 · Behaviour: SD-3a, SD-3b · State: STM-1
+footer Owner: Ngô Văn Minh Trí (WP2) · v2.1 · 27/11/2026 · names = code · main members only
 
 package "ocpp-gateway" {
   class OcppServer <<component>> {
@@ -26,6 +26,10 @@ package "ocpp-gateway" {
   class OcppHandlers <<component>> {
     + dispatch(action : string, params : unknown, ctx : InboundContext) : object
   }
+  class OfflineAuthCheckService <<component>> {
+    + scheduleAfterBoot(identity : string, epoch : number) : void
+    + check(conn : Connection) : OfflineAuthCheckResult
+  }
 }
 package "reconciliation" {
   class ReplayDetector {
@@ -44,6 +48,10 @@ package "sessions" {
     + onMeterValues(req, ctx) : void
     + onStopTransaction(req, ctx) : void
     + onStationOffline(chargePointId : number, at : Date) : number
+  }
+  class RfidCreditProtection <<component>> {
+    + onSession(transactionNo : number) : void
+    + sweep() : number
   }
   class SessionStateMachine {
     + apply(from : SessionStatus, event : SessionEvent) : SessionStatus
@@ -80,6 +88,26 @@ package "entities (tables)" {
     + meterStopWh : number [0..1]
     + orphanedAt : Date [0..1]
   }
+  class RfidCreditHold <<entity>> {
+    + amountVnd : number
+    + state : held | released
+    + reason : string
+    + releasedAt : Date [0..1]
+  }
+  class RfidStopJob <<entity>> {
+    + reason : string
+    + state : pending | inflight | awaiting_stop | retry | exhausted | completed
+    + attempts : number
+    + attemptLimit : number
+    + nextAttemptAt : Date
+  }
+  class ChargePointOfflineAuthCheck <<entity>> {
+    + epoch : number
+    + configValues : json
+    + changeResults : json
+    + offlineCardRisk : boolean
+    + riskReason : string [0..1]
+  }
   class MeterValue <<entity>> {
     + cpTimestamp : Date
     + replayed : boolean
@@ -97,6 +125,7 @@ OcppServer --> OcppMessageLogger
 OcppServer --> OcppHandlers
 OcppServer --> OfflineGraceService
 OcppHandlers --> SessionsService
+OcppHandlers --> OfflineAuthCheckService
 OfflineGraceService --> SessionsService
 SessionsService --> SessionStateMachine
 SessionsService --> ReconciliationService
@@ -106,6 +135,11 @@ OcppMessageLogger ..> OcppMessageLog : <<create>>
 SessionsService ..> Session : <<update>>
 SessionsService ..> MeterValue : <<create>>
 ReconciliationService ..> ReconciliationRecord : <<create>>
+OfflineAuthCheckService ..> ChargePointOfflineAuthCheck : <<create>>
+SessionsService ..> RfidCreditHold : <<create>>
+RfidCreditProtection ..> RfidStopJob : <<create>>
+Session "1" -- "0..1" RfidCreditHold : holds credit for >
+Session "1" -- "0..1" RfidStopJob : stopped by >
 Session "1" *-- "0..*" MeterValue
 Session "1" *-- "0..*" ReconciliationRecord
 
