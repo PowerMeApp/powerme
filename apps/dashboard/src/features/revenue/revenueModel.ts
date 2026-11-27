@@ -22,6 +22,7 @@ export const GROUP_LABEL: Record<RevenueGroupBy, string> = {
  * codes show as is. Not shown on the screen for now (Nghĩa 20/11 removed the notes).
  */
 export const REASON_LABEL: Record<string, string> = {
+  account_closed: 'Tài khoản đã đóng, đã dừng tự động quyết toán',
   promotion_unsupported: 'Có khuyến mãi (chưa áp vào quyết toán)',
   ineligible: 'Chưa đủ điều kiện trừ tiền (gồm thẻ RFID chờ T115)',
   posted_without_debit: 'Lệch sổ: đã quyết toán nhưng không có khoản trừ',

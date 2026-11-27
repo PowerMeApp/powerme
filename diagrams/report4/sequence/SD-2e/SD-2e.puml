@@ -1,23 +1,25 @@
 @startuml SD-2e
 !include ../_style.iuml
-title SD-2e (Software level, CSMS billing) — Admin refunds a top-up\nPrecondition: Admin logged in, top-up credited · System view: AD-9 · State: STM-4, STM-10, STM-7
-footer Owner: Lê Bảo Khang (WP5) · v2.0 · 01/11/2026 · Refund entity = ERD v1.1 · RefundService is new (add to CD-2) · left gate = Admin console, right gate = Payment Gateway
+title SD-2e (Software level, CSMS billing) — Admin refunds a top-up (manual refund by customer service)\nPrecondition: Admin logged in, top-up credited · System view: AD-9 · State: STM-4, STM-10, STM-7
+footer Owner: Lê Bảo Khang (WP5) · v3.0 · 26/11/2026 · manual refund (decision D-AC) · Refund entity = ERD v1.1 · Admin routes and method names follow #212 (open)
 
+actor "Admin" as AD
+participant "«boundary»\n<u>:AdminConsole</u>\n(Billing Exceptions)" as UI
 participant "«component»\n<u>:AdminBillingController</u>" as AB
 participant "«component»\n<u>:TopUpService</u>" as TS
 participant "«component»\n<u>:CreditLedgerService</u>" as CL
 participant "«component»\n<u>:LoyaltyService</u>" as LS
 participant "«component»\n<u>:RefundService</u>" as RS
-participant "«port»\n<u>:VnpayAdapter</u>" as VA
 participant "«component»\n<u>:EInvoiceService</u>" as EI
 
-== Admin records the refund ==
-[-> AB ++ : POST /admin/billing/top-ups/{id}/refund [HTTPS, JWT admin]
+== 1. Admin creates the refund request ==
+AD -> UI : Create refund request (top-up)
+UI -> AB ++ : POST refund request (topUpId) [HTTPS, JWT admin]
 AB -> TS ++ : refund(topUpId, adminId)
-TS -> TS : check top-up credited and balance ≥ amount
-break not credited, or balance < amount
+TS -> TS : check top-up credited and\navailable balance ≥ amount
+break not credited, or insufficient_available_balance
   TS --> AB : RefundNotAllowed(reason)
-  [<-- AB : 409 / 422 {reason}
+  AB --> UI : 409 / 422 {reason}
 end
 TS -> TS : credited → refunded
 TS -> CL ++ : post(accountId, refund, −amountVnd, topUpId)
@@ -26,30 +28,58 @@ opt points were redeemed
   TS -> LS ++ : restoreForTopUp(topUp)
   LS --> TS --
 end
-TS -> RS ++ : create(topUpId, kind = top_up, amountPaidVnd, adminId) : refundId
+TS -> RS ++ : create(topUpId, kind = top_up, amountPaidVnd, adminId)
 hnote over RS : {refund.status = requested}
 RS --> TS -- : refundId
 TS --> AB -- : refundId
-[<-- AB -- : 202 {refundId, status = requested}
+AB --> UI -- : {refundId, status = requested,\namountPaidVnd}
+UI --> AD : refund listed for customer service
 
-== Refund is sent to the original payment source ==
-[o-> RS ++ : send(refundId)  (job, attempt n)
-RS -> VA ++ : refund(ref, amountVnd) : result
-VA ->] : refund [HTTPS]
-note right : {d ≤ 10 s}; unknown result →\nquery before resending
-VA <--] : refund result
-VA --> RS -- : result
-alt confirmed
+== 2. Customer service refunds outside PowerMe ==
+note over AD, UI
+  Customer service refunds amountPaidVnd to the
+  original payment source in the VNPay merchant
+  portal (outside the system) and notes the gateway
+  refund transaction number.
+end note
+
+== 3. Admin records the result ==
+alt refunded on the portal
+  AD -> UI : Confirm refund (gateway refund number)
+  UI -> AB ++ : POST confirm (refundId, gatewayRefundNo) [HTTPS, JWT admin]
+  AB -> RS ++ : confirmDone(refundId, gatewayRefundNo, adminId)
+  break refund number already recorded (unique)
+    RS --> AB : RefundNoUsed
+    AB --> UI : rejected {reason}
+  end
   RS -> RS : requested → done
+  hnote over RS : {refund.status = done}
   RS ->> EI : adjustForRefund(refund)
   note right : InvoiceAdjustment\nrequested → issued (STM-7)
   RS ->>] : notify Driver (MSG25)
-else transient error and attempts < 4
-  RS -> RS : record error, retry after 5 min / 30 min / 2 h
-else rejected, or 4th attempt failed
+  RS --> AB -- : done
+  AB --> UI -- : {status = done}
+else gateway refused the refund
+  AD -> UI : Mark failed (reason)
+  UI -> AB ++ : POST mark failed (refundId, reason) [HTTPS, JWT admin]
+  AB -> RS ++ : markFailed(refundId, reason, adminId)
   RS -> RS : requested → failed
-  RS ->>] : list on Billing Exceptions, notify Admin
+  hnote over RS : {refund.status = failed}
+  RS --> AB --
+  AB --> UI -- : {status = failed}
+  opt later: Admin redoes the refund
+    AD -> UI : Redo refund
+    UI -> AB ++ : POST redo (refundId) [HTTPS, JWT admin]
+    AB -> RS ++ : redo(refundId, adminId)
+    RS -> RS : failed → requested
+    RS --> AB --
+    AB --> UI -- : {status = requested}
+    note over AD, UI : continue with step 2,\nthen confirm as above
+  end
 end
-deactivate RS
-note over AB, EI : Same pattern for a late-payment refund (kind = late_payment, no ledger entry) and for an Admin retry of a failed refund (one attempt, counter not reset).
+note over AD, EI
+  Same pattern for a late-payment refund (kind = late_payment, no ledger entry) and for closure
+  refunds (kind = account_closure, created by the system at closure, SD-2f; they wait in the same list).
+  PowerMe makes no refund API call and no querydr for refunds; no automatic retry, no background refund worker.
+end note
 @enduml

@@ -560,20 +560,149 @@ describeDb('T148 RFID settlement over OCPP and owner-scoped JWT HTTP', () => {
     });
   });
 
-  it('holds a closed account with an explicit D6 reason and no debit', async () => {
+  it('T158 stops closed RFID settlement after Stop without rejecting its ACK', async () => {
     const s = await start();
     await meter(s.tx, 2000);
     await q(
       "UPDATE credit_accounts SET status='closed',closed_at=now(),updated_at=now() WHERE driver_id=$1",
       [driver],
     );
-    await stop(s.tx);
-    expect(await job(s.id)).toMatchObject({
-      state: 'pending',
-      reason: 'account_closed',
-      last_error_code: null,
-    });
+    expect(await stop(s.tx)).toEqual({ idTagInfo: { status: 'Accepted' } });
+    expect(await job(s.id)).toMatchObject({ state: 'ineligible', reason: 'account_closed' });
     expect(await effects(s.id)).toEqual({ debit: 0, earn: 0, statement: 0 });
+  });
+
+  it.each(['rfid', 'app_qr'])(
+    'T158 stops a due legacy pending/account_closed %s job once',
+    async (origin) => {
+      const sid = await storedSession();
+      if (origin === 'app_qr') {
+        const model = await id(
+          "INSERT INTO vehicle_models(brand,model_name) VALUES('T158','Test') RETURNING id",
+        );
+        const vehicle = await id(
+          "INSERT INTO vehicles(driver_id,vehicle_model_id,plate_number) VALUES($1,$2,'T158') RETURNING id",
+          [driver, model],
+        );
+        await q("UPDATE sessions SET origin='app_qr' WHERE id=$1", [sid]);
+        await q(
+          `INSERT INTO driver_charge_intents(driver_id,connector_id,vehicle_id,idempotency_key,request_hash,
+        id_tag,energy_limit_wh,reserved_vnd,state,session_id,connector_released_at)
+        SELECT $2,connector_id,$3,'t158','t158','T158-app',1000,0,'effect',id,now() FROM sessions WHERE id=$1`,
+          [sid, driver, vehicle],
+        );
+      }
+      await q("UPDATE credit_accounts SET status='closed',closed_at=now() WHERE driver_id=$1", [
+        driver,
+      ]);
+      await q('UPDATE tariff_periods SET effective_from=current_date+2 WHERE operator_id=$1', [op]);
+      await q(
+        "UPDATE charge_settlement_jobs SET reason='account_closed',attempts=4,next_attempt_at=now()-interval '1 day' WHERE session_id=$1",
+        [sid],
+      );
+      const before = await job(sid);
+      const balance = (
+        await q('SELECT balance_vnd FROM credit_accounts WHERE driver_id=$1', [driver])
+      )[0]!.balance_vnd;
+      expect(await settlement.retryPending()).toBe(1);
+      const stopped = await job(sid);
+      expect(stopped).toMatchObject({
+        state: 'ineligible',
+        reason: 'account_closed',
+        attempts: 5,
+        last_error_code: null,
+        next_attempt_at: before.next_attempt_at,
+      });
+      for (let i = 0; i < 3; i++) {
+        expect(await settlement.retryPending()).toBe(0);
+        expect(await Promise.all([settlement.settle(sid), settlement.settle(sid)])).toEqual([
+          'ineligible',
+          'ineligible',
+        ]);
+      }
+      expect(await job(sid)).toEqual(stopped);
+      expect(await effects(sid)).toEqual({ debit: 0, earn: 0, statement: 0 });
+      expect(
+        (await q('SELECT balance_vnd FROM credit_accounts WHERE driver_id=$1', [driver]))[0]!
+          .balance_vnd,
+      ).toBe(balance);
+      expect(
+        (await q('SELECT total_cost_vnd FROM sessions WHERE id=$1', [sid]))[0]!.total_cost_vnd,
+      ).toBeNull();
+    },
+  );
+
+  it.each(['pending', 'ineligible'])(
+    'T158 stops a %s job without a configured pricing policy',
+    async (state) => {
+      const sid = await storedSession();
+      await q("UPDATE charge_settlement_jobs SET state=$2,reason='legacy' WHERE session_id=$1", [
+        sid,
+        state,
+      ]);
+      await q("UPDATE credit_accounts SET status='closed',closed_at=now() WHERE driver_id=$1", [
+        driver,
+      ]);
+      const noPolicy = new ChargeSettlementService(
+        db,
+        new CreditLedgerService(db),
+        new LoyaltyService(policy),
+      );
+      expect(await noPolicy.settle(sid)).toBe('ineligible');
+      const stopped = await job(sid);
+      expect(stopped).toMatchObject({ state: 'ineligible', reason: 'account_closed' });
+      expect(await noPolicy.settle(sid)).toBe('ineligible');
+      expect(await job(sid)).toEqual(stopped);
+      expect(await effects(sid)).toEqual({ debit: 0, earn: 0, statement: 0 });
+    },
+  );
+
+  it('T158 preserves the terminal decision against a late pending result and concurrent calls', async () => {
+    const sid = await storedSession();
+    await q('UPDATE tariff_periods SET effective_from=current_date+2 WHERE operator_id=$1', [op]);
+    const originalQuery = db.$client.query.bind(db.$client);
+    let resume!: () => void, arrived!: () => void;
+    const paused = new Promise<void>((r) => {
+      resume = r;
+    });
+    const waiting = new Promise<void>((r) => {
+      arrived = r;
+    });
+    let delay = true;
+    // Delay one pool metadata write; transactional SQL and all billing effects stay real.
+    const spy = jest.spyOn(db.$client, 'query').mockImplementation(((...args: any[]) => {
+      if (
+        delay &&
+        typeof args[0] === 'string' &&
+        args[0].includes('UPDATE charge_settlement_jobs SET state=$2')
+      ) {
+        delay = false;
+        arrived();
+        return paused.then(() => (originalQuery as any)(...args));
+      }
+      return (originalQuery as any)(...args);
+    }) as typeof db.$client.query);
+    const late = settlement.settle(sid);
+    try {
+      await waiting;
+      await q("UPDATE credit_accounts SET status='closed',closed_at=now() WHERE driver_id=$1", [
+        driver,
+      ]);
+      expect(await Promise.all([settlement.settle(sid), settlement.settle(sid)])).toEqual([
+        'ineligible',
+        'ineligible',
+      ]);
+      const stopped = await job(sid);
+      expect(stopped).toMatchObject({ state: 'ineligible', reason: 'account_closed', attempts: 1 });
+      resume();
+      await late;
+      expect(await job(sid)).toEqual(stopped);
+      expect(await effects(sid)).toEqual({ debit: 0, earn: 0, statement: 0 });
+    } finally {
+      resume();
+      await late;
+      spy.mockRestore();
+    }
   });
 
   it('keeps missing accounts recoverable without inventing one during settlement', async () => {
@@ -589,6 +718,9 @@ describeDb('T148 RFID settlement over OCPP and owner-scoped JWT HTTP', () => {
     expect(await job(sid)).toMatchObject({ reason: 'credit_account_missing' });
     expect(await q('SELECT 1 FROM credit_accounts WHERE driver_id=$1', [owner])).toEqual([]);
     expect(await effects(sid)).toEqual({ debit: 0, earn: 0, statement: 0 });
+    await q('INSERT INTO credit_accounts(driver_id,balance_vnd) VALUES($1,0)', [owner]);
+    expect(await settlement.settle(sid)).toBe('posted');
+    expect(await effects(sid)).toEqual({ debit: 1, earn: 1, statement: 1 });
   });
 
   it.each([
