@@ -13,6 +13,9 @@
  *        operator-sessions.ts; logic in Trí's SessionReviewService / UnattributedSessionService)
  *   GET  /api/operator/v1/revenue[.csv], GET /api/admin/v1/revenue[.csv]  (T108a, revenue-report.ts)
  *   GET  /api/admin/v1/transactions[.csv]  (T108b, admin-transactions.ts)
+ *   GET  /api/admin/v1/billing/exceptions, POST …/billing/e-invoices/{id}/retry,
+ *        …/billing/top-ups/{id}/recheck|exception-reviewed, …/billing/payment-conflicts/{id}/review
+ *        (T32 Phần 10a, admin-billing.ts)
  *   GET  /api/admin/v1/me     admin
  *   GET  /api/admin/v1/summary  admin  (FE-14, screen 27, admin-platform.ts)
  *   GET  /api/admin/v1/users?role=driver&q=  admin  (T161 driver search for screen 30, admin-users.ts)
@@ -35,6 +38,14 @@ import type { ConnectionRegistry } from '../ocpp-gateway/connection-registry.js'
 import { matchAdminRoute, runAdminSummary } from './admin-platform.js';
 import type { ChargePointOnboardingService } from '../stations/charge-point-onboarding.service.js';
 import { matchOnboardingRoute, runOnboardingRoute } from './charge-point-onboarding.js';
+import { BillingExceptionsQuery } from '../billing/billing-exceptions.query.js';
+import {
+  billingRouteHasBody,
+  billingRouteMethod,
+  matchBillingRoute,
+  runBillingRoute,
+  type AdminBillingDeps,
+} from './admin-billing.js';
 import { matchFaultRoute, runFaultRoute } from './operator-faults.js';
 import { matchSessionRoute, runSessionRoute, type SessionQueueDeps } from './operator-sessions.js';
 import {
@@ -92,7 +103,10 @@ export function createOperatorApiListener(
   monitoring: MonitoringDeps = { thresholds: DEFAULT_THRESHOLDS },
   /** FE-12. Missing services → session routes answer 503 `sessions_unavailable`. */
   sessions: SessionQueueDeps = {},
+  /** T32 Phần 10a. Missing → billing routes answer 503 `billing_unavailable`. */
+  billing?: AdminBillingDeps,
 ): RequestListener {
+  const billingExceptions = new BillingExceptionsQuery(db);
   return (req, res) => {
     void handle(req, res).catch((error: unknown) => {
       if (res.headersSent) return void res.end();
@@ -309,6 +323,24 @@ export function createOperatorApiListener(
       allow(req, res, 'GET');
       send(res, 200, await runAdminSummary(db, monitoring.thresholds));
       return;
+    }
+    const billingRoute = surface === 'admin' ? matchBillingRoute(rest ?? '') : null;
+    if (billingRoute) {
+      allow(req, res, billingRouteMethod(billingRoute));
+      if (!billing)
+        return send(res, 503, {
+          error: 'billing_unavailable',
+          detail: 'BillingModule chưa được nạp',
+        });
+      const body = billingRouteHasBody(billingRoute) ? await readJsonObject(req, res) : undefined;
+      const reply = await runBillingRoute(
+        billingRoute,
+        principal,
+        billing,
+        billingExceptions,
+        body,
+      );
+      return send(res, reply.status, reply.body);
     }
     if (rest !== '/me') throw new AuthError(404, 'not_found');
     allow(req, res, 'GET');

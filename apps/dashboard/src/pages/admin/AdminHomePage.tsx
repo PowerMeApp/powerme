@@ -1,3 +1,4 @@
+import { RfidProtection } from '../../components/RfidProtection';
 /**
  * Screen 27 — Admin Dashboard (hub, FE-14, UC-ADM-07). Greeting from /me, then:
  *   - platform statistics (20/11): revenue of the current month from T108's
@@ -192,6 +193,7 @@ export function AdminHomePage() {
           Không có ngoại lệ thanh toán và không có sự cố đang mở trên mạng lưới.
         </Alert>
       )}
+      <RfidProtection data={s?.rfid_credit_protection} />
       {s && !empty && (
         <>
           {(billing > 0 || (faults?.total ?? 0) > 0) && (

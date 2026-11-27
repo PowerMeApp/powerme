@@ -547,19 +547,24 @@ describeDb('WP3/T146 admin RFID registry over HTTP and isolated PostgreSQL', () 
         tables.map(async (table) => (await q(`SELECT count(*)::int AS n FROM ${table}`))[0].n),
       );
     const initialCounts = await counts();
+    const initialHold = await q('SELECT * FROM rfid_credit_holds WHERE session_id=$1', [before.id]);
     await patch(card, { driver_id: ids['other'] });
     await patch(card, { status: 'blocked' });
     expect(await svc.authorize(card.card_identifier)).toBe('Blocked');
     await patch(card, { driver_id: null });
     expect(await svc.authorize(card.card_identifier)).toBe('Blocked');
     await patch(card, { driver_id: ids['owner'], status: 'active' });
-    expect(await svc.authorize(card.card_identifier)).toBe('Accepted');
+    // WP3: this physical Start lacks a verified epoch; its captured debt blocks a new authorization.
+    expect(await svc.authorize(card.card_identifier)).toBe('Blocked');
     await patch(card, { driver_id: null });
     expect(await svc.authorize(card.card_identifier)).toBe('Invalid');
     expect(
       (await q('SELECT * FROM sessions WHERE transaction_no=$1', [started.transactionId]))[0],
     ).toEqual(before);
     expect(await counts()).toEqual(initialCounts);
+    expect(await q('SELECT * FROM rfid_credit_holds WHERE session_id=$1', [before.id])).toEqual(
+      initialHold,
+    );
   });
 
   it('never logs credentials or JWTs', () => {

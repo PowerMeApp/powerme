@@ -172,7 +172,19 @@ export async function handleTopUpRoute(
       }
       case 'get': {
         const id = safeId(route.topUpId);
-        return { status: 200, body: topUpJson(await need(ctx.topUps).get(driver, id, ip)) };
+        const service = need(ctx.topUps);
+        const topUp = await service.get(driver, id, ip);
+        // Phần 10a: chỉ GET có `refund_status` (POST không có; schema TopUp khai báo tuỳ chọn), và
+        // chỉ khi có refund `kind = top_up`: không có key = chưa có refund (Khang chốt 25/11).
+        // Đọc sau `get` (đã kiểm chủ sở hữu); app hiện "Đang hoàn tiền" khi refunded mà chưa done.
+        const refundStatus = await service.refundStatus(id);
+        return {
+          status: 200,
+          body: {
+            ...topUpJson(topUp),
+            ...(refundStatus !== null && { refund_status: refundStatus }),
+          },
+        };
       }
     }
   } catch (error) {
