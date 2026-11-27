@@ -349,7 +349,7 @@ export class OfflineAuthCheckService {
       await this.db.$client
         .query(
           `UPDATE remote_commands SET status=$2::remote_command_status,response=$3,error=$4,
-             responded_at=CASE WHEN $2::text IN ('accepted','rejected') THEN greatest(now(),sent_at) END
+             responded_at=CASE WHEN $2::text IN ('accepted','rejected') THEN greatest(now(),sent_at) END,updated_at=now()
            WHERE id=$1`,
           [commandId, status, result.response ? JSON.stringify(result.response) : null, error],
         )
