@@ -106,6 +106,15 @@ export function AppShell() {
               <span>Thẻ RFID</span>
             </NavLink>
           )}
+          {!admin && (
+            <NavLink
+              to="/operator/pricing"
+              className={({ isActive }) => `nav-link${isActive ? ' active' : ''}`}
+            >
+              <Icon name="tag" />
+              <span>Giá &amp; khuyến mãi</span>
+            </NavLink>
+          )}
           <NavLink
             to={admin ? '/admin/revenue' : '/operator/revenue'}
             className={({ isActive }) => `nav-link${isActive ? ' active' : ''}`}

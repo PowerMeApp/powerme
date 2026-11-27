@@ -30,6 +30,10 @@ import type {
   OnboardResult,
   OperatorFaultList,
   PlatformOperatorPage,
+  Promotion,
+  PromotionCreate,
+  PromotionPage,
+  PromotionPatch,
   RefreshResponse,
   RegisterDeviceRequest,
   RegistryChargePoint,
@@ -49,6 +53,8 @@ import type {
   RevenueReport,
   SessionsActiveError,
   SitePage,
+  TariffScheduleRequest,
+  TariffScheduleView,
   TransactionPage,
   TransactionQuery,
   UpdateRfidCardRequest,
@@ -180,6 +186,8 @@ export const api = createApi({
     'RfidCard',
     'Registry',
     'Network',
+    'Tariff',
+    'Promotion',
   ],
   endpoints: (b) => ({
     login: b.mutation<LoginResponse, LoginRequest>({
@@ -254,6 +262,31 @@ export const api = createApi({
     onboardChargePoint: b.mutation<OnboardResult, OnboardRequest>({
       query: (body) => ({ url: 'operator/v1/charge-points/onboard', method: 'POST', body }),
       invalidatesTags: ['ChargePoint', 'Summary'],
+    }),
+    // Screen 24 (FE-06, UC-OPS-06/07): the Operator's tariff schedule and promotions.
+    operatorTariffs: b.query<TariffScheduleView, void>({
+      query: () => 'operator/v1/tariffs',
+      providesTags: ['Tariff'],
+    }),
+    putTariffs: b.mutation<TariffScheduleView, TariffScheduleRequest>({
+      query: (body) => ({ url: 'operator/v1/tariffs', method: 'PUT', body }),
+      invalidatesTags: ['Tariff'],
+    }),
+    operatorPromotions: b.query<PromotionPage, void>({
+      query: () => 'operator/v1/promotions?page_size=100',
+      providesTags: ['Promotion'],
+    }),
+    createPromotion: b.mutation<Promotion, PromotionCreate>({
+      query: (body) => ({ url: 'operator/v1/promotions', method: 'POST', body }),
+      invalidatesTags: ['Promotion'],
+    }),
+    updatePromotion: b.mutation<Promotion, { id: string } & PromotionPatch>({
+      query: ({ id, ...body }) => ({ url: `operator/v1/promotions/${id}`, method: 'PATCH', body }),
+      invalidatesTags: ['Promotion'],
+    }),
+    deactivatePromotion: b.mutation<Promotion, string>({
+      query: (id) => ({ url: `operator/v1/promotions/${id}/deactivate`, method: 'POST', body: {} }),
+      invalidatesTags: ['Promotion'],
     }),
     // Screen 23 (FE-12, UC-OPS-05): unattributed / review queues and the Operator's decisions.
     // A decision also changes the queue counts on screen 17.
@@ -396,6 +429,12 @@ export const {
   useOperatorChargePointQuery,
   useOperatorSitesQuery,
   useOnboardChargePointMutation,
+  useOperatorTariffsQuery,
+  usePutTariffsMutation,
+  useOperatorPromotionsQuery,
+  useCreatePromotionMutation,
+  useUpdatePromotionMutation,
+  useDeactivatePromotionMutation,
   useOperatorSessionsQuery,
   useAssignSessionMutation,
   useCloseSessionMutation,

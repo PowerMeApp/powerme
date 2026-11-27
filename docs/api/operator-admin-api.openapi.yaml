@@ -1439,9 +1439,10 @@ paths:
       tags: [tariffs]
       operationId: getTariffSchedule
       x-roles: [operator_staff]
-      x-status: planned
-      x-owner: Nghĩa (+ Khang)
-      x-refs: [UC-OPS-06, FR-12, BR-P02, 'Table 5 #23']
+      x-status: implemented
+      x-source: 'operator-api/operator-pricing.ts (FE-06)'
+      x-owner: Nghĩa (FE-06)
+      x-refs: [UC-OPS-06, FR-12, BR-P02, 'Table 5 #24']
       summary: Biểu giá đang hiệu lực và các bản sắp hiệu lực của operator
       parameters:
         - name: at
@@ -1461,14 +1462,19 @@ paths:
       tags: [tariffs]
       operationId: putTariffSchedule
       x-roles: [operator_staff]
-      x-status: planned
-      x-owner: Nghĩa (+ Khang)
+      x-status: implemented
+      x-source: 'operator-api/operator-pricing.ts (FE-06)'
+      x-owner: Nghĩa (FE-06)
       x-refs: [UC-OPS-06, FR-12, BR-P02, BR-P45]
       summary: Đặt biểu giá mới từ một ngày; không sửa bản đã hiệu lực
       description: |
         Các khung phải phủ kín 24 giờ, không chồng nhau; khung qua nửa đêm tách hai dòng (như bảng
         `tariff_periods`). `effective_from` ≥ hôm nay; bản cũ được đặt `effective_to` = ngày trước
         đó. Phiên đã quyết toán không đổi vì giá đã nằm trong `session_tariff_segments`.
+        FE-06: bản mới thay mọi bản bắt đầu từ ngày đó trở đi (bản chưa hiệu lực bị xoá); nếu một
+        bản đã bắt đầu hôm nay và đã có phiên dùng thì 409 `schedule_in_use`. Biểu giá theo
+        operator, 3 band (contract §6 #3). `Idempotency-Key` được nhận nhưng không lưu: gửi lại
+        cùng body cho cùng kết quả, không có `idempotency_conflict`.
       parameters:
         - $ref: '#/components/parameters/idempotencyKey'
       requestBody:
@@ -1490,7 +1496,7 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '409':
-          description: '`idempotency_conflict`'
+          description: '`schedule_in_use` (bản bắt đầu hôm nay đã có phiên dùng)'
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
@@ -1500,8 +1506,9 @@ paths:
       tags: [tariffs]
       operationId: listPromotions
       x-roles: [operator_staff]
-      x-status: planned
-      x-owner: Nghĩa (+ Khang)
+      x-status: implemented
+      x-source: 'operator-api/operator-pricing.ts (FE-06)'
+      x-owner: Nghĩa (FE-06)
       x-refs: [UC-OPS-07, FR-12]
       summary: Khuyến mãi của operator
       parameters:
@@ -1523,8 +1530,9 @@ paths:
       tags: [tariffs]
       operationId: createPromotion
       x-roles: [operator_staff]
-      x-status: planned
-      x-owner: Nghĩa (+ Khang)
+      x-status: implemented
+      x-source: 'operator-api/operator-pricing.ts (FE-06)'
+      x-owner: Nghĩa (FE-06)
       x-refs: [UC-OPS-07, FR-12]
       summary: Tạo khuyến mãi
       requestBody:
@@ -1552,8 +1560,9 @@ paths:
       tags: [tariffs]
       operationId: updatePromotion
       x-roles: [operator_staff]
-      x-status: planned
-      x-owner: Nghĩa (+ Khang)
+      x-status: implemented
+      x-source: 'operator-api/operator-pricing.ts (FE-06)'
+      x-owner: Nghĩa (FE-06)
       x-refs: [UC-OPS-07, FR-12]
       summary: Sửa khuyến mãi chưa hết hạn
       parameters:
@@ -1584,8 +1593,9 @@ paths:
       tags: [tariffs]
       operationId: deactivatePromotion
       x-roles: [operator_staff]
-      x-status: planned
-      x-owner: Nghĩa (+ Khang)
+      x-status: implemented
+      x-source: 'operator-api/operator-pricing.ts (FE-06)'
+      x-owner: Nghĩa (FE-06)
       x-refs: [UC-OPS-07, FR-12]
       summary: Ngừng khuyến mãi ngay (valid_to = bây giờ)
       parameters:

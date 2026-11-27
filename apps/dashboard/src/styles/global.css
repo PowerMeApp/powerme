@@ -775,3 +775,34 @@ table.revenue-table tfoot td {
 .connector-row {
   align-items: start;
 }
+
+/* FE-06 — screen 24 tariff editor: one row per period, errors under each field. */
+.pricing-sheet {
+  width: min(860px, 100%);
+  max-height: calc(100vh - 48px);
+  overflow-y: auto;
+}
+.tariff-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 0;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-input);
+}
+.tariff-rows legend {
+  padding: 0 6px;
+}
+.tariff-row {
+  display: grid;
+  grid-template-columns: 1.3fr 1fr 1fr 1.2fr auto;
+  gap: 10px;
+  align-items: start;
+}
+.tariff-row > .btn {
+  margin-top: 26px;
+}
+.tariff-rows > .btn {
+  align-self: flex-start;
+}

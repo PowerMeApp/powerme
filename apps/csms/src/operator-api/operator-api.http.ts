@@ -7,6 +7,8 @@
  *   GET  /api/operator/v1/charge-points, GET /api/operator/v1/summary  (FE-03, operator-monitoring.ts)
  *   GET  /api/operator/v1/charge-points/{id}  (FE-05, screen 20)
  *   GET  /api/operator/v1/sites  (FE-02, station picker of screen 19, operator-sites.ts)
+ *   GET|PUT /api/operator/v1/tariffs, GET|POST /api/operator/v1/promotions, PATCH …/promotions/{id},
+ *        POST …/promotions/{id}/deactivate  (FE-06, screen 24, operator-pricing.ts)
  *   GET  /api/operator/v1/sessions?queue=, POST …/sessions/{id}/assign|close|resolve  (FE-12, screen 23,
  *        operator-sessions.ts; logic in Trí's SessionReviewService / UnattributedSessionService)
  *   GET  /api/operator/v1/revenue[.csv], GET /api/admin/v1/revenue[.csv]  (T108a, revenue-report.ts)
@@ -48,6 +50,7 @@ import { matchUsersRoute, searchUsers } from './admin-users.js';
 import { listNetwork, matchNetworkRoute } from './admin-network.js';
 import { listOperators, matchOperatorsRoute } from './admin-operators.js';
 import { listSites, matchSitesRoute } from './operator-sites.js';
+import { matchPricingRoute, runPricingRoute } from './operator-pricing.js';
 import { toRevenueCsv } from './revenue-csv.js';
 import { matchRevenueRoute, revenueReport } from './revenue-report.js';
 import { toTransactionsCsv } from './transactions-csv.js';
@@ -72,7 +75,7 @@ export const OPERATOR_API_PATH = /^\/api\/(auth|operator|admin)\/v1(?:\/|\?|$)/;
 
 /** Paths that take a query string (contract §2.2a: RolesGuard runs first, then the parameters). */
 const QUERY_PATHS =
-  /^\/api\/(?:operator\/v1\/(?:faults|charge-points|sessions|sites|revenue(?:\.csv)?)|admin\/v1\/(?:(?:revenue|transactions)(?:\.csv)?|users|operators|network\/charge-points))$/;
+  /^\/api\/(?:operator\/v1\/(?:faults|charge-points|sessions|sites|tariffs|promotions|revenue(?:\.csv)?)|admin\/v1\/(?:(?:revenue|transactions)(?:\.csv)?|users|operators|network\/charge-points))$/;
 const LOCAL_ORIGIN = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/;
 const BODY_LIMIT = 16 * 1024;
 
@@ -212,6 +215,23 @@ export function createOperatorApiListener(
         ),
       );
       return;
+    }
+    const pricingRoute = surface === 'operator' ? matchPricingRoute(rest ?? '') : null;
+    if (pricingRoute) {
+      if (!pricingRoute.methods.includes(req.method ?? '')) {
+        res.setHeader('Allow', `${pricingRoute.methods.join(', ')}, OPTIONS`);
+        throw new AuthError(405, 'method_not_allowed');
+      }
+      const body = req.method === 'GET' ? undefined : await readJsonObject(req, res);
+      const result = await runPricingRoute(
+        db,
+        principal.operatorId!,
+        pricingRoute,
+        req.method!,
+        url.searchParams,
+        body,
+      );
+      return send(res, result.status, result.body);
     }
     const sitesRoute =
       surface === 'operator' ? matchSitesRoute(rest ?? '', url.searchParams) : null;
