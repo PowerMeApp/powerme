@@ -7,6 +7,7 @@ const PATHS = {
   sessions: 'M4 5h16M4 12h16M4 19h10M18 17l2 2 3-4',
   revenue: 'M4 20V10M10 20V4M16 20v-7M22 20H2',
   card: 'M3 6h18v12H3zM3 10h18M7 15h4',
+  tag: 'M3 12V4h8l10 10-8 8zM7.5 7.5v.01',
 } as const;
 
 export function Icon({ name, size = 18 }: { name: keyof typeof PATHS; size?: number }) {

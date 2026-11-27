@@ -7,3 +7,4 @@ export type * from './api/admin.js';
 export type * from './api/rfidCards.js';
 export type * from './api/onboarding.js';
 export type * from './api/registry.js';
+export type * from './api/pricing.js';

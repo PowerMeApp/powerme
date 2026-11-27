@@ -382,12 +382,12 @@ tách theo bề mặt — refresh token không mang `role`, role đọc lại t�
 
 | Endpoint | Role | UC / FR / BR | Trạng thái · người làm | Ghi chú |
 |---|---|---|---|---|
-| `GET /operator/v1/tariffs` | operator_staff | UC-OPS-06, FR-12, BR-P02 | planned · Nghĩa (+ Khang) | bản đang hiệu lực + bản sắp hiệu lực |
-| `PUT /operator/v1/tariffs` | operator_staff | UC-OPS-06, BR-P02, BR-P45 | planned · Nghĩa (+ Khang) | phủ kín 24 h, không chồng; `effective_from` ≥ hôm nay; không sửa bản cũ |
-| `GET /operator/v1/promotions` | operator_staff | UC-OPS-07, FR-12 | planned · Nghĩa (+ Khang) | |
-| `POST /operator/v1/promotions` | operator_staff | UC-OPS-07 | planned · Nghĩa (+ Khang) | mã duy nhất toàn nền tảng (`promotions_promotion_code_key`) |
-| `PATCH /operator/v1/promotions/{id}` | operator_staff | UC-OPS-07 | planned · Nghĩa (+ Khang) | |
-| `POST /operator/v1/promotions/{id}/deactivate` | operator_staff | UC-OPS-07 | planned · Nghĩa (+ Khang) | `valid_to = now()` (bảng không có cột active) |
+| `GET /operator/v1/tariffs` | operator_staff | UC-OPS-06, FR-12, BR-P02 | **implemented** FE-06 · Nghĩa · `operator-pricing.ts` | bản đang hiệu lực + bản sắp hiệu lực; `at` (ngày, mặc định hôm nay giờ VN); theo operator, 3 band |
+| `PUT /operator/v1/tariffs` | operator_staff | UC-OPS-06, BR-P02, BR-P45 | **implemented** FE-06 · Nghĩa · `operator-pricing.ts` | phủ kín 24 h, không chồng (400 `tariff_gap_or_overlap`); `effective_from` ≥ hôm nay (400 `effective_from_in_past`); không sửa bản cũ (chỉ đặt `effective_to`); bản chưa hiệu lực từ ngày đó trở đi bị thay; bản bắt đầu hôm nay đã có phiên dùng → 409 `schedule_in_use`; `Idempotency-Key` nhận nhưng không lưu |
+| `GET /operator/v1/promotions` | operator_staff | UC-OPS-07, FR-12 | **implemented** FE-06 · Nghĩa | `active`, `page`/`page_size`; `active` tính từ `valid_from ≤ now < valid_to` |
+| `POST /operator/v1/promotions` | operator_staff | UC-OPS-07 | **implemented** FE-06 · Nghĩa | mã duy nhất toàn nền tảng (409 `promotion_code_taken`); chỉ lưu, chưa áp dụng khi tính tiền (K6) |
+| `PATCH /operator/v1/promotions/{id}` | operator_staff | UC-OPS-07 | **implemented** FE-06 · Nghĩa | loại, giá trị, thời gian; không đổi mã; đã hết hạn → 409 `promotion_expired`; của operator khác → 404 |
+| `POST /operator/v1/promotions/{id}/deactivate` | operator_staff | UC-OPS-07 | **implemented** FE-06 · Nghĩa | `valid_to = now()` (bảng không có cột active); chưa bắt đầu thì `valid_from` lùi về trước đó; đã hết hạn → 409 `promotion_expired` |
 
 ### 3.7 Doanh thu, giao dịch và CSV (6)
 
@@ -897,12 +897,12 @@ trạng thái (2xx/4xx nghiệp vụ khác với 401/403). Ba điều kiện c�
 | 38 | `POST /api/operator/v1/charge-intents/{intentId}/approve-late-start` | 401 | 403 | ✓ | 403 | service |
 | 39 | `POST /api/operator/v1/sessions/{sessionId}/recover-stop` | 401 | 403 | ✓ | 403 | service |
 | 40 | `POST /api/operator/v1/sessions/{sessionId}/tariff-boundary` | 401 | 403 | ✓ | 403 | service |
-| 41 | `GET /api/operator/v1/tariffs` | 401 | 403 | ✓ | 403 | planned |
-| 42 | `PUT /api/operator/v1/tariffs` | 401 | 403 | ✓ | 403 | planned |
-| 43 | `GET /api/operator/v1/promotions` | 401 | 403 | ✓ | 403 | planned |
-| 44 | `POST /api/operator/v1/promotions` | 401 | 403 | ✓ | 403 | planned |
-| 45 | `PATCH /api/operator/v1/promotions/{promotionId}` | 401 | 403 | ✓ | 403 | planned |
-| 46 | `POST /api/operator/v1/promotions/{promotionId}/deactivate` | 401 | 403 | ✓ | 403 | planned |
+| 41 | `GET /api/operator/v1/tariffs` | 401 | 403 | ✓ | 403 | implemented (FE-06) |
+| 42 | `PUT /api/operator/v1/tariffs` | 401 | 403 | ✓ | 403 | implemented (FE-06) |
+| 43 | `GET /api/operator/v1/promotions` | 401 | 403 | ✓ | 403 | implemented (FE-06) |
+| 44 | `POST /api/operator/v1/promotions` | 401 | 403 | ✓ | 403 | implemented (FE-06) |
+| 45 | `PATCH /api/operator/v1/promotions/{promotionId}` | 401 | 403 | ✓ | 403 | implemented (FE-06) |
+| 46 | `POST /api/operator/v1/promotions/{promotionId}/deactivate` | 401 | 403 | ✓ | 403 | implemented (FE-06) |
 | 47 | `GET /api/operator/v1/revenue` | 401 | 403 | ✓ | 403 | planned |
 | 48 | `GET /api/operator/v1/revenue.csv` | 401 | 403 | ✓ | 403 | planned |
 | 49 | `GET /api/admin/v1/revenue` | 401 | 403 | 403 | ✓ | planned |
