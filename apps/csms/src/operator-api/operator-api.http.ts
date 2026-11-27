@@ -39,6 +39,7 @@ import {
   listTransactions,
   matchTransactionsRoute,
 } from './admin-transactions.js';
+import { matchRfidRoute, runRfidRoute } from './admin-rfid-cards.js';
 import { toRevenueCsv } from './revenue-csv.js';
 import { matchRevenueRoute, revenueReport } from './revenue-report.js';
 import { toTransactionsCsv } from './transactions-csv.js';
@@ -109,6 +110,23 @@ export function createOperatorApiListener(
       return;
     }
     const url = new URL(req.url ?? '', 'http://operator-api.local');
+    // WP3/T146: keep RFID method/query/body validation behind the admin guard.
+    const rfidRoute = matchRfidRoute(url.pathname);
+    if (rfidRoute) {
+      await rolesGuard(req, 'admin', db, config, driverConfig);
+      if (!rfidRoute.methods.includes(req.method ?? '')) {
+        res.setHeader('Allow', rfidRoute.methods.join(', ') + ', OPTIONS');
+        throw new AuthError(405, 'method_not_allowed');
+      }
+      if (
+        req.method === 'GET' &&
+        (req.headers['transfer-encoding'] || Number(req.headers['content-length'] ?? 0) > 0)
+      )
+        throw new AuthError(400, 'invalid_input');
+      const body = req.method === 'GET' ? undefined : await readJsonObject(req, res);
+      const result = await runRfidRoute(db, rfidRoute.cardId, req.method!, url.searchParams, body);
+      return send(res, result.status, result.body);
+    }
     // BE-44 (WF-05): own block, RolesGuard first, then method, body and query (contract §2.2a).
     const onboardingRoute = matchOnboardingRoute(url.pathname, req.method);
     if (onboardingRoute) {

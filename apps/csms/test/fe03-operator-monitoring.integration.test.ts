@@ -297,6 +297,44 @@ describeDb('FE-03 operator monitoring (screens 17, 18; BR-P16, D19–D25)', () =
     });
   });
 
+  it('[TC-BRP52-05] T150: list and detail carry offline_card_risk from the latest check (migration 0030)', async () => {
+    const check = (cp: string, risk: boolean, reason: string | null, changes: object) =>
+      q(
+        `INSERT INTO charge_point_offline_auth_checks(charge_point_id,epoch,started_at,completed_at,
+           config_values,change_results,supported_feature_profiles,offline_card_risk,risk_reason)
+         VALUES($1,1,now(),now(),'{}',$2,'Core',$3,$4)`,
+        [ids[cp], JSON.stringify(changes), risk, reason],
+      );
+    // A-FRESH: an old risky check, then a confirmed one (the latest wins). A-STALE: Rejected.
+    await check('A-FRESH', true, 'no_response', {});
+    await check('A-FRESH', false, null, { LocalAuthorizeOffline: 'Accepted' });
+    await check('A-STALE', true, 'rejected', { LocalAuthorizeOffline: 'Rejected' });
+    const list = (await get('/charge-points', tokens['a'])).body.items;
+    const flag = (serial: string) => {
+      const cp = list.find((c: any) => c.serial_number === serial);
+      return [cp.offline_card_risk, cp.offline_card_risk_reason, 'offline_auth_check' in cp];
+    };
+    expect(flag('A-FRESH')).toEqual([false, null, false]);
+    expect(flag('A-STALE')).toEqual([true, 'rejected', false]);
+    // Never checked = not confirmed.
+    expect(flag('A-OFF')).toEqual([true, 'not_checked', false]);
+    const d = (await get(`/charge-points/${ids['A-STALE']}`, tokens['a'])).body;
+    expect(d).toMatchObject({
+      offline_card_risk: true,
+      offline_card_risk_reason: 'rejected',
+      offline_auth_check: {
+        epoch: 1,
+        change_results: { LocalAuthorizeOffline: 'Rejected' },
+        supported_feature_profiles: 'Core',
+        fallback_profile_status: null,
+      },
+    });
+    expect(Date.parse(d.offline_auth_check.checked_at)).not.toBeNaN();
+    expect((await get(`/charge-points/${ids['A-OFF']}`, tokens['a'])).body.offline_auth_check).toBe(
+      null,
+    );
+  });
+
   it('FE-05: detail adds capabilities, the open faults of this charge point and the 20 latest commands', async () => {
     for (let i = 0; i < 22; i++)
       await q(

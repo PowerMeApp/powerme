@@ -1,6 +1,7 @@
 // Overlay.jsx — lớp chữ HTML quanh canvas: nhãn súng A/B, mạng + hàng đợi, gợi ý thao tác.
 //
-// Viên nhãn kiểu "double-bezel": vỏ ngoài hairline trắng 10 %, lõi trong có inset highlight.
+// QA-06: viên nhãn là capsule nổi (trắng mờ + blur ở cảnh sáng, Charcoal mờ ở cảnh tối — tru3d.css);
+// màu trạng thái chỉ ở chấm và thanh SoC, chữ luôn Ink/Gray để đọc rõ.
 // Chỉ animate transform/opacity (CSS trong tru3d.css). Số liệu dùng tabular-nums.
 import { useSyncExternalStore } from 'react';
 import { VI, knownStatus } from './motion.js';

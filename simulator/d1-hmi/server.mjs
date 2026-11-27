@@ -27,6 +27,8 @@
 //        = trụ đó không gửi Basic Auth). Có CP_IDS thì CP_ID/CP_PASSWORD bị bỏ qua.
 //      Cho kiểm thử (áp cho mọi trụ): RETRY_MS, REPLAY_LOSS, METER_INTERVAL, PING_SEC, REBOOT_MS,
 //      SPEED; STALE_METERSTOP=1: StopTransaction sau một lần rớt mạng mang meterStop cũ (EXP-01).
+//      OFFLINE_AUTH=normal|rejected|notsupported (T150): trụ cho CSMS tắt authorize offline, hay
+//        "cứng đầu" (key readonly → Rejected, hoặc không có key → NotSupported) và nhận mọi thẻ offline.
 
 import http from 'node:http';
 import path from 'node:path';
@@ -70,6 +72,7 @@ const common = {
   rebootMs: num(env.REBOOT_MS, 3000),
   speed: num(env.SPEED, 1),
   staleMeterStop: env.STALE_METERSTOP === '1',
+  offlineAuth: env.OFFLINE_AUTH || 'normal',
 };
 
 const send = (res, event, data) => res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);

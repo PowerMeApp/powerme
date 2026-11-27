@@ -497,4 +497,100 @@ describeDb('T146 owned sessions over real HTTP/JWT and isolated PostgreSQL', () 
     expect((await q('SELECT count(*)::int AS n FROM remote_commands'))[0]!.n).toBe(before);
     expect((await q('SELECT count(*)::int AS n FROM charging_statements'))[0]!.n).toBe(1);
   });
+  it('keeps rollback stops in all history with unknown final energy, never active or stoppable', async () => {
+    const id = sessions['app-orphaned-meter-back']!;
+    const all = await call('/sessions?view=all&page_size=100');
+    expect(all.status).toBe(200);
+    expect(all.body.items.find((item: any) => item.session_id === id)).toMatchObject({
+      status: 'orphaned',
+      stopped_at: '2026-11-23T02:00:00.000Z',
+      energy_wh: null,
+      amount_vnd: null,
+      can_stop: false,
+    });
+    const active = await call('/sessions?view=active&page_size=100');
+    expect(active.body.items.some((item: any) => item.session_id === id)).toBe(false);
+    expect(
+      active.body.items.find((item: any) => item.session_id === sessions['app-orphaned']),
+    ).toMatchObject({
+      can_stop: true,
+      stopped_at: null,
+    });
+    const progress = await call('/sessions/' + id + '/progress');
+    expect(progress.status).toBe(200);
+    expect(progress.body).toMatchObject({
+      status: 'orphaned',
+      meter_stop_wh: null,
+      can_stop: false,
+    });
+  });
+
+  it.each(['app-orphaned-meter-back', 'app-stopped-active'])(
+    'rejects a new stop key after physical stop (%s) without creating command or intent',
+    async (name) => {
+      const before = await stopCounts();
+      const response = await call('/sessions/' + sessions[name] + '/stop', {
+        method: 'POST',
+        key: 't146-late-' + name,
+      });
+      expect([response.status, response.body.error]).toEqual([409, 'session_not_stoppable']);
+      expect(await stopCounts()).toEqual(before);
+    },
+  );
+
+  it.each(['rfid-with-intent', 'hmi', 'free'])(
+    'rejects external new stop commands even with an owned app intent (%s)',
+    async (name) => {
+      const id = sessions[name]!;
+      if (name !== 'rfid-with-intent') await intent(id);
+      const before = await stopCounts();
+      const response = await call('/sessions/' + id + '/stop', {
+        method: 'POST',
+        key: 't146-external-' + name,
+      });
+      expect([response.status, response.body.error]).toEqual([409, 'session_not_stoppable']);
+      expect(await stopCounts()).toEqual(before);
+    },
+  );
+
+  it('allows a live orphan stop and recovers the same key after invalid and valid final meters', async () => {
+    const id = sessions['app-orphaned']!;
+    const key = 't146-live-orphan-stop';
+    const before = await stopCounts();
+    const initial = await call('/sessions/' + id + '/stop', { method: 'POST', key });
+    expect(initial.status).toBe(202);
+    expect(initial.body.command_id).toMatch(/^[1-9][0-9]*$/);
+    const sent = await stopCounts();
+    expect(sent.commands).toBe(before.commands + 1);
+    expect(sent.intents).toBe(before.intents + 1);
+    expect(sent.attempts).toBe(before.attempts + 1);
+
+    await q('UPDATE sessions SET received_stopped_at=now(),meter_stop_wh=NULL WHERE id=$1', [id]);
+    const recovered = await call('/sessions/' + id + '/stop', { method: 'POST', key });
+    expect(recovered.status).toBe(202);
+    expect(recovered.body.command_id).toBe(initial.body.command_id);
+    expect(recovered.body.effect_confirmed).toBe(false);
+    const late = await call('/sessions/' + id + '/stop', { method: 'POST', key: key + '-new' });
+    expect([late.status, late.body.error]).toEqual([409, 'session_not_stoppable']);
+    expect(await stopCounts()).toEqual(sent);
+
+    await q("UPDATE sessions SET status='closed',meter_stop_wh=2000,energy_wh=1000 WHERE id=$1", [
+      id,
+    ]);
+    const confirmed = await call('/sessions/' + id + '/stop', { method: 'POST', key });
+    expect(confirmed.status).toBe(202);
+    expect(confirmed.body).toMatchObject({
+      command_id: initial.body.command_id,
+      effect_confirmed: true,
+    });
+    expect(await stopCounts()).toEqual(sent);
+  });
+
+  async function stopCounts() {
+    return (
+      await q(
+        'SELECT (SELECT count(*)::int FROM remote_commands) AS commands, (SELECT count(*)::int FROM driver_stop_intents) AS intents, (SELECT count(*)::int FROM driver_stop_attempts) AS attempts',
+      )
+    )[0]!;
+  }
 });

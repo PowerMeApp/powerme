@@ -593,8 +593,31 @@ table.revenue-table tfoot td {
   font-weight: 700;
   border-top: 1px solid var(--line);
 }
-.revenue-later {
-  margin-top: 16px;
+/* Screen 35 transaction list (UC-ADM-10). */
+.transactions {
+  margin-top: 32px;
+}
+.tx-summary {
+  margin: 0;
+  padding: 14px 16px;
+}
+.tx-kind {
+  display: inline-block;
+  padding: 2px 8px;
+  font-size: 0.85em;
+  white-space: nowrap;
+  border-radius: var(--radius-pill);
+  background: var(--muted-soft);
+  color: var(--muted);
+}
+.tx-kind-csms_billed {
+  background: var(--teal-soft);
+  color: var(--teal);
+}
+.tx-kind-unsettled,
+.tx-kind-pending_reconciliation {
+  background: var(--warning-soft);
+  color: var(--warning);
 }
 
 /* Breadcrumb trail above page titles (FE-07). */

@@ -1,7 +1,8 @@
 // ocpp-commands.mjs — các lệnh CSMS gửi XUỐNG trụ và cách trụ trả lời.
 //
 // LÀM GÌ: RemoteStart/Stop, TriggerMessage, Reset, ChangeAvailability, Get/ChangeConfiguration,
-//   UnlockConnector, DataTransfer. Lệnh khác → CALLERROR NotImplemented (ReserveNow... chưa làm).
+//   UnlockConnector, DataTransfer, SetChargingProfile / ClearChargingProfile (T150: TxDefaultProfile
+//   và TxProfile). Lệnh khác → CALLERROR NotImplemented (ReserveNow... chưa làm).
 // VÌ SAO TÁCH: là phần "trụ trả lời CSMS thế nào" — chỗ CSMS-side dev cần đọc; không dính tới
 //   mạng hay điện. Trạng thái dùng chung đi qua đối tượng `s` do station.mjs truyền vào.
 // GIẢ ĐỊNH: RemoteStart khi chưa cắm súng → Accepted rồi chờ ConnectionTimeOut (120 s) cho tới
@@ -16,6 +17,7 @@ export function registerHandlers(c, s) {
     conns,
     CONFIG,
     cfgNum,
+    profiles,
     tl,
     changed,
     emit,
@@ -142,12 +144,55 @@ export function registerHandlers(c, s) {
     if (v.readonly) return { status: 'Rejected' };
     if (v.numeric && !(Number.isInteger(Number(params.value)) && Number(params.value) > 0))
       return { status: 'Rejected' };
+    if (v.bool && !['true', 'false'].includes(String(params.value).trim().toLowerCase()))
+      return { status: 'Rejected' };
     v.value = params.value;
     if (params.key === 'HeartbeatInterval') scheduleHeartbeat();
     changed();
     return {
       status: v.numeric && params.key === 'WebSocketPingInterval' ? 'RebootRequired' : 'Accepted',
     };
+  });
+  // T150: chỉ TxDefaultProfile và TxProfile (ChargePointMaxProfile chưa mô phỏng → Rejected).
+  c.handle('SetChargingProfile', async ({ params }) => {
+    const p = params.csChargingProfiles;
+    const id = params.connectorId;
+    if (id !== 0 && !connOf(id)) return { status: 'Rejected' };
+    if (p.chargingProfilePurpose === 'TxDefaultProfile') {
+      profiles.txDefault.set(id, p);
+      tl(
+        'info',
+        `TxDefaultProfile cho ${id === 0 ? 'cả trụ' : `súng ${id}`} (id ${p.chargingProfileId})`,
+      );
+      return { status: 'Accepted' };
+    }
+    if (p.chargingProfilePurpose === 'TxProfile') {
+      const k = connOf(id);
+      // OCPP 1.6: TxProfile chỉ hợp lệ khi súng đang có đúng phiên đó.
+      if (!k?.tx || p.transactionId === undefined || k.tx.id !== p.transactionId)
+        return { status: 'Rejected' };
+      profiles.tx.set(id, p);
+      tl('info', `TxProfile súng ${id} tx ${p.transactionId} ghi đè TxDefaultProfile`);
+      changed();
+      return { status: 'Accepted' };
+    }
+    return { status: 'Rejected' };
+  });
+  c.handle('ClearChargingProfile', async ({ params = {} }) => {
+    let n = 0;
+    for (const [purpose, map] of [
+      ['TxDefaultProfile', profiles.txDefault],
+      ['TxProfile', profiles.tx],
+    ])
+      for (const [cid, p] of map) {
+        if (params.id !== undefined && p.chargingProfileId !== params.id) continue;
+        if (params.connectorId !== undefined && params.connectorId !== cid) continue;
+        if (params.chargingProfilePurpose && params.chargingProfilePurpose !== purpose) continue;
+        if (params.stackLevel !== undefined && params.stackLevel !== p.stackLevel) continue;
+        map.delete(cid);
+        n++;
+      }
+    return { status: n ? 'Accepted' : 'Unknown' };
   });
   c.handle('UnlockConnector', async ({ params }) => {
     const k = connOf(params.connectorId);

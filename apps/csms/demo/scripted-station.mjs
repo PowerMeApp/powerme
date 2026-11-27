@@ -32,6 +32,18 @@
  *            InternalError) rồi chờ lệnh Reset trong --hold-s giây. --reset accept (mặc định): trả
  *            Accepted, ngắt, khởi động lại sau --reboot-s giây, Boot, súng Available (DS-07).
  *            --reset reject: trả Rejected, súng vẫn Faulted (DS-08).
+ *   offline-card  T150 / BR-P52: trụ nối, Boot (CSMS kiểm và tắt authorize offline), RỚT MẠNG, quẹt
+ *            thẻ --tag khi offline. Trụ tự quyết theo cấu hình hiện tại của nó: nhận thì sạc
+ *            --offline-wh Wh trong lúc offline, nối lại KHÔNG Boot và phát lại Start / MeterValues /
+ *            Stop mang giờ cũ; từ chối thì không có phiên. Các ca (Report 5, TC-BRP52-*):
+ *              chặn được   (mặc định --offline-auth accept): CSMS tắt key → trụ từ chối mọi thẻ offline
+ *              thẻ lạ      --offline-auth reject                       → phiên unattributed + unknown_id_tag
+ *              bị khoá     --offline-auth reject --tag DEMO-BLOCKED-01 → phiên unattributed (BR-P23)
+ *              trong danh sách --offline-auth reject --tag DEMO-CARD-0001 --listed → csms_billed bình thường
+ *              shortfall   --offline-auth reject --tag DEMO-CARD-0001 --listed --offline-wh 400000
+ *                          → chi phí > số dư, ví âm (BR-P20)
+ *            Mọi ca đều là phát lại (cp_timestamp cũ hơn epoch mới) và bật cờ offline_card_risk khi trụ
+ *            "cứng đầu" (dashboard → Trụ sạc).
  *
  * Tuỳ chọn: --id RH24D1-00001  --url ws://localhost:9000/ocpp  --connector 1
  *           --interval-s 10 (nhịp MeterValues)  --offline-s 60 (độ dài đứt mạng)  --fast (3 s / 15 s)
@@ -43,6 +55,10 @@
  *            thật của nhịp, để app/CSMS ước tính được thời gian sạc xong)
  *           --heartbeat-s N (ép nhịp Heartbeat; mặc định theo interval CSMS trả ở Boot, 300 s)
  *           --reject-start (app)  --error-code InternalError  --reset accept|reject  --reboot-s 5 (fault)
+ *           --offline-auth accept|reject|notsupported (T150, mọi kịch bản: trụ trả lời GetConfiguration /
+ *            ChangeConfiguration — accept: đổi được key; reject: key readonly = true → Rejected;
+ *            notsupported: không có key → unknownKey / NotSupported)
+ *           --listed (offline-card: thẻ có trong Local List)  --offline-wh 170 (offline-card)
  * Biến môi trường: CP_PASSWORD (mật khẩu Basic Auth của trụ; cần khi nối vào staging)
  */
 import { createRequire } from 'node:module';
@@ -104,6 +120,27 @@ function startHeartbeat() {
     mine.call('Heartbeat', {}).catch((e) => log('✗ Heartbeat:', e.message));
   }, heartbeatS * 1000);
 }
+// ---- Cấu hình authorize offline (T150 / BR-P52) ----------------------------------------------
+const OFFLINE_AUTH = opt('offline-auth', 'accept');
+if (!['accept', 'reject', 'notsupported'].includes(OFFLINE_AUTH)) {
+  console.error('--offline-auth phải là accept | reject | notsupported');
+  process.exit(2);
+}
+/** key → { value, readonly }. Trụ "cứng đầu" (reject) giữ true và readonly; notsupported: không có key. */
+const config = new Map([
+  ['SupportedFeatureProfiles', { value: 'Core,RemoteTrigger', readonly: true }],
+  ['AuthorizationCacheEnabled', { value: 'true', readonly: false }],
+  ['LocalAuthListEnabled', { value: 'true', readonly: false }],
+]);
+if (OFFLINE_AUTH !== 'notsupported')
+  for (const key of ['LocalAuthorizeOffline', 'LocalPreAuthorize', 'AllowOfflineTxForUnknownId'])
+    config.set(key, { value: 'true', readonly: OFFLINE_AUTH === 'reject' });
+/** Trụ offline có tự nhận thẻ không: key không có = firmware nhận mọi thẻ (giả định "cứng đầu"). */
+function offlineAccepts(listed) {
+  const on = (k) => (config.has(k) ? config.get(k).value === 'true' : true);
+  return (listed && on('LocalAuthorizeOffline')) || on('AllowOfflineTxForUnknownId');
+}
+
 /** Lệnh CSMS → trụ mà kịch bản đang chạy muốn xử lý (app, fault); null = trả NotImplemented. */
 const hooks = { remoteStart: null, remoteStop: null, reset: null };
 
@@ -139,6 +176,26 @@ async function connect({ boot, password = process.env.CP_PASSWORD }) {
       }
     });
     return { status: 'Accepted' };
+  });
+  // T150: CSMS kiểm cấu hình authorize offline sau Boot.
+  client.handle('GetConfiguration', ({ params }) => {
+    const want = params?.key?.length ? params.key : [...config.keys()];
+    const configurationKey = [];
+    const unknownKey = [];
+    for (const key of want) {
+      const v = config.get(key);
+      if (v) configurationKey.push({ key, readonly: v.readonly, value: v.value });
+      else unknownKey.push(key);
+    }
+    log(`  ⇐ GetConfiguration ${want.length} key → ${unknownKey.length} unknownKey`);
+    return unknownKey.length ? { configurationKey, unknownKey } : { configurationKey };
+  });
+  client.handle('ChangeConfiguration', ({ params }) => {
+    const v = config.get(params.key);
+    const status = !v ? 'NotSupported' : v.readonly ? 'Rejected' : 'Accepted';
+    if (status === 'Accepted') v.value = String(params.value);
+    log(`  ⇐ ChangeConfiguration ${params.key}=${params.value} → ${status}`);
+    return { status };
   });
   // Lệnh từ CSMS: trả lời NGAY (như trụ thật), việc phải làm chạy sau khi CALLRESULT đã gửi.
   for (const [method, key] of [
@@ -367,6 +424,50 @@ const SCENARIOS = {
     await stopTx(tx, tag, SAMPLE_WH, 'Local', stopTs);
     await notify(CONNECTOR, 'Available');
     return { tx };
+  },
+
+  // T150 / BR-P52 — xem đầu file cho các ca (chặn được, thẻ lạ, bị khoá, trong danh sách, shortfall).
+  async 'offline-card'() {
+    const tag = opt('tag', 'UNKNOWN-TAG-99');
+    const listed = argv.includes('--listed');
+    const offlineWh = Number(opt('offline-wh', SAMPLE_WH));
+    await connect({ boot: true });
+    await sleep(3000); // CSMS gửi GetConfiguration / ChangeConfiguration sau phản hồi Boot
+    const keys = ['LocalAuthorizeOffline', 'LocalPreAuthorize', 'AllowOfflineTxForUnknownId'];
+    log(
+      `  cấu hình sau Boot: ${keys.map((k) => `${k}=${config.get(k)?.value ?? '(không có)'}`).join(' ')}`,
+    );
+    await notify(CONNECTOR, 'Preparing');
+    await dropLink();
+    const accepted = offlineAccepts(listed);
+    if (!accepted) {
+      log(
+        `  offline: trụ TỪ CHỐI thẻ ${tag} (authorize offline đã tắt) — không có phiên, không thể shortfall`,
+      );
+      await sleep(2000);
+      await connect({ boot: false });
+      await notify(CONNECTOR, 'Available');
+      return { accepted: false };
+    }
+    log(
+      `  offline: trụ NHẬN thẻ ${tag}${listed ? ' (Local List)' : ' (AllowOfflineTxForUnknownId)'} — rủi ro BR-P52`,
+    );
+    const startTs = now();
+    const queued = [];
+    for (let i = 1; i <= 2; i++) {
+      await sleep(Math.min(INTERVAL_S, 5) * 1000);
+      queued.push({ wh: Math.round((offlineWh * i) / 2), ts: now() });
+    }
+    const stopTs = now();
+    await connect({ boot: false });
+    log(
+      '  nối lại KHÔNG Boot — phát lại StartTransaction / MeterValues / StopTransaction mang giờ cũ',
+    );
+    const tx = await startTx(CONNECTOR, tag, startTs);
+    for (const q of queued) await sendMeter(CONNECTOR, tx, q.wh, q.ts);
+    await stopTx(tx, tag, offlineWh, 'Local', stopTs);
+    await notify(CONNECTOR, 'Available');
+    return { accepted: true, tx, wh: offlineWh };
   },
 
   async 'ds-09'() {

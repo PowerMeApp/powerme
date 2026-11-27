@@ -111,15 +111,15 @@ Tài xế đọc mọi phiên có driver_id khớp principal, bất kể origin 
 
 GET /api/driver/v1/sessions?view=active|all&page=1&page_size=20 trả {items,total,page,page_size}. Mặc định all/1/20; page 1–100000, page_size 1–100. Chỉ ba key này, mỗi key một lần; key lạ/trùng (kể cả driver_id/id_tag), enum sai, khoảng trắng/control, số âm/0/phân số/quá giới hạn/SQL-shaped đều 400 invalid_input. Bearer và active-driver DB check chạy trước validation/method; method khác trả 405 với Allow: GET, OPTIONS. OPTIONS theo preflight CORS hiện có (204, không cần bearer).
 
-view=active: meter_stop_wh IS NULL và status thuộc pending, active, paused, stopping, orphaned, review. failed/closed/reconciled và mọi phiên đã có meter_stop_wh bị loại. view=all gồm cả RFID đã dừng nhưng chưa có ledger/bảng kê. Sắp received_started_at DESC, id DESC; total và items từ cùng SQL snapshot, trang vượt cuối items=[] nhưng total vẫn đúng.
+view=active: meter_stop_wh IS NULL và received_stopped_at IS NULL, status thuộc pending, active, paused, stopping, orphaned, review. failed/closed/reconciled và mọi phiên đã nhận StopTransaction bị loại, kể cả meterStop < meterStart khiến meter_stop_wh còn null. view=all gồm cả RFID đã dừng nhưng chưa có ledger/bảng kê. Sắp received_started_at DESC, id DESC; total và items từ cùng SQL snapshot, trang vượt cuối items=[] nhưng total vẫn đúng.
 
 Mỗi item luôn có: session_id, status, origin, payment_mode, can_stop, statement_available, started_at, stopped_at, updated_at, energy_wh, amount_vnd, settlement_state, connector_id, connector_no, charge_point_display_code, site_id, site_name, vehicle_id, vehicle_label. ID là chuỗi bigint, thời gian ISO UTC. started_at/stopped_at dùng received_started_at/received_stopped_at. energy_wh là Wh chốt đã lưu, có thể null; tiến trình thực dùng GET progress. Wh/VND phải là số nguyên JS an toàn hoặc null, không làm tròn số vượt giới hạn. amount_vnd chỉ lấy charging_statements.amount_vnd đúng session/chủ và payment_mode=csms_billed; không có bảng kê thì null, không dùng estimate hay sessions.total_cost_vnd.
 
 site_id/site_name/vehicle_id/vehicle_label giữ null khi chưa biết. charge_point_display_code cũng giữ null nếu DB chưa gán mã. vehicle_label là plate_number của xe gắn phiên và cùng chủ; không điền xe mặc định cho RFID và không lộ xe của chủ khác. Không trả id_tag, UID, card ID, serial/credential riêng của trụ.
 
-Progress thêm origin, payment_mode, can_stop, statement_available; giữ các field cũ. can_stop chỉ true khi app_qr + intent cùng driver + meter_stop_wh null + status active/paused/orphaned. RFID/HMI/free-vend false; POST stop hiện vẫn 404 cho phiên không có intent, không đổi hành vi. Đây là eligibility, server luôn kiểm lại khi POST. statement_available chỉ true khi payment_mode=csms_billed và có charging_statements đúng session/driver; GET không tạo bảng kê hay gửi lệnh sạc.
+Progress thêm origin, payment_mode, can_stop, statement_available; giữ các field cũ. can_stop chỉ true khi app_qr + intent cùng driver + meter_stop_wh null + received_stopped_at null + status active/paused/orphaned. RFID/HMI/free-vend false; POST stop vẫn 404 cho phiên không có intent. Khi có intent, server kiểm lại origin, hai bằng chứng dừng và status trước lệnh mới; không đủ điều kiện trả 409 session_not_stoppable. Key cũ cùng chủ/phiên vẫn đọc kết quả lệnh cũ, kể cả sau StopTransaction; không phát thêm lệnh. statement_available chỉ true khi payment_mode=csms_billed và có charging_statements đúng session/driver; GET không tạo bảng kê hay gửi lệnh sạc.
 
-Flutter đã nối local với API 0.15.0 cho phát hiện phiên đang sạc, theo dõi chỉ đọc RFID và Lịch sử mọi nguồn, qua adapter thật và kiểm thử transport/widget. Đây chưa là bằng chứng API staging/đầu đọc/điện thoại thật; backend 0.15 chưa triển khai staging và cấu hình app giữ nguyên. T148, ghi nợ credit, loyalty và quy trình Admin đăng ký thẻ không thay đổi. Xem [plan, research và bằng chứng kiểm thử](../tasks/t146-driver-session-discovery.md) và [kiểm chứng Flutter/giới hạn](../../apps/mobile/README.md#t146--owned-session-discovery-and-rfid-observation-2411).
+Flutter đã nối API cho phát hiện phiên, theo dõi RFID và Lịch sử mọi nguồn qua adapter thật và kiểm thử transport/widget. T148 đã bổ sung quyết toán RFID csms_billed; bảng kê posted là nguồn khoản trừ/điểm thực tế, độc lập khả năng tạm tính. Kiểm thử local không chứng minh phiên bản staging hoặc đầu đọc/điện thoại thật. Xem [plan, research và bằng chứng kiểm thử](../tasks/t146-driver-session-discovery.md) và [kiểm chứng Flutter/giới hạn](../../apps/mobile/README.md#t146--owned-session-discovery-and-rfid-observation-2411).
 
 ## 6. Xác thực
 
@@ -211,6 +211,7 @@ Content-Type: application/json
 | 409 (top-up, §14) | `idempotency_conflict`, `account_closed`, `top_up_pending` (+ `top_up_id`, `payment_url`), `pending_top_up_confirming` (+ `top_up_id`) — trường thêm đặt cùng cấp với `error`, `detail` |
 | 422 (top-up, §14) | **lỗi luật nghiệp vụ**: BR-P22 `amount_out_of_range`, `balance_limit_exceeded`; BR-P35 `points_below_minimum`, `points_unavailable`, `points_exceed_cap` |
 | 503 (top-up, §14) | `payment_unconfigured` (CSMS chưa có mã VNPay, không ghi dòng nào; hoặc server không kèm billing) |
+| 500 / 503 (điểm thưởng, §14a) | `internal_error` (sổ điểm sai dạng, CSMS log error, không trả số đoán); `loyalty_unavailable` (server không kèm billing) |
 
 Các mã `recovery_*`, `start_not_recoverable`, `stop_attempt_not_current` thuộc đường operator (T72), không có trong API tài xế; nếu lọt ra thì route trả 500 `internal_error` đã làm sạch. Ánh xạ nằm ở `chargingErrorStatus` (`driver/charges.http.ts`).
 
@@ -385,6 +386,32 @@ Luật: WF-02 decisions D2, BR-P22 theo ADR-0013, BR-P35.
 5. **422** là lỗi luật nghiệp vụ (BR-P22: 50.000–2.000.000 ₫ mỗi lần, số dư sau nạp ≤ 5.000.000 ₫
    tính đủ `amount_vnd`; BR-P35: ≥ 500 điểm, không quá điểm còn hiệu lực, không quá 50 % số tiền).
    CSMS không tự hạ số điểm: gọi lại `quote` rồi để tài xế chọn.
+
+## 14a. T149 — điểm thưởng (cho Sơn, màn hình Loyalty, UC-PAY-04)
+
+Route ở `driver/loyalty.http.ts`, số tính ở `LoyaltyService.summary` (billing). OpenAPI 0.16.0.
+
+1. **`GET /loyalty`** →
+   `{status, points_available, points_expiring_soon, expiring_within_days, expiring_soon, points_earned_total, points_redeemed_total, as_of}`.
+   - `points_available`: điểm còn dùng được lúc `as_of`, **cùng số** với `points_available` của
+     `GET /billing/top-ups/quote` (cả hai phát lại lô earn tại `now()` của CSMS, WF-02 D11).
+   - "Sắp hết hạn": hiện `points_expiring_soon` (tổng) và, nếu cần chi tiết, từng lô trong
+     `expiring_soon` = `[{expires_at, points}]`, sắp hạn tăng dần; `expiring_within_days` = 30 (SRS
+     màn hình 15). Mỗi lần earn là một lô hạn 12 tháng (BR-P36).
+   - `points_earned_total` = tổng đã tích; `points_redeemed_total` = số ròng đã dùng (đã trừ phần
+     trả lại khi top-up bị hoàn).
+   - Chưa có tài khoản điểm → 200, `status: "none"`, mọi số 0, `expiring_soon: []`.
+2. **`GET /loyalty/transactions?page=&page_size=`** → `{items, total, page, page_size}`, mới nhất
+   trước; phân trang giống `/credit/transactions`. Mỗi dòng: `transaction_id`, `entry_no`,
+   `transaction_type` (`earn` / `redeem` / `restore` / `expire` / `adjust`), `points` (dương cộng,
+   âm trừ), `expires_at` (null được), `session_id`, `top_up_id` (id chuỗi, null được), `created_at`.
+   Dòng `adjust` luôn `points = 0` (top-up định dùng điểm nhưng lúc cộng tiền điểm đã hết hạn / bị
+   dùng) — app có thể ẩn.
+3. **Giới hạn hiện tại:** job hết hạn hằng ngày (WF-02 Phần 13) chưa có. Lô quá hạn đã **không**
+   còn trong `points_available`, nhưng lịch sử **chưa có dòng `expire`** cho lô đó tới khi job chạy.
+   Đừng cộng / trừ lịch sử để suy ra số dư; luôn dùng `points_available`.
+4. Không query lạ (400 `invalid_input`); 401 / 403 / 405 như `/credit`; 500 `internal_error` khi
+   sổ điểm hỏng; 503 `loyalty_unavailable` khi server không kèm billing.
 
 ## 15. FE-17 — tài xế báo lỗi súng (UC-CHG-05, BR-P42)
 
