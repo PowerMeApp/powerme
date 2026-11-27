@@ -171,7 +171,7 @@
           { t: `${c.kw.toFixed(1)} kW`, s: 24, c: 'ok' },
           { t: `SoC ${soc} %`, s: 17 },
           { t: mmss(c.elapsed), s: 16 },
-          { t: `${c.cost.toLocaleString('vi-VN')} đ`, s: 16, c: 'info' },
+          { t: `${c.kwh.toFixed(2)} kWh`, s: 16, c: 'info' },
         ];
       case 'SuspendedEV':
       case 'SuspendedEVSE':
