@@ -152,3 +152,32 @@ describe('loadConfig — SESSION_START_TIMEOUT_S / SESSION_HARD_CAP_H (BE-18)', 
     expect(() => loadConfig({ ...base, SESSION_HARD_CAP_H: v })).toThrow(/SESSION_HARD_CAP_H/);
   });
 });
+
+describe('loadConfig — T150 kiểm authorize offline (BR-P52)', () => {
+  it('mặc định: kiểm bật, hạn chờ 15 s, giới hạn dự phòng TẮT', () => {
+    const c = loadConfig({ ...base });
+    expect(c.offlineAuthCheckEnabled).toBe(true);
+    expect(c.offlineAuthCheckTimeoutS).toBe(15);
+    expect(c.offlineTxFallbackS).toBe(0);
+  });
+
+  it('đọc giá trị khai báo', () => {
+    const c = loadConfig({
+      ...base,
+      OFFLINE_AUTH_CHECK_ENABLED: 'false',
+      OFFLINE_AUTH_CHECK_TIMEOUT_S: '5',
+      OFFLINE_TX_FALLBACK_S: '120',
+    });
+    expect([c.offlineAuthCheckEnabled, c.offlineAuthCheckTimeoutS, c.offlineTxFallbackS]).toEqual([
+      false,
+      5,
+      120,
+    ]);
+  });
+
+  it.each(['-1', '1.5', 'abc'])('OFFLINE_TX_FALLBACK_S="%s" ném lỗi', (v) => {
+    expect(() => loadConfig({ ...base, OFFLINE_TX_FALLBACK_S: v })).toThrow(
+      /OFFLINE_TX_FALLBACK_S/,
+    );
+  });
+});

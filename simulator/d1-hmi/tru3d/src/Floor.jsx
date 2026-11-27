@@ -5,6 +5,10 @@
 //   giải (~1/3); shader riêng lấy mẫu 9 điểm cho phản chiếu nhoè, giảm cường độ, tắt dần theo bán kính và
 //   hoà vào màu nền theo khoảng cách (fog), để nền chìm vào đen.
 //   Chế độ nhẹ: cùng shader nhưng không có phản chiếu (không có lượt vẽ thêm nào).
+// Cảnh sáng (QA-06, define LIGHT): sàn trắng, phản chiếu nhạt kiểu "mix" (vật tối in bóng mờ lên
+//   sàn sáng thay vì cộng sáng), và sàn trong suốt dần theo bán kính + fog để hoà vào gradient Hero Sky
+//   của khung CSS sau canvas (canvas alpha). Vùng trống trong texture phản chiếu có alpha 0 nên không
+//   làm tối sàn.
 // Bóng tiếp xúc
 //   Camera trực giao đặt ở mặt sàn nhìn LÊN, vẽ cảnh bằng vật liệu độ sâu (gần sàn → đậm) vào
 //   texture, rồi làm nhoè ngang/dọc hai lượt. Bóng lấy từ hình học thật (bánh xe, đế trụ, cáp), không
@@ -18,6 +22,8 @@ import { HorizontalBlurShader } from 'three/examples/jsm/shaders/HorizontalBlurS
 import { VerticalBlurShader } from 'three/examples/jsm/shaders/VerticalBlurShader.js';
 
 export const BG = '#040506';
+// Màu fog của cảnh sáng: gần màu giữa gradient Hero Sky (#d2e5ff → #fff9ee) để xe ở xa nhạt dần
+export const LIGHT_FOG = '#eef1f6';
 
 const floorVert = /* glsl */ `
   uniform mat4 textureMatrix;
@@ -43,9 +49,25 @@ const floorFrag = /* glsl */ `
   varying vec3 vWorld;
   void main() {
     float r = length(vWorld.xz);
-    // vũng sáng studio dưới trụ, tối dần ra xa
-    vec3 col = uBase * (1.0 - 0.7 * smoothstep(1.2, 8.5, r));
-    #ifdef REFLECT
+    #ifdef LIGHT
+      // sàn studio trắng, chỉ hơi xám dần ra xa
+      vec3 col = uBase * (1.0 - 0.08 * smoothstep(1.2, 8.5, r));
+    #else
+      // vũng sáng studio dưới trụ, tối dần ra xa
+      vec3 col = uBase * (1.0 - 0.7 * smoothstep(1.2, 8.5, r));
+    #endif
+    #if defined(REFLECT) && defined(LIGHT)
+      vec2 uv = vUv.xy / vUv.w;
+      vec2 o = uTexel * 1.5;
+      #define TAPA(p) texture2D(tDiffuse, p, 3.0)
+      vec4 rf = TAPA(uv) * 0.28;
+      rf += (TAPA(uv + vec2(o.x, 0.0)) + TAPA(uv - vec2(o.x, 0.0))
+           + TAPA(uv + vec2(0.0, o.y)) + TAPA(uv - vec2(0.0, o.y))) * 0.12;
+      rf += (TAPA(uv + o) + TAPA(uv - o) + TAPA(uv + vec2(o.x, -o.y)) + TAPA(uv + vec2(-o.x, o.y))) * 0.06;
+      float k = uStrength * (1.0 - smoothstep(2.5, 9.0, r));
+      // rf đã nhân alpha (nền xoá trong suốt): vùng trống không đổi màu sàn
+      col = col * (1.0 - k * rf.a) + rf.rgb * k * color;
+    #elif defined(REFLECT)
       vec2 uv = vUv.xy / vUv.w;
       vec2 o = uTexel * 1.5;
       // lấy mẫu ở mip cao hơn (bias 3) + 9 điểm → nhoè mềm, không răng cưa
@@ -57,7 +79,10 @@ const floorFrag = /* glsl */ `
       col += refl * uStrength * (1.0 - smoothstep(3.0, 11.0, r)) * color;
     #endif
     float f = smoothstep(uFogNear, uFogFar, distance(cameraPosition, vWorld));
-    #ifdef REFLECT
+    #ifdef LIGHT
+      // hoà vào nền CSS: trong suốt dần theo bán kính và khoảng cách
+      gl_FragColor = vec4(col, (1.0 - f) * (1.0 - smoothstep(3.2, 8.0, r)));
+    #elif defined(REFLECT)
       gl_FragColor = vec4(mix(col, uBg, f), 1.0);
     #else
       // chế độ nhẹ vẽ thẳng ra canvas và nền không qua tone mapping: sàn xa trong suốt dần (vật liệu
@@ -68,20 +93,20 @@ const floorFrag = /* glsl */ `
     #include <colorspace_fragment>
   }
 `;
-const floorUniforms = () => ({
+const floorUniforms = (light) => ({
   color: { value: new THREE.Color(1, 1, 1) },
   tDiffuse: { value: null },
   textureMatrix: { value: new THREE.Matrix4() },
-  uBase: { value: new THREE.Color('#1b1f25') },
-  uBg: { value: new THREE.Color(BG) },
-  uStrength: { value: 0.18 },
+  uBase: { value: new THREE.Color(light ? '#fffaf3' : '#1b1f25') },
+  uBg: { value: new THREE.Color(light ? LIGHT_FOG : BG) },
+  uStrength: { value: light ? 0.3 : 0.18 },
   uTexel: { value: new THREE.Vector2(1 / 512, 1 / 512) },
   uFogNear: { value: 12 },
   uFogFar: { value: 26 },
 });
 
-/** Sàn: `high` = có phản chiếu (Reflector), ngược lại chỉ nền tối + fog. */
-export function Floor({ high }) {
+/** Sàn: `high` = có phản chiếu (Reflector), ngược lại chỉ nền + fog. `light` = cảnh sáng (QA-06). */
+export function Floor({ high, light }) {
   const { scene, size, viewport } = useThree();
   const geo = useMemo(() => new THREE.PlaneGeometry(60, 60), []);
   const mirror = useMemo(() => {
@@ -92,31 +117,32 @@ export function Floor({ high }) {
       multisample: 0,
       shader: {
         name: 'SanPhanChieu',
-        uniforms: floorUniforms(),
+        uniforms: floorUniforms(light),
         vertexShader: floorVert,
-        fragmentShader: '#define REFLECT\n' + floorFrag,
+        fragmentShader: (light ? '#define LIGHT\n' : '') + '#define REFLECT\n' + floorFrag,
       },
     });
     m.rotation.x = -Math.PI / 2;
+    m.material.transparent = !!light;
     // có mipmap để shader lấy mẫu mờ rẻ (bias) thay vì răng cưa ở texture nhỏ
     const tex = m.getRenderTarget().texture;
     tex.generateMipmaps = true;
     tex.minFilter = THREE.LinearMipmapLinearFilter;
     return m;
-  }, [geo]);
+  }, [geo, light]);
   const plain = useMemo(() => {
     const m = new THREE.Mesh(
       geo,
       new THREE.ShaderMaterial({
-        uniforms: floorUniforms(),
+        uniforms: floorUniforms(light),
         vertexShader: floorVert,
-        fragmentShader: floorFrag,
+        fragmentShader: (light ? '#define LIGHT\n' : '') + floorFrag,
         transparent: true,
       }),
     );
     m.rotation.x = -Math.PI / 2;
     return m;
-  }, [geo]);
+  }, [geo, light]);
   // Texture phản chiếu = ~1/3 kích thước canvas (đủ nhoè, đỡ tốn)
   useEffect(() => {
     const w = Math.max(64, Math.round(size.width * viewport.dpr * 0.35));
