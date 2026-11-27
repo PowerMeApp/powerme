@@ -764,3 +764,14 @@ table.revenue-table tfoot td {
   font-family: ui-monospace, 'SFMono-Regular', Menlo, monospace;
   word-break: break-all;
 }
+
+/* D43 — invalid field: red border; its message (.form-error) sits right beneath it. */
+.input[aria-invalid='true'] {
+  border-color: var(--danger);
+}
+.field .form-error {
+  margin: 0;
+}
+.connector-row {
+  align-items: start;
+}
