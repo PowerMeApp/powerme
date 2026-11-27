@@ -1,15 +1,19 @@
 /**
  * Screen 19 — Charge Point Onboarding (sheet, FE-02, UC-OPS-01, AD-8, BR-P49). Opened from screen 18.
- *   1. Form: a serial the Admin registered, one of the Operator's own Charging Stations
- *      (GET /operator/v1/sites) and 1–2 connectors (BR-P10). The CSMS checks the site's Operator
- *      and the serial's state and refuses with a reason (409 / 403 / 404).
+ *   1. Form (react-hook-form + zod, D43): a serial the Admin registered, one of the Operator's own
+ *      Charging Stations (GET /operator/v1/sites) and 1–2 connectors (BR-P10). Each invalid field
+ *      shows its message in red right beneath it; the CSMS refusals (409 / 403 / 404, AD-8) go under
+ *      the field they are about.
  *   2. Result: the charge point's credential, shown once (only its hash is stored). Escape and the
  *      backdrop do not close it; closing resets the mutation so the password leaves the store.
  * Manager and technician alike (D42).
  */
+import { zodResolver } from '@hookform/resolvers/zod';
 import { useEffect, useId, useState } from 'react';
+import { useFieldArray, useForm } from 'react-hook-form';
 import { Link } from 'react-router';
 import type { ConnectorType, OnboardResult } from '@powerme/shared';
+import { Field, FieldError } from '../../components/Field';
 import {
   errorMessage,
   useOnboardChargePointMutation,
@@ -17,23 +21,16 @@ import {
   type ApiError,
 } from '../../core/api/api';
 import { LIFECYCLE } from './format';
+import { onboardSchema, type OnboardForm, type OnboardValues } from './onboardSchema';
 
-/** Same rule as the CSMS (`serialField`, OCPP identity = Basic-auth user name). */
-export const SERIAL_RE = /^[A-Za-z0-9._-]{3,25}$/;
-const MAX_KW = 99_999.99;
+export { SERIAL_RE } from './onboardSchema';
 
-const CONNECTOR_TYPES: [ConnectorType, string][] = [
-  ['ccs2', 'CCS2'],
-  ['chademo', 'CHAdeMO'],
-  ['gbt', 'GB/T'],
-  ['type2', 'Type 2'],
-];
-
-interface ConnectorDraft {
-  no: 1 | 2;
-  type: ConnectorType;
-  kw: string;
-}
+const CONNECTOR_LABEL: Record<ConnectorType, string> = {
+  ccs2: 'CCS2',
+  chademo: 'CHAdeMO',
+  gbt: 'GB/T',
+  type2: 'Type 2',
+};
 
 /** Vietnamese text for each onboarding error (AD-8 "refuse with reason"); never the raw error. */
 export function onboardError(err: unknown): string {
@@ -54,11 +51,18 @@ export function onboardError(err: unknown): string {
   return errorMessage(err);
 }
 
-const kwOk = (kw: string) => {
-  if (!kw.trim()) return true;
-  const n = Number(kw);
-  return Number.isFinite(n) && n > 0 && n <= MAX_KW;
-};
+/** The field a CSMS refusal is about (shown under it); null = a form-level message. */
+function serverField(err: unknown): 'serial_number' | 'site_id' | null {
+  switch ((err as Partial<ApiError> | undefined)?.code) {
+    case 'serial_not_registered':
+    case 'already_onboarded':
+      return 'serial_number';
+    case 'site_of_other_operator':
+    case 'site_not_found':
+      return 'site_id';
+  }
+  return null;
+}
 
 function Credential({ result, onClose }: { result: OnboardResult; onClose: () => void }) {
   const [copied, setCopied] = useState<string | null>(null);
@@ -112,16 +116,36 @@ export function OnboardingSheet({ onClose }: { onClose: () => void }) {
   const titleId = useId();
   const sites = useOperatorSitesQuery();
   const [onboard, { data: result, isLoading, reset }] = useOnboardChargePointMutation();
-  const [serial, setSerial] = useState('');
-  const [siteId, setSiteId] = useState('');
-  const [connectors, setConnectors] = useState<ConnectorDraft[]>([
-    { no: 1, type: 'ccs2', kw: '' },
-    { no: 2, type: 'ccs2', kw: '' },
-  ]);
-  const [error, setError] = useState<string | null>(null);
+  const {
+    register,
+    control,
+    handleSubmit,
+    setError,
+    setValue,
+    getValues,
+    formState: { errors, isSubmitting },
+  } = useForm<OnboardForm, unknown, OnboardValues>({
+    resolver: zodResolver(onboardSchema),
+    mode: 'onTouched',
+    defaultValues: {
+      serial_number: '',
+      site_id: '',
+      connectors: [
+        { connector_no: 1, connector_type: 'ccs2', max_power_kw: '' },
+        { connector_no: 2, connector_type: 'ccs2', max_power_kw: '' },
+      ],
+    },
+  });
+  const { fields, append, remove } = useFieldArray({ control, name: 'connectors' });
   const siteList = sites.data?.items ?? [];
-  const chosenSite = siteId || siteList[0]?.id || '';
+  const firstSite = siteList[0]?.id;
   const noSites = !!sites.data && siteList.length === 0;
+  const busy = isLoading || isSubmitting;
+
+  // The first station is chosen once the list arrives.
+  useEffect(() => {
+    if (firstSite && !getValues('site_id')) setValue('site_id', firstSite);
+  }, [firstSite, getValues, setValue]);
 
   const close = () => {
     reset(); // the password must not stay in the store
@@ -129,30 +153,24 @@ export function OnboardingSheet({ onClose }: { onClose: () => void }) {
   };
   // Escape cancels the form only; the credential needs an explicit "Đã lưu, đóng".
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && !result && !isLoading && onClose();
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && !result && !busy && onClose();
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [result, isLoading, onClose]);
+  }, [result, busy, onClose]);
 
-  const setConnector = (no: 1 | 2, patch: Partial<ConnectorDraft>) =>
-    setConnectors((list) => list.map((c) => (c.no === no ? { ...c, ...patch } : c)));
-
-  async function submit() {
-    const sn = serial.trim();
-    if (!SERIAL_RE.test(sn)) return setError('Serial 3–25 ký tự: chữ, số, dấu . _ -');
-    if (!chosenSite) return setError('Chọn một trạm sạc');
-    if (!connectors.every((c) => kwOk(c.kw))) return setError('Công suất phải lớn hơn 0 kW');
-    setError(null);
+  async function onValid(v: OnboardValues) {
     const res = await onboard({
-      serial_number: sn,
-      site_id: Number(chosenSite),
-      connectors: connectors.map((c) => ({
-        connector_no: c.no,
-        connector_type: c.type,
-        ...(c.kw.trim() ? { max_power_kw: Number(c.kw) } : {}),
+      serial_number: v.serial_number,
+      site_id: Number(v.site_id),
+      connectors: v.connectors.map((c) => ({
+        connector_no: c.connector_no,
+        connector_type: c.connector_type,
+        ...(c.max_power_kw ? { max_power_kw: Number(c.max_power_kw) } : {}),
       })),
     });
-    if ('error' in res) setError(onboardError(res.error));
+    if (!('error' in res)) return;
+    const field = serverField(res.error);
+    setError(field ?? 'root.server', { type: 'server', message: onboardError(res.error) });
   }
 
   return (
@@ -172,92 +190,93 @@ export function OnboardingSheet({ onClose }: { onClose: () => void }) {
               Gắn một serial Admin đã đăng ký vào trạm sạc của Operator. Trụ chuyển sang "Chờ kết
               nối" cho tới khi kết nối bằng credential.
             </p>
-            <label className="field">
-              Serial
-              <input
-                className="input"
-                value={serial}
-                maxLength={40}
-                placeholder="VD: SIM-0005"
-                autoFocus
-                onChange={(e) => setSerial(e.target.value)}
-              />
-            </label>
-            <label className="field">
-              Trạm sạc
-              <select
-                className="input"
-                value={chosenSite}
-                disabled={noSites}
-                onChange={(e) => setSiteId(e.target.value)}
-              >
-                {siteList.map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {s.site_code} · {s.site_name}
-                  </option>
-                ))}
-              </select>
-            </label>
-            {sites.error && <p role="alert">{errorMessage(sites.error)}</p>}
+            <Field label="Serial" error={errors.serial_number?.message}>
+              {(a11y) => (
+                <input
+                  {...a11y}
+                  {...register('serial_number')}
+                  className="input"
+                  maxLength={40}
+                  placeholder="VD: SIM-0005"
+                  autoFocus
+                />
+              )}
+            </Field>
+            <Field label="Trạm sạc" error={errors.site_id?.message}>
+              {(a11y) => (
+                <select {...a11y} {...register('site_id')} className="input" disabled={noSites}>
+                  {siteList.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.site_code} · {s.site_name}
+                    </option>
+                  ))}
+                </select>
+              )}
+            </Field>
+            {sites.error && <FieldError message={errorMessage(sites.error)} />}
             {noSites && <p className="muted small">Operator chưa có trạm sạc nào.</p>}
             <fieldset className="connectors">
               <legend>Súng</legend>
-              {connectors.map((c) => (
-                <div key={c.no} className="connector-row">
-                  <span>Súng {c.no}</span>
-                  <label className="field">
-                    Loại súng {c.no}
-                    <select
-                      className="input"
-                      value={c.type}
-                      onChange={(e) =>
-                        setConnector(c.no, { type: e.target.value as ConnectorType })
-                      }
-                    >
-                      {CONNECTOR_TYPES.map(([id, label]) => (
-                        <option key={id} value={id}>
-                          {label}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label className="field">
-                    Công suất súng {c.no} (kW, tuỳ chọn)
-                    <input
-                      className="input"
-                      inputMode="decimal"
-                      value={c.kw}
-                      onChange={(e) => setConnector(c.no, { kw: e.target.value })}
-                    />
-                  </label>
+              {fields.map((f, i) => (
+                <div key={f.id} className="connector-row">
+                  <span>Súng {f.connector_no}</span>
+                  <Field label={`Loại súng ${f.connector_no}`}>
+                    {(a11y) => (
+                      <select
+                        {...a11y}
+                        {...register(`connectors.${i}.connector_type`)}
+                        className="input"
+                      >
+                        {(Object.keys(CONNECTOR_LABEL) as ConnectorType[]).map((t) => (
+                          <option key={t} value={t}>
+                            {CONNECTOR_LABEL[t]}
+                          </option>
+                        ))}
+                      </select>
+                    )}
+                  </Field>
+                  <Field
+                    label={`Công suất súng ${f.connector_no} (kW, tuỳ chọn)`}
+                    error={errors.connectors?.[i]?.max_power_kw?.message}
+                  >
+                    {(a11y) => (
+                      <input
+                        {...a11y}
+                        {...register(`connectors.${i}.max_power_kw`)}
+                        className="input"
+                        inputMode="decimal"
+                      />
+                    )}
+                  </Field>
                 </div>
               ))}
               <button
                 type="button"
                 className="btn small ghost"
                 onClick={() =>
-                  setConnectors((list) =>
-                    list.length === 2
-                      ? list.slice(0, 1)
-                      : [...list, { no: 2, type: 'ccs2', kw: '' }],
-                  )
+                  fields.length === 2
+                    ? remove(1)
+                    : append({ connector_no: 2, connector_type: 'ccs2', max_power_kw: '' })
                 }
               >
-                {connectors.length === 2 ? 'Bỏ súng 2' : 'Thêm súng 2'}
+                {fields.length === 2 ? 'Bỏ súng 2' : 'Thêm súng 2'}
               </button>
+              <FieldError
+                message={errors.connectors?.root?.message ?? errors.connectors?.message}
+              />
             </fieldset>
-            {error && <p role="alert">{error}</p>}
+            <FieldError message={errors.root?.server?.message} />
             <div className="btn-row">
-              <button type="button" className="btn ghost" disabled={isLoading} onClick={close}>
+              <button type="button" className="btn ghost" disabled={busy} onClick={close}>
                 Huỷ
               </button>
               <button
                 type="button"
                 className="btn primary"
-                disabled={isLoading || noSites}
-                onClick={() => void submit()}
+                disabled={busy || noSites}
+                onClick={() => void handleSubmit(onValid)()}
               >
-                {isLoading ? 'Đang gửi…' : 'Onboard'}
+                {busy ? 'Đang gửi…' : 'Onboard'}
               </button>
             </div>
           </>
