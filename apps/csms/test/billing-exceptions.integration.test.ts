@@ -78,7 +78,7 @@ describeDb('billing: BillingExceptionsQuery (T32 Phần 10a)', () => {
     return id(
       `INSERT INTO refunds (top_up_id, kind, amount_vnd, status, requested_by, next_attempt_at,
          completed_at, confirmed_via_query, attempt_count, last_error_kind, last_error_message,
-         last_attempt_at)
+         last_attempt_at, failure_reason)
        VALUES ($1, $2::refund_kind, 50000, $3::refund_status,
          CASE WHEN $2 = 'account_closure' THEN NULL ELSE $4::bigint END,
          CASE WHEN $3 = 'requested' THEN now() END,
@@ -86,7 +86,8 @@ describeDb('billing: BillingExceptionsQuery (T32 Phần 10a)', () => {
          CASE WHEN $3 = 'failed' THEN 4 ELSE 0 END,
          CASE WHEN $3 = 'failed' THEN 'transient'::e_invoice_error_kind END,
          CASE WHEN $3 = 'failed' THEN 'retry_exhausted' END,
-         CASE WHEN $3 = 'failed' THEN now() END)
+         CASE WHEN $3 = 'failed' THEN now() END,
+         CASE WHEN $3 = 'failed' THEN 'cổng từ chối' END)
        RETURNING id`,
       [topUpId, kind, status, admin],
     );
