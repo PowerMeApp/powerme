@@ -150,7 +150,12 @@ export function AdminHomePage() {
         {me.data && <p>Xin chào {me.data.full_name}. Bạn đang quản trị toàn nền tảng PowerMe.</p>}
       </div>
       {summary.error && !s && <p role="alert">{errorMessage(summary.error)}</p>}
-      {empty && <p className="muted">Nền tảng chưa có tài khoản, trụ sạc hay thẻ RFID nào.</p>}
+      {empty && (
+        <p className="muted">
+          Nền tảng chưa có tài khoản, trụ sạc hay thẻ RFID nào.{' '}
+          <Link to="/admin/charge-points">Đăng ký trụ sạc đầu tiên →</Link>
+        </p>
+      )}
       {s && !empty && (
         <>
           <h2 className="section-title">Thống kê chung</h2>
@@ -235,6 +240,9 @@ export function AdminHomePage() {
                       ])}
                       values={s.charge_points.by_lifecycle}
                     />
+                    <Link className="tile-link" to="/admin/charge-points">
+                      Xem chi tiết →
+                    </Link>
                   </section>
                 )}
                 {cards > 0 && (

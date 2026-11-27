@@ -31,6 +31,10 @@ const RESULT: OnboardResult = {
   password: 'pw-shown-once',
 };
 
+/** The message linked to an input (aria-describedby), i.e. the red text right beneath it. */
+const errorUnder = (input: HTMLElement) =>
+  document.getElementById(input.getAttribute('aria-describedby') ?? '');
+
 async function openSheet(routes: Parameters<typeof fakeCsms>[0]) {
   const seen = fakeCsms({
     [LIST]: emptyList,
@@ -111,6 +115,30 @@ describe('Onboard trụ sạc (màn 19)', () => {
     ]);
   });
 
+  it('D43: each invalid field shows its message in red right beneath it', async () => {
+    const { user, seen, dialog } = await openSheet({});
+    const serial = dialog.getByLabelText('Serial');
+    const kw1 = dialog.getByLabelText('Công suất súng 1 (kW, tuỳ chọn)');
+    await user.type(kw1, '-5');
+    await user.click(dialog.getByRole('button', { name: 'Onboard' }));
+    // Both errors at once, each under its own field, red (.form-error), field marked invalid.
+    expect(serial).toHaveAttribute('aria-invalid', 'true');
+    expect(errorUnder(serial)).toHaveTextContent('Serial 3–25 ký tự');
+    expect(errorUnder(serial)).toHaveClass('form-error');
+    expect(serial.parentElement).toContainElement(errorUnder(serial));
+    expect(kw1).toHaveAttribute('aria-invalid', 'true');
+    expect(errorUnder(kw1)).toHaveTextContent('Công suất phải lớn hơn 0 kW');
+    expect(dialog.getByLabelText('Công suất súng 2 (kW, tuỳ chọn)')).toHaveAttribute(
+      'aria-invalid',
+      'false',
+    );
+    expect(seen.some((r) => r.method === 'POST')).toBe(false);
+    // Fixing a field clears its message while typing.
+    await user.type(serial, 'SIM-0005');
+    await waitFor(() => expect(serial).toHaveAttribute('aria-invalid', 'false'));
+    expect(errorUnder(serial)).toBeNull();
+  });
+
   it('refuses with a reason: 409 serial_not_registered and already_onboarded (DS-10)', async () => {
     const { user, dialog } = await openSheet({
       [ONBOARD]: {
@@ -118,9 +146,14 @@ describe('Onboard trụ sạc (màn 19)', () => {
         body: { error: 'serial_not_registered', detail: 'SIM-9999 is not in the registry' },
       },
     });
-    await user.type(dialog.getByLabelText('Serial'), 'SIM-9999');
+    const serial = dialog.getByLabelText('Serial');
+    await user.type(serial, 'SIM-9999');
     await user.click(dialog.getByRole('button', { name: 'Onboard' }));
-    expect(await dialog.findByRole('alert')).toHaveTextContent('Serial chưa được Admin đăng ký');
+    // The CSMS refusal goes under the field it is about (AD-8 "refuse with reason").
+    await waitFor(() =>
+      expect(errorUnder(serial)).toHaveTextContent('Serial chưa được Admin đăng ký'),
+    );
+    expect(errorUnder(serial)).toHaveClass('form-error');
     expect(screen.getByRole('dialog', { name: 'Onboard trụ sạc' })).toBeInTheDocument();
   });
 
