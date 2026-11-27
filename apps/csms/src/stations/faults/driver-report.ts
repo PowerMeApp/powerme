@@ -109,11 +109,16 @@ export async function reportFromDriver(
     // T131: "cùng tài xế chỉ tính một" (Q80) áp cho cả trụ ở đường một tài xế — trong 2 giờ, một
     // tài xế tự mình chỉ mở được một sự cố trên một trụ (trụ Offline không bị ẩn hết súng bởi một
     // người). Báo cáo vẫn lưu và chờ luật hai tài xế (AD-7).
+    // T159 (ADR-0019 mục 6, BR-P42): sự cố tạo do chuyển giao (`handOverReports`) không phải "tài
+    // xế tự mở" nên không tính. Sự cố tài xế tự mở luôn được tạo cùng transaction với báo cáo kích
+    // hoạt nó, cùng mốc `at` (raised_at = reported_at, insert bên dưới); sự cố chuyển giao tạo khi
+    // sự cố OCPP / Offline đóng, sau mọi báo cáo của nó. Nên chỉ đếm sự cố có một báo cáo đúng mốc đó.
     if (drivers < 2) {
       const alone = await tx.execute(sql`SELECT 1 FROM fault_events f
         WHERE f.charge_point_id = ${chargePointId} AND f.source = 'driver_report'
           AND f.raised_at > ${at}::timestamptz - (${REPORT_WINDOW_MS}::bigint * interval '1 millisecond')
-          AND EXISTS (SELECT 1 FROM fault_reports r WHERE r.fault_event_id = f.id)
+          AND EXISTS (SELECT 1 FROM fault_reports r
+            WHERE r.fault_event_id = f.id AND r.reported_at = f.raised_at)
           AND NOT EXISTS (SELECT 1 FROM fault_reports r
             WHERE r.fault_event_id = f.id AND r.driver_id <> ${driverId})
         LIMIT 1`);
