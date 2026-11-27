@@ -286,8 +286,9 @@ paths:
       tags: [onboarding]
       operationId: listOperatorSites
       x-roles: [operator_staff]
-      x-status: planned
-      x-owner: Ân
+      x-status: implemented
+      x-source: 'operator-api/operator-sites.ts (FE-02)'
+      x-owner: Nghĩa (FE-02)
       x-refs: [UC-OPS-01, BR-P11, 'Table 5 #19']
       summary: Các site của operator người gọi (ô chọn site trong sheet onboarding)
       parameters:
@@ -513,6 +514,51 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/InvalidTransition' }
+
+  /admin/v1/network/charge-points:
+    get:
+      tags: [monitoring]
+      operationId: listNetworkChargePoints
+      x-roles: [admin]
+      x-status: implemented
+      x-source: 'operator-api/admin-network.ts (FE-18)'
+      x-owner: Nghĩa (FE-18)
+      x-refs: [UC-ADM-07, BR-P38, BR-P39, 'Table 5 #31']
+      summary: Trụ sạc của mọi operator, trạng thái trực tiếp và sự cố đang mở (màn 31)
+      description: |
+        Cùng truy vấn và trường như listOperatorChargePoints, không giới hạn operator; thêm
+        `operator` và `open_faults`. Dữ liệu lab (operator LOADTEST01) bị loại như GET /admin/v1/summary.
+        Chưa có uptime / utilisation (BR-P43).
+      parameters:
+        - name: operator_id
+          in: query
+          schema: { $ref: '#/components/schemas/Id' }
+        - name: site_id
+          in: query
+          schema: { $ref: '#/components/schemas/Id' }
+        - name: lifecycle
+          in: query
+          schema: { $ref: '#/components/schemas/ChargePointLifecycle' }
+        - name: online
+          in: query
+          schema: { type: boolean }
+        - name: charge_point_q
+          in: query
+          schema: { type: string, maxLength: 100 }
+        - name: site_q
+          in: query
+          schema: { type: string, maxLength: 100 }
+        - $ref: '#/components/parameters/page'
+        - $ref: '#/components/parameters/pageSize'
+      responses:
+        '200':
+          description: Trụ sạc của mọi operator
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/NetworkChargePointPage' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
 
   /admin/v1/charge-points:
     get:
@@ -948,15 +994,21 @@ paths:
       tags: [sessions]
       operationId: listOperatorSessions
       x-roles: [operator_staff]
-      x-status: console
-      x-source: 'GET /api/admin/sessions?limit → ConsoleQueries.sessions (không lọc, không phân trang)'
-      x-owner: Trí
+      x-status: partial
+      x-source: 'operator-api/operator-sessions.ts (FE-12, màn 23) → UnattributedSessionService.listPending / SessionReviewService.listInReview, lọc theo operator của token'
+      x-owner: 'Nghĩa (route, FE-12) · Trí (service)'
       x-refs: [UC-OPS-05, FR-13, FR-16, BR-P08, 'Table 5 #22']
       summary: Phiên trên trụ của operator; `queue` lọc hàng việc cần xử lý
       description: |
         `queue=review`: phiên `status = review` (đối soát kết luận conflict/gap hoặc hard cap,
         STM-1 #16a). `queue=unattributed`: phiên `payment_mode = unattributed` chưa giải quyết
         (thẻ lạ, free vend, BR-P06). Không có `queue`: mọi phiên, mới nhất trước.
+
+        **Đã làm (FE-12, 20/11):** chỉ `queue` (mặc định `unattributed`) + `page`/`page_size`;
+        phản hồi `SessionQueuePage`. Phân trang cắt từ tối đa 500 phiên mới nhất mỗi hàng đợi.
+        Một phiên unattributed còn ở `review` có mặt ở cả hai hàng đợi. Các bộ lọc
+        `status`/`payment_mode`/`charge_point_id`/`from`/`to` và chế độ "mọi phiên" chưa làm
+        (`invalid_input`).
       parameters:
         - name: queue
           in: query
@@ -1011,9 +1063,9 @@ paths:
       tags: [sessions]
       operationId: resolveReviewSession
       x-roles: [operator_staff]
-      x-status: service
-      x-source: 'SessionReviewService.resolveReview (BE-18)'
-      x-owner: Trí
+      x-status: done
+      x-source: 'operator-sessions.ts (FE-12) → SessionReviewService.resolveReview (BE-18); actor = staff của token'
+      x-owner: 'Nghĩa (route, FE-12) · Trí (service)'
       x-refs: [UC-OPS-05, FR-13, 'STM-1 #17']
       summary: Giải quyết phiên review (review → reconciled), quyết toán nếu đã có StopTransaction
       description: |
@@ -1047,14 +1099,16 @@ paths:
       tags: [sessions]
       operationId: assignUnattributedSession
       x-roles: [operator_staff]
-      x-status: in_progress
-      x-owner: Trí (T102)
+      x-status: done
+      x-source: 'operator-sessions.ts (FE-12) → UnattributedSessionService.assign (BE-24, T102); actor = staff của token'
+      x-owner: 'Nghĩa (route, FE-12) · Trí (service, T102)'
       x-refs: [UC-OPS-05, FR-13, BR-P06, BR-P08]
-      summary: Gán phiên unattributed cho một tài xế (T102 — hình dạng body do T102 chốt)
+      summary: Gán phiên unattributed cho một tài xế rồi quyết toán (BE-24)
       description: |
-        Đang làm ở T102 trên console; hợp đồng giữ chỗ đường dẫn và role. Body dưới đây là tối
-        thiểu (`note` bắt buộc, giống resolve); trường xác định tài xế và có trừ credit hay không
-        theo bản chốt của T102.
+        Đổi `payment_mode` sang `csms_billed`, ghi `UNATTRIBUTED_ASSIGNED` vào lịch sử, rồi
+        quyết toán (settle). Lỗi: 409 `free_vend_not_billable` / `wallet_card_not_billable`
+        (BR-P08, chỉ đóng được), `already_resolved`, `not_unattributed`, `session_not_stopped`;
+        422 `driver_not_eligible`. Gọi lại cùng tài xế → `already_resolved: true`.
       parameters:
         - $ref: '#/components/parameters/sessionId'
       requestBody:
@@ -1064,38 +1118,48 @@ paths:
             schema: { $ref: '#/components/schemas/AssignSessionRequest' }
       responses:
         '200':
-          description: Phiên sau khi gán
+          description: Đã gán
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/SessionListItem' }
+              schema: { $ref: '#/components/schemas/SessionDecisionResult' }
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
-        '409': { $ref: '#/components/responses/InvalidTransition' }
+        '409':
+          description: Quy tắc trạng thái / BR-P08
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '422':
+          description: '`driver_not_eligible`'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
 
   /operator/v1/sessions/{sessionId}/close:
     post:
       tags: [sessions]
       operationId: closeUnattributedSession
       x-roles: [operator_staff]
-      x-status: in_progress
-      x-owner: Trí (T102)
+      x-status: done
+      x-source: 'operator-sessions.ts (FE-12) → UnattributedSessionService.close (BE-24, T102); actor = staff của token'
+      x-owner: 'Nghĩa (route, FE-12) · Trí (service, T102)'
       x-refs: [UC-OPS-05, FR-13]
-      summary: Đóng phiên unattributed không gán ai, ghi kết luận (T102)
+      summary: Đóng phiên unattributed không tính tiền, ghi lý do (BE-24)
       parameters:
         - $ref: '#/components/parameters/sessionId'
       requestBody:
         required: true
         content:
           application/json:
-            schema: { $ref: '#/components/schemas/NoteRequest' }
+            schema: { $ref: '#/components/schemas/CloseSessionRequest' }
       responses:
         '200':
-          description: Phiên sau khi đóng
+          description: Đã đóng
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/SessionListItem' }
+              schema: { $ref: '#/components/schemas/SessionDecisionResult' }
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
@@ -1791,10 +1855,13 @@ paths:
       tags: [accounts]
       operationId: listUsers
       x-roles: [admin]
-      x-status: planned
-      x-owner: Trí
-      x-refs: [UC-ADM-01, FR-14, BR-P05, BR-P16, 'Table 5 #28']
+      x-status: implemented
+      x-owner: Nghĩa (T161)
+      x-refs: [UC-ADM-01, UC-ADM-04, FR-14, BR-P05, BR-P16, 'Table 5 #28', 'Table 5 #30']
       summary: Tài khoản (tài xế, nhân viên operator, admin)
+      description: |
+        Làm trước cho ô chọn tài xế của màn 30 (T161): `role=driver&account_status=active&q=…`.
+        Key lạ hoặc lặp → 400 `invalid_input`. Thứ tự id giảm dần (contract §3.8b).
       parameters:
         - name: role
           in: query
@@ -1807,7 +1874,9 @@ paths:
           schema: { $ref: '#/components/schemas/Id' }
         - name: q
           in: query
-          description: Tìm theo email hoặc họ tên (chứa, không phân biệt hoa thường)
+          description: |
+            Tìm theo email hoặc họ tên (chứa, không phân biệt hoa thường; `%` `_` `\` là ký tự
+            thường), hoặc số điện thoại bằng `q` sau chuẩn hoá BE-30 (T161)
           schema: { type: string, minLength: 2, maxLength: 100 }
         - $ref: '#/components/parameters/page'
         - $ref: '#/components/parameters/pageSize'
@@ -2004,8 +2073,9 @@ paths:
       tags: [accounts]
       operationId: listOperators
       x-roles: [admin]
-      x-status: planned
-      x-owner: Trí
+      x-status: implemented
+      x-source: 'operator-api/admin-operators.ts (FE-18)'
+      x-owner: Nghĩa (FE-18)
       x-refs: [UC-ADM-02, BR-P11, BR-P16]
       summary: Operator đối tác (để gán nhân viên và lọc báo cáo)
       parameters:
@@ -2032,10 +2102,16 @@ paths:
       tags: [cards]
       operationId: listRfidCards
       x-roles: [admin]
-      x-status: planned
+      x-status: implemented
       x-owner: Ân
       x-refs: [UC-ADM-04, FR-15, BR-P15, 'Table 5 #30']
       summary: Sổ thẻ RFID
+      description: |
+        WP3/T146 local branch. Admin guard precedes method/path/query/body validation.
+        Exact case-sensitive literal prefix q (LIKE metacharacters escaped), unique id DESC
+        order. total/items share a per-response REPEATABLE READ snapshot; pages in separate
+        requests may change. IDs are positive bigint strings <=9223372036854775807.
+        Unknown/duplicate query keys and GET bodies return 400.
       parameters:
         - name: card_kind
           in: query
@@ -2061,20 +2137,44 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
+        '405':
+          description: Method not allowed; Allow is GET, POST, OPTIONS (collection) or PATCH, OPTIONS (card)
+          headers:
+            Allow:
+              schema: { type: string }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
     post:
       tags: [cards]
       operationId: registerRfidCard
       x-roles: [admin]
-      x-status: planned
+      x-status: implemented
       x-owner: Ân
       x-refs: [UC-ADM-04, FR-15, BR-P15, BR-P23]
       summary: Đăng ký thẻ (một loại, tối đa một tài xế)
+      description: |
+        UID is preserved exactly (including leading zeros), without trimming or decimal/hex
+        normalization; 1..20 Unicode scalar characters, nonblank, no control/surrogate.
+        Online with driver starts active, without driver unlinked. Registry free_vend starts
+        active without a driver; it does not configure a charge point free-vend tag.
+        Driver must exist in drivers/users with role driver. Unique UID races return 409.
       requestBody:
         required: true
         content:
           application/json:
             schema: { $ref: '#/components/schemas/RfidCardCreate' }
       responses:
+        '413':
+          description: payload_too_large (JSON over 16 KiB)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '415':
+          description: unsupported_media_type (application/json required)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
         '201':
           description: Đã đăng ký
           content:
@@ -2083,13 +2183,21 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
+        '405':
+          description: Method not allowed; Allow is GET, POST, OPTIONS (collection) or PATCH, OPTIONS (card)
+          headers:
+            Allow:
+              schema: { type: string }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
         '404':
           description: '`driver_not_found`'
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
         '409':
-          description: '`card_already_registered`'
+          description: '`card_already_registered` or `card_kind_has_no_driver`'
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
@@ -2099,13 +2207,18 @@ paths:
       tags: [cards]
       operationId: updateRfidCard
       x-roles: [admin]
-      x-status: planned
+      x-status: implemented
       x-owner: Ân
       x-refs: [UC-ADM-04, BR-P15, BR-P23]
       summary: Gắn / bỏ gắn tài xế, khoá / mở khoá thẻ
       description: |
         Không đổi được `card_identifier` và `card_kind` (BR-P15: đúng một loại). Khoá thẻ chỉ áp
         cho Authorize sau đó; phiên đang chạy không bị dừng.
+        Online linking activates an unlinked card, unlinking makes it unlinked. Blocked cards
+        stay blocked on reassign/unlink until explicit status=active. Online active requires
+        a linked driver after the patch (otherwise 400 invalid_input). Free_vend has no driver.
+        Row-locked transaction; issued_at unchanged, updated_at updated. No session/command/
+        billing mutations. Missing card is 404 not_found; missing driver is 404 driver_not_found.
       parameters:
         - name: cardId
           in: path
@@ -2117,6 +2230,16 @@ paths:
           application/json:
             schema: { $ref: '#/components/schemas/RfidCardPatch' }
       responses:
+        '413':
+          description: payload_too_large (JSON over 16 KiB)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '415':
+          description: unsupported_media_type (application/json required)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
         '200':
           description: Sau khi sửa
           content:
@@ -2125,7 +2248,19 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
-        '404': { $ref: '#/components/responses/NotFound' }
+        '405':
+          description: Method not allowed; Allow is GET, POST, OPTIONS (collection) or PATCH, OPTIONS (card)
+          headers:
+            Allow:
+              schema: { type: string }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '404':
+          description: 'not_found (card) or driver_not_found'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
         '409':
           description: '`card_kind_has_no_driver` (thẻ free_vend không gắn tài xế)'
           content:
@@ -2140,9 +2275,9 @@ paths:
       tags: [platform]
       operationId: getAdminSummary
       x-roles: [admin]
-      x-status: console
-      x-source: 'GET /api/admin/summary (một phần: có trụ/phiên/đối soát/bản tin, thiếu user, thẻ, ngoại lệ thanh toán)'
-      x-owner: Nghĩa (T97)
+      x-status: implemented
+      x-source: 'operator-api/admin-platform.ts (FE-14)'
+      x-owner: Nghĩa (FE-14)
       x-refs: [UC-ADM-07, 'Table 5 #27']
       summary: Số tài khoản, trụ đã đăng ký, thẻ, ngoại lệ thanh toán mở — màn hình đầu Admin Console
       responses:
@@ -2942,7 +3077,7 @@ components:
             - type: 'null'
     ChargePoint:
       type: object
-      required: [id, serial_number, display_code, lifecycle, connected, is_online, last_message_at, site, connectors]
+      required: [id, serial_number, display_code, lifecycle, connected, is_online, last_message_at, site, connectors, offline_card_risk, offline_card_risk_reason]
       properties:
         id: { $ref: '#/components/schemas/Id' }
         serial_number: { type: string, description: 'OCPP identity, cuối URL /ocpp/{serial}' }
@@ -2957,6 +3092,42 @@ components:
             - $ref: '#/components/schemas/SiteRef'
             - type: 'null'
         connectors: { type: array, maxItems: 2, items: { $ref: '#/components/schemas/ConnectorLive' } }
+        offline_card_risk:
+          type: boolean
+          description: >-
+            T150 / BR-P52 — true khi CSMS không xác nhận được LocalAuthorizeOffline, LocalPreAuthorize và
+            AllowOfflineTxForUnknownId đều false (bị Rejected / NotSupported, key không có, timeout, hoặc
+            trụ chưa từng được kiểm). Thẻ lạ / thẻ bị khoá có thể sạc khi trụ mất mạng.
+        offline_card_risk_reason:
+          type: [string, 'null']
+          enum: [not_checked, no_response, key_missing, rejected, not_supported, reboot_required, change_failed, null]
+          description: Lý do ngắn; null khi offline_card_risk = false
+    OfflineAuthCheck:
+      type: object
+      description: T150 — lần kiểm cấu hình authorize offline mới nhất (sau BootNotification, migration 0030)
+      required: [checked_at, epoch, config_values, change_results, supported_feature_profiles, fallback_profile_status]
+      properties:
+        checked_at: { $ref: '#/components/schemas/Timestamp' }
+        epoch: { type: [integer, 'null'] }
+        config_values:
+          type: [object, 'null']
+          description: 'key → {value, readonly}; null = trụ không trả key (unknownKey). null cả đối tượng = GetConfiguration không có phản hồi'
+          additionalProperties:
+            oneOf:
+              - type: object
+                required: [value, readonly]
+                properties:
+                  value: { type: [string, 'null'] }
+                  readonly: { type: boolean }
+              - type: 'null'
+        change_results:
+          type: object
+          description: 'key → Accepted | Rejected | RebootRequired | NotSupported | timeout | error | skipped (đã là false)'
+          additionalProperties: { type: string }
+        supported_feature_profiles: { type: [string, 'null'] }
+        fallback_profile_status:
+          type: [string, 'null']
+          description: 'TxDefaultProfile dự phòng (OFFLINE_TX_FALLBACK_S > 0): status OCPP, unsupported (không có SmartCharging), null (tắt / không cần)'
     ChargePointPage:
       allOf:
         - $ref: '#/components/schemas/PageMeta'
@@ -2964,6 +3135,26 @@ components:
           required: [items]
           properties:
             items: { type: array, items: { $ref: '#/components/schemas/ChargePoint' } }
+    NetworkChargePoint:
+      allOf:
+        - $ref: '#/components/schemas/ChargePoint'
+        - type: object
+          required: [operator, open_faults]
+          properties:
+            operator: { $ref: '#/components/schemas/OperatorRef' }
+            open_faults:
+              type: object
+              required: [total, top_severity]
+              properties:
+                total: { type: integer, minimum: 0 }
+                top_severity: { type: [string, 'null'], enum: [critical, major, minor, none, null] }
+    NetworkChargePointPage:
+      allOf:
+        - $ref: '#/components/schemas/PageMeta'
+        - type: object
+          required: [items]
+          properties:
+            items: { type: array, items: { $ref: '#/components/schemas/NetworkChargePoint' } }
     ChargePointDetail:
       allOf:
         - $ref: '#/components/schemas/ChargePoint'
@@ -2974,6 +3165,10 @@ components:
             rated_power_kw: { type: [number, 'null'] }
             reports_soc: { type: boolean, description: 'BR-P40 — trụ có gửi SoC' }
             supports_reservation: { type: boolean }
+            offline_auth_check:
+              oneOf:
+                - $ref: '#/components/schemas/OfflineAuthCheck'
+                - type: 'null'
             open_faults: { type: array, items: { $ref: '#/components/schemas/Fault' } }
             recent_commands:
               type: array
@@ -3019,8 +3214,11 @@ components:
       additionalProperties: false
       required: [serial_number, site_id, connectors]
       properties:
-        serial_number: { type: string, pattern: '^[A-Za-z0-9._-]{3,48}$' }
-        site_id: { $ref: '#/components/schemas/Id' }
+        serial_number: { type: string, pattern: '^[A-Za-z0-9._-]{3,25}$' }
+        site_id:
+          type: integer
+          minimum: 1
+          description: 'Code hiện tại (parseOnboardBody) chỉ nhận số nguyên, không nhận Id dạng chuỗi (FE-02)'
         connectors:
           type: array
           minItems: 1
@@ -3077,7 +3275,7 @@ components:
       additionalProperties: false
       required: [serial_number]
       properties:
-        serial_number: { type: string, pattern: '^[A-Za-z0-9._-]{3,48}$' }
+        serial_number: { type: string, pattern: '^[A-Za-z0-9._-]{3,25}$' }
         model: { type: [string, 'null'], maxLength: 20 }
         rated_power_kw: { type: [number, 'null'], exclusiveMinimum: 0 }
     RegistryChargePointPatch:
@@ -3367,10 +3565,42 @@ components:
         settlement: { type: [string, 'null'], enum: [posted, already_posted, pending, ineligible, null] }
     AssignSessionRequest:
       type: object
-      required: [note]
-      description: Giữ chỗ — trường xác định tài xế theo bản chốt của T102
+      required: [driver_id, note]
       properties:
+        driver_id: { $ref: '#/components/schemas/Id' }
         note: { type: string, minLength: 1, maxLength: 500 }
+    CloseSessionRequest:
+      type: object
+      required: [reason, note]
+      properties:
+        reason:
+          type: string
+          pattern: '^[a-z0-9_]{1,40}$'
+          examples: [owner_unknown, test_session, free_vend_ok]
+        note: { type: string, minLength: 1, maxLength: 500 }
+    SessionDecisionResult:
+      type: object
+      required: [session_id, decision, payment_mode, already_resolved, records_reviewed]
+      description: 'FE-12: kết quả assign / close (BE-24)'
+      properties:
+        session_id: { $ref: '#/components/schemas/Id' }
+        decision: { type: string, enum: [assigned, closed] }
+        driver_id: { $ref: '#/components/schemas/Id' }
+        reason: { type: string }
+        payment_mode: { type: string, enum: [csms_billed, unattributed] }
+        already_resolved: { type: boolean }
+        records_reviewed: { type: integer, minimum: 0 }
+        settlement: { type: string, enum: [posted, already_posted, pending, ineligible] }
+    SessionQueuePage:
+      type: object
+      required: [queue, items, total, page, page_size]
+      description: 'FE-12: một trang hàng đợi màn 23 (packages/shared/src/api/sessions.ts)'
+      properties:
+        queue: { type: string, enum: [unattributed, review] }
+        items: { type: array, items: { type: object } }
+        total: { type: integer, minimum: 0, maximum: 500 }
+        page: { type: integer, minimum: 1 }
+        page_size: { type: integer, minimum: 1, maximum: 100 }
     ChargeIntent:
       type: object
       required: [id, charge_point_id, serial_number, connector_no, requested_at, state]
@@ -3559,7 +3789,8 @@ components:
             số phiên; lý do = `charge_settlement_jobs.reason` khi job `pending` (vd
             `promotion_unsupported`, `late_start_operator_review`, `missing_meter`,
             `invalid_energy`, `policy_unconfigured`), `ineligible` khi không có job hoặc job
-            `ineligible`, `posted_without_debit` khi job `posted` mà không có debit (lệch sổ).
+            `ineligible` khác; riêng `ineligible/account_closed` giữ `account_closed` (T158,
+            dừng tự thử lại, chưa thu nợ); `posted_without_debit` khi job `posted` mà không có debit (lệch sổ).
           required: [session_count, by_reason]
           properties:
             session_count: { type: integer, minimum: 0 }
@@ -3791,8 +4022,44 @@ components:
     # ---- admin tóm tắt / ngoại lệ thanh toán ---------------------------------------------------
     AdminSummary:
       type: object
-      required: [users, charge_points, rfid_cards, billing_exceptions]
+      required: [operators, sites, network, users, charge_points, rfid_cards, billing_exceptions]
       properties:
+        operators:
+          type: object
+          description: 'Thống kê chung (20/11): số Operator, trong đó đang hoạt động'
+          required: [total, active]
+          properties:
+            total: { type: integer, minimum: 0 }
+            active: { type: integer, minimum: 0 }
+        sites: { type: integer, minimum: 0, description: 'Số Charging Station toàn nền tảng' }
+        network:
+          type: object
+          description: |
+            Mạng lưới trụ toàn nền tảng (UC-ADM-07, chỉ đọc): trụ đang hoạt động (`in_service`)
+            online / offline theo luật offline của operator API; súng của trụ chưa gỡ theo nhóm
+            BR-P38 (cùng luật với `GET /operator/v1/summary`); sự cố đang mở theo mức
+          required: [in_service_online, in_service_offline, connectors, open_faults]
+          properties:
+            in_service_online: { type: integer, minimum: 0 }
+            in_service_offline: { type: integer, minimum: 0 }
+            connectors:
+              type: object
+              required: [available, in_use, freeing_soon, unavailable, offline]
+              properties:
+                available: { type: integer, minimum: 0 }
+                in_use: { type: integer, minimum: 0 }
+                freeing_soon: { type: integer, minimum: 0 }
+                unavailable: { type: integer, minimum: 0 }
+                offline: { type: integer, minimum: 0 }
+            open_faults:
+              type: object
+              required: [total, critical, major, minor, none]
+              properties:
+                total: { type: integer, minimum: 0 }
+                critical: { type: integer, minimum: 0 }
+                major: { type: integer, minimum: 0 }
+                minor: { type: integer, minimum: 0 }
+                none: { type: integer, minimum: 0 }
         users:
           type: object
           required: [driver, operator_staff, admin, suspended]

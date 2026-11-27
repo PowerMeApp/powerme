@@ -296,7 +296,10 @@ describe('Doanh thu (màn 25, Operator)', () => {
       names.push(this.download);
     });
     const { user } = renderApp(`/operator/revenue${PERIOD}`, session(STAFF));
-    await user.click(await screen.findByRole('button', { name: 'Tải CSV' }));
+    // The button is disabled until the report has loaded: wait for that, then click.
+    const download = await screen.findByRole('button', { name: 'Tải CSV' });
+    await waitFor(() => expect(download).toBeEnabled());
+    await user.click(download);
     await waitFor(() =>
       expect(names).toEqual(['doanh-thu_2026-11-01_2026-11-05_charge_point.csv']),
     );

@@ -1,15 +1,16 @@
 @startuml SD-2d
 !include ../_style.iuml
-title SD-2d (Software level, CSMS billing) — No payment result 2 min after the 15-min expiry, and a late payment\nPrecondition: top-up is pending · System view: AD-2 · State: STM-4
-footer Owner: Lê Bảo Khang (WP5) · v2.1 · 10/11/2026 · names = CD-2 class diagram · right gate = Payment Gateway
+title SD-2d (Software level, CSMS billing) — No payment result after the 15-min expiry: querydr schedule, and a late payment\nPrecondition: top-up is pending · System view: AD-2 · State: STM-4
+footer Owner: Lê Bảo Khang (WP5) · v2.2 · 23/11/2026 · names = CD-2 class diagram · right gate = Payment Gateway
 
 participant "«component»\n<u>:TopUpService</u>" as TS
 participant "«component»\n<u>:CreditLedgerService</u>" as CL
 participant "«port»\n<u>:VnpayAdapter</u>" as VA
 
-== Timeout sweep at expiresAt + 2 min (expiresAt = creation + 15 min), no notification ==
-[o-> TS ++ : onPendingTimeout(topUpId)  (DB-polled sweep, D7)
-opt top-up still pending
+== Query schedule: expiresAt + 2, 15, 30, 45, 60 min (expiresAt = creation + 15 min), +75 min only if the 60-min query returns RC 94 ==
+loop each slot while the top-up is still pending (DB-polled sweep: status = pending AND next_attempt_at <= now)
+  [o-> TS ++ : onPendingTimeout(topUpId)
+  TS -> TS : claim row (unfinished_claims + 1,\nnext_attempt_at = lease deadline)
   TS -> VA ++ : queryTransaction(ref) : status
   VA ->] : querydr [HTTPS]
   note right : {d ≤ 10 s}
@@ -19,12 +20,18 @@ opt top-up still pending
     TS -> TS : pending → credited
     TS -> CL ++ : post(accountId, top_up, +amountVnd, topUpId)
     CL --> TS --
-  else not paid
+  else answered: not paid
     TS -> TS : pending → expired (final)
     TS ->>] : notify Driver (MSG26)
+  else answer unclear and a slot is left
+    TS -> TS : stay pending, next_attempt_at = next slot,\nunfinished_claims = 0
+  else answer unclear and no slot left
+    TS -> TS : pending → expired,\nexception_kind = unresolved_04 / unresolved_07
+    TS ->>] : notify Driver (MSG26)
   end
+  deactivate TS
 end
-deactivate TS
+note over TS, VA : If the worker cannot finish a check 5 times in a row (claim limit), the 6th claim makes the top-up expired with exception_kind = retry_exhausted, listed for the Admin on Billing Exceptions.
 
 == Notification arrives for an expired or failed top-up ==
 [-> TS ++ : applyPaymentResult(ipn)  (from VnpayIpnController, SD-2b)

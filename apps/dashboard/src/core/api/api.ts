@@ -12,9 +12,11 @@ import {
   type FetchArgs,
 } from '@reduxjs/toolkit/query/react';
 import type {
+  AdminSummary,
   ApiErrorBody,
   ChargePointLifecycle,
   ChargePointPage,
+  CreateRfidCardRequest,
   OperatorChargePointDetail,
   OperatorSummary,
   DashboardMe,
@@ -22,21 +24,55 @@ import type {
   FaultListStatus,
   LoginRequest,
   LoginResponse,
+  NetworkChargePointPage,
+  NetworkQuery,
+  OnboardRequest,
+  OnboardResult,
   OperatorFaultList,
+  PlatformOperatorPage,
   RefreshResponse,
+  RegisterDeviceRequest,
+  RegistryChargePoint,
+  RegistryChargePointPage,
+  RfidCard,
+  RfidCardPage,
+  RfidCardQuery,
   ResetRequest,
   ResetResponse,
+  AssignSessionRequest,
+  CloseSessionRequest,
+  ResolveSessionRequest,
+  SessionDecisionResponse,
+  SessionQueue,
+  SessionQueuePage,
   RevenueQuery,
   RevenueReport,
   SessionsActiveError,
+  SitePage,
+  TransactionPage,
+  TransactionQuery,
+  UpdateRfidCardRequest,
+  UserAccountPage,
 } from '@powerme/shared';
 import { loggedOut, tokenRefreshed, type AuthState } from '../auth/authSlice';
 import { env } from '../config/env';
 
 /** Rows per page on screen 21. */
 export const FAULT_PAGE_SIZE = 20;
+/** Rows per page on screen 23. */
+export const SESSION_PAGE_SIZE = 20;
 /** Rows per page on screen 18. */
 export const CHARGE_POINT_PAGE_SIZE = 20;
+/** Rows per page of the transaction list on screen 35 (the API default). */
+export const TRANSACTION_PAGE_SIZE = 50;
+/** Rows per page on screen 30. */
+export const RFID_PAGE_SIZE = 20;
+/** Rows per page on screen 31. */
+export const NETWORK_PAGE_SIZE = 20;
+/** Rows per page of the device registry. */
+export const REGISTRY_PAGE_SIZE = 20;
+/** Matches shown by the driver picker of screen 30. */
+export const DRIVER_SEARCH_SIZE = 10;
 
 /** Screen 18 filters; omitted = all (decommissioned hidden by the server, D24). */
 export interface ChargePointFilter {
@@ -134,13 +170,28 @@ const baseQuery: BaseQueryFn<string | FetchArgs, unknown, ApiError> = async (arg
 export const api = createApi({
   reducerPath: 'api',
   baseQuery,
-  tagTypes: ['Fault', 'Summary', 'ChargePoint', 'Revenue'],
+  tagTypes: [
+    'Fault',
+    'Summary',
+    'ChargePoint',
+    'Session',
+    'Revenue',
+    'AdminSummary',
+    'RfidCard',
+    'Registry',
+    'Network',
+  ],
   endpoints: (b) => ({
     login: b.mutation<LoginResponse, LoginRequest>({
       query: (body) => ({ url: 'auth/v1/login', method: 'POST', body }),
     }),
     operatorMe: b.query<DashboardMe, void>({ query: () => 'operator/v1/me' }),
     adminMe: b.query<DashboardMe, void>({ query: () => 'admin/v1/me' }),
+    // Screen 27 (FE-14, UC-ADM-07): platform counts.
+    adminSummary: b.query<AdminSummary, void>({
+      query: () => 'admin/v1/summary',
+      providesTags: ['AdminSummary'],
+    }),
     // Screen 21 (FE-04b, UC-OPS-03): FaultEvents of the signed-in staff's Operator.
     // One page of the server's order (D39); `page` is 1-based.
     operatorFaults: b.query<
@@ -197,6 +248,44 @@ export const api = createApi({
       query: (id) => `operator/v1/charge-points/${id}`,
       providesTags: ['ChargePoint', 'Fault'],
     }),
+    // Screen 19 (FE-02, UC-OPS-01): the Operator's Charging Stations for the station picker, and
+    // the onboarding itself. A new charge point shows on screens 17 / 18 as awaiting connection.
+    operatorSites: b.query<SitePage, void>({ query: () => 'operator/v1/sites?page_size=100' }),
+    onboardChargePoint: b.mutation<OnboardResult, OnboardRequest>({
+      query: (body) => ({ url: 'operator/v1/charge-points/onboard', method: 'POST', body }),
+      invalidatesTags: ['ChargePoint', 'Summary'],
+    }),
+    // Screen 23 (FE-12, UC-OPS-05): unattributed / review queues and the Operator's decisions.
+    // A decision also changes the queue counts on screen 17.
+    operatorSessions: b.query<SessionQueuePage, { queue: SessionQueue; page: number }>({
+      query: ({ queue, page }) =>
+        `operator/v1/sessions?queue=${queue}&page=${page}&page_size=${SESSION_PAGE_SIZE}`,
+      providesTags: ['Session'],
+    }),
+    assignSession: b.mutation<SessionDecisionResponse, { id: string } & AssignSessionRequest>({
+      query: ({ id, ...body }) => ({
+        url: `operator/v1/sessions/${id}/assign`,
+        method: 'POST',
+        body,
+      }),
+      invalidatesTags: ['Session', 'Summary'],
+    }),
+    closeSession: b.mutation<SessionDecisionResponse, { id: string } & CloseSessionRequest>({
+      query: ({ id, ...body }) => ({
+        url: `operator/v1/sessions/${id}/close`,
+        method: 'POST',
+        body,
+      }),
+      invalidatesTags: ['Session', 'Summary'],
+    }),
+    resolveSession: b.mutation<SessionDecisionResponse, { id: string } & ResolveSessionRequest>({
+      query: ({ id, ...body }) => ({
+        url: `operator/v1/sessions/${id}/resolve`,
+        method: 'POST',
+        body,
+      }),
+      invalidatesTags: ['Session', 'Summary'],
+    }),
     // Screens 25 / 35 (FE-07, UC-OPS-09 / UC-ADM-10): revenue report of T108 (BR-P46).
     revenue: b.query<RevenueReport, { scope: RevenueScope } & RevenueQuery>({
       query: ({ scope, ...q }) => `${scope}/v1/revenue?${revenueSearch(q)}`,
@@ -210,6 +299,86 @@ export const api = createApi({
         responseHandler: (r) => (r.ok ? r.text() : r.json()),
       }),
     }),
+    // Screen 35 (UC-ADM-10): transaction list of T108b, one stopped session per row (contract §4.1).
+    adminTransactions: b.query<TransactionPage, TransactionQuery & { page: number }>({
+      query: ({ page, ...q }) =>
+        `admin/v1/transactions?${transactionSearch(q)}&page=${page}&page_size=${TRANSACTION_PAGE_SIZE}`,
+      providesTags: ['Revenue'],
+    }),
+    // Same filters, no paging (page / page_size → 400); whole filtered set plus a TOTAL line.
+    adminTransactionsCsv: b.mutation<string, TransactionQuery>({
+      query: (q) => ({
+        url: `admin/v1/transactions.csv?${transactionSearch(q)}`,
+        responseHandler: (r) => (r.ok ? r.text() : r.json()),
+      }),
+    }),
+    // Screen 30 (T161, UC-ADM-04): RFID card registry of T146 (contract §3.8a). A change also
+    // changes the card counts of screen 27 (T161 point 5).
+    adminRfidCards: b.query<RfidCardPage, RfidCardQuery & { page: number }>({
+      query: ({ page, ...f }) => {
+        const p = new URLSearchParams();
+        if (f.status) p.set('status', f.status);
+        if (f.card_kind) p.set('card_kind', f.card_kind);
+        if (f.q?.trim()) p.set('q', f.q.trim());
+        p.set('page', String(page));
+        p.set('page_size', String(RFID_PAGE_SIZE));
+        return `admin/v1/rfid-cards?${p}`;
+      },
+      providesTags: ['RfidCard'],
+    }),
+    createRfidCard: b.mutation<RfidCard, CreateRfidCardRequest>({
+      query: (body) => ({ url: 'admin/v1/rfid-cards', method: 'POST', body }),
+      invalidatesTags: ['RfidCard', 'AdminSummary'],
+    }),
+    updateRfidCard: b.mutation<RfidCard, { id: string } & UpdateRfidCardRequest>({
+      query: ({ id, ...body }) => ({ url: `admin/v1/rfid-cards/${id}`, method: 'PATCH', body }),
+      invalidatesTags: ['RfidCard', 'AdminSummary'],
+    }),
+    // Device registry: registered charge points of the whole platform, newest first. Registering
+    // one also changes the charge point counts of the admin home page.
+    adminRegistry: b.query<
+      RegistryChargePointPage,
+      { page: number; lifecycle?: ChargePointLifecycle }
+    >({
+      query: ({ page, lifecycle }) => {
+        const p = new URLSearchParams();
+        if (lifecycle) p.set('lifecycle', lifecycle);
+        p.set('page', String(page));
+        p.set('page_size', String(REGISTRY_PAGE_SIZE));
+        return `admin/v1/charge-points?${p}`;
+      },
+      providesTags: ['Registry'],
+    }),
+    registerDevice: b.mutation<RegistryChargePoint, RegisterDeviceRequest>({
+      query: (body) => ({ url: 'admin/v1/charge-points', method: 'POST', body }),
+      invalidatesTags: ['Registry', 'AdminSummary'],
+    }),
+    // Screen 31 (FE-18, UC-ADM-07): every Operator's charge points, live; and the Operators.
+    adminNetwork: b.query<NetworkChargePointPage, NetworkQuery & { page: number }>({
+      query: ({ page, ...f }) => {
+        const p = new URLSearchParams();
+        if (f.operator_id) p.set('operator_id', f.operator_id);
+        if (f.charge_point_q?.trim()) p.set('charge_point_q', f.charge_point_q.trim());
+        if (f.site_q?.trim()) p.set('site_q', f.site_q.trim());
+        if (f.lifecycle) p.set('lifecycle', f.lifecycle);
+        if (f.online !== undefined) p.set('online', String(f.online));
+        p.set('page', String(page));
+        p.set('page_size', String(NETWORK_PAGE_SIZE));
+        return `admin/v1/network/charge-points?${p}`;
+      },
+      providesTags: ['Network'],
+    }),
+    adminOperators: b.query<PlatformOperatorPage, void>({
+      query: () => 'admin/v1/operators?page_size=100',
+    }),
+    // Driver picker of screen 30: active drivers by name, email or phone (T161, admin-users.ts).
+    driverSearch: b.query<UserAccountPage, string>({
+      query: (q) => {
+        const p = new URLSearchParams({ role: 'driver', account_status: 'active', q: q.trim() });
+        p.set('page_size', String(DRIVER_SEARCH_SIZE));
+        return `admin/v1/users?${p}`;
+      },
+    }),
   }),
 });
 
@@ -217,6 +386,7 @@ export const {
   useLoginMutation,
   useOperatorMeQuery,
   useAdminMeQuery,
+  useAdminSummaryQuery,
   useOperatorFaultsQuery,
   useAcknowledgeFaultMutation,
   useResetFaultMutation,
@@ -224,8 +394,24 @@ export const {
   useOperatorSummaryQuery,
   useOperatorChargePointsQuery,
   useOperatorChargePointQuery,
+  useOperatorSitesQuery,
+  useOnboardChargePointMutation,
+  useOperatorSessionsQuery,
+  useAssignSessionMutation,
+  useCloseSessionMutation,
+  useResolveSessionMutation,
   useRevenueQuery,
   useRevenueCsvMutation,
+  useAdminTransactionsQuery,
+  useAdminTransactionsCsvMutation,
+  useAdminRfidCardsQuery,
+  useCreateRfidCardMutation,
+  useUpdateRfidCardMutation,
+  useDriverSearchQuery,
+  useAdminRegistryQuery,
+  useAdminNetworkQuery,
+  useAdminOperatorsQuery,
+  useRegisterDeviceMutation,
 } = api;
 
 export type RevenueScope = 'operator' | 'admin';
@@ -235,6 +421,16 @@ export function revenueSearch(q: RevenueQuery): string {
   const p = new URLSearchParams({ from: q.from, to: q.to, group_by: q.group_by });
   if (q.site_id) p.set('site_id', q.site_id);
   if (q.operator_id) p.set('operator_id', q.operator_id);
+  return p.toString();
+}
+
+/** Query string of the transaction routes, in a fixed order (JSON and CSV ask the same thing). */
+export function transactionSearch(q: TransactionQuery): string {
+  const p = new URLSearchParams({ from: q.from, to: q.to });
+  for (const k of ['operator_id', 'site_id', 'charge_point_id', 'kind', 'origin'] as const) {
+    const v = q[k];
+    if (v) p.set(k, v);
+  }
   return p.toString();
 }
 
@@ -269,6 +465,8 @@ export function errorMessage(err: unknown): string {
     // FE-07 revenue (T108).
     case 'invalid_period':
       return 'Kỳ báo cáo không hợp lệ: ngày đầu phải trước ngày cuối và dài tối đa 366 ngày';
+    case 'export_too_large':
+      return 'Quá 100 000 dòng, hãy chọn kỳ ngắn hơn hoặc lọc thêm';
   }
   if (e.status === 429) {
     const minutes = Math.max(1, Math.ceil((e.retryAfterS ?? 60) / 60));

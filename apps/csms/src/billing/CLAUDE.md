@@ -59,7 +59,7 @@ Decisions khác diagram thì theo diagram và sửa decisions. Diagram mâu thu�
     - mỗi dòng `redeem` / `restore` / `expire` theo hạn mang `expires_at` của đúng một lô, **copy bằng SQL** từ dòng earn của lô (không truyền timestamp từ JS, `Date` mất µs);
     - chỉ `adjust` 0 và `expire` lúc đóng tài khoản để `expires_at` NULL;
     - dòng sai dạng → `LoyaltyLedgerCorrupt`.
-  - Hiển thị / kiểm điểm khả dụng dùng `livePoints` của `replayLots`, **không** dùng `points_balance` (lô hết hạn còn nằm trong đó tới khi job hết hạn chạy).
+  - Hiển thị / kiểm điểm khả dụng dùng `livePoints` của `replayLots`, **không** dùng `points_balance` (lô hết hạn còn nằm trong đó tới khi job hết hạn chạy). Route app `GET /loyalty`, `/loyalty/transactions` (T149, `driver/loyalty.http.ts`) đọc qua `LoyaltyService.summary` / `history` trong một transaction REPEATABLE READ READ ONLY.
 
 ## Ai được ghi bảng nào
 

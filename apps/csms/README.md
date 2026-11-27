@@ -48,7 +48,7 @@ WF-05 onboarding (T119): `POST /api/admin/charge-points` and `POST /api/operator
 
 - **BE-02** Máy chủ WebSocket OCPP-J 1.6, định danh trụ theo SN trên đường dẫn — *Iteration 1: có*
 - **BE-03** Bản tin từ trụ lên: `BootNotification`, `Heartbeat`, `StatusNotification`, `Authorize`, `StartTransaction`, `MeterValues`, `StopTransaction` — *Iteration 1: có*
-- **BE-04** Lệnh xuống trụ: `RemoteStartTransaction`, `RemoteStopTransaction`, `Reset`, `UnlockConnector`, `GetConfiguration`, `ChangeConfiguration`, `TriggerMessage` — *Iteration 1: chỉ TriggerMessage(StatusNotification) khi trụ nối lại*
+- **BE-04** Lệnh xuống trụ: `RemoteStartTransaction`, `RemoteStopTransaction`, `Reset`, `UnlockConnector`, `GetConfiguration`, `ChangeConfiguration`, `TriggerMessage` — *Iteration 1: chỉ TriggerMessage(StatusNotification) khi trụ nối lại*; T150 (BR-P52): GetConfiguration + ChangeConfiguration tắt authorize offline sau mỗi BootNotification, cờ `offline_card_risk` trên Operator API, SetChargingProfile TxDefaultProfile / TxProfile dự phòng sau `OFFLINE_TX_FALLBACK_S` (mặc định tắt) — xem [docs/testing/T150-THE-OFFLINE.md](../../docs/testing/T150-THE-OFFLINE.md)
 - **BE-05** State machine trụ và connector cho cấu hình súng đôi, lưu bền và khôi phục — *Iteration 1: STM-1 phiên (22 chuyển), STM-2 phản chiếu + gắn cờ, STM-3 in_service/offline theo socket*
 - **BE-06** Lưu trữ MeterValues DC: SoC, điện áp, dòng, kWh — *Iteration 1: mỗi SampledValue một dòng, dedup*
 - **BE-07** Engine đối soát: phát lại hàng đợi offline, phát hiện replay theo timestamp, chống trùng giao dịch, phát hiện lỗ hổng chuỗi meter — *Iteration 1: có*
@@ -157,3 +157,14 @@ loopback HTTP listener. `/stations?sort=smart` implements the user-prioritized b
 Smart ranking uses disclosed range/road/wait/charge assumptions, not live Vietmap travel or billing.
 `npm run test:driver-discovery` runs discovery and smart HTTP suites in separate new databases;
 CI invokes that runner explicitly. Full charging HTTP, OTP and mobile remain deferred.
+
+## WP3/T146 — Admin RFID API
+
+GET/POST /api/admin/v1/rfid-cards and PATCH /api/admin/v1/rfid-cards/{cardId} use the existing
+HTTP listener and Admin JWT/RolesGuard. The card registry preserves exact reader UIDs and blocks;
+it does not stop existing sessions. See [contract §3.8a](../../docs/api/OPERATOR-ADMIN-API-HOP-DONG.md#38a-wp3t146--sổ-thẻ-rfid-26112026).
+The secret-free [Postman collection](postman/PowerMe-T146-Admin-RFID.postman_collection.json) and
+[empty local template](postman/PowerMe-T146-Local.postman_environment.json) require private local
+credentials. Do not sync/export populated credentials or tokens to a shared workspace.
+Focused isolated suite: npm run test:driver-discovery -w @powerme/csms -- test/admin-rfid-cards.integration.test.ts
+with the explicit MB03 owned-local test admin connection/creation opt-in. No application DB is reset.

@@ -1,0 +1,577 @@
+{
+  "info": {
+    "name": "PowerMe T146 Admin RFID API (local)",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "description": "Secret-free local API collection. Backend must use the dedicated local database. Import only this collection and the empty template. Do not import the private credentials file into a cloud workspace. Enter credentials privately in a local unsynced environment or Postman Vault. Login scripts use pm.variables.set only: tokens and cardId persist within one Collection Runner execution, not across separate manual Send requests. For manual requests, copy access_token and cardId from the responses into PRIVATE LOCAL/current values; keep shared values empty and do not export them. Login/refresh never set collection/global/shared environment values. UID is used exactly as supplied; a repeat registration intentionally returns 409. No deletion, charging, simulator or per-station free-vend configuration."
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{access_token}}",
+        "type": "string"
+      }
+    ]
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://127.0.0.1:3000",
+      "type": "string"
+    },
+    {
+      "key": "admin_email",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "admin_password",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "access_token",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "refresh_token",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "driver_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "other_driver_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "cardId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "card_identifier",
+      "value": "T146-DEMO-0001",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "01 Login admin (private values only)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{base_url}}/api/auth/v1/login",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"email\": \"{{admin_email}}\",\n  \"password\": \"{{admin_password}}\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "auth": {
+          "type": "noauth"
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+              "if (pm.response.code === 200) { const r = pm.response.json(); pm.variables.set('access_token', r.access_token); pm.variables.set('refresh_token', r.refresh_token); }"
+            ]
+          }
+        }
+      ],
+      "response": []
+    },
+    {
+      "name": "02 Refresh (same Collection Runner session)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{base_url}}/api/auth/v1/refresh",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"refresh_token\": \"{{refresh_token}}\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "auth": {
+          "type": "noauth"
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+              "if (pm.response.code === 200) pm.variables.set('access_token', pm.response.json().access_token);"
+            ]
+          }
+        }
+      ],
+      "response": []
+    },
+    {
+      "name": "03 List cards",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": "{{base_url}}/api/admin/v1/rfid-cards?page=1&page_size=50"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": ["pm.test('HTTP 200', () => pm.response.to.have.status(200));"]
+          }
+        }
+      ],
+      "response": []
+    },
+    {
+      "name": "04 Register online unlinked (unique demo UID)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{base_url}}/api/admin/v1/rfid-cards",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"card_identifier\": \"{{card_identifier}}\",\n  \"card_kind\": \"online\",\n  \"driver_id\": null\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 201', () => pm.response.to.have.status(201));",
+              "if (pm.response.code === 201) pm.variables.set('cardId', pm.response.json().id);"
+            ]
+          }
+        }
+      ],
+      "response": []
+    },
+    {
+      "name": "05 Link driver",
+      "request": {
+        "method": "PATCH",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{base_url}}/api/admin/v1/rfid-cards/{{cardId}}",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"driver_id\": \"{{driver_id}}\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": ["pm.test('HTTP 200', () => pm.response.to.have.status(200));"]
+          }
+        }
+      ],
+      "response": []
+    },
+    {
+      "name": "06 Filter prefix, kind, active driver",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": "{{base_url}}/api/admin/v1/rfid-cards?card_kind=online&status=active&driver_id={{driver_id}}&q={{card_identifier}}&page=1&page_size=10"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": ["pm.test('HTTP 200', () => pm.response.to.have.status(200));"]
+          }
+        }
+      ],
+      "response": []
+    },
+    {
+      "name": "07 Block card",
+      "request": {
+        "method": "PATCH",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{base_url}}/api/admin/v1/rfid-cards/{{cardId}}",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"status\": \"blocked\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": ["pm.test('HTTP 200', () => pm.response.to.have.status(200));"]
+          }
+        }
+      ],
+      "response": []
+    },
+    {
+      "name": "08 Reassign blocked card (remains blocked)",
+      "request": {
+        "method": "PATCH",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{base_url}}/api/admin/v1/rfid-cards/{{cardId}}",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"driver_id\": \"{{other_driver_id}}\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+              "pm.test('Block preserved', () => pm.expect(pm.response.json().status).to.eql('blocked'));"
+            ]
+          }
+        }
+      ],
+      "response": []
+    },
+    {
+      "name": "09 Explicit unblock (linked online card)",
+      "request": {
+        "method": "PATCH",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{base_url}}/api/admin/v1/rfid-cards/{{cardId}}",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"status\": \"active\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": ["pm.test('HTTP 200', () => pm.response.to.have.status(200));"]
+          }
+        }
+      ],
+      "response": []
+    },
+    {
+      "name": "10 Unlink online card",
+      "request": {
+        "method": "PATCH",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{base_url}}/api/admin/v1/rfid-cards/{{cardId}}",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"driver_id\": null\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": ["pm.test('HTTP 200', () => pm.response.to.have.status(200));"]
+          }
+        }
+      ],
+      "response": []
+    },
+    {
+      "name": "Negative cases (run after lifecycle)",
+      "item": [
+        {
+          "name": "11 Active without driver is invalid",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/admin/v1/rfid-cards/{{cardId}}",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"active\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": ["pm.test('HTTP 400', () => pm.response.to.have.status(400));"]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "12 Duplicate UID",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/admin/v1/rfid-cards",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"card_identifier\": \"{{card_identifier}}\",\n  \"card_kind\": \"online\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": ["pm.test('HTTP 409', () => pm.response.to.have.status(409));"]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "13 Immutable UID is rejected",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/admin/v1/rfid-cards/{{cardId}}",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"card_identifier\": \"T146-IMMUTABLE\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": ["pm.test('HTTP 400', () => pm.response.to.have.status(400));"]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "14 Unknown query is rejected",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{base_url}}/api/admin/v1/rfid-cards?unexpected=1"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": ["pm.test('HTTP 400', () => pm.response.to.have.status(400));"]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "15 Missing card",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/admin/v1/rfid-cards/9223372036854775807",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"blocked\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": ["pm.test('HTTP 404', () => pm.response.to.have.status(404));"]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "16 Free-vend cannot link driver",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/admin/v1/rfid-cards",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"card_identifier\": \"T146-FREE-DEMO\",\n  \"card_kind\": \"free_vend\",\n  \"driver_id\": \"{{driver_id}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": ["pm.test('HTTP 409', () => pm.response.to.have.status(409));"]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "17 Delete unsupported",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": "{{base_url}}/api/admin/v1/rfid-cards/{{cardId}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": ["pm.test('HTTP 405', () => pm.response.to.have.status(405));"]
+              }
+            }
+          ],
+          "response": []
+        }
+      ]
+    }
+  ]
+}

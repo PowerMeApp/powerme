@@ -134,7 +134,9 @@ describeDb('T32 Phần 5: route top-up tài xế qua HTTP', () => {
 
   async function listen(topUps?: TopUpService, config: DriverApiConfig = API): Promise<string> {
     const server = createServer(
-      createDriverListener(db, {} as DriverChargingService, config, undefined, undefined, topUps),
+      createDriverListener(db, {} as DriverChargingService, config, undefined, undefined, {
+        topUps,
+      }),
     );
     await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
     servers.push(server);

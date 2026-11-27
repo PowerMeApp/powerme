@@ -13,6 +13,7 @@
 
 import { spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
+import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import ocpp from 'ocpp-rpc';
 
@@ -140,6 +141,7 @@ async function multiStation() {
       RETRY_MS: '1000',
       REPLAY_LOSS: '0',
       PING_SEC: '5',
+      OFFLINE_AUTH: 'rejected', // T150: trụ "cứng đầu" (key readonly)
     },
     stdio: ['ignore', 'ignore', 'inherit'],
   });
@@ -229,6 +231,20 @@ async function multiStation() {
   check(
     'Đường cũ /api/state của tiến trình nhiều trụ = trụ đầu tiên',
     (await (await g('/api/state')).json()).cpId === M1,
+  );
+
+  // T150: OFFLINE_AUTH=rejected — key authorize offline readonly = true, ChangeConfiguration Rejected.
+  const stub = await cpBy[M1].call('ChangeConfiguration', {
+    key: 'AllowOfflineTxForUnknownId',
+    value: 'false',
+  });
+  const stubCfg = await cpBy[M1].call('GetConfiguration', { key: ['AllowOfflineTxForUnknownId'] });
+  check(
+    'T150: trụ cứng đầu (OFFLINE_AUTH=rejected) → Rejected, key readonly vẫn true',
+    stub.status === 'Rejected' &&
+      stubCfg.configurationKey[0]?.readonly === true &&
+      stubCfg.configurationKey[0]?.value === 'true',
+    JSON.stringify(stubCfg),
   );
 
   // RemoteStart vào súng 1 của trụ 2 khi CHƯA cắm súng → Accepted, chờ cắm
@@ -394,6 +410,30 @@ try {
     vendCodes.every((c) => c === 404),
     vendCodes.join(','),
   );
+  // Bundle hình 3D React (QA-04): đúng một file tên cố định; chưa build thì 404 (trang về 2D)
+  const built = existsSync(new URL('./tru3d/dist/tru3d.js', import.meta.url));
+  const t3 = await get('/tru3d/tru3d.js');
+  check(
+    `Tru3d: /tru3d/tru3d.js → ${built ? '200 JS (đã build)' : '404 (chưa build → hình 2D)'}`,
+    built
+      ? t3.status === 200 && (t3.headers.get('content-type') ?? '').startsWith('text/javascript')
+      : t3.status === 404,
+    String(t3.status),
+  );
+  const t3Codes = [];
+  for (const p of [
+    '/tru3d/index.html',
+    '/tru3d/..%2fvite.config.mjs',
+    '/tru3d/..%2f..%2fpackage.json',
+    '/tru3d/src/main.jsx',
+    '/tru3d/dist/tru3d.js',
+  ])
+    t3Codes.push((await get(p)).status);
+  check(
+    'Tru3d: file ngoài danh sách / có ".." / thư mục con → 404',
+    t3Codes.every((c) => c === 404),
+    t3Codes.join(','),
+  );
 
   // 2. Cắm súng A, quẹt thẻ hợp lệ
   await api('mode', { connector: 1, type: 'kwh', value: 5 });
@@ -543,6 +583,68 @@ try {
   check(
     'GetConfiguration trả key hỗ trợ + unknownKey',
     cfg.configurationKey[0].value === '1' && cfg.unknownKey[0] === 'NoSuchKey',
+  );
+  // T150 / BR-P52: OFFLINE_AUTH=normal — CSMS tắt được authorize offline; Smart Charging dự phòng.
+  const lao = await cp.call('ChangeConfiguration', {
+    key: 'LocalAuthorizeOffline',
+    value: 'false',
+  });
+  const oa = await cp.call('GetConfiguration', {
+    key: [
+      'LocalAuthorizeOffline',
+      'LocalPreAuthorize',
+      'AllowOfflineTxForUnknownId',
+      'SupportedFeatureProfiles',
+    ],
+  });
+  const oaVal = (k) => oa.configurationKey.find((x) => x.key === k)?.value;
+  check(
+    'T150: ChangeConfiguration LocalAuthorizeOffline=false → Accepted, đọc lại false; có SmartCharging',
+    lao.status === 'Accepted' &&
+      oaVal('LocalAuthorizeOffline') === 'false' &&
+      oaVal('AllowOfflineTxForUnknownId') === 'false' &&
+      oaVal('SupportedFeatureProfiles').split(',').includes('SmartCharging'),
+    JSON.stringify(oa.configurationKey),
+  );
+  const badBool = await cp.call('ChangeConfiguration', {
+    key: 'LocalPreAuthorize',
+    value: 'maybe',
+  });
+  check('T150: giá trị bool sai → Rejected', badBool.status === 'Rejected');
+  await cp.call('ChangeConfiguration', { key: 'LocalAuthorizeOffline', value: 'true' }); // trả lại
+  const schedule = (periods) => ({
+    chargingRateUnit: 'W',
+    chargingSchedulePeriod: periods.map(([startPeriod, limit]) => ({ startPeriod, limit })),
+  });
+  const txDef = await cp.call('SetChargingProfile', {
+    connectorId: 0,
+    csChargingProfiles: {
+      chargingProfileId: 15000,
+      stackLevel: 0,
+      chargingProfilePurpose: 'TxDefaultProfile',
+      chargingProfileKind: 'Relative',
+      chargingSchedule: schedule([
+        [0, 120000],
+        [600, 0],
+      ]),
+    },
+  });
+  const txBad = await cp.call('SetChargingProfile', {
+    connectorId: 1,
+    csChargingProfiles: {
+      chargingProfileId: 15001,
+      transactionId: 9999,
+      stackLevel: 0,
+      chargingProfilePurpose: 'TxProfile',
+      chargingProfileKind: 'Relative',
+      chargingSchedule: schedule([[0, 120000]]),
+    },
+  });
+  const clr = await cp.call('ClearChargingProfile', { id: 15000 });
+  check(
+    'T150: TxDefaultProfile → Accepted; TxProfile cho phiên không có → Rejected; Clear → Accepted',
+    txDef.status === 'Accepted' && txBad.status === 'Rejected' && clr.status === 'Accepted',
+    `${txDef.status}/${txBad.status}/${clr.status}`,
   );
   const rs = await cp.call('RemoteStopTransaction', { transactionId: 101 });
   await until(() => count('StopTransaction', (m) => m.params.transactionId === 101));

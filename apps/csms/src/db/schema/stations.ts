@@ -10,6 +10,7 @@ import {
   date,
   index,
   integer,
+  jsonb,
   numeric,
   pgTable,
   smallint,
@@ -207,5 +208,39 @@ export const chargePointConnections = pgTable(
   (t) => [
     unique('charge_point_connections_charge_point_id_epoch_key').on(t.chargePointId, t.epoch),
     index('charge_point_connections_opened_at_idx').on(t.chargePointId, t.openedAt),
+  ],
+);
+
+/**
+ * T150 / BR-P52 (migration 0030): mỗi lần CSMS kiểm cấu hình authorize offline sau BootNotification
+ * là một dòng (chỉ ghi thêm). Dòng mới nhất của trụ quyết định cờ `offline_card_risk`.
+ */
+export const chargePointOfflineAuthChecks = pgTable(
+  'charge_point_offline_auth_checks',
+  {
+    id: bigint('id', { mode: 'number' }).primaryKey().generatedAlwaysAsIdentity(),
+    chargePointId: bigint('charge_point_id', { mode: 'number' })
+      .notNull()
+      .references(() => chargePoints.id),
+    epoch: integer('epoch').notNull(),
+    startedAt: timestamp('started_at', { withTimezone: true }).notNull(),
+    completedAt: timestamp('completed_at', { withTimezone: true }).notNull(),
+    /** `{key: {value, readonly} | null}`; null = key trong unknownKey hoặc trụ không trả. */
+    configValues: jsonb('config_values'),
+    /** `{key: Accepted | Rejected | RebootRequired | NotSupported | timeout | error | skipped}`. */
+    changeResults: jsonb('change_results').notNull().default({}),
+    supportedFeatureProfiles: text('supported_feature_profiles'),
+    offlineCardRisk: boolean('offline_card_risk').notNull(),
+    riskReason: varchar('risk_reason', { length: 40 }),
+    /** Kết quả SetChargingProfile TxDefaultProfile; `unsupported` = không có SmartCharging; null = không gửi. */
+    fallbackProfileStatus: varchar('fallback_profile_status', { length: 20 }),
+  },
+  (t) => [
+    index('charge_point_offline_auth_checks_cp_idx').on(t.chargePointId, t.id.desc()),
+    check(
+      'charge_point_offline_auth_checks_reason_check',
+      sql`(${t.offlineCardRisk} AND ${t.riskReason} IS NOT NULL) OR (NOT ${t.offlineCardRisk} AND ${t.riskReason} IS NULL)`,
+    ),
+    check('charge_point_offline_auth_checks_time_check', sql`${t.completedAt} >= ${t.startedAt}`),
   ],
 );

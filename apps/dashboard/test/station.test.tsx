@@ -47,6 +47,8 @@ const cp = (id: string, over: Partial<OperatorChargePoint> = {}): OperatorCharge
       active_session_id: null,
     },
   ],
+  offline_card_risk: false,
+  offline_card_risk_reason: null,
   ...over,
 });
 const page = (items: OperatorChargePoint[]) => ({

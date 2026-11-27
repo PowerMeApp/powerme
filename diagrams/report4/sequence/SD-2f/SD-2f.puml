@@ -1,7 +1,7 @@
 @startuml SD-2f
 !include ../_style.iuml
 title SD-2f (Software level, CSMS billing) — Driver closes the account and unused credit is refunded\nPrecondition: credit account is active · System view: AD-9 · State: STM-5, STM-10
-footer Owner: Lê Bảo Khang (WP5) · v2.1 · 10/11/2026 · closure refunds created by the system (WF-02 decision D6, confirmed 09/11, repo #100) · left gate = Driver App
+footer Owner: Lê Bảo Khang (WP5) · v2.2 · 26/11/2026 · manual refund (decision D-AC): no automatic refund sending · v2.1 (10/11) closure refunds created by the system (WF-02 decision D6, confirmed 09/11, repo #100) · left gate = Driver App
 
 participant "«component»\n<u>:AccountClosureController</u>" as AC
 participant "«component»\n<u>:AccountClosureService</u>" as AS
@@ -38,6 +38,7 @@ opt a remainder cannot be refunded (e.g. points discount)
 end
 loop for each top-up share
   AS -> RS ++ : create(topUpId, kind = account_closure, shareVnd, requestedBy = null)
+  hnote over RS : {refund.status = requested}
   RS --> AS -- : refundId
 end
 opt points balance > 0
@@ -48,5 +49,10 @@ AS -> AS : active → closed, disable login\n(no refund created → closure_refu
 hnote over AS : {creditAccount.status = closed}
 AS --> AC -- : closure result
 [<-- AC -- : 200 {closed, refundIds, refundTotalVnd,\nnonRefundableVnd, pointsForfeited}
-note over AC, LS : Each refund is then sent to its original payment source exactly as in SD-2e (part 2). No Admin action is needed.
+note over AC, LS
+  Each closure refund waits as requested in the customer-service list (Billing Exceptions).
+  Customer service refunds it in the VNPay merchant portal, outside PowerMe, and the Admin
+  records the gateway refund number or marks it failed, as in SD-2e (steps 2 and 3).
+  PowerMe makes no refund API call and no querydr for refunds; no automatic retry, no refund worker.
+end note
 @enduml

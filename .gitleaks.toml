@@ -26,4 +26,6 @@ regexes = [
   '''115200''',
   # Fake idempotency UUID used as test input, not a secret.
   '''^01f74cc1-f6d5-40d1-8f27-42df86d119dd$''',
+  # Deterministic Stop idempotency fixture label, not an authentication credential.
+  '''^t146-live-orphan-stop$''',
 ]

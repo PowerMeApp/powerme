@@ -24,6 +24,8 @@ export const REDEEM_MIN_POINTS = 500;
 export const VND_PER_POINT = 10;
 /** BR-P35: giảm tối đa 50 % số tiền nạp → trần điểm = floor(amountVnd / 2 / 10). */
 const CAP_DIVISOR = 2 * VND_PER_POINT;
+/** SRS màn hình 15 (UC-PAY-04): "points expiring within 30 days" (T149). */
+export const EXPIRING_SOON_DAYS = 30;
 
 export type LoyaltyTransactionType = 'earn' | 'redeem' | 'restore' | 'expire' | 'adjust';
 
@@ -164,11 +166,30 @@ export function replayLots(rows: readonly LoyaltyRow[], asOf: Date): LotState {
   return { lots: sorted, total, livePoints, expiredUnwritten };
 }
 
+/** Lô còn sống lúc `asOf`, còn điểm, hết hạn tới `until` (gồm biên), sắp hạn tăng dần (T149). */
+export function lotsExpiringBy(lots: readonly Lot[], asOf: Date, until: Date): Lot[] {
+  return [...lots]
+    .sort(fifo)
+    .filter((l) => isAlive(l, asOf) && l.remaining > 0 && l.expiresAt.getTime() <= until.getTime());
+}
+
 /** Điểm còn sống lúc `asOf` sẽ hết hạn tới `until` (UC-PAY-04 "sắp hết hạn"). */
 export function pointsExpiringBy(lots: readonly Lot[], asOf: Date, until: Date): number {
-  return lots
-    .filter((l) => isAlive(l, asOf) && l.expiresAt.getTime() <= until.getTime())
-    .reduce((s, l) => s + l.remaining, 0);
+  return lotsExpiringBy(lots, asOf, until).reduce((s, l) => s + l.remaining, 0);
+}
+
+/**
+ * Tổng hiển thị của UC-PAY-04 (T149): `earned` = Σ earn; `redeemed` = −Σ redeem − Σ restore (số
+ * ròng đã dùng, restore trả lại phần của top-up bị hoàn). `expire` / `adjust` không tính.
+ */
+export function loyaltyTotals(rows: readonly LoyaltyRow[]): { earned: number; redeemed: number } {
+  let earned = 0;
+  let redeemed = 0;
+  for (const row of rows) {
+    if (row.type === 'earn') earned += row.points;
+    else if (row.type === 'redeem' || row.type === 'restore') redeemed -= row.points;
+  }
+  return { earned, redeemed };
 }
 
 /** Tiêu `points` từ các lô còn sống, cũ nhất trước. Thiếu → `shortfall` (D3 ⊕ ghi `adjust` 0). */

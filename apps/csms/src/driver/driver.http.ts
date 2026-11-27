@@ -1,4 +1,5 @@
 import type { IncomingMessage, RequestListener, ServerResponse } from 'node:http';
+import type { LoyaltyService } from '../billing/loyalty.service.js';
 import type { TopUpService } from '../billing/top-up.service.js';
 import type { Db } from '../db/db.module.js';
 import type { DriverChargingService } from '../sessions/driver-charging.service.js';
@@ -26,6 +27,7 @@ import {
   vehicleRouteAllow,
 } from './vehicles.http.js';
 import { handleTopUpRoute, isTopUpPath, topUpRouteMethod } from './top-ups.http.js';
+import { handleLoyaltyRoute, isLoyaltyPath } from './loyalty.http.js';
 import { RoadDiscovery } from './road-discovery.js';
 import { ProviderUnavailable, VietmapAdapter } from './vietmap.js';
 import { DriverReportError, type DriverReportResult } from '../stations/faults/fault.service.js';
@@ -37,6 +39,19 @@ export interface DriverFaultReports {
     connectorId: number,
     description: string,
   ): Promise<DriverReportResult>;
+}
+
+/**
+ * Service tuỳ chọn của listener, truyền theo tên (T149) thay cho tham số vị trí. Thiếu service nào
+ * thì route của nó trả 503 riêng.
+ */
+export interface DriverServices {
+  /** T32 Phần 5: route top-up; không có → 503 payment_unconfigured. */
+  topUps?: TopUpService;
+  /** FE-17: báo lỗi súng; không có → 503 faults_unavailable. */
+  faults?: DriverFaultReports;
+  /** T149: điểm thưởng; không có → 503 loyalty_unavailable. */
+  loyalty?: LoyaltyService;
 }
 
 const FAULT_REPORT_PATH = /^\/api\/driver\/v1\/connectors\/([^/]+)\/fault-reports$/;
@@ -54,9 +69,7 @@ export function createDriverListener(
   config: DriverApiConfig,
   road = new RoadDiscovery(db, new VietmapAdapter(config.searchKey), undefined),
   accounts = new DriverAccounts(db, config),
-  /** T32 Phần 5: route top-up; không có → 503 payment_unconfigured. */
-  topUps?: TopUpService,
-  faults?: DriverFaultReports,
+  { topUps, faults, loyalty }: DriverServices = {},
 ): RequestListener {
   return (req, res) => {
     void handle(req, res).catch(() => {
@@ -202,6 +215,19 @@ export function createDriverListener(
           topUps,
           clientAddress: driverClientIp(req, config),
           readBody: () => readJsonObject(req, res),
+          setAllow: (methods) => res.setHeader('Allow', methods),
+        });
+        send(res, result.status, result.body);
+        return;
+      }
+      if (isLoyaltyPath(path)) {
+        const result = await handleLoyaltyRoute({
+          req,
+          path,
+          q,
+          driverId,
+          db,
+          loyalty,
           setAllow: (methods) => res.setHeader('Allow', methods),
         });
         send(res, result.status, result.body);

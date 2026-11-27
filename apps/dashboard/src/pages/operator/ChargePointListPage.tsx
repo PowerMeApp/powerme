@@ -2,8 +2,8 @@
  * Screen 18 — Charge Point List (UC-OPS-02, FE-03). The Operator's charge points from
  * GET /api/operator/v1/charge-points, one row each, with every connector's raw OCPP status (D21),
  * Offline overriding it (D20) and a "possibly out of date" mark when stale (D22, BR-P39). Filters:
- * online / offline and lifecycle; decommissioned is hidden unless chosen (D24). The site filter
- * waits for GET /operator/v1/sites (Ân). Polled every 5 s (D5); the map is FE-03c (D23).
+ * online / offline and lifecycle; decommissioned is hidden unless chosen (D24). Polled every 5 s
+ * (D5); the map is FE-03c (D23). "Onboard trụ sạc" opens screen 19 (FE-02, OnboardingSheet).
  */
 import { Breadcrumbs } from '../../components/Breadcrumbs';
 import { useState } from 'react';
@@ -15,7 +15,8 @@ import {
   useOperatorChargePointsQuery,
 } from '../../core/api/api';
 import { ConnectorList, isOffline } from '../../features/chargePoints/ConnectorList';
-import { ago, LIFECYCLE, useNow } from '../../features/chargePoints/format';
+import { OnboardingSheet } from '../../features/chargePoints/OnboardingSheet';
+import { ago, LIFECYCLE, OFFLINE_CARD_RISK, useNow } from '../../features/chargePoints/format';
 import { MAX_SEARCH, useDebounced } from '../../core/search/search';
 
 export const LIST_POLL_MS = 5000;
@@ -39,6 +40,14 @@ function Row({ cp, now }: { cp: OperatorChargePoint; now: number }) {
           {cp.serial_number}
           {cp.model ? ` · ${cp.model}` : ''}
         </div>
+        {cp.offline_card_risk && (
+          <span
+            className="pill major small"
+            title={`Rủi ro thẻ offline: ${OFFLINE_CARD_RISK[cp.offline_card_risk_reason ?? 'not_checked']}`}
+          >
+            Rủi ro thẻ offline
+          </span>
+        )}
       </td>
       <td>
         <Link to={`/operator/stations/${cp.site.id}`}>{cp.site.site_name}</Link>
@@ -62,6 +71,7 @@ export function ChargePointListPage() {
   const [online, setOnline] = useState<OnlineFilter>('all');
   const [lifecycle, setLifecycle] = useState<ChargePointLifecycle | ''>('');
   const [page, setPage] = useState(1);
+  const [onboarding, setOnboarding] = useState(false);
   const [cpSearch, setCpSearch] = useState('');
   const [siteSearch, setSiteSearch] = useState('');
   const chargePointQ = useDebounced(cpSearch.trim());
@@ -90,6 +100,13 @@ export function ChargePointListPage() {
       <div className="page-head">
         <h1>Trụ sạc</h1>
         <p>Trạng thái từng súng theo bản tin OCPP mới nhất · cập nhật mỗi 5 giây</p>
+        <button
+          type="button"
+          className="btn primary page-action"
+          onClick={() => setOnboarding(true)}
+        >
+          Onboard trụ sạc
+        </button>
       </div>
       <div className="filters">
         <label className="field search-field">
@@ -216,6 +233,7 @@ export function ChargePointListPage() {
           </nav>
         </div>
       )}
+      {onboarding && <OnboardingSheet onClose={() => setOnboarding(false)} />}
     </>
   );
 }

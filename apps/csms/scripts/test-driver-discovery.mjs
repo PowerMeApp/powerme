@@ -13,6 +13,7 @@ try {
 if (!['127.0.0.1', '[::1]'].includes(adminUrl.hostname) || adminUrl.pathname !== '/postgres')
   throw new Error('Requires a loopback PostgreSQL admin connection to /postgres');
 const suites = [
+  'test/admin-rfid-cards.integration.test.ts',
   'test/driver-discovery.integration.test.ts',
   'test/driver-smart.integration.test.ts',
   'test/driver-auth.integration.test.ts',

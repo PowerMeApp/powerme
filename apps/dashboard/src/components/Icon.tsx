@@ -4,7 +4,9 @@ const PATHS = {
   logout: 'M15 4h4v16h-4M10 8l-4 4 4 4M6 12h11',
   alert: 'M12 3l10 18H2zM12 10v5M12 18v.01',
   plug: 'M9 2v6M15 2v6M6 8h12v4a6 6 0 01-12 0zM12 18v4',
+  sessions: 'M4 5h16M4 12h16M4 19h10M18 17l2 2 3-4',
   revenue: 'M4 20V10M10 20V4M16 20v-7M22 20H2',
+  card: 'M3 6h18v12H3zM3 10h18M7 15h4',
 } as const;
 
 export function Icon({ name, size = 18 }: { name: keyof typeof PATHS; size?: number }) {

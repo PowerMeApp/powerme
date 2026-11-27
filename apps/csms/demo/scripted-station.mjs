@@ -32,13 +32,33 @@
  *            InternalError) rồi chờ lệnh Reset trong --hold-s giây. --reset accept (mặc định): trả
  *            Accepted, ngắt, khởi động lại sau --reboot-s giây, Boot, súng Available (DS-07).
  *            --reset reject: trả Rejected, súng vẫn Faulted (DS-08).
+ *   offline-card  T150 / BR-P52: trụ nối, Boot (CSMS kiểm và tắt authorize offline), RỚT MẠNG, quẹt
+ *            thẻ --tag khi offline. Trụ tự quyết theo cấu hình hiện tại của nó: nhận thì sạc
+ *            --offline-wh Wh trong lúc offline, nối lại KHÔNG Boot và phát lại Start / MeterValues /
+ *            Stop mang giờ cũ; từ chối thì không có phiên. Các ca (Report 5, TC-BRP52-*):
+ *              chặn được   (mặc định --offline-auth accept): CSMS tắt key → trụ từ chối mọi thẻ offline
+ *              thẻ lạ      --offline-auth reject                       → phiên unattributed + unknown_id_tag
+ *              bị khoá     --offline-auth reject --tag DEMO-BLOCKED-01 → phiên unattributed (BR-P23)
+ *              trong danh sách --offline-auth reject --tag DEMO-CARD-0001 --listed → csms_billed bình thường
+ *              shortfall   --offline-auth reject --tag DEMO-CARD-0001 --listed --offline-wh 400000
+ *                          → chi phí > số dư, ví âm (BR-P20)
+ *            Mọi ca đều là phát lại (cp_timestamp cũ hơn epoch mới) và bật cờ offline_card_risk khi trụ
+ *            "cứng đầu" (dashboard → Trụ sạc).
  *
  * Tuỳ chọn: --id RH24D1-00001  --url ws://localhost:9000/ocpp  --connector 1
  *           --interval-s 10 (nhịp MeterValues)  --offline-s 60 (độ dài đứt mạng)  --fast (3 s / 15 s)
  *           --tag <idTag>  --hold-s 60 (ds-09 / app / fault: seconds to stay connected)
- *           --tick-wh 170 (app: Wh cộng mỗi nhịp; 2500 để chạm giới hạn 10 kWh sau 4 nhịp)
+ *           --tick-wh 170 (app: Wh mỗi nhịp ở công suất đầy; 2500 để chạm giới hạn 10 kWh sau 4 nhịp)
+ *           --soc-start 20  --battery-kwh 75 (app, T154: SoC đầu phiên và dung lượng pin giả định.
+ *            Công suất giữ 100 % tới SoC 80 % rồi giảm tuyến tính còn 5 % ở 99 %, về 0 khi đầy —
+ *            cùng đường cong với simulator/d1-hmi/model.mjs. SoC và Power.Active.Import khớp số Wh
+ *            thật của nhịp, để app/CSMS ước tính được thời gian sạc xong)
  *           --heartbeat-s N (ép nhịp Heartbeat; mặc định theo interval CSMS trả ở Boot, 300 s)
  *           --reject-start (app)  --error-code InternalError  --reset accept|reject  --reboot-s 5 (fault)
+ *           --offline-auth accept|reject|notsupported (T150, mọi kịch bản: trụ trả lời GetConfiguration /
+ *            ChangeConfiguration — accept: đổi được key; reject: key readonly = true → Rejected;
+ *            notsupported: không có key → unknownKey / NotSupported)
+ *           --listed (offline-card: thẻ có trong Local List)  --offline-wh 170 (offline-card)
  * Biến môi trường: CP_PASSWORD (mật khẩu Basic Auth của trụ; cần khi nối vào staging)
  */
 import { createRequire } from 'node:module';
@@ -60,6 +80,20 @@ const CONNECTOR = Number(opt('connector', 1));
 const INTERVAL_S = Number(opt('interval-s', fast ? 3 : 10));
 const OFFLINE_S = Number(opt('offline-s', fast ? 15 : 60));
 const SAMPLE_WH = 170; // ~60 kW × 10 s; chỉ để số liệu đẹp, không có ý nghĩa vật lý
+
+/** T154: hệ số công suất theo SoC — 1 tới 80 %, giảm tuyến tính còn 0,05, đầy (100 %) thì 0. */
+const taper = (soc) =>
+  soc >= 100 ? 0 : soc <= 80 ? 1 : Math.max(0.05, 1 - ((soc - 80) / 20) * 0.95);
+
+/**
+ * T154: một nhịp sạc của xe giả định. Trả Wh của nhịp (làm tròn), SoC mới và công suất (W) khớp
+ * với Wh đó trong `intervalS` giây.
+ */
+function chargeTick({ soc, batteryWh, fullTickWh, intervalS }) {
+  const wh = Math.round(fullTickWh * taper(soc));
+  const next = Math.min(100, soc + (wh / batteryWh) * 100);
+  return { wh, soc: next, powerW: Math.round((wh / intervalS) * 3600) };
+}
 
 const now = () => new Date().toISOString();
 const log = (...a) => console.log(now(), `[${ID}]`, ...a);
@@ -86,6 +120,27 @@ function startHeartbeat() {
     mine.call('Heartbeat', {}).catch((e) => log('✗ Heartbeat:', e.message));
   }, heartbeatS * 1000);
 }
+// ---- Cấu hình authorize offline (T150 / BR-P52) ----------------------------------------------
+const OFFLINE_AUTH = opt('offline-auth', 'accept');
+if (!['accept', 'reject', 'notsupported'].includes(OFFLINE_AUTH)) {
+  console.error('--offline-auth phải là accept | reject | notsupported');
+  process.exit(2);
+}
+/** key → { value, readonly }. Trụ "cứng đầu" (reject) giữ true và readonly; notsupported: không có key. */
+const config = new Map([
+  ['SupportedFeatureProfiles', { value: 'Core,RemoteTrigger', readonly: true }],
+  ['AuthorizationCacheEnabled', { value: 'true', readonly: false }],
+  ['LocalAuthListEnabled', { value: 'true', readonly: false }],
+]);
+if (OFFLINE_AUTH !== 'notsupported')
+  for (const key of ['LocalAuthorizeOffline', 'LocalPreAuthorize', 'AllowOfflineTxForUnknownId'])
+    config.set(key, { value: 'true', readonly: OFFLINE_AUTH === 'reject' });
+/** Trụ offline có tự nhận thẻ không: key không có = firmware nhận mọi thẻ (giả định "cứng đầu"). */
+function offlineAccepts(listed) {
+  const on = (k) => (config.has(k) ? config.get(k).value === 'true' : true);
+  return (listed && on('LocalAuthorizeOffline')) || on('AllowOfflineTxForUnknownId');
+}
+
 /** Lệnh CSMS → trụ mà kịch bản đang chạy muốn xử lý (app, fault); null = trả NotImplemented. */
 const hooks = { remoteStart: null, remoteStop: null, reset: null };
 
@@ -121,6 +176,26 @@ async function connect({ boot, password = process.env.CP_PASSWORD }) {
       }
     });
     return { status: 'Accepted' };
+  });
+  // T150: CSMS kiểm cấu hình authorize offline sau Boot.
+  client.handle('GetConfiguration', ({ params }) => {
+    const want = params?.key?.length ? params.key : [...config.keys()];
+    const configurationKey = [];
+    const unknownKey = [];
+    for (const key of want) {
+      const v = config.get(key);
+      if (v) configurationKey.push({ key, readonly: v.readonly, value: v.value });
+      else unknownKey.push(key);
+    }
+    log(`  ⇐ GetConfiguration ${want.length} key → ${unknownKey.length} unknownKey`);
+    return unknownKey.length ? { configurationKey, unknownKey } : { configurationKey };
+  });
+  client.handle('ChangeConfiguration', ({ params }) => {
+    const v = config.get(params.key);
+    const status = !v ? 'NotSupported' : v.readonly ? 'Rejected' : 'Accepted';
+    if (status === 'Accepted') v.value = String(params.value);
+    log(`  ⇐ ChangeConfiguration ${params.key}=${params.value} → ${status}`);
+    return { status };
   });
   // Lệnh từ CSMS: trả lời NGAY (như trụ thật), việc phải làm chạy sau khi CALLRESULT đã gửi.
   for (const [method, key] of [
@@ -177,7 +252,8 @@ async function dropLink() {
   await client.close({ force: true });
 }
 
-function meterValuesParams(connectorId, transactionId, wh, ts = now()) {
+/** `ev` (T154, kịch bản app): SoC và công suất thật của nhịp; thiếu thì giữ số cũ (kịch bản khác). */
+function meterValuesParams(connectorId, transactionId, wh, ts = now(), ev = null) {
   return {
     connectorId,
     transactionId,
@@ -187,11 +263,11 @@ function meterValuesParams(connectorId, transactionId, wh, ts = now()) {
         sampledValue: [
           { value: String(wh), measurand: 'Energy.Active.Import.Register', unit: 'Wh' },
           {
-            value: String(Math.min(100, 20 + Math.round(wh / 40))),
+            value: String(ev ? Math.floor(ev.soc) : Math.min(100, 20 + Math.round(wh / 40))),
             measurand: 'SoC',
             unit: 'Percent',
           },
-          { value: '60000', measurand: 'Power.Active.Import', unit: 'W' },
+          { value: String(ev ? ev.powerW : 60000), measurand: 'Power.Active.Import', unit: 'W' },
           { value: '400', measurand: 'Voltage', unit: 'V' },
           { value: '150', measurand: 'Current.Import', unit: 'A' },
         ],
@@ -217,9 +293,13 @@ async function startTx(connectorId, idTag, ts = now(), meterStart = 0) {
   return res.transactionId;
 }
 
-async function sendMeter(connectorId, transactionId, wh, ts) {
-  await client.call('MeterValues', meterValuesParams(connectorId, transactionId, wh, ts));
-  log(`  MeterValues tx=${transactionId} ${wh} Wh${ts ? ` (cp_timestamp ${ts})` : ''}`);
+async function sendMeter(connectorId, transactionId, wh, ts, ev = null) {
+  await client.call(
+    'MeterValues',
+    meterValuesParams(connectorId, transactionId, wh, ts ?? now(), ev),
+  );
+  const extra = ev ? ` SoC ${Math.floor(ev.soc)} % ${(ev.powerW / 1000).toFixed(1)} kW` : '';
+  log(`  MeterValues tx=${transactionId} ${wh} Wh${extra}${ts ? ` (cp_timestamp ${ts})` : ''}`);
 }
 
 async function stopTx(transactionId, idTag, meterStop, reason = 'Local', ts = now()) {
@@ -346,6 +426,50 @@ const SCENARIOS = {
     return { tx };
   },
 
+  // T150 / BR-P52 — xem đầu file cho các ca (chặn được, thẻ lạ, bị khoá, trong danh sách, shortfall).
+  async 'offline-card'() {
+    const tag = opt('tag', 'UNKNOWN-TAG-99');
+    const listed = argv.includes('--listed');
+    const offlineWh = Number(opt('offline-wh', SAMPLE_WH));
+    await connect({ boot: true });
+    await sleep(3000); // CSMS gửi GetConfiguration / ChangeConfiguration sau phản hồi Boot
+    const keys = ['LocalAuthorizeOffline', 'LocalPreAuthorize', 'AllowOfflineTxForUnknownId'];
+    log(
+      `  cấu hình sau Boot: ${keys.map((k) => `${k}=${config.get(k)?.value ?? '(không có)'}`).join(' ')}`,
+    );
+    await notify(CONNECTOR, 'Preparing');
+    await dropLink();
+    const accepted = offlineAccepts(listed);
+    if (!accepted) {
+      log(
+        `  offline: trụ TỪ CHỐI thẻ ${tag} (authorize offline đã tắt) — không có phiên, không thể shortfall`,
+      );
+      await sleep(2000);
+      await connect({ boot: false });
+      await notify(CONNECTOR, 'Available');
+      return { accepted: false };
+    }
+    log(
+      `  offline: trụ NHẬN thẻ ${tag}${listed ? ' (Local List)' : ' (AllowOfflineTxForUnknownId)'} — rủi ro BR-P52`,
+    );
+    const startTs = now();
+    const queued = [];
+    for (let i = 1; i <= 2; i++) {
+      await sleep(Math.min(INTERVAL_S, 5) * 1000);
+      queued.push({ wh: Math.round((offlineWh * i) / 2), ts: now() });
+    }
+    const stopTs = now();
+    await connect({ boot: false });
+    log(
+      '  nối lại KHÔNG Boot — phát lại StartTransaction / MeterValues / StopTransaction mang giờ cũ',
+    );
+    const tx = await startTx(CONNECTOR, tag, startTs);
+    for (const q of queued) await sendMeter(CONNECTOR, tx, q.wh, q.ts);
+    await stopTx(tx, tag, offlineWh, 'Local', stopTs);
+    await notify(CONNECTOR, 'Available');
+    return { accepted: true, tx, wh: offlineWh };
+  },
+
   async 'ds-09'() {
     if (!process.env.CP_PASSWORD) {
       throw new Error('ds-09 needs CP_PASSWORD = the password returned by the onboard route');
@@ -374,6 +498,10 @@ const SCENARIOS = {
   async app() {
     const holdS = Number(opt('hold-s', 600));
     const tickWh = Number(opt('tick-wh', SAMPLE_WH));
+    const socStart = Number(opt('soc-start', 20));
+    const batteryWh = Number(opt('battery-kwh', 75)) * 1000;
+    if (!(socStart >= 0 && socStart < 100) || !(batteryWh > 0))
+      throw new Error('--soc-start phải trong [0, 100), --battery-kwh phải > 0');
     const rejectStart = argv.includes('--reject-start');
     const done = [];
     let active = null; // { tx, idTag, connectorId, wh, stopping }
@@ -391,7 +519,7 @@ const SCENARIOS = {
 
     hooks.remoteStart = ({ connectorId = CONNECTOR, idTag }) => {
       if (rejectStart || active) return { status: 'Rejected' };
-      active = { tx: null, idTag, connectorId, wh: 0, stopping: false };
+      active = { tx: null, idTag, connectorId, wh: 0, soc: socStart, stopping: false };
       return {
         status: 'Accepted',
         then: async () => {
@@ -402,8 +530,15 @@ const SCENARIOS = {
           while (active === a && !a.stopping) {
             await sleep(INTERVAL_S * 1000);
             if (active !== a || a.stopping) break;
-            a.wh += tickWh;
-            await sendMeter(connectorId, a.tx, a.wh);
+            const step = chargeTick({
+              soc: a.soc,
+              batteryWh,
+              fullTickWh: tickWh,
+              intervalS: INTERVAL_S,
+            });
+            a.wh += step.wh;
+            a.soc = step.soc;
+            await sendMeter(connectorId, a.tx, a.wh, undefined, step);
           }
         },
       };

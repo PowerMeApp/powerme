@@ -5,6 +5,7 @@
 //   - GET  /tru/<cpId>            → public/tru.html: trang từng trụ (HMI bấm được + hành trình phiên)
 //   - GET  /static/<tên>.css|js   → file tĩnh trong public/, tên đơn, chống ".."
 //   - GET  /vendor/three/<file>   → đúng hai file build của three.js trong node_modules (hình 3D)
+//   - GET  /tru3d/tru3d.js        → bundle hình 3D (React + r3f) đã build ở tru3d/dist/; chưa build → 404
 //   - GET  /tong/events           → SSE trang tổng: "tong" (tóm tắt mọi trụ, tối đa ~2 lần/giây)
 //   - GET  /events/<cpId>         → SSE của MỘT trụ: "hello" (snapshot + nhật ký + điểm biểu đồ),
 //                                    rồi "state" (~7 lần/giây), "log", "point"
@@ -26,6 +27,8 @@
 //        = trụ đó không gửi Basic Auth). Có CP_IDS thì CP_ID/CP_PASSWORD bị bỏ qua.
 //      Cho kiểm thử (áp cho mọi trụ): RETRY_MS, REPLAY_LOSS, METER_INTERVAL, PING_SEC, REBOOT_MS,
 //      SPEED; STALE_METERSTOP=1: StopTransaction sau một lần rớt mạng mang meterStop cũ (EXP-01).
+//      OFFLINE_AUTH=normal|rejected|notsupported (T150): trụ cho CSMS tắt authorize offline, hay
+//        "cứng đầu" (key readonly → Rejected, hoặc không có key → NotSupported) và nhận mọi thẻ offline.
 
 import http from 'node:http';
 import path from 'node:path';
@@ -69,6 +72,7 @@ const common = {
   rebootMs: num(env.REBOOT_MS, 3000),
   speed: num(env.SPEED, 1),
   staleMeterStop: env.STALE_METERSTOP === '1',
+  offlineAuth: env.OFFLINE_AUTH || 'normal',
 };
 
 const send = (res, event, data) => res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
@@ -159,6 +163,11 @@ try {
 } catch {
   /* không có three → không có route vendor */
 }
+
+// Bundle hình 3D (QA-04): ĐÚNG một file tên cố định do `npm run sim:tru3d:build` sinh ra trong
+// tru3d/dist/ (không commit). Đọc lúc có yêu cầu nên build xong không cần khởi động lại server;
+// chưa build → 404 → tru-3d.js tự về hình 2D.
+const TRU3D = new Map([['tru3d.js', new URL('./tru3d/dist/tru3d.js', import.meta.url)]]);
 
 const sseHead = {
   'content-type': 'text/event-stream',
@@ -268,6 +277,18 @@ const server = http.createServer(async (req, res) => {
         'cache-control': 'max-age=86400',
       });
       return res.end(await readFile(file));
+    }
+    if (get && parts[0] === 'tru3d' && parts.length === 2) {
+      const file = TRU3D.get(parts[1]);
+      if (!file) return notFound(res);
+      let body;
+      try {
+        body = await readFile(file);
+      } catch {
+        return notFound(res);
+      }
+      res.writeHead(200, { 'content-type': STATIC_TYPES['.js'], 'cache-control': 'no-cache' });
+      return res.end(body);
     }
     if (get && url.pathname === '/tong/events') {
       res.writeHead(200, sseHead);

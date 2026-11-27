@@ -1,6 +1,9 @@
 import { LoyaltyLedgerCorrupt, RedemptionRejected } from './billing-errors.js';
 import {
   computeQuote,
+  EXPIRING_SOON_DAYS,
+  lotsExpiringBy,
+  loyaltyTotals,
   LoyaltyRow,
   planExpiry,
   planRedeem,
@@ -291,6 +294,63 @@ describe('pointsExpiringBy', () => {
       AS_OF,
     );
     expect(pointsExpiringBy(s.lots, AS_OF, day(130))).toBe(500);
+  });
+});
+
+describe('lotsExpiringBy / cửa sổ "sắp hết hạn" (T149, SRS màn hình 15)', () => {
+  const DAY_MS = 86_400_000;
+  const until = new Date(AS_OF.getTime() + EXPIRING_SOON_DAYS * DAY_MS);
+
+  it('cửa sổ là 30 ngày', () => {
+    expect(EXPIRING_SOON_DAYS).toBe(30);
+  });
+
+  it('lô hết hạn đúng asOf + 30 ngày được tính; +1 ms, lô đã chết, lô đã tiêu hết thì không', () => {
+    const s = replayLots(
+      rows(
+        earn(100, 1, AS_OF), // chết đúng biên asOf
+        earn(200, 2, day(90)), // chết từ trước, chưa có dòng expire
+        earn(300, 3, until), // đúng biên → tính
+        earn(400, 4, new Date(until.getTime() + 1)), // ngoài cửa sổ
+        earn(500, 5, day(105)),
+        redeem(500, 5, day(105), 9), // lô trong cửa sổ nhưng đã tiêu hết
+        earn(600, 6, day(101)),
+        redeem(50, 6, day(101), 9),
+      ),
+      AS_OF,
+    );
+    expect(lotsExpiringBy(s.lots, AS_OF, until).map((l) => [l.lotId, l.remaining])).toEqual([
+      [6, 550],
+      [3, 300],
+    ]);
+    expect(pointsExpiringBy(s.lots, AS_OF, until)).toBe(850);
+  });
+});
+
+describe('loyaltyTotals (T149)', () => {
+  it('sổ rỗng → 0 / 0', () => {
+    expect(loyaltyTotals([])).toEqual({ earned: 0, redeemed: 0 });
+  });
+
+  it('earned = Σ earn; redeemed = −Σ redeem − Σ restore (ròng); expire / adjust không tính', () => {
+    const r = rows(
+      earn(1000, 1, day(150)),
+      earn(500, 2, day(90)),
+      redeem(600, 1, day(150), 7),
+      adjust(0, 7),
+      restore(200, 1, day(150), 7),
+      expire(500, 2, day(90)),
+    );
+    expect(loyaltyTotals(r)).toEqual({ earned: 1500, redeemed: 400 });
+  });
+
+  it('restore hết phần đã redeem → redeemed = 0', () => {
+    const r = rows(
+      earn(800, 1, day(150)),
+      redeem(600, 1, day(150), 7),
+      restore(600, 1, day(150), 7),
+    );
+    expect(loyaltyTotals(r)).toEqual({ earned: 800, redeemed: 0 });
   });
 });
 
