@@ -33,6 +33,7 @@ export const STOPPED_SQL = `s.status IN ('closed','review','reconciled')`;
 
 /** Why an `unsettled` session has no debit; `j` is its settlement job (session_id is the PK). */
 export const UNSETTLED_REASON_SQL = `(CASE WHEN j.state='pending' THEN j.reason
+  WHEN j.state='ineligible' AND j.reason='account_closed' THEN 'account_closed'
   WHEN j.state='posted' THEN 'posted_without_debit' ELSE 'ineligible' END)`;
 
 /** Vietnam calendar day of `PERIOD_AT_SQL`. */

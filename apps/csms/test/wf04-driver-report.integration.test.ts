@@ -467,6 +467,35 @@ describeDb('FE-17 driver fault report (UC-CHG-05, BR-P42, STM-6 t8)', () => {
     }
   });
 
+  it('T159: a fault created by hand-over does not count toward the one-driver limit (ADR-0019 §6, BR-P42)', async () => {
+    const at = (offsetMs: number) => new Date(Date.now() + offsetMs);
+    // Driver 0 reports connector 1 while it is Faulted: the report joins the OCPP fault.
+    await faults.onConnectorStatus({
+      chargePointId: cp,
+      connectorNo: 1,
+      status: 'Faulted',
+      errorCode: 'GroundFailure',
+      receivedAt: at(0),
+    });
+    expect((await report(drivers[0]!, 1)).reportedIssue).toBe(true);
+    // The OCPP fault closes on Available: the report moves to a new driver_report fault.
+    const closed = await faults.onConnectorStatus({
+      chargePointId: cp,
+      connectorNo: 1,
+      status: 'Available',
+      errorCode: 'NoError',
+      receivedAt: at(1000),
+    });
+    expect(closed).toMatchObject({ handedOver: [{ reports: 1, created: true }] });
+    // The charge point goes Offline; driver 0 alone may still open one fault on connector 2,
+    // because the hand-over fault was not opened by the driver.
+    await q("UPDATE charge_points SET last_message_at=now()-interval '1 hour' WHERE id=$1", [cp]);
+    expect((await report(drivers[0]!, 2)).reportedIssue).toBe(true);
+    expect((await openEvents()).map((e: any) => Number(e.connector_id)).sort()).toEqual(
+      [conn[1], conn[2]].sort(),
+    );
+  });
+
   it('T141: reports join a fault already open on the connector; a fault without reports closes as before', async () => {
     // Whole charge point Faulted (connector 0) with a report on connector 1, while connector 1
     // has its own open fault: the report joins that fault, no new one.

@@ -1,9 +1,10 @@
 /*
   tru-sac.css — kiểu dáng của khối "Trụ sạc" minh hoạ trên HMI D1 (QA-02).
 
-  LÀM GÌ: tô màu và làm hoạt ảnh cho hình SVG do tru-sac.js dựng. Màu nền/chữ lấy từ biến CSS
-    của tru.html (--panel, --line, --text, --ok, --danger...); các biến --lt-* (màu đèn) và
-    --tru-* (màu thân trụ, xe) khai báo ở đây, có bản sáng/tối.
+  LÀM GÌ: tô màu và làm hoạt ảnh cho hình SVG do tru-sac.js dựng, và khung "Cloudlight Hero" của
+    khối #tru (QA-06). Màu nền/chữ lấy từ token chung /static/bevel-tokens.css (--paper, --cloud,
+    --ink, --gray, --ok, --danger...); bảng màu đèn --lt-* cũng ở đó (dùng chung với bundle 3D và
+    trang tổng). Các biến --tru-* (màu thân trụ, xe của hình 2D) khai báo ở đây, có bản sáng/tối.
   VÌ SAO TÁCH FILE: tru.html đã dài; hình + hoạt ảnh là một mảng riêng, dễ đọc khi tách.
   QUY TẮC HOẠT ẢNH: mọi chuyển động nằm trong @keyframes/transition ở file này và bị tắt bởi
     (a) lớp .noanim trên #tru (nút "Tắt hoạt ảnh"), (b) prefers-reduced-motion: reduce.
@@ -11,22 +12,12 @@
 */
 
 :root {
-  /* Màu đèn trạng thái: giống nhau ở sáng/tối vì đèn LED tự phát sáng. */
-  --lt-Available: #35d07f;
-  --lt-Preparing: #4aa3ff;
-  --lt-Charging: #35d07f;
-  --lt-SuspendedEV: #f0b04a;
-  --lt-SuspendedEVSE: #f0b04a;
-  --lt-Finishing: #a78bfa;
-  --lt-Faulted: #ff4d57;
-  --lt-Unavailable: #8b97a6;
-  --lt-Reserved: #2cc3b8;
-  /* Thân trụ, xe, cáp: bản sáng */
-  --tru-body: #dde4ee;
-  --tru-edge: #7f8ea3;
-  --tru-car: #5d7a99;
-  --tru-glass: #cfe3f5;
-  --tru-cable: #3a4656;
+  /* Màu đèn --lt-*: xem bevel-tokens.css. Thân trụ, xe, cáp của hình 2D: bản sáng */
+  --tru-body: #ffffff;
+  --tru-edge: #9aa3b0;
+  --tru-car: #c9d3e1;
+  --tru-glass: #eef3fa;
+  --tru-cable: #2b2d33;
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme='light']) {
@@ -45,19 +36,35 @@
   --tru-cable: #9fb0c4;
 }
 
-/* ── Khung khối ─────────────────────────────────────────────────────────── */
+/* ── Khung khối: Cloudlight Hero (QA-06) ───────────────────────────────── */
 #tru {
-  margin: 0.8rem 1rem 0;
+  margin: var(--s3, 24px) 0 0;
+  padding: var(--s5, 40px) var(--s5, 40px) var(--s3, 24px);
+  border-radius: var(--r-card-lg, 32px);
+  background: var(--hero-sky);
 }
 #tru .tru-head {
   display: flex;
-  align-items: center;
-  gap: 0.6rem;
+  align-items: flex-end;
+  gap: var(--s2, 16px) var(--s3, 24px);
   flex-wrap: wrap;
 }
-#tru .tru-head h2 {
-  margin: 0;
-  flex: 1;
+#tru .tru-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+/* nút phụ trên nền trời sáng: trắng mờ, chữ Ink */
+#tru .tru-tools button {
+  background: color-mix(in srgb, var(--paper) 72%, transparent);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+#tru .tru-tools button:hover:not(:disabled) {
+  background: var(--paper);
+}
+#tru .tru-body {
+  margin-top: var(--s4, 32px);
 }
 #tru.collapsed .tru-body {
   display: none;
@@ -67,12 +74,13 @@
   width: 100%;
   max-width: 1040px;
   max-height: 62vh;
-  margin: 0.3rem auto 0;
+  margin: 0 auto;
 }
 #tru .tru-cap {
   text-align: center;
-  font-size: 0.85rem;
+  font-size: 0.8125rem;
   color: var(--muted);
+  margin-top: var(--s2, 16px);
 }
 /* Chế độ "Chữ lớn": hình phóng to tới hết bề ngang, chú thích to hơn */
 :root.big #tru .tru-svg {
@@ -85,7 +93,8 @@
 
 /* ── Thân trụ, màn hình LCD ─────────────────────────────────────────────── */
 #tru .ground {
-  stroke: var(--line);
+  stroke: var(--tru-edge);
+  stroke-opacity: 0.35;
   stroke-width: 3;
 }
 #tru .body {
@@ -101,9 +110,9 @@
 }
 #tru .brand {
   fill: var(--text);
-  font-weight: 700;
+  font-weight: 600;
   font-size: 22px;
-  letter-spacing: 3px;
+  letter-spacing: 1px;
 }
 #tru .plate {
   fill: var(--muted);
@@ -125,7 +134,7 @@
 }
 #tru .lc {
   fill: #d8f3ff;
-  font-weight: 700;
+  font-weight: 600;
   text-anchor: middle;
 }
 #tru .lc-h {
@@ -193,7 +202,7 @@
 }
 #tru .net-txt {
   font-size: 17px;
-  font-weight: 700;
+  font-weight: 600;
   fill: var(--ok);
   text-anchor: end;
 }
@@ -208,7 +217,7 @@
 }
 #tru .bubble text {
   fill: #0b1620;
-  font-weight: 700;
+  font-weight: 600;
   font-size: 17px;
   text-anchor: middle;
 }
@@ -221,7 +230,7 @@
 #tru .replay-txt {
   fill: var(--ok);
   font-size: 15px;
-  font-weight: 700;
+  font-weight: 600;
   opacity: 0;
 }
 #tru .replay.go .replay-txt {
@@ -260,22 +269,24 @@
 #tru .letter {
   fill: #d8f3ff;
   font-size: 24px;
-  font-weight: 700;
+  font-weight: 600;
   text-anchor: middle;
 }
+/* QA-06: nền nhãn chỉ ửng màu trạng thái (màu dữ liệu không làm mảng nền đặc), chữ Ink */
 #tru .badge {
   fill: var(--lt, var(--lt-Unavailable));
-  stroke: var(--line);
+  fill-opacity: 0.3;
+  stroke: var(--lt, var(--lt-Unavailable));
   stroke-width: 1.5;
 }
 #tru .badge-t1,
 #tru .badge-t2 {
-  fill: #0b1620;
+  fill: var(--ink, #0b1620);
   text-anchor: middle;
 }
 #tru .badge-t1 {
   font-size: 20px;
-  font-weight: 700;
+  font-weight: 600;
 }
 #tru .badge-t2 {
   font-size: 14px;
@@ -371,7 +382,7 @@
 #tru .bat-txt {
   fill: var(--text);
   font-size: 17px;
-  font-weight: 700;
+  font-weight: 600;
   text-anchor: middle;
 }
 
@@ -443,9 +454,14 @@
   }
 }
 
-@media (max-width: 700px) {
+@media (max-width: 767px) {
   #tru {
-    margin: 0.6rem 0.6rem 0;
+    margin-top: var(--s2, 16px);
+    padding: var(--s3, 24px) var(--s2, 16px) var(--s2, 16px);
+    border-radius: var(--r-card, 24px);
+  }
+  #tru .tru-body {
+    margin-top: var(--s3, 24px);
   }
 }
 
