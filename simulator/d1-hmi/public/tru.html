@@ -1374,7 +1374,11 @@
         }
         if (s.name) {
           // QA-08: có tên trạm → tên làm tiêu đề, identity OCPP thành dòng nhỏ.
-          $('cpTitle').innerHTML = `${esc(s.name)} <span class="cp-serial">${esc(s.cpId)}</span>`;
+          $('cpTitle').innerHTML = `${esc(s.name)} <span class="cp-serial">${
+            s.displayCode
+              ? `Mã trên trụ (nhập/quét trên app): <b>${esc(s.displayCode)}</b>/1, /2 · `
+              : ''
+          }OCPP ${esc(s.cpId)}</span>`;
           document.title = `${s.name} · ${s.cpId}`;
           $('cpEyebrow').textContent = 'Trụ sạc giả lập (mô hình D1, hai súng)';
         } else $('cpId').textContent = s.cpId;

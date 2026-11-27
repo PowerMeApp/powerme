@@ -276,7 +276,11 @@
               .join('');
             return `<section class="cp" aria-label="Trụ ${esc(st.cpId)}">
               <div class="cp-head"><h2>${esc(st.name || st.cpId)}${
-                st.name ? `<span class="cp-serial">${esc(st.cpId)}</span>` : ''
+                st.name
+                  ? `<span class="cp-serial">${
+                      st.displayCode ? `Mã trên trụ: <b>${esc(st.displayCode)}</b> · ` : ''
+                    }OCPP ${esc(st.cpId)}</span>`
+                  : ''
               }</h2>
                 <span class="bv-badge" style="--c:${nc}">${esc(net)}</span></div>
               <div class="meta">Tốc độ mô phỏng ×${esc(st.speed)} · hàng đợi buffer ${esc(st.queue)}${

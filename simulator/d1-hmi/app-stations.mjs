@@ -70,6 +70,23 @@ const NAMES = {
   'PMAPP-TD-02B': 'VinFast Vinhomes Grand Park · AC 11 kW',
   'PMAPP-TD-03A': 'PowerMe Nha Van hoa Sinh vien · DC 60 kW',
 };
+// Mã in trên trụ (display_code, seed-app.sql / seed.sql) — tài xế nhập "<mã>/<súng>" trên app.
+const CODES = {
+  [D1]: 'PM-D1-HCM-0001',
+  'PMAPP-BT-01A': 'PM-DC120-HCM-0501',
+  'PMAPP-PN-01A': 'PM-DC30-HCM-0401',
+  'PMAPP-Q1-01A': 'PM-DC120-HCM-0101',
+  'PMAPP-Q1-01B': 'PM-AC22-HCM-0102',
+  'PMAPP-Q10-01A': 'PM-AC7-HCM-0301',
+  'PMAPP-Q3-01A': 'PM-DC60-HCM-0201',
+  'PMAPP-Q7-01A': 'PM-DC150-HCM-0701',
+  'PMAPP-TB-01A': 'PM-DC60-HCM-0901',
+  'PMAPP-TD-01A': 'PM-DC50-HCM-0601',
+  'PMAPP-TD-01B': 'PM-AC22-HCM-0602',
+  'PMAPP-TD-02A': 'PM-DC60-HCM-0801',
+  'PMAPP-TD-02B': 'PM-AC11-HCM-0802',
+  'PMAPP-TD-03A': 'PM-DC60-HCM-1001',
+};
 const EXCEPTIONS = [
   ['PMAPP-Q1-01A', 'fault', { connector: 2, errorCode: 'ConnectorLockFailure' }],
   ['PMAPP-TD-02A', 'fault', { connector: 1, errorCode: 'GroundFailure' }],
@@ -114,6 +131,7 @@ const child = spawn(process.execPath, [server], {
     CP_IDS: ids.join(','),
     CP_PASSWORDS: ids.map((id) => (id === D1 ? passwordD1 : password)).join(','),
     CP_NAMES: ids.map((id) => NAMES[id] ?? '').join(','),
+    CP_CODES: ids.map((id) => CODES[id] ?? '').join(','),
   },
 });
 const stop = () => child.kill('SIGINT');

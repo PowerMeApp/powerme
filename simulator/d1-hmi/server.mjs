@@ -49,13 +49,21 @@ function stationList() {
     const pws = (env.CP_PASSWORDS ?? '').split(',').map((s) => s.trim());
     // QA-08: tên hiển thị (vd. tên trạm) cùng thứ tự CP_IDS; trống → chỉ hiện identity.
     const names = (env.CP_NAMES ?? '').split(',').map((s) => s.trim());
-    return ids.map((id, i) => ({ id, password: pws[i] || undefined, name: names[i] || null }));
+    // Mã in trên trụ (display_code) — mã tài xế nhập/quét trên app, khác identity OCPP.
+    const codes = (env.CP_CODES ?? '').split(',').map((s) => s.trim());
+    return ids.map((id, i) => ({
+      id,
+      password: pws[i] || undefined,
+      name: names[i] || null,
+      code: codes[i] || null,
+    }));
   }
   return [
     {
       id: env.CP_ID ?? 'RH24D1-00001',
       password: env.CP_PASSWORD || undefined,
       name: env.CP_NAME?.trim() || null,
+      code: env.CP_CODE?.trim() || null,
     },
   ];
 }
@@ -88,13 +96,13 @@ const tongClients = new Set();
 
 // Mỗi trụ: station + tập client SSE riêng. Trang một trụ chỉ nhận dữ liệu của trụ đó.
 const stations = new Map();
-for (const { id, password, name } of list) {
+for (const { id, password, name, code } of list) {
   const station = createStation({
     ...common,
     cpId: id,
     ...(password ? { authPassword: password } : {}),
   });
-  const entry = { id, name, station, clients: new Set() };
+  const entry = { id, name, code, station, clients: new Set() };
   // Đẩy snapshot khi có thay đổi nhưng không quá ~7 lần/giây.
   let pending = false;
   station.events.on('change', () => {
@@ -121,7 +129,7 @@ const first = stations.values().next().value;
 // ── Trang tổng: tóm tắt nhỏ, không có nhật ký/hành trình ───────────────────
 /** Snapshot của một trụ kèm tên hiển thị (QA-08). */
 function snapOf(entry) {
-  return { ...entry.station.snapshot(), name: entry.name };
+  return { ...entry.station.snapshot(), name: entry.name, displayCode: entry.code };
 }
 
 function summary(entry) {
@@ -129,6 +137,7 @@ function summary(entry) {
   return {
     cpId: s.cpId,
     name: s.name,
+    displayCode: s.displayCode,
     net: { state: s.net.state, halfOpen: s.net.halfOpen, nextRetrySec: s.net.nextRetrySec },
     speed: s.speed,
     clockAheadSec: s.clockAheadSec,
