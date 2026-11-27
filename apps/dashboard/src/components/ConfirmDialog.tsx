@@ -1,10 +1,16 @@
-/** Modal confirmation (role="dialog"): Escape or "Huỷ" cancels; focus starts on the confirm button. */
-import { useEffect, useId, type ReactNode } from 'react';
+/**
+ * Modal confirmation (Mantine Modal, role="dialog"): Escape or "Huỷ" cancels unless busy; focus is
+ * trapped inside, starts on the confirm button and returns to the opener on close.
+ */
+import { Button, Group, Modal, Stack } from '@mantine/core';
+import type { ReactNode } from 'react';
 
 export function ConfirmDialog({
   title,
   confirmLabel,
   busy,
+  danger,
+  size = 480,
   onConfirm,
   onCancel,
   children,
@@ -12,36 +18,40 @@ export function ConfirmDialog({
   title: string;
   confirmLabel: string;
   busy?: boolean;
+  /** Destructive action (lock, block, force reset): red confirm button. */
+  danger?: boolean;
+  size?: number | string;
   onConfirm: () => void;
   onCancel: () => void;
   children?: ReactNode;
 }) {
-  const id = useId();
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && !busy && onCancel();
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [busy, onCancel]);
   return (
-    <div className="backdrop">
-      <div className="card dialog" role="dialog" aria-modal="true" aria-labelledby={id}>
-        <h2 id={id}>{title}</h2>
+    <Modal
+      opened
+      onClose={onCancel}
+      title={title}
+      size={size}
+      closeOnEscape={!busy}
+      closeOnClickOutside={!busy}
+      withCloseButton={false}
+      classNames={{ title: 'dialog-title', body: 'dialog-body' }}
+    >
+      <Stack gap="md">
         {children}
-        <div className="btn-row">
-          <button type="button" className="btn ghost" disabled={busy} onClick={onCancel}>
+        <Group justify="flex-end" gap="sm" mt="xs">
+          <Button variant="subtle" color="slate" disabled={busy} onClick={onCancel}>
             Huỷ
-          </button>
-          <button
-            type="button"
-            className="btn primary"
+          </Button>
+          <Button
+            color={danger ? 'danger' : 'teal'}
             disabled={busy}
             onClick={onConfirm}
-            autoFocus
+            data-autofocus
           >
             {busy ? 'Đang gửi…' : confirmLabel}
-          </button>
-        </div>
-      </div>
-    </div>
+          </Button>
+        </Group>
+      </Stack>
+    </Modal>
   );
 }

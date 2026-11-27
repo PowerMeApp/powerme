@@ -38,11 +38,11 @@ export function RetryInvoiceSheet({
   async function confirm() {
     const res = await retry(item.e_invoice_id);
     if ('error' in res) return setError(billingError(res.error));
-    onDone(`Đã gửi lại hoá đơn của top-up #${item.top_up_id} (lần ${res.data.attempt_count + 1})`);
+    onDone(`Đã gửi lại hoá đơn của lần nạp #${item.top_up_id} (lần ${res.data.attempt_count + 1})`);
   }
   return (
     <ConfirmDialog
-      title={`Thử lại hoá đơn top-up #${item.top_up_id}`}
+      title={`Thử lại hoá đơn lần nạp #${item.top_up_id}`}
       confirmLabel="Thử lại"
       busy={isLoading}
       onCancel={onCancel}
@@ -76,11 +76,11 @@ export function ReviewedSheet({
   async function confirm() {
     const res = await mark(item.top_up_id);
     if ('error' in res) return setError(billingError(res.error));
-    onDone(`Đã đánh dấu đã xem ngoại lệ của top-up #${item.top_up_id}`);
+    onDone(`Đã đánh dấu đã xem ngoại lệ của lần nạp #${item.top_up_id}`);
   }
   return (
     <ConfirmDialog
-      title={`Đánh dấu đã xem top-up #${item.top_up_id}`}
+      title={`Đánh dấu đã xem lần nạp #${item.top_up_id}`}
       confirmLabel="Đã xem"
       busy={isLoading}
       onCancel={onCancel}
@@ -125,11 +125,11 @@ export function ConflictReviewSheet({
     const res = await review({ id: item.conflict_id, note: v.note.trim() });
     if ('error' in res)
       return setError('root.server', { type: 'server', message: billingError(res.error) });
-    onDone(`Đã ghi nhận xử lý lần trả mâu thuẫn của top-up #${item.top_up_id}`);
+    onDone(`Đã ghi nhận xử lý lần trả mâu thuẫn của lần nạp #${item.top_up_id}`);
   }
   return (
     <ConfirmDialog
-      title={`Xử lý lần trả mâu thuẫn top-up #${item.top_up_id}`}
+      title={`Xử lý lần trả mâu thuẫn lần nạp #${item.top_up_id}`}
       confirmLabel="Đã xử lý"
       busy={isLoading || isSubmitting}
       onCancel={onCancel}

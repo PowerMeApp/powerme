@@ -4,10 +4,11 @@
  * adds a serial, after which an operator can onboard it. Registered rows cannot be edited here.
  */
 import { zodResolver } from '@hookform/resolvers/zod';
+import { Button, Loader, Table } from '@mantine/core';
+import { IconPlus } from '@tabler/icons-react';
 import { useState } from 'react';
 import { useForm } from 'react-hook-form';
 import type { ChargePointLifecycle, RegistryChargePoint } from '@powerme/shared';
-import { Breadcrumbs } from '../../components/Breadcrumbs';
 import { ConfirmDialog } from '../../components/ConfirmDialog';
 import { Field, FieldError } from '../../components/Field';
 import {
@@ -23,8 +24,12 @@ import {
   type RegisterForm,
   type RegisterValues,
 } from '../../features/registry/schema';
-
-type Note = { tone: 'ok' | 'error'; text: string } | null;
+import { DataTable, EmptyState } from '../../ui/DataTable';
+import { FilterBar, SelectFilter } from '../../ui/FilterBar';
+import { Notice, type Note } from '../../ui/Notice';
+import { PageHeader } from '../../ui/PageHeader';
+import { Pager, pageCount } from '../../ui/Pager';
+import { StatusBadge } from '../../ui/StatusBadge';
 
 const LIFECYCLE_TONE: Record<ChargePointLifecycle, string> = {
   registered: 'muted',
@@ -70,7 +75,7 @@ function RegisterDialog({
         message: registryError(res.error),
       });
     }
-    onDone(`Đã đăng ký trụ ${v.serial_number}, operator có thể onboard trụ này`);
+    onDone(`Đã đăng ký trụ ${v.serial_number}, đơn vị vận hành có thể đưa trụ này vào vận hành`);
   }
 
   return (
@@ -81,18 +86,18 @@ function RegisterDialog({
       onCancel={onCancel}
       onConfirm={() => void handleSubmit(onValid)()}
     >
-      <Field label="Serial" error={errors.serial_number?.message}>
+      <Field label="Số seri" error={errors.serial_number?.message}>
         {(a11y) => (
           <input
             {...a11y}
             {...register('serial_number')}
             className="input"
             maxLength={40}
-            placeholder="Số serial in trên trụ"
+            placeholder="Số seri in trên trụ"
           />
         )}
       </Field>
-      <Field label="Model (tuỳ chọn)" error={errors.model?.message}>
+      <Field label="Dòng máy (tuỳ chọn)" error={errors.model?.message}>
         {(a11y) => (
           <input {...a11y} {...register('model')} className="input" maxLength={MAX_MODEL + 10} />
         )}
@@ -109,21 +114,21 @@ function RegisterDialog({
 
 function RegistryRow({ cp }: { cp: RegistryChargePoint }) {
   return (
-    <tr aria-label={`Trụ ${cp.serial_number}`}>
-      <td className="cell-title">{cp.serial_number}</td>
-      <td>{cp.display_code ?? dash}</td>
-      <td>
+    <Table.Tr aria-label={`Trụ ${cp.serial_number}`}>
+      <Table.Td className="cell-title">{cp.serial_number}</Table.Td>
+      <Table.Td>{cp.display_code ?? dash}</Table.Td>
+      <Table.Td>
         {cp.model ?? dash}
-        {cp.firmware_version && <div className="muted small">FW {cp.firmware_version}</div>}
-      </td>
-      <td>{cp.rated_power_kw ?? dash}</td>
-      <td className="nowrap">
+        {cp.firmware_version && <div className="muted small">Phần mềm {cp.firmware_version}</div>}
+      </Table.Td>
+      <Table.Td>{cp.rated_power_kw ?? dash}</Table.Td>
+      <Table.Td className="nowrap">
         {cp.warranty_until ? cp.warranty_until.split('-').reverse().join('/') : dash}
-      </td>
-      <td>
-        <span className={`pill ${LIFECYCLE_TONE[cp.lifecycle]}`}>{LIFECYCLE[cp.lifecycle]}</span>
-      </td>
-      <td>
+      </Table.Td>
+      <Table.Td>
+        <StatusBadge tone={LIFECYCLE_TONE[cp.lifecycle]}>{LIFECYCLE[cp.lifecycle]}</StatusBadge>
+      </Table.Td>
+      <Table.Td>
         {cp.operator ? (
           <>
             {cp.operator.legal_name}
@@ -136,9 +141,9 @@ function RegistryRow({ cp }: { cp: RegistryChargePoint }) {
         ) : (
           dash
         )}
-      </td>
-      <td className="nowrap">{day(cp.created_at)}</td>
-    </tr>
+      </Table.Td>
+      <Table.Td className="nowrap">{day(cp.created_at)}</Table.Td>
+    </Table.Tr>
   );
 }
 
@@ -152,108 +157,85 @@ export function DeviceRegistryPage() {
     ...(lifecycle ? { lifecycle } : {}),
   });
   const total = data?.total ?? 0;
-  const pages = Math.max(1, Math.ceil(total / REGISTRY_PAGE_SIZE));
+  const pages = pageCount(total, REGISTRY_PAGE_SIZE);
   if (data && page > pages) setPage(pages);
+
+  const first = ((data?.page ?? 1) - 1) * (data?.page_size ?? REGISTRY_PAGE_SIZE) + 1;
 
   return (
     <>
-      <Breadcrumbs items={[{ label: 'Sổ đăng ký trụ' }]} />
-      <div className="page-head">
-        <h1>Sổ đăng ký trụ</h1>
-        <p>Model, firmware, bảo hành và vòng đời của mọi trụ sạc trên nền tảng</p>
-        <button
-          type="button"
-          className="btn primary page-action"
-          onClick={() => {
-            setNote(null);
-            setDialog(true);
-          }}
-        >
-          Đăng ký trụ
-        </button>
-      </div>
-      <div className="filters">
-        <label className="field">
-          Vòng đời
-          <select
-            className="input"
-            value={lifecycle}
-            onChange={(e) => {
-              setLifecycle(e.target.value as ChargePointLifecycle | '');
-              setPage(1);
+      <PageHeader
+        crumbs={[{ label: 'Sổ đăng ký trụ' }]}
+        title="Sổ đăng ký trụ"
+        actions={
+          <Button
+            leftSection={<IconPlus size={16} aria-hidden="true" />}
+            onClick={() => {
+              setNote(null);
+              setDialog(true);
             }}
           >
-            <option value="">Tất cả</option>
-            {(Object.keys(LIFECYCLE) as ChargePointLifecycle[]).map((l) => (
-              <option key={l} value={l}>
-                {LIFECYCLE[l]}
-              </option>
-            ))}
-          </select>
-        </label>
-      </div>
-      {note && (
-        <p className={`queue-note ${note.tone}`} role={note.tone === 'ok' ? 'status' : 'alert'}>
-          {note.text}
-        </p>
-      )}
+            Đăng ký trụ
+          </Button>
+        }
+      />
+      <FilterBar>
+        <SelectFilter
+          label="Vòng đời"
+          value={lifecycle}
+          options={[
+            ['', 'Tất cả'],
+            ...(Object.keys(LIFECYCLE) as ChargePointLifecycle[]).map(
+              (l) => [l, LIFECYCLE[l]] as const,
+            ),
+          ]}
+          onChange={(v) => {
+            setLifecycle(v);
+            setPage(1);
+          }}
+        />
+      </FilterBar>
+      {note && <Notice tone={note.tone}>{note.text}</Notice>}
       {isLoading ? (
-        <p className="muted">Đang tải…</p>
+        <Loader size="sm" aria-label="Đang tải…" />
       ) : error && !data ? (
-        <p role="alert">{registryError(error)}</p>
+        <Notice tone="error">{registryError(error)}</Notice>
       ) : !data || data.items.length === 0 ? (
-        <div className="card">
-          <p className="muted">
-            {lifecycle ? 'Không có trụ nào khớp bộ lọc.' : 'Chưa có trụ nào được đăng ký.'}
-          </p>
-        </div>
+        <EmptyState>
+          {lifecycle ? 'Không có trụ nào khớp bộ lọc.' : 'Chưa có trụ nào được đăng ký.'}
+        </EmptyState>
       ) : (
-        <div className="card table-card">
-          <div className="table-wrap">
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th scope="col">Serial</th>
-                  <th scope="col">Mã hiển thị</th>
-                  <th scope="col">Model / firmware</th>
-                  <th scope="col">Công suất (kW)</th>
-                  <th scope="col">Bảo hành đến</th>
-                  <th scope="col">Vòng đời</th>
-                  <th scope="col">Operator / trạm</th>
-                  <th scope="col">Ngày đăng ký</th>
-                </tr>
-              </thead>
-              <tbody>
-                {data.items.map((cp) => (
-                  <RegistryRow key={cp.id} cp={cp} />
-                ))}
-              </tbody>
-            </table>
-          </div>
-          <nav className="pager" aria-label="Phân trang">
-            <span className="muted">
-              {total} trụ · Trang {page} / {pages}
-            </span>
-            <div className="btn-row">
-              <button
-                type="button"
-                className="btn small ghost"
-                disabled={page <= 1}
-                onClick={() => setPage(page - 1)}
-              >
-                ‹ Trước
-              </button>
-              <button
-                type="button"
-                className="btn small ghost"
-                disabled={page >= pages}
-                onClick={() => setPage(page + 1)}
-              >
-                Sau ›
-              </button>
-            </div>
-          </nav>
-        </div>
+        <DataTable
+          minWidth={1040}
+          footer={
+            <Pager
+              first={first}
+              last={first + data.items.length - 1}
+              total={total}
+              page={page}
+              pages={pages}
+              onPage={setPage}
+            />
+          }
+        >
+          <Table.Thead>
+            <Table.Tr>
+              <Table.Th scope="col">Số seri</Table.Th>
+              <Table.Th scope="col">Mã hiển thị</Table.Th>
+              <Table.Th scope="col">Dòng máy / phần mềm</Table.Th>
+              <Table.Th scope="col">Công suất (kW)</Table.Th>
+              <Table.Th scope="col">Bảo hành đến</Table.Th>
+              <Table.Th scope="col">Vòng đời</Table.Th>
+              <Table.Th scope="col">Đơn vị vận hành / trạm</Table.Th>
+              <Table.Th scope="col">Ngày đăng ký</Table.Th>
+            </Table.Tr>
+          </Table.Thead>
+          <Table.Tbody>
+            {data.items.map((cp) => (
+              <RegistryRow key={cp.id} cp={cp} />
+            ))}
+          </Table.Tbody>
+        </DataTable>
       )}
       {dialog && (
         <RegisterDialog

@@ -41,10 +41,10 @@ function OperatorFields({
 }) {
   return (
     <>
-      <Field label="Operator" error={error}>
+      <Field label="Đơn vị vận hành" error={error}>
         {(a11y) => (
           <select {...a11y} {...register('operator_id')} className="input">
-            <option value="">— Chọn Operator —</option>
+            <option value="">— Chọn đơn vị vận hành —</option>
             {operators.map((o) => (
               <option key={o.id} value={o.id}>
                 {o.legal_name}
@@ -130,8 +130,8 @@ export function CreateUserDialog({
       <Field label="Vai trò">
         {(a11y) => (
           <select {...a11y} {...register('role')} className="input">
-            <option value="operator_staff">Nhân viên Operator</option>
-            <option value="admin">Admin</option>
+            <option value="operator_staff">Nhân viên đơn vị vận hành</option>
+            <option value="admin">Quản trị viên</option>
           </select>
         )}
       </Field>
@@ -289,8 +289,8 @@ export function RoleDialog({
       <Field label="Vai trò">
         {(a11y) => (
           <select {...a11y} {...register('role')} className="input">
-            <option value="operator_staff">Nhân viên Operator</option>
-            <option value="admin">Admin</option>
+            <option value="operator_staff">Nhân viên đơn vị vận hành</option>
+            <option value="admin">Quản trị viên</option>
           </select>
         )}
       </Field>
@@ -342,6 +342,7 @@ export function LockDialog({
   return (
     <ConfirmDialog
       title={`${lock ? 'Khoá' : 'Mở khoá'} tài khoản ${user.email}`}
+      danger={lock}
       confirmLabel={lock ? 'Khoá' : 'Mở khoá'}
       busy={isLoading || isSubmitting}
       onCancel={onCancel}

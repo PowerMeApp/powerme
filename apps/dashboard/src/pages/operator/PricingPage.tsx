@@ -7,10 +7,11 @@
  *     not apply them yet (decision K6), which the screen says.
  * The reservation hold window / no-show fee of Table 5 #24 wait for reservation (Should).
  */
+import { Button, Card, Group, Loader, SimpleGrid, Table, Text, Title } from '@mantine/core';
+import { IconPlus } from '@tabler/icons-react';
 import { useState } from 'react';
 import { useSearchParams } from 'react-router';
 import type { Promotion, TariffSchedule } from '@powerme/shared';
-import { Breadcrumbs } from '../../components/Breadcrumbs';
 import { ConfirmDialog } from '../../components/ConfirmDialog';
 import {
   useDeactivatePromotionMutation,
@@ -26,44 +27,47 @@ import {
 } from '../../features/pricing/format';
 import { PromotionDialog } from '../../features/pricing/PromotionDialog';
 import { TariffEditor } from '../../features/pricing/TariffEditor';
-
-type Note = { tone: 'ok' | 'error'; text: string } | null;
+import { Notice, type Note } from '../../ui/Notice';
+import { PageHeader } from '../../ui/PageHeader';
+import { QueueSwitch } from '../../ui/QueueSwitch';
+import { StatusBadge } from '../../ui/StatusBadge';
+import { DataTable, EmptyState } from '../../ui/DataTable';
 const day = (ymd: string) => ymd.split('-').reverse().join('/');
 const when = (iso: string) =>
   new Date(iso).toLocaleString('vi-VN', { dateStyle: 'short', timeStyle: 'short' });
 
 function ScheduleTable({ schedule, label }: { schedule: TariffSchedule; label: string }) {
   return (
-    <section className="card table-card" aria-label={label}>
-      <h2 className="section-title">
+    <Card component="section" padding={0} className="table-card" aria-label={label}>
+      <Title order={2} className="section-title table-toolbar">
         {label} · từ {day(schedule.effective_from)}
         {schedule.effective_to ? ` đến ${day(schedule.effective_to)}` : ''}
-      </h2>
-      <div className="table-wrap">
-        <table className="data-table">
-          <thead>
-            <tr>
-              <th scope="col">Khung giờ</th>
-              <th scope="col">Loại</th>
-              <th scope="col">Giá</th>
-            </tr>
-          </thead>
-          <tbody>
+      </Title>
+      <Table.ScrollContainer minWidth={420} type="native">
+        <Table className="data-table">
+          <Table.Thead>
+            <Table.Tr>
+              <Table.Th scope="col">Khung giờ</Table.Th>
+              <Table.Th scope="col">Loại</Table.Th>
+              <Table.Th scope="col">Giá</Table.Th>
+            </Table.Tr>
+          </Table.Thead>
+          <Table.Tbody>
             {schedule.periods.map((p) => (
-              <tr key={`${p.time_start}-${p.band}`} aria-label={`${label} ${p.time_start}`}>
-                <td className="nowrap">
+              <Table.Tr key={`${p.time_start}-${p.band}`} aria-label={`${label} ${p.time_start}`}>
+                <Table.Td className="nowrap">
                   {p.time_start} – {p.time_end}
-                </td>
-                <td>
-                  <span className={`pill ${BAND[p.band][1]}`}>{BAND[p.band][0]}</span>
-                </td>
-                <td className="nowrap">{vnd(p.price_per_kwh_vnd)}/kWh</td>
-              </tr>
+                </Table.Td>
+                <Table.Td>
+                  <StatusBadge tone={BAND[p.band][1]}>{BAND[p.band][0]}</StatusBadge>
+                </Table.Td>
+                <Table.Td className="nowrap">{vnd(p.price_per_kwh_vnd)}/kWh</Table.Td>
+              </Table.Tr>
             ))}
-          </tbody>
-        </table>
-      </div>
-    </section>
+          </Table.Tbody>
+        </Table>
+      </Table.ScrollContainer>
+    </Card>
   );
 }
 
@@ -72,10 +76,10 @@ function TariffTab({ onNote }: { onNote: (n: Note) => void }) {
   const [editing, setEditing] = useState(false);
   return (
     <>
-      <div className="btn-row">
-        <button
+      <Group justify="flex-end">
+        <Button
           type="button"
-          className="btn primary"
+          leftSection={<IconPlus size={16} aria-hidden="true" />}
           disabled={!data}
           onClick={() => {
             onNote(null);
@@ -83,25 +87,23 @@ function TariffTab({ onNote }: { onNote: (n: Note) => void }) {
           }}
         >
           Lập biểu giá mới
-        </button>
-      </div>
+        </Button>
+      </Group>
       {isLoading ? (
-        <p className="muted">Đang tải…</p>
+        <Loader size="sm" aria-label="Đang tải…" />
       ) : error && !data ? (
-        <p role="alert">{pricingError(error)}</p>
+        <Notice tone="error">{pricingError(error)}</Notice>
       ) : !data?.current && !data?.upcoming.length ? (
-        <div className="card">
-          <p className="muted">
-            Operator chưa có biểu giá. Tài xế chưa bắt đầu sạc được cho tới khi có biểu giá.
-          </p>
-        </div>
+        <Notice tone="warn" role="note">
+          Operator chưa có biểu giá. Tài xế chưa bắt đầu sạc được cho tới khi có biểu giá.
+        </Notice>
       ) : (
-        <>
+        <SimpleGrid cols={{ base: 1, lg: 2 }} spacing="md">
           {data.current && <ScheduleTable schedule={data.current} label="Đang áp dụng" />}
           {data.upcoming.map((s) => (
             <ScheduleTable key={s.effective_from} schedule={s} label="Sắp áp dụng" />
           ))}
-        </>
+        </SimpleGrid>
       )}
       {editing && data && (
         <TariffEditor
@@ -136,92 +138,86 @@ function PromotionTab({ onNote }: { onNote: (n: Note) => void }) {
 
   return (
     <>
-      <p className="muted small">
-        Mã khuyến mãi được lưu nhưng chưa được áp dụng khi tính tiền phiên sạc.
-      </p>
-      <div className="btn-row">
-        <button
+      <Group justify="space-between" wrap="wrap">
+        <Text size="sm" c="dimmed">
+          Mã khuyến mãi được lưu nhưng chưa được áp dụng khi tính tiền phiên sạc.
+        </Text>
+        <Button
           type="button"
-          className="btn primary"
+          leftSection={<IconPlus size={16} aria-hidden="true" />}
           onClick={() => {
             onNote(null);
             setDialog({});
           }}
         >
           Tạo khuyến mãi
-        </button>
-      </div>
+        </Button>
+      </Group>
       {isLoading ? (
-        <p className="muted">Đang tải…</p>
+        <Loader size="sm" aria-label="Đang tải…" />
       ) : error && !data ? (
-        <p role="alert">{pricingError(error)}</p>
+        <Notice tone="error">{pricingError(error)}</Notice>
       ) : !data || data.items.length === 0 ? (
-        <div className="card">
-          <p className="muted">Chưa có khuyến mãi nào.</p>
-        </div>
+        <EmptyState>Chưa có khuyến mãi nào.</EmptyState>
       ) : (
-        <div className="card table-card">
-          <div className="table-wrap">
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th scope="col">Mã</th>
-                  <th scope="col">Giảm</th>
-                  <th scope="col">Thời gian</th>
-                  <th scope="col">Trạng thái</th>
-                  <th scope="col">Thao tác</th>
-                </tr>
-              </thead>
-              <tbody>
-                {data.items.map((p) => {
-                  const [label, tone] = promotionStatus(p);
-                  return (
-                    <tr key={p.id} aria-label={`Khuyến mãi ${p.promotion_code}`}>
-                      <td className="cell-title">{p.promotion_code}</td>
-                      <td className="nowrap">
-                        {p.discount_type === 'percent'
-                          ? `${p.discount_value}%`
-                          : vnd(p.discount_value)}
-                      </td>
-                      <td className="small">
-                        {when(p.valid_from)} – {when(p.valid_to)}
-                      </td>
-                      <td>
-                        <span className={`pill ${tone}`}>{label}</span>
-                      </td>
-                      <td>
-                        {!promotionEnded(p) && (
-                          <div className="btn-row">
-                            <button
-                              type="button"
-                              className="btn small"
-                              onClick={() => {
-                                onNote(null);
-                                setDialog({ promotion: p });
-                              }}
-                            >
-                              Sửa
-                            </button>
-                            <button
-                              type="button"
-                              className="btn small ghost"
-                              onClick={() => {
-                                setEndError(null);
-                                setEnding(p);
-                              }}
-                            >
-                              Kết thúc
-                            </button>
-                          </div>
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        </div>
+        <DataTable minWidth={720}>
+          <Table.Thead>
+            <Table.Tr>
+              <Table.Th scope="col">Mã</Table.Th>
+              <Table.Th scope="col">Giảm</Table.Th>
+              <Table.Th scope="col">Thời gian</Table.Th>
+              <Table.Th scope="col">Trạng thái</Table.Th>
+              <Table.Th scope="col">Thao tác</Table.Th>
+            </Table.Tr>
+          </Table.Thead>
+          <Table.Tbody>
+            {data.items.map((p) => {
+              const [label, tone] = promotionStatus(p);
+              return (
+                <Table.Tr key={p.id} aria-label={`Khuyến mãi ${p.promotion_code}`}>
+                  <Table.Td className="cell-title">{p.promotion_code}</Table.Td>
+                  <Table.Td className="nowrap">
+                    {p.discount_type === 'percent' ? `${p.discount_value}%` : vnd(p.discount_value)}
+                  </Table.Td>
+                  <Table.Td className="small">
+                    {when(p.valid_from)} – {when(p.valid_to)}
+                  </Table.Td>
+                  <Table.Td>
+                    <StatusBadge tone={tone}>{label}</StatusBadge>
+                  </Table.Td>
+                  <Table.Td>
+                    {!promotionEnded(p) && (
+                      <Group gap={6} wrap="nowrap">
+                        <Button
+                          type="button"
+                          size="compact-sm"
+                          variant="light"
+                          onClick={() => {
+                            onNote(null);
+                            setDialog({ promotion: p });
+                          }}
+                        >
+                          Sửa
+                        </Button>
+                        <Button
+                          type="button"
+                          size="compact-sm"
+                          variant="default"
+                          onClick={() => {
+                            setEndError(null);
+                            setEnding(p);
+                          }}
+                        >
+                          Kết thúc
+                        </Button>
+                      </Group>
+                    )}
+                  </Table.Td>
+                </Table.Tr>
+              );
+            })}
+          </Table.Tbody>
+        </DataTable>
       )}
       {dialog && (
         <PromotionDialog
@@ -266,38 +262,17 @@ export function PricingPage() {
   };
   return (
     <>
-      <Breadcrumbs items={[{ label: 'Giá & khuyến mãi' }]} />
-      <div className="page-head">
-        <h1>Giá &amp; khuyến mãi</h1>
-        <p>
-          Biểu giá theo khung giờ (cao điểm, bình thường, thấp điểm) và mã khuyến mãi của Operator
-        </p>
-      </div>
-      <div className="filters">
-        <div className="queue-switch" role="group" aria-label="Mục">
-          {(
-            [
-              ['tariffs', 'Biểu giá'],
-              ['promotions', 'Khuyến mãi'],
-            ] as const
-          ).map(([id, label]) => (
-            <button
-              key={id}
-              type="button"
-              className={`btn small ${tab === id ? '' : 'ghost'}`}
-              aria-pressed={tab === id}
-              onClick={() => switchTab(id)}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
-      </div>
-      {note && (
-        <p className={`queue-note ${note.tone}`} role={note.tone === 'ok' ? 'status' : 'alert'}>
-          {note.text}
-        </p>
-      )}
+      <PageHeader crumbs={[{ label: 'Giá & khuyến mãi' }]} title="Giá & khuyến mãi" />
+      <QueueSwitch
+        label="Mục"
+        value={tab}
+        onChange={switchTab}
+        items={[
+          { key: 'tariffs', label: 'Biểu giá' },
+          { key: 'promotions', label: 'Khuyến mãi' },
+        ]}
+      />
+      {note && <Notice tone={note.tone}>{note.text}</Notice>}
       {tab === 'tariffs' ? <TariffTab onNote={setNote} /> : <PromotionTab onNote={setNote} />}
     </>
   );

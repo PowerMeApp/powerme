@@ -53,7 +53,7 @@ describe('Tài khoản & vai trò (màn 28)', () => {
     const seen = fakeCsms(routes());
     renderApp('/admin/users', session(ADMIN)); // ADMIN.user_id = '1'
     const staff = within(await screen.findByRole('row', { name: 'Tài khoản user5@powerme.test' }));
-    expect(staff.getByText('Nhân viên Operator')).toBeInTheDocument();
+    expect(staff.getByText('Nhân viên đơn vị vận hành')).toBeInTheDocument();
     expect(staff.getByText('Kỹ thuật viên · An Phát EV')).toBeInTheDocument();
     expect(staff.getByText('Đang hoạt động')).toBeInTheDocument();
     expect(buttons('user5@powerme.test')).toEqual(['Sửa', 'Đổi vai trò', 'Khoá']);
@@ -74,7 +74,7 @@ describe('Tài khoản & vai trò (màn 28)', () => {
     await u.selectOptions(screen.getByLabelText('Vai trò'), 'operator_staff');
     await u.selectOptions(screen.getByLabelText('Trạng thái'), 'suspended');
     await u.selectOptions(
-      screen.getByRole('combobox', { name: 'Operator' }),
+      screen.getByRole('combobox', { name: 'Đơn vị vận hành' }),
       await screen.findByRole('option', { name: 'An Phát EV' }),
     );
     await u.type(screen.getByLabelText('Tìm tài khoản'), 'ng');
@@ -98,13 +98,15 @@ describe('Tài khoản & vai trò (màn 28)', () => {
     await u.click(await screen.findByRole('button', { name: 'Tạo tài khoản' }));
     const dialog = within(screen.getByRole('dialog', { name: 'Tạo tài khoản' }));
     await u.click(dialog.getByRole('button', { name: 'Tạo' }));
-    expect(errorUnder(dialog.getByLabelText('Operator'))).toHaveTextContent('Chọn Operator');
+    expect(errorUnder(dialog.getByLabelText('Đơn vị vận hành'))).toHaveTextContent(
+      'Chọn đơn vị vận hành',
+    );
     expect(errorUnder(dialog.getByLabelText('Email'))).toHaveTextContent('Email không hợp lệ');
     expect(errorUnder(dialog.getByLabelText('Mật khẩu ban đầu'))).toHaveTextContent(
       'Ít nhất 8 ký tự',
     );
     expect(seen.some((r) => r.method === 'POST')).toBe(false);
-    await u.selectOptions(dialog.getByLabelText('Operator'), '1');
+    await u.selectOptions(dialog.getByLabelText('Đơn vị vận hành'), '1');
     await u.selectOptions(dialog.getByLabelText('Chức vụ'), 'manager');
     await u.type(dialog.getByLabelText('Email'), 'new@powerme.test');
     await u.type(dialog.getByLabelText('Họ tên'), 'Nguyễn Quản Lý');
@@ -134,7 +136,7 @@ describe('Tài khoản & vai trò (màn 28)', () => {
     await u.click(await screen.findByRole('button', { name: 'Tạo tài khoản' }));
     const dialog = within(screen.getByRole('dialog'));
     await u.selectOptions(dialog.getByLabelText('Vai trò'), 'admin');
-    expect(dialog.queryByLabelText('Operator')).toBeNull();
+    expect(dialog.queryByLabelText('Đơn vị vận hành')).toBeNull();
     await u.type(dialog.getByLabelText('Email'), 'admin2@powerme.test');
     await u.type(dialog.getByLabelText('Họ tên'), 'Admin Hai');
     await u.type(dialog.getByLabelText('Mật khẩu ban đầu'), 'mat-khau-123');

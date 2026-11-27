@@ -17,7 +17,7 @@ function staffNeedsOperator(
   ctx: z.RefinementCtx,
 ) {
   if (v.role === 'operator_staff' && !v.operator_id)
-    ctx.addIssue({ code: 'custom', path: ['operator_id'], message: 'Chọn Operator' });
+    ctx.addIssue({ code: 'custom', path: ['operator_id'], message: 'Chọn đơn vị vận hành' });
 }
 
 export const createUserSchema = z

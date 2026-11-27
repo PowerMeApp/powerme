@@ -59,7 +59,7 @@ describe('Ngoại lệ thanh toán (màn 32 / 33)', () => {
   it('shows four tabs with counts; late payments first; menu link', async () => {
     fakeCsms({ [LIST]: { status: 200, body: DATA } });
     renderApp('/admin/billing', session(ADMIN));
-    const late = within(await screen.findByRole('row', { name: 'Trả muộn top-up #11' }));
+    const late = within(await screen.findByRole('row', { name: 'Trả muộn lần nạp #11' }));
     expect(late.getByText('Nguyễn Thị Lan')).toBeInTheDocument();
     expect(late.getByText('200.000 ₫')).toBeInTheDocument();
     expect(late.getByText('VNP-LATE-1')).toBeInTheDocument();
@@ -82,14 +82,14 @@ describe('Ngoại lệ thanh toán (màn 32 / 33)', () => {
       },
     });
     const { user } = renderApp('/admin/billing?tab=invoices', session(ADMIN));
-    const row = within(await screen.findByRole('row', { name: 'Hoá đơn top-up #12' }));
+    const row = within(await screen.findByRole('row', { name: 'Hoá đơn lần nạp #12' }));
     expect(row.getByText(/Dữ liệu bị từ chối/)).toBeInTheDocument();
     expect(row.getByText(/Mã số thuế không hợp lệ/)).toBeInTheDocument();
     await user.click(row.getByRole('button', { name: 'Thử lại' }));
-    const sheet = within(screen.getByRole('dialog', { name: 'Thử lại hoá đơn top-up #12' }));
+    const sheet = within(screen.getByRole('dialog', { name: 'Thử lại hoá đơn lần nạp #12' }));
     expect(sheet.getByText(/đã thử 4 lần/)).toBeInTheDocument();
     await user.click(sheet.getByRole('button', { name: 'Thử lại' }));
-    expect(await screen.findByText(/Đã gửi lại hoá đơn của top-up #12/)).toBeInTheDocument();
+    expect(await screen.findByText(/Đã gửi lại hoá đơn của lần nạp #12/)).toBeInTheDocument();
     expect(seen.some((r) => r.path === '/api/admin/v1/billing/e-invoices/21/retry')).toBe(true);
   });
 
@@ -111,7 +111,7 @@ describe('Ngoại lệ thanh toán (màn 32 / 33)', () => {
       },
     });
     const { user } = renderApp('/admin/billing?tab=exceptions', session(ADMIN));
-    const row = within(await screen.findByRole('row', { name: 'Ngoại lệ top-up #13' }));
+    const row = within(await screen.findByRole('row', { name: 'Ngoại lệ lần nạp #13' }));
     expect(row.getByText('VNPay mã 04: chưa rõ kết quả')).toBeInTheDocument();
     // D10: recheck comes before "Đã xem".
     expect(row.getAllByRole('button').map((b) => b.textContent)).toEqual([
@@ -121,10 +121,10 @@ describe('Ngoại lệ thanh toán (màn 32 / 33)', () => {
     await user.click(row.getByRole('button', { name: 'Kiểm tra lại' }));
     expect(await screen.findByText(/Thử lại sau khoảng 15 phút/)).toHaveClass('queue-note', 'ok');
     await user.click(row.getByRole('button', { name: 'Đã xem' }));
-    const sheet = within(screen.getByRole('dialog', { name: 'Đánh dấu đã xem top-up #13' }));
+    const sheet = within(screen.getByRole('dialog', { name: 'Đánh dấu đã xem lần nạp #13' }));
     expect(sheet.getByText(/không “Kiểm tra lại” được nữa/)).toBeInTheDocument();
     await user.click(sheet.getByRole('button', { name: 'Đã xem' }));
-    expect(await sheet.findByText(/Top-up không còn ngoại lệ/)).toHaveClass('form-error');
+    expect(await sheet.findByText(/Lần nạp không còn ngoại lệ/)).toHaveClass('form-error');
   });
 
   it('payment conflict: the note is required (red under the field) and sent', async () => {
@@ -156,7 +156,7 @@ describe('Ngoại lệ thanh toán (màn 32 / 33)', () => {
       },
     });
     const { user } = renderApp('/admin/billing?tab=conflicts', session(ADMIN));
-    const row = within(await screen.findByRole('row', { name: 'Trả mâu thuẫn top-up #14' }));
+    const row = within(await screen.findByRole('row', { name: 'Trả mâu thuẫn lần nạp #14' }));
     await user.click(row.getByRole('button', { name: 'Đã xử lý' }));
     const sheet = within(screen.getByRole('dialog'));
     await user.click(sheet.getByRole('button', { name: 'Đã xử lý' }));
