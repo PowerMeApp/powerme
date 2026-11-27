@@ -8,6 +8,7 @@ const PATHS = {
   revenue: 'M4 20V10M10 20V4M16 20v-7M22 20H2',
   card: 'M3 6h18v12H3zM3 10h18M7 15h4',
   tag: 'M3 12V4h8l10 10-8 8zM7.5 7.5v.01',
+  receipt: 'M6 3h12v18l-3-2-3 2-3-2-3 2zM9 8h6M9 12h6',
   users:
     'M9 11a4 4 0 100-8 4 4 0 000 8zM2 21v-1a6 6 0 0112 0v1M17 11a3 3 0 100-6M22 21v-1a5 5 0 00-4-4.9',
 } as const;

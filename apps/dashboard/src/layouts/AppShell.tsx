@@ -124,6 +124,15 @@ export function AppShell() {
               <span>Giá &amp; khuyến mãi</span>
             </NavLink>
           )}
+          {admin && (
+            <NavLink
+              to="/admin/billing"
+              className={({ isActive }) => `nav-link${isActive ? ' active' : ''}`}
+            >
+              <Icon name="receipt" />
+              <span>Ngoại lệ thanh toán</span>
+            </NavLink>
+          )}
           <NavLink
             to={admin ? '/admin/revenue' : '/operator/revenue'}
             className={({ isActive }) => `nav-link${isActive ? ' active' : ''}`}

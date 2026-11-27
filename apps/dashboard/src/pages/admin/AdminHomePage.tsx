@@ -5,8 +5,8 @@
  *     (in service online / offline, connectors in the driver groups, open faults) and the
  *     Operators / Charging Stations — from GET /api/admin/v1/summary;
  *   - the SRS counts: user accounts by role, charge points by lifecycle, RFID cards by status.
- * A group that is 0 is hidden — never a placeholder (D36). The billing exceptions tile comes with
- * FE-09 (screen 32), although the API already returns its counts. Polled every 10 s.
+ * A group that is 0 is hidden — never a placeholder (D36). The billing exceptions tile (FE-09) shows
+ * only when there is work, highlighted, and opens screen 32. Polled every 10 s.
  */
 import { Link } from 'react-router';
 import type { AdminSummary, ChargePointLifecycle } from '@powerme/shared';
@@ -38,6 +38,11 @@ const CARD_GROUPS: [keyof AdminSummary['rfid_cards'], string, string][] = [
   ['active', 'Đang dùng', ''],
   ['unlinked', 'Chưa gắn tài xế', 'muted'],
   ['blocked', 'Bị chặn', 'major'],
+];
+const BILLING_GROUPS: [keyof AdminSummary['billing_exceptions'], string, string][] = [
+  ['late_payments', 'Trả muộn chờ hoàn', 'major'],
+  ['invoices_needs_review', 'Hoá đơn cần xem lại', 'major'],
+  ['failed_refunds', 'Hoàn tiền thất bại', 'critical'],
 ];
 const CONNECTOR_GROUPS: [keyof AdminSummary['network']['connectors'], string, string][] = [
   ['available', 'Sẵn sàng', ''],
@@ -135,6 +140,11 @@ export function AdminHomePage() {
     : [];
   const chargePoints = s ? lifecycles.reduce((n, l) => n + s.charge_points.by_lifecycle[l]!, 0) : 0;
   const cards = s ? s.rfid_cards.active + s.rfid_cards.blocked + s.rfid_cards.unlinked : 0;
+  const billing = s
+    ? s.billing_exceptions.late_payments +
+      s.billing_exceptions.invoices_needs_review +
+      s.billing_exceptions.failed_refunds
+    : 0;
   const net = s?.network;
   const inService = net ? net.in_service_online + net.in_service_offline : 0;
   const empty = s ? users + chargePoints + cards === 0 && s.operators.total === 0 : false;
@@ -160,6 +170,16 @@ export function AdminHomePage() {
         <>
           <h2 className="section-title">Thống kê chung</h2>
           <div className="tiles">
+            {billing > 0 && s && (
+              <section className="card tile tile-urgent" aria-label="Ngoại lệ thanh toán">
+                <h2>Ngoại lệ thanh toán</h2>
+                <p className="tile-number">{formatCount(billing)}</p>
+                <Counts rows={BILLING_GROUPS} values={s.billing_exceptions} />
+                <Link className="tile-link" to="/admin/billing">
+                  Xem chi tiết →
+                </Link>
+              </section>
+            )}
             <MonthRevenue />
             {inService > 0 && net && (
               <section className="card tile" aria-label="Mạng lưới trụ sạc">

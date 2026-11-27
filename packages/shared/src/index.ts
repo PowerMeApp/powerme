@@ -9,3 +9,4 @@ export type * from './api/users.js';
 export type * from './api/onboarding.js';
 export type * from './api/registry.js';
 export type * from './api/pricing.js';
+export type * from './api/billing.js';
