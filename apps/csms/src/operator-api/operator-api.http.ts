@@ -14,6 +14,8 @@
  *   GET  /api/admin/v1/me     admin
  *   GET  /api/admin/v1/summary  admin  (FE-14, screen 27, admin-platform.ts)
  *   GET  /api/admin/v1/users?role=driver&q=  admin  (T161 driver search for screen 30, admin-users.ts)
+ *   GET  /api/admin/v1/network/charge-points, GET /api/admin/v1/operators  admin  (FE-18, screen 31,
+ *        admin-network.ts, admin-operators.ts)
  *   POST /api/operator/v1/charge-points/onboard, GET|POST /api/admin/v1/charge-points  (BE-44, WF-05,
  *        charge-point-onboarding.ts → ChargePointOnboardingService)
  * RolesGuard runs before route matching, so an unknown path without a valid token is 401, not 404.
@@ -43,6 +45,8 @@ import {
 } from './admin-transactions.js';
 import { matchRfidRoute, runRfidRoute } from './admin-rfid-cards.js';
 import { matchUsersRoute, searchUsers } from './admin-users.js';
+import { listNetwork, matchNetworkRoute } from './admin-network.js';
+import { listOperators, matchOperatorsRoute } from './admin-operators.js';
 import { listSites, matchSitesRoute } from './operator-sites.js';
 import { toRevenueCsv } from './revenue-csv.js';
 import { matchRevenueRoute, revenueReport } from './revenue-report.js';
@@ -68,7 +72,7 @@ export const OPERATOR_API_PATH = /^\/api\/(auth|operator|admin)\/v1(?:\/|\?|$)/;
 
 /** Paths that take a query string (contract §2.2a: RolesGuard runs first, then the parameters). */
 const QUERY_PATHS =
-  /^\/api\/(?:operator\/v1\/(?:faults|charge-points|sessions|sites|revenue(?:\.csv)?)|admin\/v1\/(?:(?:revenue|transactions)(?:\.csv)?|users))$/;
+  /^\/api\/(?:operator\/v1\/(?:faults|charge-points|sessions|sites|revenue(?:\.csv)?)|admin\/v1\/(?:(?:revenue|transactions)(?:\.csv)?|users|operators|network\/charge-points))$/;
 const LOCAL_ORIGIN = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/;
 const BODY_LIMIT = 16 * 1024;
 
@@ -243,6 +247,22 @@ export function createOperatorApiListener(
         `transactions_${txRoute.from}_${txRoute.to}.csv`,
         toTransactionsCsv(await exportTransactions(db, txRoute)),
       );
+    }
+    const networkRoute =
+      surface === 'admin' ? matchNetworkRoute(rest ?? '', url.searchParams) : null;
+    if (networkRoute) {
+      allow(req, res, 'GET');
+      return send(
+        res,
+        200,
+        await listNetwork(db, networkRoute, monitoring.thresholds, monitoring.registry),
+      );
+    }
+    const operatorsRoute =
+      surface === 'admin' ? matchOperatorsRoute(rest ?? '', url.searchParams) : null;
+    if (operatorsRoute) {
+      allow(req, res, 'GET');
+      return send(res, 200, await listOperators(db, operatorsRoute));
     }
     const usersRoute = surface === 'admin' ? matchUsersRoute(rest ?? '', url.searchParams) : null;
     if (usersRoute) {

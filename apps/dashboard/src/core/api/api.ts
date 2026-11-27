@@ -24,9 +24,12 @@ import type {
   FaultListStatus,
   LoginRequest,
   LoginResponse,
+  NetworkChargePointPage,
+  NetworkQuery,
   OnboardRequest,
   OnboardResult,
   OperatorFaultList,
+  PlatformOperatorPage,
   RefreshResponse,
   RegisterDeviceRequest,
   RegistryChargePoint,
@@ -64,6 +67,8 @@ export const CHARGE_POINT_PAGE_SIZE = 20;
 export const TRANSACTION_PAGE_SIZE = 50;
 /** Rows per page on screen 30. */
 export const RFID_PAGE_SIZE = 20;
+/** Rows per page on screen 31. */
+export const NETWORK_PAGE_SIZE = 20;
 /** Rows per page of the device registry. */
 export const REGISTRY_PAGE_SIZE = 20;
 /** Matches shown by the driver picker of screen 30. */
@@ -174,6 +179,7 @@ export const api = createApi({
     'AdminSummary',
     'RfidCard',
     'Registry',
+    'Network',
   ],
   endpoints: (b) => ({
     login: b.mutation<LoginResponse, LoginRequest>({
@@ -347,6 +353,24 @@ export const api = createApi({
       query: (body) => ({ url: 'admin/v1/charge-points', method: 'POST', body }),
       invalidatesTags: ['Registry', 'AdminSummary'],
     }),
+    // Screen 31 (FE-18, UC-ADM-07): every Operator's charge points, live; and the Operators.
+    adminNetwork: b.query<NetworkChargePointPage, NetworkQuery & { page: number }>({
+      query: ({ page, ...f }) => {
+        const p = new URLSearchParams();
+        if (f.operator_id) p.set('operator_id', f.operator_id);
+        if (f.charge_point_q?.trim()) p.set('charge_point_q', f.charge_point_q.trim());
+        if (f.site_q?.trim()) p.set('site_q', f.site_q.trim());
+        if (f.lifecycle) p.set('lifecycle', f.lifecycle);
+        if (f.online !== undefined) p.set('online', String(f.online));
+        p.set('page', String(page));
+        p.set('page_size', String(NETWORK_PAGE_SIZE));
+        return `admin/v1/network/charge-points?${p}`;
+      },
+      providesTags: ['Network'],
+    }),
+    adminOperators: b.query<PlatformOperatorPage, void>({
+      query: () => 'admin/v1/operators?page_size=100',
+    }),
     // Driver picker of screen 30: active drivers by name, email or phone (T161, admin-users.ts).
     driverSearch: b.query<UserAccountPage, string>({
       query: (q) => {
@@ -385,6 +409,8 @@ export const {
   useUpdateRfidCardMutation,
   useDriverSearchQuery,
   useAdminRegistryQuery,
+  useAdminNetworkQuery,
+  useAdminOperatorsQuery,
   useRegisterDeviceMutation,
 } = api;
 
