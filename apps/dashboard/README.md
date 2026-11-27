@@ -35,7 +35,8 @@ npm run build -w @powerme/dashboard
 |---|---|---|---|
 | 16 | Login — Operator Dashboard | `/operator/login` | FE-01b |
 | 17 | Operator Dashboard (hub) | `/operator` | FE-01b (khung; số liệu ở FE-03 / FE-04) |
-| 18–25 | Charge Points, Onboarding, Charge Point Detail, Fault Alerts, Maintenance Tickets, Unattributed Sessions, Pricing & Promotions, Station Revenue | `/operator/…` | FE-02 … FE-07, FE-12, FE-13 |
+| 19 | Charge Point Onboarding (sheet, UC-OPS-01) | nút "Onboard trụ sạc" trên `/operator/charge-points` | FE-02 (+ `GET /api/operator/v1/sites`) |
+| 18, 20–25 | Charge Points, Charge Point Detail, Fault Alerts, Maintenance Tickets, Unattributed Sessions, Pricing & Promotions, Station Revenue | `/operator/…` | FE-03 … FE-07, FE-12, FE-13 |
 | 26 | Login — Admin Console | `/admin/login` | FE-01b |
 | 27 | Admin Dashboard (hub) | `/admin` | FE-01b (khung; số liệu ở FE-14) |
 | 30 | RFID Cards (Card Registry, UC-ADM-04) | `/admin/rfid-cards` | T161 (API T146 + tìm tài xế `GET /api/admin/v1/users`) |

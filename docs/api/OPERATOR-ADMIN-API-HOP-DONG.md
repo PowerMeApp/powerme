@@ -325,8 +325,8 @@ tách theo bề mặt — refresh token không mang `role`, role đọc lại t�
 
 | Endpoint | Role | UC / FR / BR | Trạng thái · người làm | Ghi chú |
 |---|---|---|---|---|
-| `GET /operator/v1/sites` | operator_staff | UC-OPS-01, BR-P11 | planned · Ân | ô chọn site trong sheet onboarding |
-| `POST /operator/v1/charge-points/onboard` | operator_staff | UC-OPS-01, FR-09, STM-3 #2, SD-5a | **done** BE-44 · `charge-point-onboarding.ts` → `ChargePointOnboardingService.onboard` · Trí (route) / Ân (service) | body như console T119 (`OnboardRequest`); actor = staff của token (manager và technician đều được); site phải thuộc operator của token (DB) → khác 403 `site_of_other_operator`, không có 404 `site_not_found`; 201, mật khẩu hiện **một lần**, `no-store`, không log; 409 `serial_not_registered` / `already_onboarded`. Đường dẫn có `/onboard` (giống console) thay cho `POST /operator/v1/charge-points` bản nháp, để không chung đường dẫn với `GET` giám sát. Console `/api/operator/charge-points/onboard` vẫn giữ cho demo |
+| `GET /operator/v1/sites` | operator_staff | UC-OPS-01, BR-P11 | **implemented** FE-02 · Nghĩa · `operator-sites.ts` | ô chọn site trong sheet onboarding (màn 19); chỉ site của operator trong token, sắp theo `site_code`; chỉ nhận `page`, `page_size` (1–100, mặc định 50), key khác → 400; trả `SitePage` |
+| `POST /operator/v1/charge-points/onboard` | operator_staff | UC-OPS-01, FR-09, STM-3 #2, SD-5a | **done** BE-44 · `charge-point-onboarding.ts` → `ChargePointOnboardingService.onboard` · Trí (route) / Ân (service) | body như console T119 (`OnboardRequest`); actor = staff của token (manager và technician đều được); site phải thuộc operator của token (DB) → khác 403 `site_of_other_operator`, site không có → 404 `site_not_found` (code và OpenAPI); **`site_id` trong body phải là số nguyên** (`parseOnboardBody`), dù OpenAPI ghi `Id` dạng chuỗi — màn 19 gửi số (FE-02); 201, mật khẩu hiện **một lần**, `no-store`, không log; 409 `serial_not_registered` / `already_onboarded`. Đường dẫn có `/onboard` (giống console) thay cho `POST /operator/v1/charge-points` bản nháp, để không chung đường dẫn với `GET` giám sát. Console `/api/operator/charge-points/onboard` vẫn giữ cho demo |
 | `POST /operator/v1/charge-points/{id}/disable` | operator_staff | STM-3 #4, ADR-0016 | planned · Ân | chỉ có `ChargePointLifecyclePolicy`, chưa có service ghi DB |
 | `POST /operator/v1/charge-points/{id}/enable` | operator_staff | STM-3 #5 | planned · Ân | |
 | `GET /admin/v1/charge-points` | admin | UC-ADM-03, UC-ADM-07, FR-15 | **partial** BE-44 · `charge-point-onboarding.ts` · Trí | đã làm: `lifecycle`, `page`/`page_size`, mới nhất trước, `RegistryChargePoint` (kèm operator, site; không bao giờ có băm/mật khẩu); chưa làm: `operator_id`, `q` (→ 400 `invalid_input`) |
@@ -860,7 +860,7 @@ trạng thái (2xx/4xx nghiệp vụ khác với 401/403). Ba điều kiện c�
 | 2 | `POST /api/auth/v1/refresh` | công khai | — | — | — | implemented (T125) |
 | 3 | `GET /api/operator/v1/me` | 401 | 403 | ✓ | 403 | implemented |
 | 4 | `GET /api/admin/v1/me` | 401 | 403 | 403 | ✓ | implemented |
-| 5 | `GET /api/operator/v1/sites` | 401 | 403 | ✓ | 403 | planned |
+| 5 | `GET /api/operator/v1/sites` | 401 | 403 | ✓ | 403 | implemented (FE-02) |
 | 6 | `GET /api/operator/v1/charge-points` | 401 | 403 | ✓ | 403 | implemented (FE-03) |
 | 7 | `POST /api/operator/v1/charge-points/onboard` | 401 | 403 | ✓ | 403 | implemented (BE-44) |
 | 8 | `GET /api/operator/v1/charge-points/{chargePointId}` | 401 | 403 | ✓ | 403 | implemented (FE-05) |
