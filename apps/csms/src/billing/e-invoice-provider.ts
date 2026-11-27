@@ -2,9 +2,10 @@
  * Cổng nhà cung cấp hoá đơn điện tử (CD-2 `EInvoiceProviderAdapter`, SD-2c) + bản stub (T32 Phần 7,
  * decisions D5).
  *
- * Vì sao tồn tại: `EInvoiceService` gọi nhà cung cấp qua interface để sau thay bằng provider thật
- * (MISA meInvoice, ngoài phạm vi) mà không sửa service. Bản stub không gọi HTTP; cấu hình bằng biến
- * môi trường để giả lập thành công / lỗi tạm thời / bị từ chối và độ trễ.
+ * Vì sao tồn tại: `EInvoiceService` gọi nhà cung cấp qua interface, không biết bản cài nào. Bản thật
+ * là SePay eInvoice (T144, `sepay-einvoice.provider.ts`); chọn bằng `EINVOICE_PROVIDER`
+ * (`sepay-einvoice.config.ts`), mặc định stub. Bản stub không gọi HTTP; cấu hình bằng biến môi trường
+ * để giả lập thành công / lỗi tạm thời / bị từ chối và độ trễ.
  *
  * Lệch CD-2 / SD-2c (diagrams/README.md Known differences): `createInvoice` không nhận thông tin
  * người mua (người tiêu dùng cá nhân, SRS §3.4.1 / UC-PAY-01) và trả kết quả đã phân loại thay vì
@@ -14,7 +15,7 @@
 import { setTimeout as sleep } from 'node:timers/promises';
 import { stubInvoiceNo } from './e-invoice.js';
 
-/** Token Nest của `EInvoiceProviderAdapter` (BillingModule cấp bản stub). */
+/** Token Nest của `EInvoiceProviderAdapter` (BillingModule chọn bằng `createEInvoiceProvider`). */
 export const E_INVOICE_PROVIDER = Symbol('BILLING_E_INVOICE_PROVIDER');
 
 /** Token tuỳ chọn để test đặt timeout nhỏ; mặc định `EINVOICE_PROVIDER_TIMEOUT_MS`. */
