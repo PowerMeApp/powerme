@@ -51,7 +51,8 @@ Future<void> _tap(
   Finder finder, {
   bool settle = true,
 }) async {
-  await tester.ensureVisible(finder);
+  await tester.pump();
+  await Scrollable.ensureVisible(tester.element(finder), alignment: .5);
   await tester.pump();
   await tester.tap(finder);
   if (settle) await tester.pumpAndSettle();
@@ -59,7 +60,7 @@ Future<void> _tap(
 
 Future<void> _text(WidgetTester tester, String key, String value) async {
   final finder = _key(key);
-  await tester.ensureVisible(finder);
+  await Scrollable.ensureVisible(tester.element(finder), alignment: .5);
   await tester.enterText(finder, value);
   await tester.pump();
 }
@@ -90,17 +91,23 @@ void main() {
         _ => throw StateError('Unexpected route'),
       },
     );
-    await _login(tester, fixture);
+    await _login(
+      tester,
+      fixture,
+      location: _DeviceLocation(() async => const MapLocation(10.77, 106.66)),
+    );
+    await _tap(tester, _key('open-discovery-origin'));
+    await _tap(tester, _key('discovery-use-location'));
     expect(find.text('Thử lại'), findsNothing);
     await _tap(tester, find.text('Sửa từ khóa'));
     expect(tester.testTextInput.isVisible, isTrue);
-    expect(_requests(fixture, 'stations'), hasLength(1));
+    expect(_requests(fixture, 'stations'), hasLength(2));
     await _tap(tester, _key('open-suggestions'));
     await _text(tester, 'suggestion-soc', '15');
     await _tap(tester, _key('submit-smart-search'));
     expect(find.text('Thử lại'), findsNothing);
     final before = _requests(fixture, 'stations').length;
-    await _tap(tester, find.text('Sửa mức pin'));
+    await _tap(tester, find.text('Sửa thông tin'));
     expect(tester.testTextInput.isVisible, isTrue);
     expect(_requests(fixture, 'stations'), hasLength(before));
   });
@@ -128,7 +135,7 @@ void main() {
       },
     );
     await _login(tester, fixture, location: location);
-    await _tap(tester, find.text('Điểm đi và bộ lọc'));
+    await _tap(tester, _key('open-discovery-origin'));
     expect(find.textContaining('PowerMe nhận tọa độ'), findsOneWidget);
     await _tap(tester, _key('discovery-address-consent'));
     await _text(tester, 'discovery-address-query', 'Võ Văn Tần');
@@ -148,15 +155,7 @@ void main() {
       isNot(contains('latitude')),
     );
     final locationButton = _key('discovery-use-location');
-    if (locationButton.evaluate().isEmpty) {
-      final filters = find.text('Điểm đi và bộ lọc');
-      await tester.scrollUntilVisible(
-        filters,
-        200,
-        scrollable: find.byType(Scrollable).first,
-      );
-      if (locationButton.evaluate().isEmpty) await _tap(tester, filters);
-    }
+    await _tap(tester, _key('open-discovery-origin'));
     await _tap(tester, locationButton);
     await tester.scrollUntilVisible(
       _key('station-result-31'),
@@ -274,7 +273,7 @@ void main() {
         size: const Size(390, 844),
       );
       final map = find.byType(VietmapSurface);
-      final filters = find.text('Điểm đi và bộ lọc');
+      final filters = _key('open-discovery-origin');
       final suggestions = _key('open-suggestions');
       final toggle = _key('toggle-station-map');
       expect(tester.getCenter(suggestions).dy, tester.getCenter(toggle).dy);
@@ -283,7 +282,7 @@ void main() {
       expect(tester.getSize(map).height, lessThan(120));
       expect(
         tester.getTopLeft(map).dy,
-        lessThan(tester.getTopLeft(filters).dy),
+        greaterThan(tester.getTopLeft(filters).dy),
       );
       final initialMap = tester.widget<VietmapSurface>(map);
       expect(initialMap.origin, isNull);
@@ -297,7 +296,6 @@ void main() {
       expect(tester.widget<VietmapSurface>(map).stations.single.id, '31');
       await _tap(tester, filters);
       await _tap(tester, _key('discovery-use-location'));
-      await _tap(tester, filters);
       await tester.scrollUntilVisible(
         _key('station-result-31'),
         200,
@@ -574,7 +572,8 @@ void main() {
         _requests(fixture, 'stations').last.uri.queryParameters,
         containsPair('page', '1'),
       );
-      await _tap(tester, find.text('Điểm đi và bộ lọc'));
+      await _tap(tester, _key('include-vinfast-only'));
+      await _tap(tester, _key('open-discovery-origin'));
       await _tap(tester, _key('discovery-use-location'));
       expect(location.calls, 1);
       expect(find.textContaining('chưa cấp quyền vị trí'), findsOneWidget);
@@ -585,7 +584,6 @@ void main() {
         ).every((r) => !r.uri.queryParameters.containsKey('latitude')),
         true,
       );
-      await _tap(tester, _key('include-vinfast-only'));
       expect(
         _requests(fixture, 'stations').last.uri.queryParameters,
         containsPair('include_vinfast_only', 'true'),
@@ -729,7 +727,7 @@ void main() {
       final missing = find.text('Chưa nhập mức pin.');
       final atTarget = find.textContaining('Pin đã đạt 80% trở lên');
       final fallbackStation = find.text('Trạm dự phòng');
-      final origin = find.text('Điểm đi');
+      final origin = _key('open-discovery-origin');
       final useLocation = _key('discovery-use-location');
       Future<void> reveal(Finder finder, double delta) =>
           tester.scrollUntilVisible(
@@ -746,16 +744,15 @@ void main() {
         scale: 2,
       );
       await _tap(tester, _key('open-suggestions'));
+      await reveal(field, 160);
       expect(find.byType(TextField), findsOneWidget);
       expect(find.textContaining('Không bắt buộc'), findsOneWidget);
       expect(smartRequests, isEmpty);
-      await reveal(origin, 160);
+      await reveal(origin, -160);
       await _tap(tester, origin);
       await reveal(useLocation, 160);
       await _tap(tester, useLocation);
-      await reveal(origin, -160);
-      await _tap(tester, origin);
-      await reveal(submit, -160);
+      await reveal(submit, 160);
       expect(disclosure, findsNothing);
       expect(smartRequests, isEmpty);
 
@@ -861,13 +858,8 @@ void main() {
       await _tap(tester, _key('open-suggestions'));
       await _text(tester, 'suggestion-soc', '0');
       await _tap(tester, _key('submit-smart-search'));
-      expect(find.textContaining('Chưa chọn điểm đi.'), findsOneWidget);
-      final zero = _requests(fixture, 'stations').last.uri.queryParameters;
-      expect(zero, containsPair('soc_percent', '0.0'));
-      expect(zero, containsPair('target_soc_percent', '80.0'));
-      expect(zero, isNot(contains('latitude')));
-      expect(zero, isNot(contains('location_consent')));
-      await _tap(tester, find.text('Điểm đi'));
+      expect(_requests(fixture, 'stations'), hasLength(1));
+      expect(_key('suggestion-result-31'), findsNothing);
       await _tap(tester, _key('discovery-use-location'));
       expect(location.calls, 1);
       expect(
@@ -875,6 +867,12 @@ void main() {
         isNot(contains('location_consent')),
       );
       expect(find.textContaining('đường bộ'), findsNothing);
+      await _tap(tester, _key('submit-smart-search'));
+      final zero = _requests(fixture, 'stations').last.uri.queryParameters;
+      expect(zero, containsPair('soc_percent', '0.0'));
+      expect(zero, containsPair('target_soc_percent', '80.0'));
+      expect(zero, containsPair('latitude', '10.77'));
+      expect(zero, containsPair('location_consent', 'true'));
       final requestCount = _requests(fixture, 'stations').length;
       await _text(tester, 'suggestion-soc', '25,5');
       expect(_requests(fixture, 'stations'), hasLength(requestCount));
@@ -966,9 +964,12 @@ void main() {
       oldQuery.complete(reply(200, page([station('32', 'Kết quả cũ')])));
       await tester.pumpAndSettle();
       expect(find.text('Kết quả cũ'), findsNothing);
-      await _tap(tester, find.text('Điểm đi và bộ lọc'));
+      await _tap(tester, _key('open-discovery-origin'));
       await _tap(tester, _key('discovery-use-location'), settle: false);
       await tester.pump(const Duration(milliseconds: 100));
+      Navigator.of(tester.element(_key('discovery-use-location'))).pop();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
       await tester.scrollUntilVisible(
         _key('station-search-query'),
         -200,

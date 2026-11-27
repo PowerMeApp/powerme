@@ -64,6 +64,7 @@ class _SuggestionsState extends ConsumerState<_Suggestions> {
       if (previous?.origin != next.origin ||
           previous?.includeVinFastOnly != next.includeVinFastOnly) {
         _consentedOrigin = null;
+        _submitted = null;
       }
     });
     final batteryLabel = copy.text(
@@ -100,7 +101,7 @@ class _SuggestionsState extends ConsumerState<_Suggestions> {
           identical(_consentedOrigin, discovery.origin) &&
           _consentedVinFastFilter == discovery.includeVinFastOnly,
     );
-    final results = submitted == null
+    final results = submitted == null || discovery.origin == null
         ? null
         : ref.watch(discoverySearchProvider(input));
     return DiscoveryPage(
@@ -162,6 +163,15 @@ class _SuggestionsState extends ConsumerState<_Suggestions> {
           ),
           const SizedBox(height: 12),
         ],
+        const DiscoveryOriginSelector(),
+        if (discovery.origin == null)
+          Text(
+            copy.text(
+              'Chưa chọn điểm đi. Chọn điểm đi trước khi xem gợi ý.',
+              'No starting point selected. Choose one before viewing suggestions.',
+            ),
+          ),
+        const DiscoveryVinFastOverride(),
         InfoCard(
           spacing: 8,
           children: [
@@ -194,6 +204,10 @@ class _SuggestionsState extends ConsumerState<_Suggestions> {
               key: const Key('submit-smart-search'),
               onPressed: () {
                 FocusScope.of(context).unfocus();
+                if (valid && discovery.origin == null) {
+                  showDiscoveryOriginPicker(context);
+                  return;
+                }
                 if (valid &&
                     input.smart == draft &&
                     input.consentToRoute == canShareOrigin) {
@@ -213,17 +227,6 @@ class _SuggestionsState extends ConsumerState<_Suggestions> {
             ),
           ],
         ),
-        ExpansionTile(
-          title: Text(copy.text('Điểm đi', 'Starting point')),
-          subtitle: discovery.origin == null
-              ? null
-              : Text(
-                  discovery.origin?.address ??
-                      copy.text('Vị trí hiện tại', 'Current location'),
-                ),
-          maintainState: true,
-          children: const [DiscoveryOriginPanel()],
-        ),
         const SizedBox(height: 12),
         if (results != null)
           ...results.when(
@@ -240,8 +243,8 @@ class _SuggestionsState extends ConsumerState<_Suggestions> {
                     'Could not load suggestions.',
                   ),
                   invalid: copy.text(
-                    'Hãy kiểm tra và sửa mức pin đã nhập.',
-                    'Check and edit the battery level you entered.',
+                    'Hãy kiểm tra điểm đi, mức pin và bộ lọc.',
+                    'Check the starting point, battery level and filters.',
                   ),
                 ),
                 copy: copy,
@@ -251,7 +254,7 @@ class _SuggestionsState extends ConsumerState<_Suggestions> {
                 edit: invalidDiscoveryInput(error)
                     ? _editFocus.requestFocus
                     : null,
-                editLabel: copy.text('Sửa mức pin', 'Edit battery level'),
+                editLabel: copy.text('Sửa thông tin', 'Edit inputs'),
               ),
             ],
             data: (page) => [
