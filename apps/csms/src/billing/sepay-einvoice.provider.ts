@@ -14,10 +14,14 @@
  * Token Bearer (`POST /v1/token`, Basic Auth, sống 86400 s) cache trong adapter, xin lại khi còn < 5
  * phút hoặc khi gặp 401 (gọi lại đúng một lần). Message / log không bao giờ chứa mật khẩu, token,
  * header hay URL: lỗi gốc của fetch không đưa ra ngoài.
+ *
+ * `adjustInvoice` (T32 Phần 9b) chưa cài: trả `data` `sepay_adjustment_not_supported`, không gọi HTTP.
  */
 import { Logger } from '@nestjs/common';
 import { setTimeout as delay } from 'node:timers/promises';
 import type {
+  EInvoiceAdjustmentInput,
+  EInvoiceAdjustmentResult,
   EInvoiceInput,
   EInvoiceProviderAdapter,
   EInvoiceResult,
@@ -235,6 +239,17 @@ export class SepayEInvoiceProvider implements EInvoiceProviderAdapter {
       if (error instanceof Stop) return error.result;
       return { kind: 'transient', message: signal.aborted ? 'sepay_aborted' : 'sepay_network' };
     }
+  }
+
+  /**
+   * Chưa hỗ trợ điều chỉnh qua SePay: chưa kiểm API điều chỉnh giảm của SePay (D5 "Còn mở"). Không gọi
+   * HTTP, trả `data` để điều chỉnh vào `needs_review` cho Admin xem thay vì gửi sai.
+   */
+  async adjustInvoice(
+    _input: EInvoiceAdjustmentInput,
+    _signal: AbortSignal,
+  ): Promise<EInvoiceAdjustmentResult> {
+    return { kind: 'data', message: 'sepay_adjustment_not_supported' };
   }
 
   private toResult(state: InvoiceState): EInvoiceResult {
