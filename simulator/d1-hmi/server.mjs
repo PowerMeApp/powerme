@@ -5,6 +5,7 @@
 //   - GET  /tru/<cpId>            → public/tru.html: trang từng trụ (HMI bấm được + hành trình phiên)
 //   - GET  /static/<tên>.css|js   → file tĩnh trong public/, tên đơn, chống ".."
 //   - GET  /vendor/three/<file>   → đúng hai file build của three.js trong node_modules (hình 3D)
+//   - GET  /vendor/qrcode.mjs     → qrcode-generator (QA-09, tem QR trên trang trụ); thiếu gói → 404
 //   - GET  /tru3d/tru3d.js        → bundle hình 3D (React + r3f) đã build ở tru3d/dist/; chưa build → 404
 //   - GET  /tong/events           → SSE trang tổng: "tong" (tóm tắt mọi trụ, tối đa ~2 lần/giây)
 //   - GET  /events/<cpId>         → SSE của MỘT trụ: "hello" (snapshot + nhật ký + điểm biểu đồ),
@@ -51,11 +52,16 @@ function stationList() {
     const names = (env.CP_NAMES ?? '').split(',').map((s) => s.trim());
     // Mã in trên trụ (display_code) — mã tài xế nhập/quét trên app, khác identity OCPP.
     const codes = (env.CP_CODES ?? '').split(',').map((s) => s.trim());
+    // QA-09: địa chỉ trạm (ngăn bằng "|" vì địa chỉ có dấu phẩy) và số súng thật trong DB (1 hoặc 2).
+    const addrs = (env.CP_ADDRESSES ?? '').split('|').map((s) => s.trim());
+    const guns = (env.CP_GUNS ?? '').split(',').map((s) => Number(s.trim()));
     return ids.map((id, i) => ({
       id,
       password: pws[i] || undefined,
       name: names[i] || null,
       code: codes[i] || null,
+      address: addrs[i] || null,
+      guns: guns[i] === 1 ? 1 : 2,
     }));
   }
   return [
@@ -64,6 +70,8 @@ function stationList() {
       password: env.CP_PASSWORD || undefined,
       name: env.CP_NAME?.trim() || null,
       code: env.CP_CODE?.trim() || null,
+      address: env.CP_ADDRESS?.trim() || null,
+      guns: env.CP_GUNS?.trim() === '1' ? 1 : 2,
     },
   ];
 }
@@ -96,13 +104,13 @@ const tongClients = new Set();
 
 // Mỗi trụ: station + tập client SSE riêng. Trang một trụ chỉ nhận dữ liệu của trụ đó.
 const stations = new Map();
-for (const { id, password, name, code } of list) {
+for (const { id, password, name, code, address, guns } of list) {
   const station = createStation({
     ...common,
     cpId: id,
     ...(password ? { authPassword: password } : {}),
   });
-  const entry = { id, name, code, station, clients: new Set() };
+  const entry = { id, name, code, address, guns, station, clients: new Set() };
   // Đẩy snapshot khi có thay đổi nhưng không quá ~7 lần/giây.
   let pending = false;
   station.events.on('change', () => {
@@ -129,7 +137,13 @@ const first = stations.values().next().value;
 // ── Trang tổng: tóm tắt nhỏ, không có nhật ký/hành trình ───────────────────
 /** Snapshot của một trụ kèm tên hiển thị (QA-08). */
 function snapOf(entry) {
-  return { ...entry.station.snapshot(), name: entry.name, displayCode: entry.code };
+  return {
+    ...entry.station.snapshot(),
+    name: entry.name,
+    displayCode: entry.code,
+    address: entry.address,
+    guns: entry.guns,
+  };
 }
 
 function summary(entry) {
@@ -138,6 +152,7 @@ function summary(entry) {
     cpId: s.cpId,
     name: s.name,
     displayCode: s.displayCode,
+    address: s.address,
     net: { state: s.net.state, halfOpen: s.net.halfOpen, nextRetrySec: s.net.nextRetrySec },
     speed: s.speed,
     clockAheadSec: s.clockAheadSec,
@@ -185,6 +200,14 @@ try {
   for (const f of ['three.module.js', 'three.core.js']) VENDOR.set(f, path.join(dir, f));
 } catch {
   /* không có three → không có route vendor */
+}
+// QA-09: thư viện tạo tem QR (MIT, một file ESM, không phụ thuộc). Thiếu → trang chỉ hiện mã chữ.
+let QRCODE_FILE = null;
+try {
+  const p = createRequire(import.meta.url).resolve('qrcode-generator');
+  QRCODE_FILE = path.join(path.dirname(p), 'qrcode.mjs');
+} catch {
+  /* không có qrcode-generator */
 }
 
 // Bundle hình 3D (QA-04): ĐÚNG một file tên cố định do `npm run sim:tru3d:build` sinh ra trong
@@ -291,6 +314,17 @@ const server = http.createServer(async (req, res) => {
       } catch {
         return notFound(res);
       }
+    }
+    if (get && parts[0] === 'vendor' && parts[1] === 'qrcode.mjs' && parts.length === 2) {
+      if (!QRCODE_FILE) return notFound(res);
+      let body;
+      try {
+        body = await readFile(QRCODE_FILE);
+      } catch {
+        return notFound(res);
+      }
+      res.writeHead(200, { 'content-type': STATIC_TYPES['.js'], 'cache-control': 'max-age=86400' });
+      return res.end(body);
     }
     if (get && parts[0] === 'vendor' && parts[1] === 'three' && parts.length === 3) {
       const file = VENDOR.get(parts[2]);

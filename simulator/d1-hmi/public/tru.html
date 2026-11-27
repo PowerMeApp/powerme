@@ -905,6 +905,15 @@
         </div>
       </section>
 
+      <!-- QA-09: tem QR như dán trên trụ thật — app PowerMe quét "powerme:connector:<mã>/<súng>". -->
+      <section id="temqr" aria-label="Tem QR trên trụ" hidden>
+        <div class="sec-head">
+          <h2>Tem QR trên trụ</h2>
+          <p>mở app PowerMe → Sạc → quét mã của súng muốn dùng</p>
+        </div>
+        <div class="qr-grid" id="qrGrid"></div>
+      </section>
+
       <!-- QA-03: hành trình phiên cho người test app tài xế. Dựng bằng JS (buildJr). -->
       <section id="phien" aria-label="Phiên sạc trên trụ này">
         <div class="sec-head">
@@ -977,6 +986,36 @@
       const CP = decodeURIComponent(location.pathname.split('/')[2] ?? '');
       const API = '/api/' + encodeURIComponent(CP) + '/';
       document.title = 'Trụ ' + CP;
+      // QA-09: dựng tem QR một lần cho mỗi trụ (mã cố định). Thư viện thiếu → chỉ hiện mã chữ.
+      let qrDone = false;
+      async function renderQr(s) {
+        if (qrDone || !s.displayCode) return;
+        qrDone = true;
+        let qr = null;
+        try {
+          qr = (await import('/vendor/qrcode.mjs')).default;
+        } catch {
+          /* không có thư viện QR */
+        }
+        const guns = s.guns === 1 ? [1] : [1, 2];
+        $('qrGrid').innerHTML = guns
+          .map((n) => {
+            const text = `powerme:connector:${s.displayCode}/${n}`;
+            let svg = '';
+            if (qr) {
+              const q = qr(0, 'M');
+              q.addData(text);
+              q.make();
+              svg = q.createSvgTag({ cellSize: 6, margin: 2, scalable: true });
+            }
+            return `<figure class="qr-card">
+              <div class="qr-img" aria-label="Mã QR súng ${n}">${svg || '<span class="muted">(chưa có thư viện QR — nhập mã bên dưới)</span>'}</div>
+              <figcaption><b>Súng ${n === 1 ? 'A' : 'B'}</b><span>${esc(s.displayCode)}/${n}</span></figcaption>
+            </figure>`;
+          })
+          .join('');
+        $('temqr').hidden = false;
+      }
       const esc = (v) =>
         String(v ?? '').replace(
           /[&<>"']/g,
@@ -1380,6 +1419,12 @@
               : ''
           }OCPP ${esc(s.cpId)}</span>`;
           document.title = `${s.name} · ${s.cpId}`;
+          if (s.address)
+            $('cpTitle').insertAdjacentHTML(
+              'beforeend',
+              `<span class="cp-address">${esc(s.address)}</span>`,
+            );
+          renderQr(s);
           $('cpEyebrow').textContent = 'Trụ sạc giả lập (mô hình D1, hai súng)';
         } else $('cpId').textContent = s.cpId;
         $('csms').textContent = s.csmsUrl;

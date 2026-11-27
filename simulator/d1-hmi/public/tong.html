@@ -283,7 +283,7 @@
                   : ''
               }</h2>
                 <span class="bv-badge" style="--c:${nc}">${esc(net)}</span></div>
-              <div class="meta">Tốc độ mô phỏng ×${esc(st.speed)} · hàng đợi buffer ${esc(st.queue)}${
+              ${st.address ? `<div class="meta">${esc(st.address)}</div>` : ''}<div class="meta">Tốc độ mô phỏng ×${esc(st.speed)} · hàng đợi buffer ${esc(st.queue)}${
                 Math.abs(st.clockAheadSec) > 300
                   ? ' · <b>đồng hồ trụ lệch giờ thật &gt; 300 s</b>'
                   : ''

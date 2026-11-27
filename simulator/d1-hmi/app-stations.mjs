@@ -87,6 +87,24 @@ const CODES = {
   'PMAPP-TD-02B': 'PM-AC11-HCM-0802',
   'PMAPP-TD-03A': 'PM-DC60-HCM-1001',
 };
+// QA-09: địa chỉ trạm (seed) và số súng thật trong DB — trụ 1 súng chỉ có một tem QR.
+const ADDRESSES = {
+  [D1]: '1 Nguyen Hue, Quan 1, TP.HCM',
+  'PMAPP-Q1-01A': 'Le Loi, Phuong Ben Thanh, Quan 1, TP.HCM',
+  'PMAPP-Q1-01B': 'Le Loi, Phuong Ben Thanh, Quan 1, TP.HCM',
+  'PMAPP-Q3-01A': 'Vo Van Tan, Phuong Vo Thi Sau, Quan 3, TP.HCM',
+  'PMAPP-Q10-01A': 'Su Van Hanh, Phuong 12, Quan 10, TP.HCM',
+  'PMAPP-PN-01A': 'Phan Xich Long, Phuong 2, Phu Nhuan, TP.HCM',
+  'PMAPP-BT-01A': 'Dien Bien Phu, Phuong 22, Binh Thanh, TP.HCM',
+  'PMAPP-TD-01A': 'Xuan Thuy, Phuong Thao Dien, TP Thu Duc, TP.HCM',
+  'PMAPP-TD-01B': 'Xuan Thuy, Phuong Thao Dien, TP Thu Duc, TP.HCM',
+  'PMAPP-Q7-01A': 'Ton Dat Tien, Phuong Tan Phu, Quan 7, TP.HCM',
+  'PMAPP-TD-02A': 'Nguyen Xien, Phuong Long Binh, TP Thu Duc, TP.HCM',
+  'PMAPP-TD-02B': 'Nguyen Xien, Phuong Long Binh, TP Thu Duc, TP.HCM',
+  'PMAPP-TB-01A': 'Cong Hoa, Phuong 4, Tan Binh, TP.HCM',
+  'PMAPP-TD-03A': 'Khu do thi DHQG-HCM, Phuong Dong Hoa, Di An, Binh Duong',
+};
+const ONE_GUN = new Set(['PMAPP-PN-01A', 'PMAPP-Q1-01B']);
 const EXCEPTIONS = [
   ['PMAPP-Q1-01A', 'fault', { connector: 2, errorCode: 'ConnectorLockFailure' }],
   ['PMAPP-TD-02A', 'fault', { connector: 1, errorCode: 'GroundFailure' }],
@@ -132,6 +150,8 @@ const child = spawn(process.execPath, [server], {
     CP_PASSWORDS: ids.map((id) => (id === D1 ? passwordD1 : password)).join(','),
     CP_NAMES: ids.map((id) => NAMES[id] ?? '').join(','),
     CP_CODES: ids.map((id) => CODES[id] ?? '').join(','),
+    CP_ADDRESSES: ids.map((id) => ADDRESSES[id] ?? '').join('|'),
+    CP_GUNS: ids.map((id) => (ONE_GUN.has(id) ? 1 : 2)).join(','),
   },
 });
 const stop = () => child.kill('SIGINT');
