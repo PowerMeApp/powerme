@@ -21,6 +21,10 @@
 //   --sach                   không cài ngoại lệ (mọi trụ bật, mọi súng Available)
 //   --off PMAPP-TB-01A       trụ cố ý KHÔNG bật (mặc định PMAPP-TB-01A; "--off none" để bật cả 13)
 //   --only A,B               chỉ bật các trụ này (vd. để thử nhanh một trụ)
+//   --them-d1                bật thêm trụ D1 gốc RH24D1-00001 (trạm "Tram sac demo Quan 1"). Trụ này
+//                            có mật khẩu RIÊNG: đặt CP_PASSWORD_D1. Chỉ dùng khi không có HMI/simulator
+//                            nào khác đang chạy RH24D1-00001 trên CSMS đó (staging: profile `sim` tắt;
+//                            local: HMI :8140 của run-demo đã dùng nó → đừng bật ở local).
 //
 // NGOẠI LỆ MẶC ĐỊNH (bỏ bằng --sach)
 //   PMAPP-Q1-01A súng 2 Faulted (ConnectorLockFailure) · PMAPP-TD-02A súng 1 Faulted (GroundFailure)
@@ -49,7 +53,9 @@ const ALL = [
   'PMAPP-TD-03A',
 ];
 // QA-08: tên hiển thị = tên trạm + công suất trụ (theo apps/csms/demo/seed-app.sql).
+const D1 = 'RH24D1-00001';
 const NAMES = {
+  [D1]: 'Tram sac demo Quan 1 · DC 120 kW (D1)',
   'PMAPP-BT-01A': 'PowerMe Landmark 81 · DC 120 kW',
   'PMAPP-PN-01A': 'PowerMe Phan Xich Long · DC 30 kW',
   'PMAPP-Q1-01A': 'PowerMe Ben Thanh · DC 120 kW',
@@ -85,13 +91,17 @@ const only = opt('only', null)
   ?.split(',')
   .map((s) => s.trim());
 const password = process.env.CP_PASSWORD ?? '';
+const withD1 = argv.includes('--them-d1');
+const passwordD1 = process.env.CP_PASSWORD_D1 ?? '';
 
 if (!/^wss?:\/\/[^\s]+$/.test(url)) fail(`--url không hợp lệ: ${url}`);
 if (!(port > 0 && port < 65536)) fail(`--port không hợp lệ: ${port}`);
 if (!password) fail('thiếu CP_PASSWORD (mật khẩu trụ — nhận riêng, không dán chat)');
 if (only?.some((s) => !ALL.includes(s))) fail(`--only chỉ nhận: ${ALL.join(', ')}`);
+if (withD1 && !passwordD1)
+  fail('--them-d1 cần CP_PASSWORD_D1 (mật khẩu trụ RH24D1-00001, nhận riêng)');
 
-const ids = (only ?? ALL).filter((s) => s !== off);
+const ids = [...(withD1 ? [D1] : []), ...(only ?? ALL).filter((s) => s !== off)];
 if (!ids.length) fail('không còn trụ nào để bật');
 
 const server = fileURLToPath(new URL('./server.mjs', import.meta.url));
@@ -102,7 +112,7 @@ const child = spawn(process.execPath, [server], {
     CSMS_URL: url,
     HMI_PORT: String(port),
     CP_IDS: ids.join(','),
-    CP_PASSWORDS: ids.map(() => password).join(','),
+    CP_PASSWORDS: ids.map((id) => (id === D1 ? passwordD1 : password)).join(','),
     CP_NAMES: ids.map((id) => NAMES[id] ?? '').join(','),
   },
 });
