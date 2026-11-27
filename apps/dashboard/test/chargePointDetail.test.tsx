@@ -209,3 +209,20 @@ describe('Chi tiết trụ sạc (màn 20)', () => {
     );
   });
 });
+
+it('WP3 shows persistent RFID stop reason and held amount beyond recent commands', async () => {
+  const { RFID_PROTECTION } = await import('./rfidProtectionFixture');
+  fakeCsms({
+    [DETAIL_URL]: {
+      status: 200,
+      body: { ...DETAIL, recent_commands: [], rfid_credit_protection: RFID_PROTECTION },
+    },
+    [FAULTS_URL]: faults,
+  });
+  renderApp('/operator/charge-points/5', session(STAFF));
+  const region = within(await screen.findByRole('region', { name: 'Bảo vệ credit RFID' }));
+  expect(region.getByText('Đã hết lượt tự động dừng')).toBeInTheDocument();
+  expect(region.getByText('Chạm ngưỡng credit')).toBeInTheDocument();
+  expect(region.getByText('200.000 ₫')).toBeInTheDocument();
+  expect(region.getByText('881')).toBeInTheDocument();
+});

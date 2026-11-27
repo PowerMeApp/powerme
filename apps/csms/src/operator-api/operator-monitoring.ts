@@ -1,3 +1,4 @@
+import { rfidProtectionOverview } from './rfid-protection-overview.js';
 /**
  * Operator charge point monitoring (FE-03, UC-OPS-02, screens 17 and 18; OPERATOR-DASHBOARD-PLAN
  * D19–D25, D36) behind RolesGuard `operator_staff`:
@@ -258,10 +259,16 @@ async function detail(
       [id],
     ),
   ]);
+  const protection = await rfidProtectionOverview(
+    db,
+    's.charge_point_id=$1 AND st.operator_id=$2',
+    [id, operatorId],
+  );
   const { extra, admin: _admin, ...base } = cp;
   return {
     ...base,
     ...extra,
+    rfid_credit_protection: protection,
     open_faults: open.map((f) => toDto(f, faults)),
     recent_commands: commands.rows.map((c) => ({
       id: c.id,

@@ -1,3 +1,4 @@
+import { availableCreditSql, unresolvedRfidSql } from './credit-availability.js';
 import { sql } from 'drizzle-orm';
 import type { DbExecutor } from '../db/db.module.js';
 import { ChargePolicy, meetsStartMinimum } from './charge-start-policy.js';
@@ -38,6 +39,7 @@ export async function evaluateOnlineCard(
   ex: DbExecutor,
   driverId: number | null,
   policy: ChargePolicy,
+  ownSession?: number,
 ): Promise<CardEligibility> {
   const deny = (reason: CardDenyReason): CardEligibility => ({
     eligible: false,
@@ -50,10 +52,10 @@ export async function evaluateOnlineCard(
     account_status: string | null;
     credit_status: string | null;
     available_vnd: string | null;
+    unresolved: string;
   }>(sql`SELECT u.account_status::text AS account_status, a.status::text AS credit_status,
-      a.balance_vnd - coalesce((SELECT sum(i.reserved_vnd) FROM driver_charge_intents i
-        WHERE i.driver_id = ${driverId} AND i.state NOT IN ('rejected','settled','released')),0)
-        AS available_vnd
+      ${sql.raw(availableCreditSql('u.id', 'a.balance_vnd', String(ownSession ?? 'NULL')))} AS available_vnd,
+      ${sql.raw(unresolvedRfidSql('u.id', String(ownSession ?? 'NULL')))} AS unresolved
     FROM users u LEFT JOIN credit_accounts a ON a.driver_id = u.id
     WHERE u.id = ${driverId} AND u.role = 'driver'`);
   const row = res.rows[0];
@@ -62,6 +64,7 @@ export async function evaluateOnlineCard(
   if (row.credit_status === null) return deny('no_credit_account');
   if (row.credit_status === 'in_shortfall') return deny('credit_in_shortfall');
   if (row.credit_status !== 'active') return deny('credit_closed');
+  if (Number(row.unresolved) > 0) return deny('below_start_minimum');
   if (!meetsStartMinimum(Number(row.available_vnd), policy)) return deny('below_start_minimum');
   return { eligible: true, driverId };
 }
