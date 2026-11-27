@@ -4,7 +4,6 @@ import 'package:go_router/go_router.dart';
 
 import '../../../core/l10n/app_copy.dart';
 import '../../../core/theme/powerme_theme.dart';
-import '../../profile/application/profile_controller.dart';
 import '../application/station_discovery_controller.dart';
 import '../domain/station_discovery.dart';
 import 'api_discovery_components.dart';
@@ -52,7 +51,6 @@ class _StationSearchState extends ConsumerState<_StationSearch> {
 
   @override
   Widget build(BuildContext context) {
-    final profile = ref.watch(profileControllerProvider).profile;
     final copy = ref.watch(discoveryCopyProvider);
     final discovery = ref.watch(discoveryContextProvider);
     ref.listen(discoveryContextProvider, (_, _) => setState(() => _page = 1));
@@ -135,23 +133,9 @@ class _StationSearchState extends ConsumerState<_StationSearch> {
             ),
           ],
         ),
-        if (discovery.origin != null) ...[
-          const SizedBox(height: 8),
-          Text(
-            originSharingDisclosure(copy),
-            style: Theme.of(context).textTheme.bodySmall,
-          ),
-          Align(
-            alignment: Alignment.centerLeft,
-            child: TextButton(
-              key: const Key('clear-discovery-origin'),
-              onPressed: ref
-                  .read(discoveryContextProvider.notifier)
-                  .clearOrigin,
-              child: Text(copy.text('Bỏ điểm đi', 'Clear starting point')),
-            ),
-          ),
-        ],
+        const SizedBox(height: 8),
+        const DiscoveryOriginSelector(),
+        const DiscoveryVinFastOverride(),
         const SizedBox(height: 8),
         SingleChildScrollView(
           scrollDirection: Axis.horizontal,
@@ -241,33 +225,6 @@ class _StationSearchState extends ConsumerState<_StationSearch> {
           ),
           const SizedBox(height: 8),
         ],
-        ExpansionTile(
-          leading: const Icon(Icons.tune_rounded, color: PowerMeColors.gold),
-          tilePadding: const EdgeInsets.symmetric(horizontal: 8),
-          title: Text(
-            copy.text('Điểm đi và bộ lọc', 'Starting point and filters'),
-          ),
-          subtitle: Text(discovery.origin?.address ?? profile.vehicle),
-          maintainState: true,
-          children: [
-            const DiscoveryOriginPanel(),
-            if (!profile.isVinFast)
-              SwitchListTile(
-                key: const Key('include-vinfast-only'),
-                contentPadding: EdgeInsets.zero,
-                title: Text(
-                  copy.text(
-                    'Hiện cả trạm chỉ dành cho VinFast',
-                    'Include VinFast-only stations',
-                  ),
-                ),
-                value: discovery.includeVinFastOnly,
-                onChanged: ref
-                    .read(discoveryContextProvider.notifier)
-                    .includeVinFastOnly,
-              ),
-          ],
-        ),
         const SizedBox(height: 16),
         ...results.when(
           skipLoadingOnRefresh: false,
