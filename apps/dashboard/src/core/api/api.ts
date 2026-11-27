@@ -13,9 +13,13 @@ import {
 } from '@reduxjs/toolkit/query/react';
 import type {
   AdminSummary,
+  BillingExceptions,
+  InvoiceRetryResult,
+  RecheckResult,
   ApiErrorBody,
   ChargePointLifecycle,
   ChargePointPage,
+  CreateStaffUserRequest,
   CreateRfidCardRequest,
   OperatorChargePointDetail,
   OperatorSummary,
@@ -24,10 +28,20 @@ import type {
   FaultListStatus,
   LoginRequest,
   LoginResponse,
+  NetworkChargePointPage,
+  NetworkQuery,
   OnboardRequest,
   OnboardResult,
   OperatorFaultList,
+  PlatformOperatorPage,
+  Promotion,
+  PromotionCreate,
+  PromotionPage,
+  PromotionPatch,
   RefreshResponse,
+  RegisterDeviceRequest,
+  RegistryChargePoint,
+  RegistryChargePointPage,
   RfidCard,
   RfidCardPage,
   RfidCardQuery,
@@ -42,7 +56,14 @@ import type {
   RevenueQuery,
   RevenueReport,
   SessionsActiveError,
+  NoteRequest,
+  SetRoleRequest,
   SitePage,
+  UpdateUserRequest,
+  UserAccount,
+  UserQuery,
+  TariffScheduleRequest,
+  TariffScheduleView,
   TransactionPage,
   TransactionQuery,
   UpdateRfidCardRequest,
@@ -61,6 +82,12 @@ export const CHARGE_POINT_PAGE_SIZE = 20;
 export const TRANSACTION_PAGE_SIZE = 50;
 /** Rows per page on screen 30. */
 export const RFID_PAGE_SIZE = 20;
+/** Rows per page on screen 28. */
+export const USER_PAGE_SIZE = 20;
+/** Rows per page on screen 31. */
+export const NETWORK_PAGE_SIZE = 20;
+/** Rows per page of the device registry. */
+export const REGISTRY_PAGE_SIZE = 20;
 /** Matches shown by the driver picker of screen 30. */
 export const DRIVER_SEARCH_SIZE = 10;
 
@@ -160,7 +187,21 @@ const baseQuery: BaseQueryFn<string | FetchArgs, unknown, ApiError> = async (arg
 export const api = createApi({
   reducerPath: 'api',
   baseQuery,
-  tagTypes: ['Fault', 'Summary', 'ChargePoint', 'Session', 'Revenue', 'AdminSummary', 'RfidCard'],
+  tagTypes: [
+    'Fault',
+    'Summary',
+    'ChargePoint',
+    'Session',
+    'Revenue',
+    'AdminSummary',
+    'RfidCard',
+    'Registry',
+    'Network',
+    'Tariff',
+    'Promotion',
+    'User',
+    'Billing',
+  ],
   endpoints: (b) => ({
     login: b.mutation<LoginResponse, LoginRequest>({
       query: (body) => ({ url: 'auth/v1/login', method: 'POST', body }),
@@ -234,6 +275,31 @@ export const api = createApi({
     onboardChargePoint: b.mutation<OnboardResult, OnboardRequest>({
       query: (body) => ({ url: 'operator/v1/charge-points/onboard', method: 'POST', body }),
       invalidatesTags: ['ChargePoint', 'Summary'],
+    }),
+    // Screen 24 (FE-06, UC-OPS-06/07): the Operator's tariff schedule and promotions.
+    operatorTariffs: b.query<TariffScheduleView, void>({
+      query: () => 'operator/v1/tariffs',
+      providesTags: ['Tariff'],
+    }),
+    putTariffs: b.mutation<TariffScheduleView, TariffScheduleRequest>({
+      query: (body) => ({ url: 'operator/v1/tariffs', method: 'PUT', body }),
+      invalidatesTags: ['Tariff'],
+    }),
+    operatorPromotions: b.query<PromotionPage, void>({
+      query: () => 'operator/v1/promotions?page_size=100',
+      providesTags: ['Promotion'],
+    }),
+    createPromotion: b.mutation<Promotion, PromotionCreate>({
+      query: (body) => ({ url: 'operator/v1/promotions', method: 'POST', body }),
+      invalidatesTags: ['Promotion'],
+    }),
+    updatePromotion: b.mutation<Promotion, { id: string } & PromotionPatch>({
+      query: ({ id, ...body }) => ({ url: `operator/v1/promotions/${id}`, method: 'PATCH', body }),
+      invalidatesTags: ['Promotion'],
+    }),
+    deactivatePromotion: b.mutation<Promotion, string>({
+      query: (id) => ({ url: `operator/v1/promotions/${id}/deactivate`, method: 'POST', body: {} }),
+      invalidatesTags: ['Promotion'],
     }),
     // Screen 23 (FE-12, UC-OPS-05): unattributed / review queues and the Operator's decisions.
     // A decision also changes the queue counts on screen 17.
@@ -314,6 +380,103 @@ export const api = createApi({
       query: ({ id, ...body }) => ({ url: `admin/v1/rfid-cards/${id}`, method: 'PATCH', body }),
       invalidatesTags: ['RfidCard', 'AdminSummary'],
     }),
+    // Device registry: registered charge points of the whole platform, newest first. Registering
+    // one also changes the charge point counts of the admin home page.
+    adminRegistry: b.query<
+      RegistryChargePointPage,
+      { page: number; lifecycle?: ChargePointLifecycle }
+    >({
+      query: ({ page, lifecycle }) => {
+        const p = new URLSearchParams();
+        if (lifecycle) p.set('lifecycle', lifecycle);
+        p.set('page', String(page));
+        p.set('page_size', String(REGISTRY_PAGE_SIZE));
+        return `admin/v1/charge-points?${p}`;
+      },
+      providesTags: ['Registry'],
+    }),
+    registerDevice: b.mutation<RegistryChargePoint, RegisterDeviceRequest>({
+      query: (body) => ({ url: 'admin/v1/charge-points', method: 'POST', body }),
+      invalidatesTags: ['Registry', 'AdminSummary'],
+    }),
+    // Screen 31 (FE-18, UC-ADM-07): every Operator's charge points, live; and the Operators.
+    adminNetwork: b.query<NetworkChargePointPage, NetworkQuery & { page: number }>({
+      query: ({ page, ...f }) => {
+        const p = new URLSearchParams();
+        if (f.operator_id) p.set('operator_id', f.operator_id);
+        if (f.charge_point_q?.trim()) p.set('charge_point_q', f.charge_point_q.trim());
+        if (f.site_q?.trim()) p.set('site_q', f.site_q.trim());
+        if (f.lifecycle) p.set('lifecycle', f.lifecycle);
+        if (f.online !== undefined) p.set('online', String(f.online));
+        p.set('page', String(page));
+        p.set('page_size', String(NETWORK_PAGE_SIZE));
+        return `admin/v1/network/charge-points?${p}`;
+      },
+      providesTags: ['Network'],
+    }),
+    adminOperators: b.query<PlatformOperatorPage, void>({
+      query: () => 'admin/v1/operators?page_size=100',
+    }),
+    // Screen 28 (FE-19, UC-ADM-01/02): accounts and roles. Changes also move the screen-27 counts.
+    adminUsers: b.query<UserAccountPage, UserQuery & { page: number }>({
+      query: ({ page, ...f }) => {
+        const p = new URLSearchParams();
+        if (f.role) p.set('role', f.role);
+        if (f.account_status) p.set('account_status', f.account_status);
+        if (f.operator_id) p.set('operator_id', f.operator_id);
+        if (f.q?.trim()) p.set('q', f.q.trim());
+        p.set('page', String(page));
+        p.set('page_size', String(USER_PAGE_SIZE));
+        return `admin/v1/users?${p}`;
+      },
+      providesTags: ['User'],
+    }),
+    createUser: b.mutation<UserAccount, CreateStaffUserRequest>({
+      query: (body) => ({ url: 'admin/v1/users', method: 'POST', body }),
+      invalidatesTags: ['User', 'AdminSummary'],
+    }),
+    updateUser: b.mutation<UserAccount, { id: string } & UpdateUserRequest>({
+      query: ({ id, ...body }) => ({ url: `admin/v1/users/${id}`, method: 'PATCH', body }),
+      invalidatesTags: ['User'],
+    }),
+    setUserRole: b.mutation<UserAccount, { id: string; body: SetRoleRequest }>({
+      query: ({ id, body }) => ({ url: `admin/v1/users/${id}/role`, method: 'PUT', body }),
+      invalidatesTags: ['User', 'AdminSummary'],
+    }),
+    setUserLock: b.mutation<UserAccount, { id: string; lock: boolean } & NoteRequest>({
+      query: ({ id, lock, note }) => ({
+        url: `admin/v1/users/${id}/${lock ? 'lock' : 'unlock'}`,
+        method: 'POST',
+        body: { note },
+      }),
+      invalidatesTags: ['User', 'AdminSummary'],
+    }),
+    // Screens 32 / 33 (FE-09, UC-ADM-08) on Khang's #212 routes. Each action also moves the
+    // billing counts of screen 27.
+    billingExceptions: b.query<BillingExceptions, void>({
+      query: () => 'admin/v1/billing/exceptions',
+      providesTags: ['Billing'],
+    }),
+    retryInvoice: b.mutation<InvoiceRetryResult, string>({
+      query: (id) => ({ url: `admin/v1/billing/e-invoices/${id}/retry`, method: 'POST' }),
+      invalidatesTags: ['Billing', 'AdminSummary'],
+    }),
+    recheckTopUp: b.mutation<RecheckResult, string>({
+      query: (id) => ({ url: `admin/v1/billing/top-ups/${id}/recheck`, method: 'POST' }),
+      invalidatesTags: ['Billing', 'AdminSummary'],
+    }),
+    markExceptionReviewed: b.mutation<unknown, string>({
+      query: (id) => ({ url: `admin/v1/billing/top-ups/${id}/exception-reviewed`, method: 'POST' }),
+      invalidatesTags: ['Billing', 'AdminSummary'],
+    }),
+    reviewConflict: b.mutation<unknown, { id: string; note: string }>({
+      query: ({ id, note }) => ({
+        url: `admin/v1/billing/payment-conflicts/${id}/review`,
+        method: 'POST',
+        body: { note },
+      }),
+      invalidatesTags: ['Billing', 'AdminSummary'],
+    }),
     // Driver picker of screen 30: active drivers by name, email or phone (T161, admin-users.ts).
     driverSearch: b.query<UserAccountPage, string>({
       query: (q) => {
@@ -339,6 +502,12 @@ export const {
   useOperatorChargePointQuery,
   useOperatorSitesQuery,
   useOnboardChargePointMutation,
+  useOperatorTariffsQuery,
+  usePutTariffsMutation,
+  useOperatorPromotionsQuery,
+  useCreatePromotionMutation,
+  useUpdatePromotionMutation,
+  useDeactivatePromotionMutation,
   useOperatorSessionsQuery,
   useAssignSessionMutation,
   useCloseSessionMutation,
@@ -351,6 +520,20 @@ export const {
   useCreateRfidCardMutation,
   useUpdateRfidCardMutation,
   useDriverSearchQuery,
+  useBillingExceptionsQuery,
+  useRetryInvoiceMutation,
+  useRecheckTopUpMutation,
+  useMarkExceptionReviewedMutation,
+  useReviewConflictMutation,
+  useAdminUsersQuery,
+  useCreateUserMutation,
+  useUpdateUserMutation,
+  useSetUserRoleMutation,
+  useSetUserLockMutation,
+  useAdminRegistryQuery,
+  useAdminNetworkQuery,
+  useAdminOperatorsQuery,
+  useRegisterDeviceMutation,
 } = api;
 
 export type RevenueScope = 'operator' | 'admin';
@@ -383,7 +566,7 @@ export function errorMessage(err: unknown): string {
     case 'account_locked':
       return 'Tài khoản đã bị khoá';
     case 'operator_inactive':
-      return 'Operator đã ngừng hoạt động';
+      return 'Đơn vị vận hành đã ngừng hoạt động';
     case 'invalid_refresh_token':
       return 'Phiên đăng nhập đã hết hạn, vui lòng đăng nhập lại';
     case 'auth_unavailable':
@@ -392,13 +575,13 @@ export function errorMessage(err: unknown): string {
     case 'invalid_transition':
       return 'Sự cố đã đổi trạng thái, danh sách đã được làm mới';
     case 'fault_not_acknowledged':
-      return 'Phải xác nhận sự cố trước khi Reset';
+      return 'Phải xác nhận sự cố trước khi khởi động lại';
     case 'station_offline':
-      return 'Trụ sạc đang offline, không gửi được lệnh Reset';
+      return 'Trụ sạc đang mất kết nối, không gửi được lệnh khởi động lại';
     case 'reset_in_progress':
-      return 'Trụ sạc đang chờ kết quả một lệnh Reset khác, thử lại sau';
+      return 'Trụ sạc đang chờ kết quả một lệnh khởi động lại khác, thử lại sau';
     case 'station_error':
-      return 'Trụ sạc không trả lời lệnh Reset hợp lệ, sự cố quay về "Đã xác nhận"';
+      return 'Trụ sạc không trả lời lệnh khởi động lại hợp lệ, sự cố quay về "Đã xác nhận"';
     case 'not_found':
       return 'Không tìm thấy sự cố này';
     // FE-07 revenue (T108).

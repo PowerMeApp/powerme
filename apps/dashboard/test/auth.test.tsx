@@ -30,8 +30,8 @@ async function submit(user: ReturnType<typeof renderApp>['user'], email: string)
 
 describe('Đăng nhập (màn 16 / 26) và phân quyền', () => {
   it.each([
-    ['/operator', '/operator/login', 'Đăng nhập Operator Dashboard'],
-    ['/admin/anything', '/admin/login', 'Đăng nhập Admin Console'],
+    ['/operator', '/operator/login', 'Đăng nhập Trang đơn vị vận hành'],
+    ['/admin/anything', '/admin/login', 'Đăng nhập Trang quản trị'],
   ])('chưa đăng nhập: %s → %s', async (from, to, heading) => {
     fakeCsms({});
     renderApp(from);
@@ -63,8 +63,8 @@ describe('Đăng nhập (màn 16 / 26) và phân quyền', () => {
   });
 
   it.each([
-    ['/operator/login', ADMIN, 'Đây là tài khoản Admin', '/admin/login'],
-    ['/admin/login', STAFF, 'Đây là tài khoản Operator', '/operator/login'],
+    ['/operator/login', ADMIN, 'Đây là tài khoản Quản trị viên', '/admin/login'],
+    ['/admin/login', STAFF, 'Đây là tài khoản Đơn vị vận hành', '/operator/login'],
   ])(
     'màn %s từ chối tài khoản của vai trò kia và không lưu token',
     async (path, who, text, link) => {
@@ -82,7 +82,7 @@ describe('Đăng nhập (màn 16 / 26) và phân quyền', () => {
   it.each([
     [fail(401, 'invalid_credentials'), 'Email hoặc mật khẩu không đúng'],
     [fail(403, 'account_locked'), 'Tài khoản đã bị khoá'],
-    [fail(403, 'operator_inactive'), 'Operator đã ngừng hoạt động'],
+    [fail(403, 'operator_inactive'), 'Đơn vị vận hành đã ngừng hoạt động'],
     [fail(429, 'too_many_attempts', { 'Retry-After': '840' }), 'thử lại sau 14 phút'],
     [fail(503, 'auth_unavailable'), 'Máy chủ chưa bật đăng nhập'],
     ['network' as const, 'Không kết nối được máy chủ'],

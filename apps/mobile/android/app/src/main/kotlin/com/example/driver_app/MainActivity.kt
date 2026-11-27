@@ -77,8 +77,21 @@ class MainActivity : FlutterActivity() {
 
         val lat = BigDecimal.valueOf(latitude).toPlainString()
         val lng = BigDecimal.valueOf(longitude).toPlainString()
+        val destination = Uri.Builder()
+            .scheme("https")
+            .authority("www.google.com")
+            .path("/maps/dir/")
+            .appendQueryParameter("api", "1")
+            .appendQueryParameter("destination", "$lat,$lng")
+            .appendQueryParameter("travelmode", "driving")
+            .build()
+        val intent = Intent(Intent.ACTION_VIEW, destination).addCategory(Intent.CATEGORY_BROWSABLE)
         return try {
-            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("geo:$lat,$lng")))
+            try {
+                startActivity(intent.setPackage("com.google.android.apps.maps"))
+            } catch (_: ActivityNotFoundException) {
+                startActivity(intent.setPackage(null))
+            }
             true
         } catch (_: ActivityNotFoundException) {
             false

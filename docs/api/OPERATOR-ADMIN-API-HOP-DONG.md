@@ -329,8 +329,9 @@ tách theo bề mặt — refresh token không mang `role`, role đọc lại t�
 | `POST /operator/v1/charge-points/onboard` | operator_staff | UC-OPS-01, FR-09, STM-3 #2, SD-5a | **done** BE-44 · `charge-point-onboarding.ts` → `ChargePointOnboardingService.onboard` · Trí (route) / Ân (service) | body như console T119 (`OnboardRequest`); actor = staff của token (manager và technician đều được); site phải thuộc operator của token (DB) → khác 403 `site_of_other_operator`, site không có → 404 `site_not_found` (code và OpenAPI); **`site_id` trong body phải là số nguyên** (`parseOnboardBody`), dù OpenAPI ghi `Id` dạng chuỗi — màn 19 gửi số (FE-02); 201, mật khẩu hiện **một lần**, `no-store`, không log; 409 `serial_not_registered` / `already_onboarded`. Đường dẫn có `/onboard` (giống console) thay cho `POST /operator/v1/charge-points` bản nháp, để không chung đường dẫn với `GET` giám sát. Console `/api/operator/charge-points/onboard` vẫn giữ cho demo |
 | `POST /operator/v1/charge-points/{id}/disable` | operator_staff | STM-3 #4, ADR-0016 | planned · Ân | chỉ có `ChargePointLifecyclePolicy`, chưa có service ghi DB |
 | `POST /operator/v1/charge-points/{id}/enable` | operator_staff | STM-3 #5 | planned · Ân | |
-| `GET /admin/v1/charge-points` | admin | UC-ADM-03, UC-ADM-07, FR-15 | **partial** BE-44 · `charge-point-onboarding.ts` · Trí | đã làm: `lifecycle`, `page`/`page_size`, mới nhất trước, `RegistryChargePoint` (kèm operator, site; không bao giờ có băm/mật khẩu); chưa làm: `operator_id`, `q` (→ 400 `invalid_input`) |
-| `POST /admin/v1/charge-points` | admin | UC-ADM-03, FR-15, STM-3 #1 | **done** BE-44 · `charge-point-onboarding.ts` → `ChargePointOnboardingService.registerDevice` · Trí (route) / Ân (service) | body như console T119 (`RegisterDeviceRequest`); actor = admin của token; 201 `RegistryChargePoint`; 409 `serial_already_registered`. Console `POST /api/admin/charge-points` vẫn giữ cho demo |
+| `GET /admin/v1/network/charge-points` | admin | UC-ADM-07, BR-P38/P39, Table 5 #31 | **implemented** FE-18 · Nghĩa · `admin-network.ts` | màn 31: trụ của mọi operator (trừ dữ liệu lab), cùng trường trực tiếp như `GET /operator/v1/charge-points` (súng, Offline, `status_quality`) + `operator {id, legal_name}` + `open_faults {total, top_severity}`; lọc như màn 18 + `operator_id`; chưa có uptime / utilisation (BR-P43, chờ API metrics) |
+| `GET /admin/v1/charge-points` | admin | UC-ADM-03, UC-ADM-07, FR-15 | **partial** BE-44 · `charge-point-onboarding.ts` · Trí | đã làm: `lifecycle`, `page`/`page_size`, mới nhất trước, `RegistryChargePoint` (kèm operator, site; không bao giờ có băm/mật khẩu); chưa làm: `operator_id`, `q` (→ 400 `invalid_input`); màn 29 (FE-15) lọc theo `lifecycle` |
+| `POST /admin/v1/charge-points` | admin | UC-ADM-03, FR-15, STM-3 #1 | **done** BE-44 · `charge-point-onboarding.ts` → `ChargePointOnboardingService.registerDevice` · Trí (route) / Ân (service) | body như console T119 (`RegisterDeviceRequest`); actor = admin của token; 201 `RegistryChargePoint`; 409 `serial_already_registered`. Console `POST /api/admin/charge-points` vẫn giữ cho demo. Màn 29 (FE-15) gọi route này từ nút "Đăng ký trụ" |
 | `GET /admin/v1/charge-points/{id}` | admin | UC-ADM-03 | planned · Ân | |
 | `PATCH /admin/v1/charge-points/{id}` | admin | UC-ADM-03 | planned · Ân | model, firmware, kW, bảo hành; không đổi serial |
 | `PUT /admin/v1/charge-points/{id}/free-vend-tag` | admin | UC-ADM-05, BR-P09, ADR-0012 | planned · Ân | null = tắt; chỉ áp cho phiên bắt đầu sau đó (BR-P08) |
@@ -381,12 +382,12 @@ tách theo bề mặt — refresh token không mang `role`, role đọc lại t�
 
 | Endpoint | Role | UC / FR / BR | Trạng thái · người làm | Ghi chú |
 |---|---|---|---|---|
-| `GET /operator/v1/tariffs` | operator_staff | UC-OPS-06, FR-12, BR-P02 | planned · Nghĩa (+ Khang) | bản đang hiệu lực + bản sắp hiệu lực |
-| `PUT /operator/v1/tariffs` | operator_staff | UC-OPS-06, BR-P02, BR-P45 | planned · Nghĩa (+ Khang) | phủ kín 24 h, không chồng; `effective_from` ≥ hôm nay; không sửa bản cũ |
-| `GET /operator/v1/promotions` | operator_staff | UC-OPS-07, FR-12 | planned · Nghĩa (+ Khang) | |
-| `POST /operator/v1/promotions` | operator_staff | UC-OPS-07 | planned · Nghĩa (+ Khang) | mã duy nhất toàn nền tảng (`promotions_promotion_code_key`) |
-| `PATCH /operator/v1/promotions/{id}` | operator_staff | UC-OPS-07 | planned · Nghĩa (+ Khang) | |
-| `POST /operator/v1/promotions/{id}/deactivate` | operator_staff | UC-OPS-07 | planned · Nghĩa (+ Khang) | `valid_to = now()` (bảng không có cột active) |
+| `GET /operator/v1/tariffs` | operator_staff | UC-OPS-06, FR-12, BR-P02 | **implemented** FE-06 · Nghĩa · `operator-pricing.ts` | bản đang hiệu lực + bản sắp hiệu lực; `at` (ngày, mặc định hôm nay giờ VN); theo operator, 3 band |
+| `PUT /operator/v1/tariffs` | operator_staff | UC-OPS-06, BR-P02, BR-P45 | **implemented** FE-06 · Nghĩa · `operator-pricing.ts` | phủ kín 24 h, không chồng (400 `tariff_gap_or_overlap`); `effective_from` ≥ hôm nay (400 `effective_from_in_past`); không sửa bản cũ (chỉ đặt `effective_to`); bản chưa hiệu lực từ ngày đó trở đi bị thay; bản bắt đầu hôm nay đã có phiên dùng → 409 `schedule_in_use`; `Idempotency-Key` nhận nhưng không lưu |
+| `GET /operator/v1/promotions` | operator_staff | UC-OPS-07, FR-12 | **implemented** FE-06 · Nghĩa | `active`, `page`/`page_size`; `active` tính từ `valid_from ≤ now < valid_to` |
+| `POST /operator/v1/promotions` | operator_staff | UC-OPS-07 | **implemented** FE-06 · Nghĩa | mã duy nhất toàn nền tảng (409 `promotion_code_taken`); chỉ lưu, chưa áp dụng khi tính tiền (K6) |
+| `PATCH /operator/v1/promotions/{id}` | operator_staff | UC-OPS-07 | **implemented** FE-06 · Nghĩa | loại, giá trị, thời gian; không đổi mã; đã hết hạn → 409 `promotion_expired`; của operator khác → 404 |
+| `POST /operator/v1/promotions/{id}/deactivate` | operator_staff | UC-OPS-07 | **implemented** FE-06 · Nghĩa | `valid_to = now()` (bảng không có cột active); chưa bắt đầu thì `valid_from` lùi về trước đó; đã hết hạn → 409 `promotion_expired` |
 
 ### 3.7 Doanh thu, giao dịch và CSV (6)
 
@@ -407,13 +408,13 @@ thuộc Platform Administration; Operator xem doanh thu trạm mình qua `/opera
 | Endpoint | Role | UC / FR / BR | Trạng thái · người làm | Ghi chú |
 |---|---|---|---|---|
 | `GET /admin/v1/users` | admin | UC-ADM-01, FR-14, BR-P05 | **implemented** T161 · Nghĩa · `admin-users.ts` | lọc `role`, `account_status`, `operator_id`, `q`; xem §3.8b |
-| `POST /admin/v1/users` | admin | UC-ADM-01/02, BR-P16 | planned · Trí | chỉ `operator_staff`/`admin`; tài xế tự đăng ký (consent BR-P05) |
-| `GET /admin/v1/users/{id}` | admin | UC-ADM-01 | planned · Trí | |
-| `PATCH /admin/v1/users/{id}` | admin | UC-ADM-01 | planned · Trí | họ tên, điện thoại |
-| `PUT /admin/v1/users/{id}/role` | admin | UC-ADM-02, BR-P16 | planned · Trí | một role mỗi user; tài xế không đổi role được (409) |
-| `POST /admin/v1/users/{id}/lock` | admin | UC-ADM-01, F-13 | planned · Trí | `active → suspended`, có hiệu lực ở request kế tiếp |
-| `POST /admin/v1/users/{id}/unlock` | admin | UC-ADM-01, F-13 | planned · Trí | `closed` không mở lại |
-| `GET /admin/v1/operators` | admin | UC-ADM-02, BR-P11 | planned · Trí | để gán nhân viên và lọc báo cáo |
+| `POST /admin/v1/users` | admin | UC-ADM-01/02, BR-P16 | **implemented** FE-19 · Nghĩa · `admin-user-actions.ts` | chỉ `operator_staff`/`admin`; tài xế tự đăng ký (consent BR-P05) |
+| `GET /admin/v1/users/{id}` | admin | UC-ADM-01 | **implemented** FE-19 · Nghĩa | |
+| `PATCH /admin/v1/users/{id}` | admin | UC-ADM-01 | **implemented** FE-19 · Nghĩa | họ tên, điện thoại (chuẩn hoá BE-30, `null` xoá; trùng → 409 `phone_taken`) |
+| `PUT /admin/v1/users/{id}/role` | admin | UC-ADM-02, BR-P16 | **implemented** FE-19 · Nghĩa | một role mỗi user; tài xế không đổi role được (409) |
+| `POST /admin/v1/users/{id}/lock` | admin | UC-ADM-01, F-13 | **implemented** FE-19 · Nghĩa | `active → suspended`, có hiệu lực ở request kế tiếp |
+| `POST /admin/v1/users/{id}/unlock` | admin | UC-ADM-01, F-13 | **implemented** FE-19 · Nghĩa | `closed` không mở lại |
+| `GET /admin/v1/operators` | admin | UC-ADM-02, BR-P11 | **implemented** FE-18 · Nghĩa · `admin-operators.ts` | để gán nhân viên và lọc báo cáo (màn 31, 28); `status`, `page`/`page_size` (1–100, mặc định 50), sắp theo tên; không có operator lab (LOADTEST01) |
 | `GET /admin/v1/rfid-cards` | admin | UC-ADM-04, FR-15, BR-P15 | **implemented local (chưa merge/deploy)** WP3/T146 · `admin-rfid-cards.ts` | |
 | `POST /admin/v1/rfid-cards` | admin | UC-ADM-04, BR-P15, BR-P23 | **implemented local (chưa merge/deploy)** WP3/T146 · `admin-rfid-cards.ts` | `card_kind` ∈ `online`, `free_vend` |
 | `PATCH /admin/v1/rfid-cards/{id}` | admin | UC-ADM-04, BR-P15 | **implemented local (chưa merge/deploy)** WP3/T146 · `admin-rfid-cards.ts` | gắn/bỏ tài xế, khoá/mở; không đổi loại |
@@ -485,6 +486,24 @@ Collection và template rỗng: apps/csms/postman/PowerMe-T146-Admin-RFID.postma
 PowerMe-T146-Local.postman_environment.json. Không import credentials/token vào workspace cloud.
 Script login chỉ dùng pm.variables.set (trong một Collection Runner run); Send riêng lẻ phải
 điền giá trị private local/current, shared vẫn rỗng. Không ghi token vào collection/global/shared env.
+
+### 3.8c FE-19 — tạo / sửa / đổi role / khoá tài khoản (27/11/2026)
+
+Làm cho màn 28 (Users & Roles), đúng OpenAPI. Admin chỉ tạo `operator_staff` hoặc `admin`; tài xế tự
+đăng ký (consent BR-P05) nên không tạo được và không đổi role được (409 `role_change_not_allowed`).
+
+- `POST /users`: email hạ chữ thường, trùng (không phân biệt hoa thường) → 409 `email_taken`;
+  `phone_number` chuẩn hoá BE-30, trùng → 409 `phone_taken`; `operator_id` không có → 404
+  `operator_not_found`; `initial_password` 8–128 ký tự, băm scrypt như mật khẩu đăng nhập; ghi
+  `users` + `admins` hoặc `operator_staff` trong một transaction. 201 `UserAccount`.
+- `PUT /users/{id}/role`: đổi chính mình → 409 `cannot_change_own_role`; xoá dòng role cũ, thêm dòng
+  role mới. Token cũ hết dùng được ở request kế tiếp (RolesGuard đọc lại DB; refresh trả 401).
+- `POST /users/{id}/lock` / `unlock`: body `{note}` 1–500 ký tự; `active → suspended` /
+  `suspended → active`, sai trạng thái (kể cả `closed`) → 409 `invalid_transition`; khoá chính mình
+  → 409 `cannot_lock_self`. Có hiệu lực ở request kế tiếp (403 `account_locked`), cả Driver API.
+  **Ghi chú chỉ ghi vào log** kèm id Admin: chưa có bảng audit (như WF-02 D10).
+- Route hành động không nhận query string (400); chỉ `GET /users` (danh sách) nhận query.
+- Test: `test/fe19-admin-user-actions.integration.test.ts` (9 ca HTTP / Postgres).
 
 ### 3.8b T161 — danh sách tài khoản `GET /admin/v1/users` (27/11/2026)
 
@@ -896,12 +915,12 @@ trạng thái (2xx/4xx nghiệp vụ khác với 401/403). Ba điều kiện c�
 | 38 | `POST /api/operator/v1/charge-intents/{intentId}/approve-late-start` | 401 | 403 | ✓ | 403 | service |
 | 39 | `POST /api/operator/v1/sessions/{sessionId}/recover-stop` | 401 | 403 | ✓ | 403 | service |
 | 40 | `POST /api/operator/v1/sessions/{sessionId}/tariff-boundary` | 401 | 403 | ✓ | 403 | service |
-| 41 | `GET /api/operator/v1/tariffs` | 401 | 403 | ✓ | 403 | planned |
-| 42 | `PUT /api/operator/v1/tariffs` | 401 | 403 | ✓ | 403 | planned |
-| 43 | `GET /api/operator/v1/promotions` | 401 | 403 | ✓ | 403 | planned |
-| 44 | `POST /api/operator/v1/promotions` | 401 | 403 | ✓ | 403 | planned |
-| 45 | `PATCH /api/operator/v1/promotions/{promotionId}` | 401 | 403 | ✓ | 403 | planned |
-| 46 | `POST /api/operator/v1/promotions/{promotionId}/deactivate` | 401 | 403 | ✓ | 403 | planned |
+| 41 | `GET /api/operator/v1/tariffs` | 401 | 403 | ✓ | 403 | implemented (FE-06) |
+| 42 | `PUT /api/operator/v1/tariffs` | 401 | 403 | ✓ | 403 | implemented (FE-06) |
+| 43 | `GET /api/operator/v1/promotions` | 401 | 403 | ✓ | 403 | implemented (FE-06) |
+| 44 | `POST /api/operator/v1/promotions` | 401 | 403 | ✓ | 403 | implemented (FE-06) |
+| 45 | `PATCH /api/operator/v1/promotions/{promotionId}` | 401 | 403 | ✓ | 403 | implemented (FE-06) |
+| 46 | `POST /api/operator/v1/promotions/{promotionId}/deactivate` | 401 | 403 | ✓ | 403 | implemented (FE-06) |
 | 47 | `GET /api/operator/v1/revenue` | 401 | 403 | ✓ | 403 | planned |
 | 48 | `GET /api/operator/v1/revenue.csv` | 401 | 403 | ✓ | 403 | planned |
 | 49 | `GET /api/admin/v1/revenue` | 401 | 403 | 403 | ✓ | planned |
@@ -909,13 +928,14 @@ trạng thái (2xx/4xx nghiệp vụ khác với 401/403). Ba điều kiện c�
 | 51 | `GET /api/admin/v1/transactions` | 401 | 403 | 403 | ✓ | planned |
 | 52 | `GET /api/admin/v1/transactions.csv` | 401 | 403 | 403 | ✓ | planned |
 | 53 | `GET /api/admin/v1/users` | 401 | 403 | 403 | ✓ | implemented (T161) |
-| 54 | `POST /api/admin/v1/users` | 401 | 403 | 403 | ✓ | planned |
-| 55 | `GET /api/admin/v1/users/{userId}` | 401 | 403 | 403 | ✓ | planned |
-| 56 | `PATCH /api/admin/v1/users/{userId}` | 401 | 403 | 403 | ✓ | planned |
-| 57 | `PUT /api/admin/v1/users/{userId}/role` | 401 | 403 | 403 | ✓ | planned |
-| 58 | `POST /api/admin/v1/users/{userId}/lock` | 401 | 403 | 403 | ✓ | planned |
-| 59 | `POST /api/admin/v1/users/{userId}/unlock` | 401 | 403 | 403 | ✓ | planned |
-| 60 | `GET /api/admin/v1/operators` | 401 | 403 | 403 | ✓ | planned |
+| 54 | `POST /api/admin/v1/users` | 401 | 403 | 403 | ✓ | implemented (FE-19) |
+| 55 | `GET /api/admin/v1/users/{userId}` | 401 | 403 | 403 | ✓ | implemented (FE-19) |
+| 56 | `PATCH /api/admin/v1/users/{userId}` | 401 | 403 | 403 | ✓ | implemented (FE-19) |
+| 57 | `PUT /api/admin/v1/users/{userId}/role` | 401 | 403 | 403 | ✓ | implemented (FE-19) |
+| 58 | `POST /api/admin/v1/users/{userId}/lock` | 401 | 403 | 403 | ✓ | implemented (FE-19) |
+| 59 | `POST /api/admin/v1/users/{userId}/unlock` | 401 | 403 | 403 | ✓ | implemented (FE-19) |
+| 60 | `GET /api/admin/v1/operators` | 401 | 403 | 403 | ✓ | implemented (FE-18) |
+| 60a | `GET /api/admin/v1/network/charge-points` | 401 | 403 | 403 | ✓ | implemented (FE-18) |
 | 61 | `GET /api/admin/v1/rfid-cards` | 401 | 403 | 403 | ✓ | implemented local (chưa merge/deploy) · WP3/T146 |
 | 62 | `POST /api/admin/v1/rfid-cards` | 401 | 403 | 403 | ✓ | implemented local (chưa merge/deploy) · WP3/T146 |
 | 63 | `PATCH /api/admin/v1/rfid-cards/{cardId}` | 401 | 403 | 403 | ✓ | implemented local (chưa merge/deploy) · WP3/T146 |

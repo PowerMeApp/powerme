@@ -11,7 +11,7 @@ export const MAX_PERIOD_DAYS = 366;
 
 /** UI labels in Vietnamese (GLOSSARY: "trụ sạc"; Nghĩa 20/11: no English names on this screen). */
 export const GROUP_LABEL: Record<RevenueGroupBy, string> = {
-  operator: 'Operator',
+  operator: 'Đơn vị vận hành',
   site: 'Trạm sạc',
   charge_point: 'Trụ sạc',
   day: 'Ngày',
@@ -26,7 +26,7 @@ export const REASON_LABEL: Record<string, string> = {
   promotion_unsupported: 'Có khuyến mãi (chưa áp vào quyết toán)',
   ineligible: 'Chưa đủ điều kiện trừ tiền (gồm thẻ RFID chờ T115)',
   posted_without_debit: 'Lệch sổ: đã quyết toán nhưng không có khoản trừ',
-  late_start_operator_review: 'Bắt đầu muộn, chờ Operator duyệt',
+  late_start_operator_review: 'Bắt đầu muộn, chờ đơn vị vận hành duyệt',
   missing_meter: 'Thiếu số đo',
   invalid_energy: 'Năng lượng không hợp lệ',
   policy_unconfigured: 'Chưa cấu hình chính sách giá',

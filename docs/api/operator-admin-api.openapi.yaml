@@ -515,6 +515,51 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/InvalidTransition' }
 
+  /admin/v1/network/charge-points:
+    get:
+      tags: [monitoring]
+      operationId: listNetworkChargePoints
+      x-roles: [admin]
+      x-status: implemented
+      x-source: 'operator-api/admin-network.ts (FE-18)'
+      x-owner: Nghĩa (FE-18)
+      x-refs: [UC-ADM-07, BR-P38, BR-P39, 'Table 5 #31']
+      summary: Trụ sạc của mọi operator, trạng thái trực tiếp và sự cố đang mở (màn 31)
+      description: |
+        Cùng truy vấn và trường như listOperatorChargePoints, không giới hạn operator; thêm
+        `operator` và `open_faults`. Dữ liệu lab (operator LOADTEST01) bị loại như GET /admin/v1/summary.
+        Chưa có uptime / utilisation (BR-P43).
+      parameters:
+        - name: operator_id
+          in: query
+          schema: { $ref: '#/components/schemas/Id' }
+        - name: site_id
+          in: query
+          schema: { $ref: '#/components/schemas/Id' }
+        - name: lifecycle
+          in: query
+          schema: { $ref: '#/components/schemas/ChargePointLifecycle' }
+        - name: online
+          in: query
+          schema: { type: boolean }
+        - name: charge_point_q
+          in: query
+          schema: { type: string, maxLength: 100 }
+        - name: site_q
+          in: query
+          schema: { type: string, maxLength: 100 }
+        - $ref: '#/components/parameters/page'
+        - $ref: '#/components/parameters/pageSize'
+      responses:
+        '200':
+          description: Trụ sạc của mọi operator
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/NetworkChargePointPage' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
   /admin/v1/charge-points:
     get:
       tags: [onboarding]
@@ -1394,9 +1439,10 @@ paths:
       tags: [tariffs]
       operationId: getTariffSchedule
       x-roles: [operator_staff]
-      x-status: planned
-      x-owner: Nghĩa (+ Khang)
-      x-refs: [UC-OPS-06, FR-12, BR-P02, 'Table 5 #23']
+      x-status: implemented
+      x-source: 'operator-api/operator-pricing.ts (FE-06)'
+      x-owner: Nghĩa (FE-06)
+      x-refs: [UC-OPS-06, FR-12, BR-P02, 'Table 5 #24']
       summary: Biểu giá đang hiệu lực và các bản sắp hiệu lực của operator
       parameters:
         - name: at
@@ -1416,14 +1462,19 @@ paths:
       tags: [tariffs]
       operationId: putTariffSchedule
       x-roles: [operator_staff]
-      x-status: planned
-      x-owner: Nghĩa (+ Khang)
+      x-status: implemented
+      x-source: 'operator-api/operator-pricing.ts (FE-06)'
+      x-owner: Nghĩa (FE-06)
       x-refs: [UC-OPS-06, FR-12, BR-P02, BR-P45]
       summary: Đặt biểu giá mới từ một ngày; không sửa bản đã hiệu lực
       description: |
         Các khung phải phủ kín 24 giờ, không chồng nhau; khung qua nửa đêm tách hai dòng (như bảng
         `tariff_periods`). `effective_from` ≥ hôm nay; bản cũ được đặt `effective_to` = ngày trước
         đó. Phiên đã quyết toán không đổi vì giá đã nằm trong `session_tariff_segments`.
+        FE-06: bản mới thay mọi bản bắt đầu từ ngày đó trở đi (bản chưa hiệu lực bị xoá); nếu một
+        bản đã bắt đầu hôm nay và đã có phiên dùng thì 409 `schedule_in_use`. Biểu giá theo
+        operator, 3 band (contract §6 #3). `Idempotency-Key` được nhận nhưng không lưu: gửi lại
+        cùng body cho cùng kết quả, không có `idempotency_conflict`.
       parameters:
         - $ref: '#/components/parameters/idempotencyKey'
       requestBody:
@@ -1445,7 +1496,7 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '409':
-          description: '`idempotency_conflict`'
+          description: '`schedule_in_use` (bản bắt đầu hôm nay đã có phiên dùng)'
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
@@ -1455,8 +1506,9 @@ paths:
       tags: [tariffs]
       operationId: listPromotions
       x-roles: [operator_staff]
-      x-status: planned
-      x-owner: Nghĩa (+ Khang)
+      x-status: implemented
+      x-source: 'operator-api/operator-pricing.ts (FE-06)'
+      x-owner: Nghĩa (FE-06)
       x-refs: [UC-OPS-07, FR-12]
       summary: Khuyến mãi của operator
       parameters:
@@ -1478,8 +1530,9 @@ paths:
       tags: [tariffs]
       operationId: createPromotion
       x-roles: [operator_staff]
-      x-status: planned
-      x-owner: Nghĩa (+ Khang)
+      x-status: implemented
+      x-source: 'operator-api/operator-pricing.ts (FE-06)'
+      x-owner: Nghĩa (FE-06)
       x-refs: [UC-OPS-07, FR-12]
       summary: Tạo khuyến mãi
       requestBody:
@@ -1507,8 +1560,9 @@ paths:
       tags: [tariffs]
       operationId: updatePromotion
       x-roles: [operator_staff]
-      x-status: planned
-      x-owner: Nghĩa (+ Khang)
+      x-status: implemented
+      x-source: 'operator-api/operator-pricing.ts (FE-06)'
+      x-owner: Nghĩa (FE-06)
       x-refs: [UC-OPS-07, FR-12]
       summary: Sửa khuyến mãi chưa hết hạn
       parameters:
@@ -1539,8 +1593,9 @@ paths:
       tags: [tariffs]
       operationId: deactivatePromotion
       x-roles: [operator_staff]
-      x-status: planned
-      x-owner: Nghĩa (+ Khang)
+      x-status: implemented
+      x-source: 'operator-api/operator-pricing.ts (FE-06)'
+      x-owner: Nghĩa (FE-06)
       x-refs: [UC-OPS-07, FR-12]
       summary: Ngừng khuyến mãi ngay (valid_to = bây giờ)
       parameters:
@@ -1848,8 +1903,9 @@ paths:
       tags: [accounts]
       operationId: createStaffUser
       x-roles: [admin]
-      x-status: planned
-      x-owner: Trí
+      x-status: implemented
+      x-source: 'operator-api/admin-user-actions.ts (FE-19)'
+      x-owner: Nghĩa (FE-19)
       x-refs: [UC-ADM-01, UC-ADM-02, FR-14, BR-P16]
       summary: Tạo tài khoản nhân viên operator hoặc admin
       description: |
@@ -1876,7 +1932,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
         '409':
-          description: '`email_taken`'
+          description: '`email_taken`, `phone_taken`'
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
@@ -1886,8 +1942,9 @@ paths:
       tags: [accounts]
       operationId: getUser
       x-roles: [admin]
-      x-status: planned
-      x-owner: Trí
+      x-status: implemented
+      x-source: 'operator-api/admin-user-actions.ts (FE-19)'
+      x-owner: Nghĩa (FE-19)
       x-refs: [UC-ADM-01]
       summary: Một tài khoản
       parameters:
@@ -1905,8 +1962,9 @@ paths:
       tags: [accounts]
       operationId: updateUser
       x-roles: [admin]
-      x-status: planned
-      x-owner: Trí
+      x-status: implemented
+      x-source: 'operator-api/admin-user-actions.ts (FE-19)'
+      x-owner: Nghĩa (FE-19)
       x-refs: [UC-ADM-01]
       summary: Sửa họ tên, số điện thoại
       parameters:
@@ -1932,8 +1990,9 @@ paths:
       tags: [accounts]
       operationId: setUserRole
       x-roles: [admin]
-      x-status: planned
-      x-owner: Trí
+      x-status: implemented
+      x-source: 'operator-api/admin-user-actions.ts (FE-19)'
+      x-owner: Nghĩa (FE-19)
       x-refs: [UC-ADM-02, FR-14, BR-P16]
       summary: Đổi role giữa operator_staff và admin, hoặc đổi operator / staff_role
       description: |
@@ -1968,8 +2027,9 @@ paths:
       tags: [accounts]
       operationId: lockUser
       x-roles: [admin]
-      x-status: planned
-      x-owner: Trí
+      x-status: implemented
+      x-source: 'operator-api/admin-user-actions.ts (FE-19)'
+      x-owner: Nghĩa (FE-19)
       x-refs: [UC-ADM-01, F-13]
       summary: Khoá tài khoản (active → suspended); đăng nhập và mọi request sau đó bị 403
       parameters:
@@ -2000,8 +2060,9 @@ paths:
       tags: [accounts]
       operationId: unlockUser
       x-roles: [admin]
-      x-status: planned
-      x-owner: Trí
+      x-status: implemented
+      x-source: 'operator-api/admin-user-actions.ts (FE-19)'
+      x-owner: Nghĩa (FE-19)
       x-refs: [UC-ADM-01, F-13]
       summary: Mở khoá (suspended → active); tài khoản closed không mở lại được
       parameters:
@@ -2028,8 +2089,9 @@ paths:
       tags: [accounts]
       operationId: listOperators
       x-roles: [admin]
-      x-status: planned
-      x-owner: Trí
+      x-status: implemented
+      x-source: 'operator-api/admin-operators.ts (FE-18)'
+      x-owner: Nghĩa (FE-18)
       x-refs: [UC-ADM-02, BR-P11, BR-P16]
       summary: Operator đối tác (để gán nhân viên và lọc báo cáo)
       parameters:
@@ -3089,6 +3151,26 @@ components:
           required: [items]
           properties:
             items: { type: array, items: { $ref: '#/components/schemas/ChargePoint' } }
+    NetworkChargePoint:
+      allOf:
+        - $ref: '#/components/schemas/ChargePoint'
+        - type: object
+          required: [operator, open_faults]
+          properties:
+            operator: { $ref: '#/components/schemas/OperatorRef' }
+            open_faults:
+              type: object
+              required: [total, top_severity]
+              properties:
+                total: { type: integer, minimum: 0 }
+                top_severity: { type: [string, 'null'], enum: [critical, major, minor, none, null] }
+    NetworkChargePointPage:
+      allOf:
+        - $ref: '#/components/schemas/PageMeta'
+        - type: object
+          required: [items]
+          properties:
+            items: { type: array, items: { $ref: '#/components/schemas/NetworkChargePoint' } }
     ChargePointDetail:
       allOf:
         - $ref: '#/components/schemas/ChargePoint'

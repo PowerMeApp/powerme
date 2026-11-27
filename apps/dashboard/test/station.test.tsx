@@ -91,19 +91,19 @@ describe('Trang trạm sạc', () => {
     });
     renderApp('/operator/stations/5?from=2026-11-01&to=2026-11-05', session(STAFF));
     expect(await screen.findByRole('heading', { level: 1, name: 'Trạm Q1' })).toBeInTheDocument();
-    expect(screen.getByText(/1\/2 trụ sạc online/)).toBeInTheDocument();
+    expect(screen.getByText(/1\/2 trụ sạc đang kết nối/)).toBeInTheDocument();
     const list = within(screen.getByRole('region', { name: 'Trụ sạc của trạm' }));
     const first = within(list.getByRole('row', { name: 'Trụ sạc PM-11' }));
     expect(first.getByRole('link', { name: 'PM-11' })).toHaveAttribute(
       'href',
       '/operator/charge-points/11',
     );
-    expect(first.getByText('Charging')).toBeInTheDocument();
-    expect(first.getByText('Faulted · GroundFailure')).toBeInTheDocument();
+    expect(first.getByText('Đang sạc')).toBeInTheDocument();
+    expect(first.getByText('Lỗi · GroundFailure')).toBeInTheDocument();
     expect(first.getByText(/phiên 77/)).toBeInTheDocument();
     expect(first.getAllByText(/Súng \d/)).toHaveLength(2);
     const second = within(list.getByRole('row', { name: 'Trụ sạc PM-12' }));
-    expect(second.getAllByText('Offline').length).toBeGreaterThan(0);
+    expect(second.getAllByText('Mất kết nối').length).toBeGreaterThan(0);
     expect(second.getByText('chưa từng kết nối')).toBeInTheDocument();
     const crumbs = within(screen.getByRole('navigation', { name: 'Breadcrumb' }));
     expect(crumbs.getByRole('link', { name: 'Trụ sạc' })).toHaveAttribute(
@@ -144,7 +144,7 @@ describe('Trang trạm sạc', () => {
     fakeCsms({ [CPS]: page([]) });
     renderApp('/operator/stations/99', session(STAFF));
     expect(await screen.findByRole('alert')).toHaveTextContent(
-      'Không tìm thấy trạm sạc này trong các trạm của Operator',
+      'Không tìm thấy trạm sạc này trong các trạm của đơn vị vận hành',
     );
     expect(screen.getByRole('link', { name: '← Danh sách trụ sạc' })).toHaveAttribute(
       'href',

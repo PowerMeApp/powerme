@@ -14,7 +14,11 @@ import { rfidProtectionOverview } from './rfid-protection-overview.js';
  */
 import type { Db } from '../db/db.module.js';
 import { guideFor } from '../stations/faults/error-code-guide.js';
-import { OFFLINE_SQL, type MonitoringThresholds } from './operator-monitoring.js';
+import {
+  OFFLINE_SQL,
+  TEST_OPERATOR_TAX_CODE,
+  type MonitoringThresholds,
+} from './operator-monitoring.js';
 
 export type AdminRoute = { kind: 'summary' };
 
@@ -35,7 +39,7 @@ const OFFLINE = OFFLINE_SQL.replaceAll('$2', '$1');
  * and the lab drivers `load-%@load.powerme.test` / `%@rq1.powerme.test` with their cards and
  * credit. It cannot be deleted (append-only session history), so it is filtered out.
  */
-export const TEST_OPERATOR_TAX_CODE = 'LOADTEST01';
+export { TEST_OPERATOR_TAX_CODE };
 const TEST_EMAIL = (col: string) =>
   `(${col} LIKE '%@load.powerme.test' OR ${col} LIKE '%@rq1.powerme.test')`;
 const REAL_OPERATOR = `o.tax_code<>'${TEST_OPERATOR_TAX_CODE}'`;

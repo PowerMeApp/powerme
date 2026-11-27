@@ -8,13 +8,18 @@ import { useAppSelector } from '../core/store/store';
 import { AppShell } from '../layouts/AppShell';
 import { AdminHomePage } from '../pages/admin/AdminHomePage';
 import { AdminRevenuePage } from '../pages/admin/AdminRevenuePage';
+import { BillingExceptionsPage } from '../pages/admin/BillingExceptionsPage';
+import { DeviceRegistryPage } from '../pages/admin/DeviceRegistryPage';
+import { NetworkMonitorPage } from '../pages/admin/NetworkMonitorPage';
 import { RfidCardsPage } from '../pages/admin/RfidCardsPage';
+import { UsersPage } from '../pages/admin/UsersPage';
 import { LoginPage } from '../pages/LoginPage';
 import { ChargePointDetailPage } from '../pages/operator/ChargePointDetailPage';
 import { ChargePointListPage } from '../pages/operator/ChargePointListPage';
 import { FaultAlertsPage } from '../pages/operator/FaultAlertsPage';
 import { OperatorHomePage } from '../pages/operator/OperatorHomePage';
 import { SessionQueuePage } from '../pages/operator/SessionQueuePage';
+import { PricingPage } from '../pages/operator/PricingPage';
 import { RevenuePage } from '../pages/operator/RevenuePage';
 import { StationPage } from '../pages/operator/StationPage';
 import { RequireRole } from './RequireRole';
@@ -41,6 +46,7 @@ export const routes: RouteObject[] = [
       { path: 'charge-points/:id', element: <ChargePointDetailPage /> }, // 20
       { path: 'faults', element: <FaultAlertsPage /> }, // 21
       { path: 'sessions', element: <SessionQueuePage /> }, // 23
+      { path: 'pricing', element: <PricingPage /> }, // 24
       { path: 'revenue', element: <RevenuePage /> }, // 25
       // Station detail (FE-07): outside Table 5, reached from screens 18, 20 and 25.
       { path: 'stations/:id', element: <StationPage /> },
@@ -56,7 +62,11 @@ export const routes: RouteObject[] = [
     ),
     children: [
       { index: true, element: <AdminHomePage /> }, // 27
+      { path: 'users', element: <UsersPage /> }, // 28
+      { path: 'charge-points', element: <DeviceRegistryPage /> }, // 29
       { path: 'rfid-cards', element: <RfidCardsPage /> }, // 30
+      { path: 'network', element: <NetworkMonitorPage /> }, // 31
+      { path: 'billing', element: <BillingExceptionsPage /> }, // 32 (+ 33 sheets)
       { path: 'revenue', element: <AdminRevenuePage /> }, // 35
       { path: '*', element: <Navigate to="/admin" replace /> },
     ],
