@@ -17,6 +17,11 @@ COPY packages/shared/package.json packages/shared/
 RUN npm ci --ignore-scripts
 COPY packages/shared packages/shared
 COPY apps/dashboard apps/dashboard
+# Khoá Tile Vietmap cho bản đồ màn 18 (FE-03c, D23). Vite nhúng nó vào bundle, nên đây phải là khoá
+# chỉ có quyền Tile (lộ ra trình duyệt), không bao giờ là khoá Search / Route của CSMS. Trống →
+# màn 18 hiện "chưa cấu hình khoá bản đồ", danh sách vẫn dùng được.
+ARG VITE_VIETMAP_TILE_KEY=
+ENV VITE_VIETMAP_TILE_KEY=${VITE_VIETMAP_TILE_KEY}
 RUN npm run build -w @powerme/dashboard
 
 FROM ${CADDY_IMAGE} AS runtime

@@ -102,8 +102,15 @@ describeDb('FE-03 operator monitoring (screens 17, 18; BR-P16, D19–D25)', () =
       ids[`site${op}`] = (
         await q(
           `INSERT INTO sites(site_code,operator_id,site_name,address,latitude,longitude)
-           VALUES($1,$2,$3,'x',10.7,106.7) RETURNING id::text AS id`,
-          [`FE03-${op}`, ids[`op${op}`], `Tram ${op}`],
+           VALUES($1,$2,$3,'x',$4,$5) RETURNING id::text AS id`,
+          // FE-03c: site B has no coordinates (shown as null, left off the map).
+          [
+            `FE03-${op}`,
+            ids[`op${op}`],
+            `Tram ${op}`,
+            op === 'A' ? 10.7 : null,
+            op === 'A' ? 106.7 : null,
+          ],
         )
       )[0].id;
       const user = (
@@ -201,7 +208,13 @@ describeDb('FE-03 operator monitoring (screens 17, 18; BR-P16, D19–D25)', () =
       lifecycle: 'in_service',
       connected: false,
       is_online: true,
-      site: { id: ids['siteA'], site_code: 'FE03-A', site_name: 'Tram A' },
+      site: {
+        id: ids['siteA'],
+        site_code: 'FE03-A',
+        site_name: 'Tram A',
+        latitude: 10.7,
+        longitude: 106.7,
+      },
     });
     expect(fresh).toMatchObject({
       connector_id: ids['A-FRESHc1'],
@@ -227,6 +240,7 @@ describeDb('FE-03 operator monitoring (screens 17, 18; BR-P16, D19–D25)', () =
     expect(a.items[1].connectors[0].status_quality).toBe('offline');
     const b = (await get('/charge-points', tokens['b'])).body;
     expect(b.items.map((c: any) => c.serial_number)).toEqual(['B-FRESH']);
+    expect(b.items[0].site).toMatchObject({ latitude: null, longitude: null });
   });
 
   it('filters by site, lifecycle and online, and pages in the same order', async () => {
