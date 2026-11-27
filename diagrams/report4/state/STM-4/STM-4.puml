@@ -1,6 +1,6 @@
 @startuml STM-4
 !include _style.iuml
-title STM-4 (System level) — Lifecycle of a TopUp\ntop_ups.status · v1.1 · 10/11/2026
+title STM-4 (System level) — Lifecycle of a TopUp\ntop_ups.status · v1.2 · 23/11/2026
 
 state c1 <<choice>>
 [*] --> pending : / send payment request
@@ -11,13 +11,21 @@ note left of pending
 end note
 pending --> credited : payment confirmed\n[valid, amount matches, not yet applied]\n/ credit full amount, settle shortfall,\nredeem points, request e-invoice
 pending --> failed : payment failed\nor Driver cancels
-pending --> c1 : at(expires_at + 2 min)\n/ query gateway (querydr)
+pending --> c1 : at(next_attempt_at)\n[expires_at + 2, 15, 30, 45, 60 min;\n+75 min only if the 60-min query is RC 94]\n/ query gateway (querydr)
 c1 --> credited : [paid]\n/ credit, as above
-c1 --> expired : [else]\n/ tell Driver (MSG26)
+c1 --> pending : [answer unclear and slots left]\n/ set next_attempt_at
+c1 --> expired : [not paid, or no slot left,\nor 5 failed attempts in a row]\n/ set exception_kind, tell Driver (MSG26)
 expired --> [*]
 credited --> refunded : Admin refunds it\n[balance ≥ amount]\n/ debit credit, restore points,\ncreate refund (STM-10)
 failed --> [*]
 refunded --> [*]
+note right of c1
+  exception_kind on expired:
+  unresolved_04 / unresolved_07 = last
+  gateway status 04 / 07 when the schedule ends;
+  retry_exhausted = claim limit of 5 used up
+  (listed for the Admin on Billing Exceptions)
+end note
 note bottom of expired
   Expiry is final. A payment confirmed after
   expiry is recorded as a late payment (no credit,
