@@ -15,15 +15,16 @@ export const STATUSES = [
   'Reserved',
 ];
 
+// Mặc định = bảng màu trong public/bevel-tokens.css (QA-06)
 const FALLBACK = {
-  Available: '#35d07f',
-  Preparing: '#4aa3ff',
-  Charging: '#35d07f',
-  SuspendedEV: '#f0b04a',
-  SuspendedEVSE: '#f0b04a',
-  Finishing: '#a78bfa',
-  Faulted: '#ff4d57',
-  Unavailable: '#8b97a6',
+  Available: '#415eee',
+  Preparing: '#b9a6ff',
+  Charging: '#31ce01',
+  SuspendedEV: '#ffca00',
+  SuspendedEVSE: '#ffca00',
+  Finishing: '#ffab94',
+  Faulted: '#e5484d',
+  Unavailable: '#a5a7ab',
   Reserved: '#2cc3b8',
 };
 
@@ -39,7 +40,16 @@ export const VI = {
   Reserved: 'Đặt trước',
 };
 
-/** Đọc --lt-* từ :root; thiếu biến thì dùng giá trị mặc định của tru-sac.css. */
+/**
+ * Cảnh sáng (Hero Sky, QA-06) hay tối (cảnh OLED cũ)? Đọc --t3-scene trên :root (bevel-tokens.css:
+ * "light" mặc định, "dark" khi trang ở giao diện tối). Đọc một lần lúc gắn bundle.
+ */
+export function readSceneTheme() {
+  const v = getComputedStyle(document.documentElement).getPropertyValue('--t3-scene').trim();
+  return v === 'dark' ? 'dark' : 'light';
+}
+
+/** Đọc --lt-* từ :root; thiếu biến thì dùng giá trị mặc định của bevel-tokens.css. */
 export function readPalette() {
   const css = getComputedStyle(document.documentElement);
   const out = {};

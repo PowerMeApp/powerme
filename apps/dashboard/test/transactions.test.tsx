@@ -112,7 +112,7 @@ describe('Danh sách giao dịch (màn 35, Admin)', () => {
 
     const free = within(screen.getByRole('row', { name: 'Phiên #102' }));
     expect(free.getByText('Không định danh')).toBeInTheDocument();
-    expect(free.getByText('Free vend')).toBeInTheDocument();
+    expect(free.getByText('Sạc miễn phí')).toBeInTheDocument();
     expect(free.getByText('Thiếu số đo')).toBeInTheDocument(); // null is not 0 Wh
     expect(free.getByText('—')).toBeInTheDocument();
     expect(free.getByText('Trụ gửi bù sau khi nối lại')).toBeInTheDocument();
@@ -126,6 +126,22 @@ describe('Danh sách giao dịch (màn 35, Admin)', () => {
 
     expect(screen.getByLabelText('Tổng giao dịch')).toHaveTextContent('120.000 ₫');
     expect(txCalls(seen)).toEqual([`${PERIOD}&page=1&page_size=50`]);
+  });
+
+  it('T158 labels a closed account as stopped automatic settlement', async () => {
+    fakeCsms({
+      [REV]: ok(revenue),
+      [TX]: ok(
+        txPage({
+          items: [tx({ kind: 'unsettled', amount_vnd: null, unsettled_reason: 'account_closed' })],
+        }),
+      ),
+    });
+    renderApp(`/admin/revenue${PERIOD}`, session(ADMIN));
+    const row = within(await screen.findByRole('row', { name: 'Phiên #101' }));
+    expect(row.getByText('Tài khoản đã đóng, đã dừng tự động quyết toán')).toBeInTheDocument();
+    expect(row.getByText('Chưa trừ tiền')).toBeInTheDocument();
+    expect(row.getByText('—')).toBeInTheDocument();
   });
 
   it('filters go to the API and back to page 1; paging asks the next page', async () => {
@@ -142,7 +158,7 @@ describe('Danh sách giao dịch (màn 35, Admin)', () => {
     await waitFor(() =>
       expect(txCalls(seen)).toContain(`${PERIOD}&kind=unattributed&page=1&page_size=50`),
     );
-    await user.selectOptions(screen.getByRole('combobox', { name: 'Operator' }), '3');
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Đơn vị vận hành' }), '3');
     await waitFor(() =>
       expect(txCalls(seen)).toContain(
         `${PERIOD}&operator_id=3&kind=unattributed&page=1&page_size=50`,
@@ -165,7 +181,7 @@ describe('Danh sách giao dịch (màn 35, Admin)', () => {
       names.push(this.download);
     });
     const { user } = renderApp(`/admin/revenue${PERIOD}&tx_origin=rfid`, session(ADMIN));
-    await user.click(await screen.findByRole('button', { name: 'Tải CSV giao dịch' }));
+    await user.click(await screen.findByRole('button', { name: 'Tải tệp giao dịch (CSV)' }));
     await waitFor(() => expect(names).toEqual(['transactions_2026-11-01_2026-11-05.csv']));
     expect(seen.find((r) => r.path.endsWith('transactions.csv'))?.search).toBe(
       `${PERIOD}&origin=rfid`,
@@ -179,7 +195,7 @@ describe('Danh sách giao dịch (màn 35, Admin)', () => {
       [TX_CSV]: { status: 400, body: { error: 'export_too_large', detail: 'export_too_large' } },
     });
     const { user } = renderApp(`/admin/revenue${PERIOD}`, session(ADMIN));
-    await user.click(await screen.findByRole('button', { name: 'Tải CSV giao dịch' }));
+    await user.click(await screen.findByRole('button', { name: 'Tải tệp giao dịch (CSV)' }));
     expect(await screen.findByText(/Quá 100 000 dòng/)).toBeInTheDocument();
   });
 

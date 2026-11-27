@@ -1,11 +1,13 @@
+import type { RfidCreditProtection } from './rfid-protection.js';
 /**
  * Admin platform overview (FE-14, screen 27) — types only, snake_case as on the wire.
  * Source: apps/csms/src/operator-api/admin-platform.ts.
  */
-import type { ChargePointLifecycle } from './monitoring.js';
+import type { ChargePointLifecycle, OperatorChargePoint } from './monitoring.js';
 
 /** GET /api/admin/v1/summary */
 export interface AdminSummary {
+  rfid_credit_protection?: RfidCreditProtection;
   /** Platform statistics (20/11). */
   operators: { total: number; active: number };
   sites: number;
@@ -36,4 +38,42 @@ export interface AdminSummary {
     invoices_needs_review: number;
     failed_refunds: number;
   };
+}
+
+/** One Operator of the platform (GET /api/admin/v1/operators, OpenAPI `Operator`, FE-18). */
+export interface PlatformOperator {
+  id: string;
+  tax_code: string;
+  legal_name: string;
+  status: 'active' | 'suspended' | 'closed';
+}
+
+export interface PlatformOperatorPage {
+  items: PlatformOperator[];
+  total: number;
+  page: number;
+  page_size: number;
+}
+
+/** Screen 31 (FE-18, UC-ADM-07): a charge point of any Operator, with its Operator and open faults. */
+export interface NetworkChargePoint extends OperatorChargePoint {
+  operator: { id: string; legal_name: string };
+  open_faults: { total: number; top_severity: 'critical' | 'major' | 'minor' | 'none' | null };
+}
+
+/** GET /api/admin/v1/network/charge-points */
+export interface NetworkChargePointPage {
+  items: NetworkChargePoint[];
+  total: number;
+  page: number;
+  page_size: number;
+}
+
+/** Screen 31 filters; omitted = all (decommissioned hidden unless chosen). */
+export interface NetworkQuery {
+  operator_id?: string;
+  online?: boolean;
+  lifecycle?: ChargePointLifecycle;
+  charge_point_q?: string;
+  site_q?: string;
 }

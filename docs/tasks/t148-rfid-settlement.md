@@ -90,8 +90,8 @@ cùng transaction; lỗi sau debit hoặc earn rollback toàn bộ phần tiền
 CP/offset/CSMS clock giữ nguyên; BR-P45 cộng chính xác rồi half-up một lần tới VND.
 Phiên 0 Wh/0 VND vẫn có debit 0, earn 0, statement. `in_shortfall` được âm thêm
 (BR-P20), không kiểm lại start minimum khi thu nợ. Tài khoản thiếu →
-`pending/credit_account_missing`; ledger từ chối closed → `pending/account_closed`
-(D6), không ép trừ. Free vend và unattributed không debit/earn.
+`pending/credit_account_missing`; tài khoản closed → `ineligible/account_closed`
+([T158](t158-closed-account-settlement.md)), dừng tự thử lại, không ép trừ hay xóa nợ. Free vend và unattributed không debit/earn.
 
 StopTransaction vẫn lưu stop/job và đối soát trước; lỗi billing không hủy ACK.
 Khóa phiên và unique debit/earn/statement chặn thu trùng; job `posted` không bị
@@ -199,3 +199,7 @@ Evidence private: `E:/Project/PowerMe/.review/t148-rfid-settlement-20261124/`:
 `runtime-backup.json`, cold source/copy manifests, `runtime-before.json`,
 `runtime-after.json`, `runtime-stability.json`, `runtime-listeners.json`.
 `FINAL-HANDOFF.md` và `final-manifest.json` ghi APK/device status và check exits cuối.
+
+## RFID credit protection 27/11/2026
+
+Giới hạn hold/cutoff lịch sử ở trên được xử lý bởi [RFID credit protection](rfid-credit-protection.md) và migration 0031, phụ thuộc T158. Không thay kết quả/evidence lịch sử; public RFID Stop và Flutter estimate capability giữ nguyên. D6 closure vẫn ngoài scope.

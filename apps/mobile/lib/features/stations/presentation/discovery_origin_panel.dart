@@ -3,9 +3,92 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/l10n/app_copy.dart';
 import '../../../core/widgets/flow_page.dart';
+import '../../profile/application/profile_controller.dart';
 import '../application/station_discovery_controller.dart';
 import '../domain/station_discovery.dart';
 import 'api_discovery_components.dart';
+
+Future<void> showDiscoveryOriginPicker(BuildContext context) =>
+    showModalBottomSheet<void>(
+      context: context,
+      useSafeArea: true,
+      isScrollControlled: true,
+      builder: (context) => SingleChildScrollView(
+        padding: EdgeInsets.fromLTRB(
+          20,
+          20,
+          20,
+          20 + MediaQuery.viewInsetsOf(context).bottom,
+        ),
+        child: const DiscoveryOriginPanel(closeAfterSelection: true),
+      ),
+    );
+
+class DiscoveryOriginSelector extends ConsumerWidget {
+  const DiscoveryOriginSelector({super.key});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final copy = ref.watch(discoveryCopyProvider);
+    final origin = ref.watch(discoveryContextProvider).origin;
+    return Row(
+      children: [
+        Expanded(
+          child: OutlinedButton.icon(
+            key: const Key('open-discovery-origin'),
+            onPressed: () => showDiscoveryOriginPicker(context),
+            icon: Icon(
+              origin?.address == null
+                  ? Icons.my_location_outlined
+                  : Icons.place_outlined,
+            ),
+            label: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              child: Text(
+                origin == null
+                    ? copy.text('Chọn điểm đi', 'Choose starting point')
+                    : origin.address == null
+                    ? copy.text('Điểm đi · GPS', 'Starting point · GPS')
+                    : copy.text(
+                        'Điểm đi · ${origin.address}',
+                        'Starting point · ${origin.address}',
+                      ),
+              ),
+            ),
+          ),
+        ),
+        if (origin != null)
+          IconButton(
+            key: const Key('clear-discovery-origin'),
+            tooltip: copy.text('Bỏ điểm đi', 'Clear starting point'),
+            onPressed: ref.read(discoveryContextProvider.notifier).clearOrigin,
+            icon: const Icon(Icons.close_rounded),
+          ),
+      ],
+    );
+  }
+}
+
+class DiscoveryVinFastOverride extends ConsumerWidget {
+  const DiscoveryVinFastOverride({super.key});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    if (ref.watch(profileControllerProvider).profile.isVinFast) {
+      return const SizedBox.shrink();
+    }
+    final copy = ref.watch(discoveryCopyProvider);
+    return SwitchListTile(
+      key: const Key('include-vinfast-only'),
+      contentPadding: EdgeInsets.zero,
+      title: Text(
+        copy.text('Hiện thêm trạm VinFast', 'Show VinFast stations too'),
+      ),
+      value: ref.watch(discoveryContextProvider).includeVinFastOnly,
+      onChanged: ref.read(discoveryContextProvider.notifier).includeVinFastOnly,
+    );
+  }
+}
 
 class DiscoveryOriginPanel extends ConsumerStatefulWidget {
   const DiscoveryOriginPanel({super.key, this.closeAfterSelection = false});
@@ -23,9 +106,11 @@ class _DiscoveryOriginPanelState extends ConsumerState<DiscoveryOriginPanel> {
   bool _busy = false;
   AddressSearch? _submittedAddress;
   String? _error;
+  DiscoveryContext? _originController;
 
   @override
   void dispose() {
+    if (_busy) _originController?.cancelOriginUpdate();
     _address.dispose();
     super.dispose();
   }
@@ -35,6 +120,7 @@ class _DiscoveryOriginPanelState extends ConsumerState<DiscoveryOriginPanel> {
     Future<bool> Function() update, {
     bool locating = false,
   }) async {
+    _originController = ref.read(discoveryContextProvider.notifier);
     setState(() {
       _busy = true;
       _error = null;
@@ -176,7 +262,10 @@ class _DiscoveryOriginPanelState extends ConsumerState<DiscoveryOriginPanel> {
           origin?.address ??
               (origin == null
                   ? copy.text('Chưa chọn điểm đi', 'No starting point selected')
-                  : copy.text('Vị trí hiện tại', 'Current location')),
+                  : copy.text(
+                      'Vị trí hiện tại · GPS',
+                      'Current location · GPS',
+                    )),
         ),
         Text(originSharingDisclosure(copy)),
         Wrap(

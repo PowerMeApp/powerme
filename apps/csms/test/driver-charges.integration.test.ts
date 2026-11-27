@@ -467,6 +467,8 @@ describeDb('BE-22 driver charges and credit over HTTP, real OCPP and dedicated P
     expect(typeof history.body.items[0].transaction_id).toBe('string');
     const none = await call('GET', '/credit', { auth: await jwt(walletless) });
     expect(none.body).toEqual({
+      blocking_rfid_sessions: 0,
+      unresolved_rfid_sessions: 0,
       balance_vnd: 0,
       held_vnd: 0,
       available_vnd: 0,

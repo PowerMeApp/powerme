@@ -238,7 +238,8 @@ export class ChargeSettlementService {
         `UPDATE charge_settlement_jobs SET state=$2,
         reason=CASE WHEN $2::varchar='pending' THEN reason ELSE $3 END,
         attempts=attempts+1,last_error_code=NULL,next_attempt_at=now()+interval '30 seconds',updated_at=now()
-        WHERE session_id=$1 AND state<>'posted'`,
+        WHERE session_id=$1 AND (state='pending'
+          OR (state='ineligible' AND reason<>'account_closed'))`,
         [sessionId, result === 'already_posted' ? 'posted' : result, result],
       );
       return result;
@@ -368,13 +369,6 @@ export class ChargeSettlementService {
   private async post(
     sessionId: number,
   ): Promise<'posted' | 'already_posted' | 'pending' | 'ineligible'> {
-    if (!this.policy) {
-      await this.db.$client.query(
-        "UPDATE charge_settlement_jobs SET reason='policy_unconfigured',updated_at=now() WHERE session_id=$1 AND state='pending'",
-        [sessionId],
-      );
-      return 'pending';
-    }
     return chargeTransaction(this.db, async (c) => {
       const pending = async (reason: string): Promise<'pending'> => {
         await c.query(
@@ -382,6 +376,18 @@ export class ChargeSettlementService {
           [sessionId, reason],
         );
         return 'pending';
+      };
+      const stopClosed = async (): Promise<'ineligible'> => {
+        const changed = await c.query(
+          `UPDATE charge_settlement_jobs SET state='ineligible',reason='account_closed',
+           attempts=attempts+1,last_error_code=NULL,updated_at=now()
+           WHERE session_id=$1 AND (state='pending'
+             OR (state='ineligible' AND reason<>'account_closed'))`,
+          [sessionId],
+        );
+        if (changed.rowCount)
+          this.logger.warn(`T158 settlement stopped: session=${sessionId} reason=account_closed`);
+        return 'ineligible';
       };
       const session = (
         await c.query<BillableSession>(
@@ -405,6 +411,15 @@ export class ChargeSettlementService {
           .rowCount
       )
         return 'already_posted';
+      // T158: reread under the session lock before any pricing or billing can resume.
+      const job = (
+        await c.query<{ state: string; reason: string }>(
+          'SELECT state,reason FROM charge_settlement_jobs WHERE session_id=$1 FOR UPDATE',
+          [sessionId],
+        )
+      ).rows[0];
+      if (job?.state === 'posted') return 'already_posted';
+      if (job?.state === 'ineligible' && job.reason === 'account_closed') return 'ineligible';
       if (
         session.status !== 'reconciled' ||
         session.meter_stop_wh === null ||
@@ -430,6 +445,14 @@ export class ChargeSettlementService {
         return pending('late_start_operator_review');
       const energy = BigInt(session.meter_stop_wh) - BigInt(session.meter_start_wh);
       if (energy < 0n || energy !== BigInt(session.energy_wh)) return pending('invalid_energy');
+      const account = (
+        await c.query<{ id: string; status: string }>(
+          'SELECT id,status FROM credit_accounts WHERE driver_id=$1 FOR UPDATE',
+          [session.driver_id],
+        )
+      ).rows[0];
+      if (account?.status === 'closed') return stopClosed();
+      if (!this.policy) return pending('policy_unconfigured');
       const timeline = await this.pricingTimeline(c, {
         ...session,
         received_stopped_at: session.received_stopped_at,
@@ -444,12 +467,6 @@ export class ChargeSettlementService {
       // WP3/T72: BR-P45 rounds the exact total once, never each tariff portion independently.
       const amount = (numerator + 500n) / 1000n;
       if (amount > BigInt(Number.MAX_SAFE_INTEGER)) return pending('amount_out_of_range');
-      const account = (
-        await c.query<{ id: string; balance_vnd: string }>(
-          'SELECT id,balance_vnd FROM credit_accounts WHERE driver_id=$1 FOR UPDATE',
-          [session.driver_id],
-        )
-      ).rows[0];
       if (!account) return pending('credit_account_missing');
       if (
         (
@@ -469,7 +486,7 @@ export class ChargeSettlementService {
         });
       } catch (error) {
         if (error instanceof LedgerPostRejected && error.reason === 'account_closed')
-          return pending('account_closed');
+          return stopClosed();
         throw error;
       }
       const earn = await this.loyalty.earnForSession(
@@ -544,6 +561,10 @@ export class ChargeSettlementService {
       );
       await c.query(
         "UPDATE driver_charge_intents SET state='settled',reserved_vnd=0,version=version+1,updated_at=now() WHERE session_id=$1 AND state<>'settled'",
+        [sessionId],
+      );
+      await c.query(
+        "UPDATE rfid_credit_holds SET state='released',released_at=now(),updated_at=now() WHERE session_id=$1 AND state='held'",
         [sessionId],
       );
       return 'posted';

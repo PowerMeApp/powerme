@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | Chủ sở hữu | WP4 — Trần Trọng Nghĩa |
-| Stack | React 19 + Vite + TypeScript, Redux Toolkit / RTK Query, React Router |
+| Stack | React 19 + Vite + TypeScript, Redux Toolkit / RTK Query, React Router, React Hook Form + Zod (form, D43) |
 | Thiết kế | Report 4 PKG-2 (presentation → features → core → foundation), SRS Table 5 / 6, Fig 10 / 11 |
 | Backend | CSMS operator API (`/api/auth/v1`, `/api/operator/v1`, `/api/admin/v1`) — ADR-0018 |
 
@@ -35,10 +35,16 @@ npm run build -w @powerme/dashboard
 |---|---|---|---|
 | 16 | Login — Operator Dashboard | `/operator/login` | FE-01b |
 | 17 | Operator Dashboard (hub) | `/operator` | FE-01b (khung; số liệu ở FE-03 / FE-04) |
-| 18–25 | Charge Points, Onboarding, Charge Point Detail, Fault Alerts, Maintenance Tickets, Unattributed Sessions, Pricing & Promotions, Station Revenue | `/operator/…` | FE-02 … FE-07, FE-12, FE-13 |
+| 19 | Charge Point Onboarding (sheet, UC-OPS-01) | nút "Onboard trụ sạc" trên `/operator/charge-points` | FE-02 (+ `GET /api/operator/v1/sites`) |
+| 24 | Pricing & Promotions (UC-OPS-06/07) | `/operator/pricing` | FE-06 (`GET`/`PUT /api/operator/v1/tariffs`, `/api/operator/v1/promotions`; biểu giá theo Operator, 3 khung; khuyến mãi chỉ lưu, chưa áp dụng khi tính tiền — K6) |
+| 18, 20–23, 25 | Charge Points, Charge Point Detail, Fault Alerts, Maintenance Tickets, Unattributed Sessions, Station Revenue | `/operator/…` | FE-03 … FE-07, FE-12, FE-13 |
 | 26 | Login — Admin Console | `/admin/login` | FE-01b |
 | 27 | Admin Dashboard (hub) | `/admin` | FE-01b (khung; số liệu ở FE-14) |
-| 28–33 | Users & Roles, Charge Point Registry, RFID Cards, Billing Exceptions, … | `/admin/…` | FE-09, FE-14, FE-15 |
+| 29 | Device Registry (UC-ADM-03) | `/admin/charge-points` | FE-15 (API BE-44 `GET`/`POST /api/admin/v1/charge-points`; chỉ xem + đăng ký serial, chưa sửa) |
+| 30 | RFID Cards (Card Registry, UC-ADM-04) | `/admin/rfid-cards` | T161 (API T146 + tìm tài xế `GET /api/admin/v1/users`) |
+| 31 | Charge Point Network Monitor (UC-ADM-07) | `/admin/network` | FE-18 (`GET /api/admin/v1/network/charge-points`, `GET /api/admin/v1/operators`; chưa có uptime / utilisation, chờ API metrics) |
+| 28 | Users & Roles (UC-ADM-01/02) | `/admin/users` | FE-19 (`/api/admin/v1/users` tạo / sửa / đổi vai trò / khoá; ghi chú khoá chỉ vào log) |
+| 32–33 | Billing Exceptions + Refund / Retry (sheet) (UC-ADM-08) | `/admin/billing` | FE-09 (API của Khang, PR #212: danh sách 4 mục, thử lại hoá đơn, kiểm tra lại / đã xem, xử lý trả mâu thuẫn; hoàn tiền thủ công chờ T152) |
 
 ## Quy tắc
 
@@ -47,3 +53,4 @@ npm run build -w @powerme/dashboard
 - Không hiện số giả: màn chưa có dữ liệu thì không có ô số (D36).
 - Dùng đúng thuật ngữ GLOSSARY: Charge Point (trụ sạc), Charging Station, Connector (súng), FaultEvent. Một trụ hai súng luôn hiện hai trạng thái Connector độc lập.
 - Kiểu dữ liệu API lấy từ `@powerme/shared`.
+- Form: React Hook Form + Zod (`components/Field.tsx`); lỗi của từng ô hiện màu đỏ ngay dưới ô đó, lỗi máy chủ về một ô (ví dụ 409 serial) cũng hiện dưới ô đó.

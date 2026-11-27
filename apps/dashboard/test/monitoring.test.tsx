@@ -47,6 +47,8 @@ const cp = (over: Partial<OperatorChargePoint> = {}): OperatorChargePoint => ({
       active_session_id: null,
     },
   ],
+  offline_card_risk: false,
+  offline_card_risk_reason: null,
   ...over,
 });
 const offline = cp({
@@ -82,8 +84,8 @@ describe('Tổng quan vận hành (màn 17)', () => {
     renderApp('/operator', session(STAFF));
     const cps = await screen.findByRole('region', { name: 'Trụ sạc' });
     expect(within(cps).getByText('2')).toBeInTheDocument();
-    expect(within(cps).getByText('/ 3 online')).toBeInTheDocument();
-    expect(within(cps).getByText('1 offline')).toBeInTheDocument();
+    expect(within(cps).getByText('/ 3 đang kết nối')).toBeInTheDocument();
+    expect(within(cps).getByText('1 mất kết nối')).toBeInTheDocument();
     const conns = screen.getByRole('region', { name: 'Súng sạc' });
     expect(within(conns).getByText('Sẵn sàng')).toBeInTheDocument();
     expect(within(conns).queryByText('Sắp trống')).toBeNull(); // 0 → hidden (D36)
@@ -122,7 +124,7 @@ describe('Tổng quan vận hành (màn 17)', () => {
       },
     });
     renderApp('/operator', session(STAFF));
-    expect(await screen.findByText('Operator chưa có trụ sạc nào.')).toBeInTheDocument();
+    expect(await screen.findByText('Đơn vị vận hành chưa có trụ sạc nào.')).toBeInTheDocument();
     expect(screen.queryByRole('region', { name: 'Súng sạc' })).toBeNull();
     expect(screen.getByText('Không có sự cố đang mở.')).toBeInTheDocument();
     expect(screen.queryByRole('region', { name: 'Việc cần xử lý' })).toBeNull();
@@ -135,13 +137,13 @@ describe('Danh sách trụ sạc (màn 18)', () => {
     renderApp('/operator/charge-points', session(STAFF));
     const row = within(await screen.findByRole('row', { name: 'Trụ sạc PM-D1-HCM-0001' }));
     expect(row.getByText('Trạm sạc demo Quận 1')).toBeInTheDocument();
-    expect(row.getByText('Online')).toBeInTheDocument();
-    expect(row.getByText('Charging')).toBeInTheDocument();
-    expect(row.getByText('Faulted · GroundFailure')).toBeInTheDocument();
+    expect(row.getByText('Đang kết nối')).toBeInTheDocument();
+    expect(row.getByText('Đang sạc')).toBeInTheDocument();
+    expect(row.getByText('Lỗi · GroundFailure')).toBeInTheDocument();
     expect(row.getByText(/có thể đã cũ/)).toBeInTheDocument();
     expect(row.getByText(/phiên 77/)).toBeInTheDocument();
     const off = within(screen.getByRole('row', { name: 'Trụ sạc RH24D1-00002' }));
-    expect(off.getAllByText('Offline')).toHaveLength(2); // the charge point and its connector
+    expect(off.getAllByText('Mất kết nối')).toHaveLength(2); // the charge point and its connector
     expect(off.queryByText('Available')).toBeNull();
     expect(off.getByText('chưa từng kết nối')).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Trụ sạc' })).toHaveAttribute(
@@ -159,6 +161,28 @@ describe('Danh sách trụ sạc (màn 18)', () => {
     expect(seen[0]).toMatchObject({ search: '?page=1&page_size=20' });
   });
 
+  it('[TC-BRP52-05] T150: a charge point whose offline card authorisation is not confirmed off shows a warning badge', async () => {
+    fakeCsms({
+      [LIST_URL]: page([
+        cp(),
+        cp({
+          id: '3',
+          serial_number: 'RH24D1-00003',
+          display_code: 'PM-D1-HCM-0003',
+          offline_card_risk: true,
+          offline_card_risk_reason: 'rejected',
+        }),
+      ]),
+    });
+    renderApp('/operator/charge-points', session(STAFF));
+    const risky = within(await screen.findByRole('row', { name: 'Trụ sạc PM-D1-HCM-0003' }));
+    const badge = risky.getByText('Rủi ro thẻ khi mất kết nối');
+    expect(badge).toHaveClass('pill', 'major');
+    expect(badge).toHaveAttribute('title', expect.stringContaining('từ chối tắt chấp nhận thẻ'));
+    const safe = within(screen.getByRole('row', { name: 'Trụ sạc PM-D1-HCM-0001' }));
+    expect(safe.queryByText('Rủi ro thẻ khi mất kết nối')).toBeNull();
+  });
+
   it('filters send online / lifecycle from page 1; the pager asks for page 2', async () => {
     const seen = fakeCsms({ [LIST_URL]: page([cp()], 25) });
     const { user } = renderApp('/operator/charge-points', session(STAFF));
@@ -166,7 +190,7 @@ describe('Danh sách trụ sạc (màn 18)', () => {
     expect(screen.getByText('Trang 1 / 2')).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Sau ›' }));
     await waitFor(() => expect(seen.some((r) => r.search === '?page=2&page_size=20')).toBe(true));
-    await user.selectOptions(screen.getByRole('combobox', { name: 'Kết nối' }), 'Offline');
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Kết nối' }), 'Mất kết nối');
     await waitFor(() =>
       expect(seen.some((r) => r.search === '?online=false&page=1&page_size=20')).toBe(true),
     );

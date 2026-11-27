@@ -1,3 +1,5 @@
+import { RfidCreditProtection } from './rfid-credit-protection.js';
+import { heldCreditSql, availableCreditSql, unresolvedRfidSql } from './credit-availability.js';
 import { SESSION_CAPABILITIES_SQL } from './session-capabilities.js';
 import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { createHash, randomBytes } from 'node:crypto';
@@ -62,6 +64,7 @@ interface Intent {
 @Injectable()
 export class DriverChargingService {
   private readonly logger = new Logger(DriverChargingService.name);
+  private readonly rfidProtection?: RfidCreditProtection;
   constructor(
     @Inject(DB) private readonly db: Db,
     private readonly registry: ConnectionRegistry,
@@ -69,7 +72,10 @@ export class DriverChargingService {
     @Optional() @Inject(CHARGE_POLICY) private readonly policy?: ChargePolicy,
     @Optional() @Inject(CONFIG) private readonly config?: CsmsConfig,
   ) {
-    if (policy) validateChargePolicy(policy);
+    if (policy) {
+      validateChargePolicy(policy);
+      this.rfidProtection = new RfidCreditProtection(db, registry, settlement, policy);
+    }
   }
 
   // WP3/T72: app tags authorize only their reserved pending intent on the original live connection.
@@ -105,9 +111,7 @@ export class DriverChargingService {
       }>(
         `SELECT i.connector_id,i.vehicle_id,i.mode,i.energy_limit_wh,i.duration_minutes,i.amount_limit_vnd,i.reserved_vnd,
         CASE WHEN c.max_power_kw>0 THEN least(c.max_power_kw,m.max_dc_kw)*1000 END AS power_w,
-        a.balance_vnd-coalesce((SELECT sum(other.reserved_vnd) FROM driver_charge_intents other
-          WHERE other.driver_id=i.driver_id AND other.id<>i.id
-          AND other.state NOT IN ('rejected','settled','released')),0) AS available_vnd,
+        ${availableCreditSql('i.driver_id', 'a.balance_vnd', 'i.session_id', 'i.id')} AS available_vnd,
         (SELECT max(t.price_per_kwh_vnd) FROM tariff_periods t WHERE t.operator_id=st.operator_id
           AND t.effective_from<=(now() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date
           AND (t.effective_to IS NULL OR t.effective_to>=(now() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date)) AS price
@@ -129,6 +133,7 @@ export class DriverChargingService {
         AND conn.opened_at=$6 AND conn.closed_at IS NULL
         AND cp.lifecycle='in_service' AND o.status='active' AND c.status IN ('Available','Preparing')
         AND u.role='driver' AND u.account_status='active' AND a.status='active'
+        AND ${unresolvedRfidSql('i.driver_id', 'i.session_id')}=0
         AND NOT EXISTS(SELECT 1 FROM sessions s WHERE s.connector_id=c.id
           AND s.received_stopped_at IS NULL AND s.status IN ('pending','active','paused','stopping','orphaned'))`,
         [idTag, ctx.chargePointId, ctx.identity, ctx.epoch, ctx.receivedAt, ctx.epochOpenedAt],
@@ -246,12 +251,12 @@ export class DriverChargingService {
       )
         throw new ChargingError('connector_busy_or_unknown');
       const held = (
-        await c.query<{ held: string }>(
-          `SELECT coalesce(sum(reserved_vnd),0) AS held FROM driver_charge_intents
-        WHERE driver_id=$1 AND state NOT IN ('rejected','settled','released')`,
+        await c.query<{ held: string; unresolved: string }>(
+          `SELECT ${heldCreditSql('$1')} AS held, ${unresolvedRfidSql('$1')} AS unresolved`,
           [driverId],
         )
       ).rows[0]!;
+      if (Number(held.unresolved) > 0) throw new ChargingError('credit_unavailable');
       const price = (
         await c.query<{ price: string | null }>(
           `SELECT max(price_per_kwh_vnd) AS price FROM tariff_periods
@@ -1150,9 +1155,7 @@ export class DriverChargingService {
   // WP3/T72: only this trusted ingress hook can request an account-independent system cutoff.
   async onMeter(transactionNo: number): Promise<void> {
     if (!this.policy || !Number.isSafeInteger(transactionNo) || transactionNo < 1) return;
-    // Chỉ phiên mở từ app (có driver_charge_intents) — stopCommand() JOIN intent nên phiên quẹt
-    // thẻ RFID có driver_id sẽ ném not_found mỗi MeterValues (thấy trong demo 27/10). Cắt credit
-    // cho phiên thẻ (BR-P19) chưa làm: Design Brief gap G5/G8.
+    await this.rfidProtection?.onSession(transactionNo);
     const row = (
       await this.db.$client.query<{ id: string; driver_id: string }>(
         `SELECT s.id,s.driver_id FROM sessions s WHERE s.transaction_no=$1 AND s.driver_id IS NOT NULL
@@ -1163,6 +1166,10 @@ export class DriverChargingService {
     ).rows[0];
     if (!row) return;
     await this.automaticStop(Number(row.driver_id), Number(row.id));
+  }
+
+  async sweepRfidStops(): Promise<number> {
+    return this.rfidProtection?.sweep() ?? 0;
   }
 
   // WP3/T72: a heartbeat cannot promote an Available snapshot from an older connection.
@@ -1207,9 +1214,7 @@ export class DriverChargingService {
         `SELECT s.billing_mode,s.limit_value,
         floor(extract(epoch FROM (now()-s.received_started_at))*1000)::text AS elapsed_ms,
         cp.serial_number,cp.current_epoch,
-        a.balance_vnd-coalesce((SELECT sum(reserved_vnd) FROM driver_charge_intents other
-          WHERE other.driver_id=s.driver_id AND other.id<>i.id
-          AND other.state NOT IN ('rejected','settled','released')),0) AS available,
+        ${availableCreditSql('s.driver_id', 'a.balance_vnd', 's.id', 'i.id')} AS available,
         (SELECT max(price_per_kwh_vnd) FROM tariff_periods t WHERE t.operator_id=st.operator_id
           AND effective_from<=(now() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date
           AND (effective_to IS NULL OR effective_to>=(now() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date)) AS price
@@ -1224,6 +1229,15 @@ export class DriverChargingService {
       )
     ).rows[0];
     if (!row || this.registry.get(row.serial_number)?.epoch !== row.current_epoch) return false;
+    if (
+      (
+        await c.query(
+          "SELECT 1 FROM session_status_history WHERE session_id=$1 AND event='UNDERFUNDED_LATE_START'",
+          [sessionId],
+        )
+      ).rowCount
+    )
+      return true;
     // WP3: the balance itself can prove credit exhaustion without inventing missing energy.
     if (BigInt(row.available) <= BigInt(this.requirePolicy().cutoffReserveVnd)) return true;
     // WP3: elapsed CSMS time includes pauses; BigInt avoids duration and interval overflow.
@@ -1295,11 +1309,15 @@ export class DriverChargingService {
     await chargeTransaction(this.db, async (c) => {
       const row = (
         await c.query<{ id: string }>(
-          'SELECT id FROM sessions WHERE transaction_no=$1 FOR UPDATE',
+          'SELECT id FROM sessions WHERE transaction_no=$1 AND received_stopped_at IS NOT NULL FOR UPDATE',
           [transactionNo],
         )
       ).rows[0];
       if (!row) return;
+      await c.query(
+        "UPDATE rfid_stop_jobs SET state='completed',updated_at=now() WHERE session_id=$1 AND state<>'completed'",
+        [row.id],
+      );
       await c.query(
         "UPDATE driver_stop_intents SET state='effect',updated_at=now() WHERE session_id=$1 AND state NOT IN ('effect','rejected')",
         [row.id],
@@ -1307,7 +1325,7 @@ export class DriverChargingService {
     });
     const row = (
       await this.db.$client.query<{ id: string }>(
-        'SELECT id FROM sessions WHERE transaction_no=$1',
+        'SELECT id FROM sessions WHERE transaction_no=$1 AND received_stopped_at IS NOT NULL',
         [transactionNo],
       )
     ).rows[0];

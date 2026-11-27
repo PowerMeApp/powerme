@@ -1,0 +1,27 @@
+export const RFID_PROTECTION = {
+  total: 1,
+  exhausted_stops: 1,
+  held_vnd: '200000',
+  limit: 50,
+  items: [
+    {
+      session_id: '881',
+      charge_point_id: '5',
+      connector_no: 1,
+      session_status: 'review',
+      credit_status: 'closed',
+      held_vnd: '200000',
+      hold_state: 'held',
+      hold_reason: 'live_start',
+      stop_state: 'exhausted',
+      stop_reason: 'credit_cutoff',
+      attempts: 4,
+      attempt_limit: 4,
+      current_command_id: '72',
+      last_error: 'stop_retry_exhausted',
+      next_attempt_at: null,
+      exhausted_at: '2026-11-27T01:00:00.000Z',
+      settlement_reason: 'account_closed',
+    },
+  ],
+};

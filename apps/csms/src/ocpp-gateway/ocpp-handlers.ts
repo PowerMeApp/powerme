@@ -16,6 +16,7 @@ import { SessionsService } from '../sessions/sessions.service.js';
 import { DriverChargingService } from '../sessions/driver-charging.service.js';
 import { FaultService } from '../stations/faults/fault.service.js';
 import type { InboundContext } from './inbound-context.js';
+import { OfflineAuthCheckService } from './offline-auth-check.service.js';
 import type {
   AuthorizeRequest,
   BootNotificationRequest,
@@ -35,6 +36,8 @@ export class OcppHandlers {
     @Optional() private readonly driverCharging?: DriverChargingService,
     /** WF-04 (FE-04). Optional để test WF-03/WF-05/T61 dựng handler không cần nó. */
     @Optional() private readonly faults?: FaultService,
+    /** T150 / BR-P52. Optional: test cũ dựng handler không có nó → không kiểm, hành vi như trước. */
+    @Optional() private readonly offlineAuth?: OfflineAuthCheckService,
   ) {}
 
   /** Trả payload CALLRESULT; ném lỗi (RPCError) để ocpp-rpc gửi CALLERROR. */
@@ -82,6 +85,20 @@ export class OcppHandlers {
           params as StartTransactionRequest,
           ctx,
         );
+        // T150: phiên bắt đầu khi trụ online → ghi đè giới hạn dự phòng (chỉ khi đang bật, sau phản hồi).
+        if (!ctx.replay.replayed)
+          this.offlineAuth?.scheduleTxProfile(
+            ctx.identity,
+            ctx.epoch,
+            (params as StartTransactionRequest).connectorId,
+            transactionId,
+          );
+        if (this.driverCharging)
+          setImmediate(() => {
+            void this.driverCharging!.onMeter(transactionId).catch(() =>
+              this.logger.error('WP3 start protection pending; recovery will retry'),
+            );
+          });
         // ADR-0012: phiên đã diễn ra thì luôn ghi nhận → luôn Accepted, kể cả idTag lạ.
         return { transactionId, idTagInfo: { status: 'Accepted' } };
       }
@@ -133,6 +150,8 @@ export class OcppHandlers {
     this.logger.log(
       `BootNotification ${ctx.identity}: ${req.chargePointVendor} ${req.chargePointModel} fw=${req.firmwareVersion ?? '?'}`,
     );
+    // T150 / BR-P52: kiểm cấu hình authorize offline SAU phản hồi Boot, không chặn nó.
+    this.offlineAuth?.scheduleAfterBoot(ctx.identity, ctx.epoch);
     return {
       status: 'Accepted',
       currentTime: ctx.receivedAt.toISOString(),

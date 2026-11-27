@@ -24,7 +24,7 @@ E = [
   ["Charge Point Status","Card Identifier","Transaction Record"],
   ["Authorization Decision","Remote Charging Command","Charge Point Configuration"]),
  ("Payment Gateway", 45, 280, 120,
-  ["Payment Result","Refund Result"], ["Payment Order","Refund Order"]),
+  ["Payment Result"], ["Payment Order"]),
  ("E-Invoice Provider", 315, 280, 120, ["Issued E-Invoice"], ["Invoice Data"]),
  ("Map & Routing Service", 270, 280, 120, ["Travel Time Estimate"], ["Route Query"]),
 ]

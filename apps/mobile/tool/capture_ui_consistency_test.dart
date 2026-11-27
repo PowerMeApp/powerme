@@ -72,7 +72,7 @@ void main() {
                 .first,
           );
         }
-        await tester.ensureVisible(target);
+        await Scrollable.ensureVisible(tester.element(target), alignment: .5);
         await tester.pumpAndSettle();
         void repaint(RenderObject object) {
           object.visitChildren(repaint);
@@ -94,7 +94,46 @@ void main() {
         });
       }
 
+      const discoveryOnly = bool.fromEnvironment('POWERME_DISCOVERY_CAPTURE');
+      if (discoveryOnly) {
+        router.go('/discover');
+        await tester.pumpAndSettle();
+        await capture(
+          'discover-origin',
+          find.byKey(const Key('open-discovery-origin')),
+        );
+        await selectConsistencyOrigin(tester);
+        await capture(
+          'discover-gps',
+          find.byKey(const Key('open-discovery-origin')),
+        );
+        router.go('/suggestions');
+        await tester.pumpAndSettle();
+        await capture(
+          'suggestions-origin',
+          find.byKey(const Key('open-discovery-origin')),
+        );
+        final field = find.byKey(const Key('suggestion-soc'));
+        await tester.scrollUntilVisible(
+          field,
+          160,
+          scrollable: find
+              .descendant(
+                of: find.byType(AppPage),
+                matching: find.byType(Scrollable),
+              )
+              .first,
+        );
+        await tester.enterText(field, '30');
+        await tester.pumpAndSettle();
+        await tapChargeKey(tester, 'submit-smart-search');
+        await capture('suggestions-results', find.byType(MetricGrid));
+        await tester.pumpWidget(const SizedBox.shrink());
+        await tester.pumpAndSettle();
+        return;
+      }
       if (width == 390) {
+        await selectConsistencyOrigin(tester);
         await tester.enterText(find.byKey(const Key('suggestion-soc')), '30');
         await tapChargeKey(tester, 'submit-smart-search');
         await capture('suggestions', find.byType(MetricGrid));

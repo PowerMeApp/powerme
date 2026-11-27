@@ -62,7 +62,7 @@ const routes = (summary: AdminSummary) => ({
 });
 
 describe('Tổng quan nền tảng (màn 27)', () => {
-  it('shows accounts, charge points and RFID cards; zero groups and billing stay hidden', async () => {
+  it('shows accounts, charge points, RFID cards and billing work; zero groups stay hidden', async () => {
     fakeCsms(routes(SUMMARY));
     renderApp('/admin', session(ADMIN));
     const users = within(await screen.findByRole('region', { name: 'Tài khoản' }));
@@ -74,12 +74,27 @@ describe('Tổng quan nền tảng (màn 27)', () => {
     expect(cps.getByText('13')).toBeInTheDocument();
     expect(cps.getByText('Đã đăng ký')).toBeInTheDocument();
     expect(cps.queryByText('Đã gỡ')).toBeNull();
+    expect(cps.getByRole('link', { name: 'Xem chi tiết →' })).toHaveAttribute(
+      'href',
+      '/admin/charge-points',
+    );
     const cards = within(screen.getByRole('region', { name: 'Thẻ RFID' }));
     expect(cards.getByText('Bị chặn')).toBeInTheDocument();
     expect(cards.queryByText('Chưa gắn tài xế')).toBeNull();
-    // D36: the billing exceptions tile comes with FE-09, even when the API has counts.
-    expect(screen.queryByRole('region', { name: /thanh toán/i })).toBeNull();
-    expect(screen.queryByText(/hoá đơn/i)).toBeNull();
+    // T161: the tile opens screen 30.
+    expect(cards.getByRole('link', { name: 'Xem chi tiết →' })).toHaveAttribute(
+      'href',
+      '/admin/rfid-cards',
+    );
+    // FE-09: the billing tile shows when there is work; only groups with a count (D36).
+    const billing = within(screen.getByRole('region', { name: 'Ngoại lệ thanh toán' }));
+    expect(billing.getByText('3')).toBeInTheDocument();
+    expect(billing.getByText('Trả muộn chờ hoàn')).toBeInTheDocument();
+    expect(billing.queryByText('Hoàn tiền thất bại')).toBeNull();
+    expect(billing.getByRole('link', { name: 'Xem chi tiết →' })).toHaveAttribute(
+      'href',
+      '/admin/billing',
+    );
   });
 
   it('shows suspended accounts when there are some', async () => {
@@ -122,7 +137,7 @@ describe('Tổng quan nền tảng (màn 27)', () => {
       rev.getByText(/40 phiên tính tiền · 400 kWh · 2 phiên không định danh/),
     ).toBeInTheDocument();
     // Top 3 by revenue, Operators without revenue left out.
-    const top = within(rev.getByRole('list', { name: 'Operator dẫn đầu' }));
+    const top = within(rev.getByRole('list', { name: 'Đơn vị vận hành dẫn đầu' }));
     expect(top.getAllByRole('listitem').map((li) => li.textContent)).toEqual([
       'B Operator 900.000 ₫',
       'D Operator 500.000 ₫',
@@ -143,14 +158,25 @@ describe('Tổng quan nền tảng (màn 27)', () => {
       ).toBe(true),
     );
     const net = within(screen.getByRole('region', { name: 'Mạng lưới trụ sạc' }));
-    expect(net.getByText(/\/ 10 trụ đang hoạt động online/)).toBeInTheDocument();
+    expect(net.getByText(/\/ 10 trụ đang hoạt động, đang kết nối/)).toBeInTheDocument();
     expect(net.getByText('Sẵn sàng')).toBeInTheDocument();
     expect(net.queryByText('Sắp trống')).toBeNull();
     expect(net.getByLabelText('4 sự cố đang mở')).toHaveClass('count-badge');
     expect(net.getByText('1 nghiêm trọng')).toBeInTheDocument();
-    const ops = within(screen.getByRole('region', { name: 'Operator và trạm sạc' }));
+    const ops = within(screen.getByRole('region', { name: 'Đơn vị vận hành và trạm sạc' }));
     expect(ops.getByText('Ngừng hoạt động')).toBeInTheDocument();
     expect(ops.getByText('Trạm sạc')).toBeInTheDocument();
     expect(ops.getByText('7')).toBeInTheDocument();
   });
+});
+
+it('WP3 shows durable exhausted RFID protection independently of revenue and billing tiles', async () => {
+  const { RFID_PROTECTION } = await import('./rfidProtectionFixture');
+  fakeCsms(routes({ ...SUMMARY, rfid_credit_protection: RFID_PROTECTION } as AdminSummary));
+  renderApp('/admin', session(ADMIN));
+  const region = within(await screen.findByRole('region', { name: 'Bảo vệ credit RFID' }));
+  expect(region.getByText('Đã hết lượt tự động dừng')).toBeInTheDocument();
+  expect(region.getByText('4 / 4')).toBeInTheDocument();
+  expect(region.getByText('72')).toBeInTheDocument();
+  expect(region.getByText('Tài khoản đã đóng, còn nghĩa vụ')).toBeInTheDocument();
 });

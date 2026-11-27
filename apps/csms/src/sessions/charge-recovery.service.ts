@@ -30,6 +30,11 @@ export class ChargeRecoveryService implements OnApplicationBootstrap, OnApplicat
     if (this.running) return;
     this.running = true;
     try {
+      await this.driverCharging.sweepRfidStops();
+    } catch {
+      this.logger.error('WP3 RFID protection scan unavailable; durable jobs retained');
+    }
+    try {
       await this.driverCharging.sweepDueModes();
     } catch {
       this.logger.error('WP3 due-mode sweep unavailable; durable sessions will retry');

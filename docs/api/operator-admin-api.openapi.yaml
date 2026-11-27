@@ -286,8 +286,9 @@ paths:
       tags: [onboarding]
       operationId: listOperatorSites
       x-roles: [operator_staff]
-      x-status: planned
-      x-owner: Ân
+      x-status: implemented
+      x-source: 'operator-api/operator-sites.ts (FE-02)'
+      x-owner: Nghĩa (FE-02)
       x-refs: [UC-OPS-01, BR-P11, 'Table 5 #19']
       summary: Các site của operator người gọi (ô chọn site trong sheet onboarding)
       parameters:
@@ -513,6 +514,51 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/InvalidTransition' }
+
+  /admin/v1/network/charge-points:
+    get:
+      tags: [monitoring]
+      operationId: listNetworkChargePoints
+      x-roles: [admin]
+      x-status: implemented
+      x-source: 'operator-api/admin-network.ts (FE-18)'
+      x-owner: Nghĩa (FE-18)
+      x-refs: [UC-ADM-07, BR-P38, BR-P39, 'Table 5 #31']
+      summary: Trụ sạc của mọi operator, trạng thái trực tiếp và sự cố đang mở (màn 31)
+      description: |
+        Cùng truy vấn và trường như listOperatorChargePoints, không giới hạn operator; thêm
+        `operator` và `open_faults`. Dữ liệu lab (operator LOADTEST01) bị loại như GET /admin/v1/summary.
+        Chưa có uptime / utilisation (BR-P43).
+      parameters:
+        - name: operator_id
+          in: query
+          schema: { $ref: '#/components/schemas/Id' }
+        - name: site_id
+          in: query
+          schema: { $ref: '#/components/schemas/Id' }
+        - name: lifecycle
+          in: query
+          schema: { $ref: '#/components/schemas/ChargePointLifecycle' }
+        - name: online
+          in: query
+          schema: { type: boolean }
+        - name: charge_point_q
+          in: query
+          schema: { type: string, maxLength: 100 }
+        - name: site_q
+          in: query
+          schema: { type: string, maxLength: 100 }
+        - $ref: '#/components/parameters/page'
+        - $ref: '#/components/parameters/pageSize'
+      responses:
+        '200':
+          description: Trụ sạc của mọi operator
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/NetworkChargePointPage' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
 
   /admin/v1/charge-points:
     get:
@@ -1393,9 +1439,10 @@ paths:
       tags: [tariffs]
       operationId: getTariffSchedule
       x-roles: [operator_staff]
-      x-status: planned
-      x-owner: Nghĩa (+ Khang)
-      x-refs: [UC-OPS-06, FR-12, BR-P02, 'Table 5 #23']
+      x-status: implemented
+      x-source: 'operator-api/operator-pricing.ts (FE-06)'
+      x-owner: Nghĩa (FE-06)
+      x-refs: [UC-OPS-06, FR-12, BR-P02, 'Table 5 #24']
       summary: Biểu giá đang hiệu lực và các bản sắp hiệu lực của operator
       parameters:
         - name: at
@@ -1415,14 +1462,19 @@ paths:
       tags: [tariffs]
       operationId: putTariffSchedule
       x-roles: [operator_staff]
-      x-status: planned
-      x-owner: Nghĩa (+ Khang)
+      x-status: implemented
+      x-source: 'operator-api/operator-pricing.ts (FE-06)'
+      x-owner: Nghĩa (FE-06)
       x-refs: [UC-OPS-06, FR-12, BR-P02, BR-P45]
       summary: Đặt biểu giá mới từ một ngày; không sửa bản đã hiệu lực
       description: |
         Các khung phải phủ kín 24 giờ, không chồng nhau; khung qua nửa đêm tách hai dòng (như bảng
         `tariff_periods`). `effective_from` ≥ hôm nay; bản cũ được đặt `effective_to` = ngày trước
         đó. Phiên đã quyết toán không đổi vì giá đã nằm trong `session_tariff_segments`.
+        FE-06: bản mới thay mọi bản bắt đầu từ ngày đó trở đi (bản chưa hiệu lực bị xoá); nếu một
+        bản đã bắt đầu hôm nay và đã có phiên dùng thì 409 `schedule_in_use`. Biểu giá theo
+        operator, 3 band (contract §6 #3). `Idempotency-Key` được nhận nhưng không lưu: gửi lại
+        cùng body cho cùng kết quả, không có `idempotency_conflict`.
       parameters:
         - $ref: '#/components/parameters/idempotencyKey'
       requestBody:
@@ -1444,7 +1496,7 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '409':
-          description: '`idempotency_conflict`'
+          description: '`schedule_in_use` (bản bắt đầu hôm nay đã có phiên dùng)'
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
@@ -1454,8 +1506,9 @@ paths:
       tags: [tariffs]
       operationId: listPromotions
       x-roles: [operator_staff]
-      x-status: planned
-      x-owner: Nghĩa (+ Khang)
+      x-status: implemented
+      x-source: 'operator-api/operator-pricing.ts (FE-06)'
+      x-owner: Nghĩa (FE-06)
       x-refs: [UC-OPS-07, FR-12]
       summary: Khuyến mãi của operator
       parameters:
@@ -1477,8 +1530,9 @@ paths:
       tags: [tariffs]
       operationId: createPromotion
       x-roles: [operator_staff]
-      x-status: planned
-      x-owner: Nghĩa (+ Khang)
+      x-status: implemented
+      x-source: 'operator-api/operator-pricing.ts (FE-06)'
+      x-owner: Nghĩa (FE-06)
       x-refs: [UC-OPS-07, FR-12]
       summary: Tạo khuyến mãi
       requestBody:
@@ -1506,8 +1560,9 @@ paths:
       tags: [tariffs]
       operationId: updatePromotion
       x-roles: [operator_staff]
-      x-status: planned
-      x-owner: Nghĩa (+ Khang)
+      x-status: implemented
+      x-source: 'operator-api/operator-pricing.ts (FE-06)'
+      x-owner: Nghĩa (FE-06)
       x-refs: [UC-OPS-07, FR-12]
       summary: Sửa khuyến mãi chưa hết hạn
       parameters:
@@ -1538,8 +1593,9 @@ paths:
       tags: [tariffs]
       operationId: deactivatePromotion
       x-roles: [operator_staff]
-      x-status: planned
-      x-owner: Nghĩa (+ Khang)
+      x-status: implemented
+      x-source: 'operator-api/operator-pricing.ts (FE-06)'
+      x-owner: Nghĩa (FE-06)
       x-refs: [UC-OPS-07, FR-12]
       summary: Ngừng khuyến mãi ngay (valid_to = bây giờ)
       parameters:
@@ -1809,10 +1865,13 @@ paths:
       tags: [accounts]
       operationId: listUsers
       x-roles: [admin]
-      x-status: planned
-      x-owner: Trí
-      x-refs: [UC-ADM-01, FR-14, BR-P05, BR-P16, 'Table 5 #28']
+      x-status: implemented
+      x-owner: Nghĩa (T161)
+      x-refs: [UC-ADM-01, UC-ADM-04, FR-14, BR-P05, BR-P16, 'Table 5 #28', 'Table 5 #30']
       summary: Tài khoản (tài xế, nhân viên operator, admin)
+      description: |
+        Làm trước cho ô chọn tài xế của màn 30 (T161): `role=driver&account_status=active&q=…`.
+        Key lạ hoặc lặp → 400 `invalid_input`. Thứ tự id giảm dần (contract §3.8b).
       parameters:
         - name: role
           in: query
@@ -1825,7 +1884,9 @@ paths:
           schema: { $ref: '#/components/schemas/Id' }
         - name: q
           in: query
-          description: Tìm theo email hoặc họ tên (chứa, không phân biệt hoa thường)
+          description: |
+            Tìm theo email hoặc họ tên (chứa, không phân biệt hoa thường; `%` `_` `\` là ký tự
+            thường), hoặc số điện thoại bằng `q` sau chuẩn hoá BE-30 (T161)
           schema: { type: string, minLength: 2, maxLength: 100 }
         - $ref: '#/components/parameters/page'
         - $ref: '#/components/parameters/pageSize'
@@ -1842,8 +1903,9 @@ paths:
       tags: [accounts]
       operationId: createStaffUser
       x-roles: [admin]
-      x-status: planned
-      x-owner: Trí
+      x-status: implemented
+      x-source: 'operator-api/admin-user-actions.ts (FE-19)'
+      x-owner: Nghĩa (FE-19)
       x-refs: [UC-ADM-01, UC-ADM-02, FR-14, BR-P16]
       summary: Tạo tài khoản nhân viên operator hoặc admin
       description: |
@@ -1870,7 +1932,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
         '409':
-          description: '`email_taken`'
+          description: '`email_taken`, `phone_taken`'
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
@@ -1880,8 +1942,9 @@ paths:
       tags: [accounts]
       operationId: getUser
       x-roles: [admin]
-      x-status: planned
-      x-owner: Trí
+      x-status: implemented
+      x-source: 'operator-api/admin-user-actions.ts (FE-19)'
+      x-owner: Nghĩa (FE-19)
       x-refs: [UC-ADM-01]
       summary: Một tài khoản
       parameters:
@@ -1899,8 +1962,9 @@ paths:
       tags: [accounts]
       operationId: updateUser
       x-roles: [admin]
-      x-status: planned
-      x-owner: Trí
+      x-status: implemented
+      x-source: 'operator-api/admin-user-actions.ts (FE-19)'
+      x-owner: Nghĩa (FE-19)
       x-refs: [UC-ADM-01]
       summary: Sửa họ tên, số điện thoại
       parameters:
@@ -1926,8 +1990,9 @@ paths:
       tags: [accounts]
       operationId: setUserRole
       x-roles: [admin]
-      x-status: planned
-      x-owner: Trí
+      x-status: implemented
+      x-source: 'operator-api/admin-user-actions.ts (FE-19)'
+      x-owner: Nghĩa (FE-19)
       x-refs: [UC-ADM-02, FR-14, BR-P16]
       summary: Đổi role giữa operator_staff và admin, hoặc đổi operator / staff_role
       description: |
@@ -1962,8 +2027,9 @@ paths:
       tags: [accounts]
       operationId: lockUser
       x-roles: [admin]
-      x-status: planned
-      x-owner: Trí
+      x-status: implemented
+      x-source: 'operator-api/admin-user-actions.ts (FE-19)'
+      x-owner: Nghĩa (FE-19)
       x-refs: [UC-ADM-01, F-13]
       summary: Khoá tài khoản (active → suspended); đăng nhập và mọi request sau đó bị 403
       parameters:
@@ -1994,8 +2060,9 @@ paths:
       tags: [accounts]
       operationId: unlockUser
       x-roles: [admin]
-      x-status: planned
-      x-owner: Trí
+      x-status: implemented
+      x-source: 'operator-api/admin-user-actions.ts (FE-19)'
+      x-owner: Nghĩa (FE-19)
       x-refs: [UC-ADM-01, F-13]
       summary: Mở khoá (suspended → active); tài khoản closed không mở lại được
       parameters:
@@ -2022,8 +2089,9 @@ paths:
       tags: [accounts]
       operationId: listOperators
       x-roles: [admin]
-      x-status: planned
-      x-owner: Trí
+      x-status: implemented
+      x-source: 'operator-api/admin-operators.ts (FE-18)'
+      x-owner: Nghĩa (FE-18)
       x-refs: [UC-ADM-02, BR-P11, BR-P16]
       summary: Operator đối tác (để gán nhân viên và lọc báo cáo)
       parameters:
@@ -2999,7 +3067,7 @@ components:
             - type: 'null'
     ChargePoint:
       type: object
-      required: [id, serial_number, display_code, lifecycle, connected, is_online, last_message_at, site, connectors]
+      required: [id, serial_number, display_code, lifecycle, connected, is_online, last_message_at, site, connectors, offline_card_risk, offline_card_risk_reason]
       properties:
         id: { $ref: '#/components/schemas/Id' }
         serial_number: { type: string, description: 'OCPP identity, cuối URL /ocpp/{serial}' }
@@ -3014,6 +3082,42 @@ components:
             - $ref: '#/components/schemas/SiteRef'
             - type: 'null'
         connectors: { type: array, maxItems: 2, items: { $ref: '#/components/schemas/ConnectorLive' } }
+        offline_card_risk:
+          type: boolean
+          description: >-
+            T150 / BR-P52 — true khi CSMS không xác nhận được LocalAuthorizeOffline, LocalPreAuthorize và
+            AllowOfflineTxForUnknownId đều false (bị Rejected / NotSupported, key không có, timeout, hoặc
+            trụ chưa từng được kiểm). Thẻ lạ / thẻ bị khoá có thể sạc khi trụ mất mạng.
+        offline_card_risk_reason:
+          type: [string, 'null']
+          enum: [not_checked, no_response, key_missing, rejected, not_supported, reboot_required, change_failed, null]
+          description: Lý do ngắn; null khi offline_card_risk = false
+    OfflineAuthCheck:
+      type: object
+      description: T150 — lần kiểm cấu hình authorize offline mới nhất (sau BootNotification, migration 0030)
+      required: [checked_at, epoch, config_values, change_results, supported_feature_profiles, fallback_profile_status]
+      properties:
+        checked_at: { $ref: '#/components/schemas/Timestamp' }
+        epoch: { type: [integer, 'null'] }
+        config_values:
+          type: [object, 'null']
+          description: 'key → {value, readonly}; null = trụ không trả key (unknownKey). null cả đối tượng = GetConfiguration không có phản hồi'
+          additionalProperties:
+            oneOf:
+              - type: object
+                required: [value, readonly]
+                properties:
+                  value: { type: [string, 'null'] }
+                  readonly: { type: boolean }
+              - type: 'null'
+        change_results:
+          type: object
+          description: 'key → Accepted | Rejected | RebootRequired | NotSupported | timeout | error | skipped (đã là false)'
+          additionalProperties: { type: string }
+        supported_feature_profiles: { type: [string, 'null'] }
+        fallback_profile_status:
+          type: [string, 'null']
+          description: 'TxDefaultProfile dự phòng (OFFLINE_TX_FALLBACK_S > 0): status OCPP, unsupported (không có SmartCharging), null (tắt / không cần)'
     ChargePointPage:
       allOf:
         - $ref: '#/components/schemas/PageMeta'
@@ -3021,16 +3125,41 @@ components:
           required: [items]
           properties:
             items: { type: array, items: { $ref: '#/components/schemas/ChargePoint' } }
+    NetworkChargePoint:
+      allOf:
+        - $ref: '#/components/schemas/ChargePoint'
+        - type: object
+          required: [operator, open_faults]
+          properties:
+            operator: { $ref: '#/components/schemas/OperatorRef' }
+            open_faults:
+              type: object
+              required: [total, top_severity]
+              properties:
+                total: { type: integer, minimum: 0 }
+                top_severity: { type: [string, 'null'], enum: [critical, major, minor, none, null] }
+    NetworkChargePointPage:
+      allOf:
+        - $ref: '#/components/schemas/PageMeta'
+        - type: object
+          required: [items]
+          properties:
+            items: { type: array, items: { $ref: '#/components/schemas/NetworkChargePoint' } }
     ChargePointDetail:
       allOf:
         - $ref: '#/components/schemas/ChargePoint'
         - type: object
-          required: [open_faults, recent_commands]
+          required: [open_faults, recent_commands, rfid_credit_protection]
           properties:
+            rfid_credit_protection: { $ref: '#/components/schemas/RfidCreditProtection' }
             firmware_version: { type: [string, 'null'] }
             rated_power_kw: { type: [number, 'null'] }
             reports_soc: { type: boolean, description: 'BR-P40 — trụ có gửi SoC' }
             supports_reservation: { type: boolean }
+            offline_auth_check:
+              oneOf:
+                - $ref: '#/components/schemas/OfflineAuthCheck'
+                - type: 'null'
             open_faults: { type: array, items: { $ref: '#/components/schemas/Fault' } }
             recent_commands:
               type: array
@@ -3077,7 +3206,10 @@ components:
       required: [serial_number, site_id, connectors]
       properties:
         serial_number: { type: string, pattern: '^[A-Za-z0-9._-]{3,25}$' }
-        site_id: { $ref: '#/components/schemas/Id' }
+        site_id:
+          type: integer
+          minimum: 1
+          description: 'Code hiện tại (parseOnboardBody) chỉ nhận số nguyên, không nhận Id dạng chuỗi (FE-02)'
         connectors:
           type: array
           minItems: 1
@@ -3648,7 +3780,8 @@ components:
             số phiên; lý do = `charge_settlement_jobs.reason` khi job `pending` (vd
             `promotion_unsupported`, `late_start_operator_review`, `missing_meter`,
             `invalid_energy`, `policy_unconfigured`), `ineligible` khi không có job hoặc job
-            `ineligible`, `posted_without_debit` khi job `posted` mà không có debit (lệch sổ).
+            `ineligible` khác; riêng `ineligible/account_closed` giữ `account_closed` (T158,
+            dừng tự thử lại, chưa thu nợ); `posted_without_debit` khi job `posted` mà không có debit (lệch sổ).
           required: [session_count, by_reason]
           properties:
             session_count: { type: integer, minimum: 0 }
@@ -3878,10 +4011,43 @@ components:
         status: { type: string, enum: [active, blocked] }
 
     # ---- admin tóm tắt / ngoại lệ thanh toán ---------------------------------------------------
+    RfidCreditProtection:
+      type: object
+      required: [total, exhausted_stops, held_vnd, limit, items]
+      properties:
+        total: { type: integer, minimum: 0 }
+        exhausted_stops: { type: integer, minimum: 0 }
+        held_vnd: { type: string, pattern: '^[0-9]+$' }
+        limit: { type: integer, const: 50 }
+        items:
+          type: array
+          maxItems: 50
+          items:
+            type: object
+            required: [session_id, charge_point_id, connector_no, session_status, credit_status, held_vnd, hold_state, hold_reason, stop_state, stop_reason, attempts, attempt_limit, current_command_id, last_error, next_attempt_at, exhausted_at, settlement_reason]
+            properties:
+              session_id: { type: string }
+              charge_point_id: { type: string }
+              connector_no: { type: integer }
+              session_status: { type: string }
+              credit_status: { type: [string, 'null'] }
+              held_vnd: { type: [string, 'null'], description: Initial budget; collection total counts only held rows }
+              hold_state: { type: [string, 'null'], enum: [held, released, null] }
+              hold_reason: { type: [string, 'null'] }
+              stop_state: { type: [string, 'null'], enum: [pending, inflight, awaiting_stop, retry, exhausted, completed, null] }
+              stop_reason: { type: [string, 'null'] }
+              attempts: { type: [integer, 'null'], minimum: 0 }
+              attempt_limit: { type: [integer, 'null'], minimum: 1 }
+              current_command_id: { type: [string, 'null'] }
+              last_error: { type: [string, 'null'] }
+              next_attempt_at: { type: [string, 'null'], format: date-time }
+              exhausted_at: { type: [string, 'null'], format: date-time }
+              settlement_reason: { type: [string, 'null'] }
     AdminSummary:
       type: object
-      required: [operators, sites, network, users, charge_points, rfid_cards, billing_exceptions]
+      required: [operators, sites, network, users, charge_points, rfid_cards, billing_exceptions, rfid_credit_protection]
       properties:
+        rfid_credit_protection: { $ref: '#/components/schemas/RfidCreditProtection' }
         operators:
           type: object
           description: 'Thống kê chung (20/11): số Operator, trong đó đang hoạt động'
