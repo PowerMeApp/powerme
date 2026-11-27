@@ -10,6 +10,10 @@
 // một đèn key ấm, một đèn fill lạnh, một đèn viền phía sau màu theo "tâm trạng" của trụ. Vật phát sáng
 // (đèn LED, vòng khay, hạt năng lượng, đèn xe) có màu HDR > 1 để bloom (Effects.jsx) bắt được; bề mặt
 // thường giữ dưới ngưỡng.
+//
+// Cảnh sáng (QA-06, prop `light`): không có nền (canvas trong suốt, lộ gradient Hero Sky của khung CSS),
+// đèn studio sáng hơn, sàn trắng phản chiếu nhạt, bóng tiếp xúc nhẹ hơn; quầng màu trạng thái vẽ bằng
+// pha trộn alpha thường (premultiplied) vì cộng sáng (additive) không thấy được trên nền sáng.
 import { useFrame, useThree } from '@react-three/fiber';
 import { useEffect, useMemo, useRef } from 'react';
 import * as THREE from 'three';
@@ -17,7 +21,7 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
 import Car, { PORT_LOCAL, WHEEL_R } from './Car.jsx';
-import { BG, ContactShadows, Floor } from './Floor.jsx';
+import { BG, ContactShadows, Floor, LIGHT_FOG } from './Floor.jsx';
 import {
   MOOD_GAIN,
   clamp01,
@@ -67,8 +71,10 @@ const glowFrag = /* glsl */ `
     #include <colorspace_fragment>
   }
 `;
-function glowMaterial(pow) {
+function glowMaterial(pow, light) {
   return new THREE.ShaderMaterial({
+    // nền sáng: trộn alpha thường (màu đã nhân alpha) thay vì cộng sáng
+    ...(light && { blending: THREE.NormalBlending, premultipliedAlpha: true }),
     uniforms: {
       uColor: { value: new THREE.Color('#7d8da3') },
       uGain: { value: 0.3 },
@@ -78,7 +84,7 @@ function glowMaterial(pow) {
     fragmentShader: glowFrag,
     transparent: true,
     depthWrite: false,
-    blending: THREE.AdditiveBlending,
+    ...(!light && { blending: THREE.AdditiveBlending }),
   });
 }
 
@@ -197,19 +203,20 @@ function useMaterials() {
 }
 
 // ── Ánh sáng studio, nền gần OLED, fog ─────────────────────────────────────
-function Studio({ store, M }) {
+function Studio({ store, M, light }) {
   const { gl, scene } = useThree();
   const rim = useRef();
   useEffect(() => {
     const pm = new THREE.PMREMGenerator(gl);
     const env = pm.fromScene(new RoomEnvironment(), 0.04).texture;
     scene.environment = env;
-    scene.environmentIntensity = 0.55;
+    scene.environmentIntensity = light ? 0.95 : 0.55;
     // envMapIntensity riêng chỉ có hiệu lực khi vật liệu có envMap của chính nó: kính cabin cần phản
     // chiếu studio yếu hơn hẳn (kính tối), nên gán env trực tiếp cho nó.
     M.cabin.envMap = env;
-    scene.background = new THREE.Color(BG);
-    scene.fog = new THREE.Fog(BG, 13, 26);
+    // cảnh sáng: không nền (canvas alpha) → gradient Hero Sky của CSS hiện qua
+    scene.background = light ? null : new THREE.Color(BG);
+    scene.fog = new THREE.Fog(light ? LIGHT_FOG : BG, 13, 26);
     return () => {
       scene.environment = null;
       M.cabin.envMap = null;
@@ -218,7 +225,7 @@ function Studio({ store, M }) {
       env.dispose();
       pm.dispose();
     };
-  }, [gl, scene, M]);
+  }, [gl, scene, M, light]);
   const target = useMemo(() => new THREE.Color(), []);
   useFrame((_, dt) => {
     const s = store.get();
@@ -229,9 +236,9 @@ function Studio({ store, M }) {
   });
   return (
     <>
-      <ambientLight intensity={0.05} />
-      <directionalLight position={[3.5, 7, 6]} intensity={1.0} color="#fff4e8" />
-      <directionalLight position={[-6, 3.5, 2.5]} intensity={0.3} color="#cfe0ff" />
+      <ambientLight intensity={light ? 0.45 : 0.05} />
+      <directionalLight position={[3.5, 7, 6]} intensity={light ? 2.1 : 1.0} color="#fff4e8" />
+      <directionalLight position={[-6, 3.5, 2.5]} intensity={light ? 0.9 : 0.3} color="#dbe7ff" />
       {/* đèn viền phía sau, màu theo trạng thái → mép thân trụ ánh màu */}
       <pointLight ref={rim} position={[0, 2.2, -1.7]} distance={7} decay={1.6} intensity={5} />
     </>
@@ -239,22 +246,22 @@ function Studio({ store, M }) {
 }
 
 // ── Sàn, quầng sáng sau trụ, vòng sàn ─────────────────────────────────────
-function Stage({ store, high }) {
+function Stage({ store, high, light }) {
   const halo = useRef();
   const { camera } = useThree();
   const mats = useMemo(
     () => ({
-      halo: glowMaterial(2.3),
-      pool: glowMaterial(1.8),
+      halo: glowMaterial(2.3, light),
+      pool: glowMaterial(1.8, light),
       ring: new THREE.MeshBasicMaterial({
         color: '#7d8da3',
         transparent: true,
         opacity: 0.3,
-        blending: THREE.AdditiveBlending,
+        blending: light ? THREE.NormalBlending : THREE.AdditiveBlending,
         depthWrite: false,
       }),
     }),
-    [],
+    [light],
   );
   useEffect(() => () => Object.values(mats).forEach((m) => m.dispose()), [mats]);
   const c = useMemo(() => new THREE.Color(), []);
@@ -268,8 +275,11 @@ function Stage({ store, high }) {
     gain.current = damp(gain.current, MOOD_GAIN[mood], 2.2, dt);
     for (const m of [mats.halo, mats.pool])
       m.uniforms.uColor.value.lerp(c, 1 - Math.exp(-2.5 * dt));
-    mats.halo.uniforms.uGain.value = 0.6 * gain.current * breathe;
-    mats.pool.uniforms.uGain.value = 0.3 * gain.current * breathe;
+    // nền sáng: quầng nhẹ hơn để chỉ "ửng" màu trạng thái, không thành mảng màu
+    const hk = light ? 0.42 : 0.6;
+    const pk = light ? 0.38 : 0.3;
+    mats.halo.uniforms.uGain.value = hk * gain.current * breathe;
+    mats.pool.uniforms.uGain.value = pk * gain.current * breathe;
     mats.ring.color.copy(mats.halo.uniforms.uColor.value);
     mats.ring.opacity = 0.1 + 0.32 * gain.current * breathe;
     // quầng luôn quay mặt về camera (billboard) để kéo xoay vẫn tròn
@@ -277,7 +287,7 @@ function Stage({ store, high }) {
   });
   return (
     <>
-      <Floor high={high} />
+      <Floor high={high} light={light} />
       <mesh rotation-x={-Math.PI / 2} position-y={0.004} material={mats.pool} renderOrder={2}>
         <planeGeometry args={[7, 7]} />
       </mesh>
@@ -858,17 +868,17 @@ function Rig() {
   return null;
 }
 
-export default function Scene({ store, high }) {
+export default function Scene({ store, high, light }) {
   const M = useMaterials();
   const stage = useRef();
   return (
     <>
-      <Studio store={store} M={M} />
+      <Studio store={store} M={M} light={light} />
       <Rig />
       <group ref={stage}>
-        <Stage store={store} high={high} />
+        <Stage store={store} high={high} light={light} />
       </group>
-      <ContactShadows hide={stage} every={high ? 1 : 3} />
+      <ContactShadows hide={stage} every={high ? 1 : 3} opacity={light ? 0.6 : 0.92} />
       <Station store={store} M={M} />
       <Bay id={1} store={store} M={M} />
       <Bay id={2} store={store} M={M} />

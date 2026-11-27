@@ -1,0 +1,320 @@
+/*
+  bevel-tokens.css — token giao diện dùng chung cho trang tổng "/" và trang từng trụ "/tru/<cpId>"
+  của trụ giả lập D1 (QA-06, style tham chiếu "Bevel": "morning metrics in cloudlight").
+
+  LÀM GÌ: khai báo màu, chữ, khoảng cách, bo góc, bóng thành CSS custom properties trên :root, kèm
+    các thành phần dùng chung (capsule nav, Cloud Card, pill, chấm trạng thái, chân trang).
+  QUY TẮC (theo style): nền trắng, thẻ #ebf0f8 không viền không bóng, tiêu đề 600 tracking âm, nút
+    pill bo 128px. Màu dữ liệu (Green/Blue/Lilac/Coral/Gold) CHỈ cho biểu đồ, chấm trạng thái, huy
+    hiệu nhỏ — không làm nền trang hay nút chính. Không tải font/CDN: chỉ font hệ thống.
+  ALIAS CŨ: --bg, --panel, --text, --muted, --ok, --warn, --danger, --st-*, --lt-* vẫn còn (trỏ vào
+    token mới) để tru-sac.css, bundle 3D (motion.js đọc --lt-*) và mã JS cũ chạy không đổi.
+  SÁNG/TỐI: sáng là mặc định; tối theo prefers-color-scheme hoặc ?theme=dark (data-theme).
+*/
+
+:root {
+  color-scheme: light;
+  /* ── Màu nền / chữ ── */
+  --paper: #ffffff;
+  --charcoal: #1f2025;
+  --ink: #222326;
+  --cloud: #ebf0f8;
+  --gray: #747679;
+  --hair: rgba(34, 35, 38, 0.08);
+  --hero-sky: linear-gradient(180deg, #d2e5ff 0%, #fff9ee 100%);
+  --nav-bg: rgba(255, 255, 255, 0.78);
+  --on-charcoal: #ebf0f8;
+  /* ── Màu dữ liệu (chỉ hình hoá số liệu, chấm, huy hiệu nhỏ) ── */
+  --gold: #ffca00;
+  --coral: #ffab94;
+  --green: #31ce01;
+  --blue: #415eee;
+  --lilac: #b9a6ff;
+  /* Đỏ cảnh báo: style không có token đỏ; dùng một đỏ hồng dịu cho lỗi / mất mạng / nút nguy hiểm */
+  --alert: #e5484d;
+  --alert-soft: rgba(229, 72, 77, 0.1);
+  --alert-line: rgba(229, 72, 77, 0.38);
+  /* ── Chữ ── */
+  --font:
+    -apple-system, BlinkMacSystemFont, 'Segoe UI Variable Text', 'Segoe UI', system-ui, sans-serif;
+  --mono: ui-monospace, 'Cascadia Mono', 'SF Mono', Consolas, monospace;
+  --track-tight: -0.03em;
+  /* ── Khoảng cách (đơn vị 8px) ── */
+  --s1: 8px;
+  --s2: 16px;
+  --s3: 24px;
+  --s4: 32px;
+  --s5: 40px;
+  --s6: 48px;
+  --s10: 80px;
+  /* ── Bo góc ── */
+  --r-card: 24px;
+  --r-card-lg: 32px;
+  --r-img: 16px;
+  --r-nav: 32px;
+  --r-btn: 128px;
+  --r-pill: 9999px;
+  /* ── Bóng ── */
+  --shadow-md: 0 0 16px -8px rgba(0, 0, 0, 0.25);
+  --shadow-md2: 0 2px 16px 0 rgba(0, 0, 0, 0.15);
+  --shadow-nav: 0 1px 2px rgba(0, 0, 0, 0.04), 0 8px 24px -12px rgba(0, 0, 0, 0.14);
+  --inset-hi: inset 0 1px 0 rgba(255, 255, 255, 0.9);
+
+  /* ── Trạng thái OCPP → màu dữ liệu (chấm, vòng, đèn 3D/2D). Mỗi trạng thái một màu riêng;
+        hai "tạm dừng" cùng vàng, phân biệt bằng kiểu nháy + nhãn. ── */
+  --st-Available: var(--blue);
+  --st-Preparing: var(--lilac);
+  --st-Charging: var(--green);
+  --st-SuspendedEV: var(--gold);
+  --st-SuspendedEVSE: var(--gold);
+  --st-Finishing: var(--coral);
+  --st-Faulted: var(--alert);
+  --st-Unavailable: #a5a7ab;
+  --st-Reserved: #2cc3b8;
+  --net-online: var(--green);
+  --net-connecting: var(--gold);
+  --net-offline: var(--alert);
+  /* Đèn LED trong hình 3D/2D (motion.js đọc các biến này; phải là mã hex cụ thể sau khi tính) */
+  --lt-Available: #415eee;
+  --lt-Preparing: #b9a6ff;
+  --lt-Charging: #31ce01;
+  --lt-SuspendedEV: #ffca00;
+  --lt-SuspendedEVSE: #ffca00;
+  --lt-Finishing: #ffab94;
+  --lt-Faulted: #e5484d;
+  --lt-Unavailable: #a5a7ab;
+  --lt-Reserved: #2cc3b8;
+
+  /* ── Alias cho mã cũ ── */
+  --bg: var(--paper);
+  --panel: var(--paper);
+  --panel-2: var(--cloud);
+  --line: var(--hair);
+  --text: var(--ink);
+  --muted: var(--gray);
+  --accent: var(--charcoal);
+  --accent-text: var(--on-charcoal);
+  --ok: var(--green);
+  --warn: var(--gold);
+  --danger: var(--alert);
+  --log-out: var(--blue);
+  --log-in: var(--green);
+  --log-err: var(--alert);
+  /* Hình 3D: cảnh sáng (Hero Sky) hay tối (thẻ Charcoal) — bundle tru3d đọc lúc gắn */
+  --t3-scene: light;
+
+  font-size: 16px;
+}
+
+/* Tối giản: đảo token. Sáng vẫn là mặc định và là bản đẹp nhất. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    color-scheme: dark;
+    --paper: #111215;
+    --charcoal: #ebf0f8;
+    --ink: #f2f4f8;
+    --cloud: #1c1e23;
+    --gray: #9b9ea4;
+    --hair: rgba(255, 255, 255, 0.08);
+    --hero-sky: linear-gradient(180deg, #1a2333 0%, #15161a 100%);
+    --nav-bg: rgba(28, 30, 35, 0.78);
+    --on-charcoal: #1f2025;
+    --alert: #ff6b70;
+    --alert-soft: rgba(255, 107, 112, 0.12);
+    --alert-line: rgba(255, 107, 112, 0.45);
+    --shadow-nav: 0 1px 2px rgba(0, 0, 0, 0.3), 0 8px 24px -12px rgba(0, 0, 0, 0.6);
+    --inset-hi: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+    --t3-scene: dark;
+  }
+}
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --paper: #111215;
+  --charcoal: #ebf0f8;
+  --ink: #f2f4f8;
+  --cloud: #1c1e23;
+  --gray: #9b9ea4;
+  --hair: rgba(255, 255, 255, 0.08);
+  --hero-sky: linear-gradient(180deg, #1a2333 0%, #15161a 100%);
+  --nav-bg: rgba(28, 30, 35, 0.78);
+  --on-charcoal: #1f2025;
+  --alert: #ff6b70;
+  --alert-soft: rgba(255, 107, 112, 0.12);
+  --alert-line: rgba(255, 107, 112, 0.45);
+  --shadow-nav: 0 1px 2px rgba(0, 0, 0, 0.3), 0 8px 24px -12px rgba(0, 0, 0, 0.6);
+  --inset-hi: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  --t3-scene: dark;
+}
+
+/* ── Nền chung ─────────────────────────────────────────────────────────── */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+html {
+  -webkit-text-size-adjust: 100%;
+}
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font);
+  font-size: 1rem;
+  line-height: 1.4;
+  -webkit-font-smoothing: antialiased;
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+h1,
+h2,
+h3 {
+  font-weight: 600;
+  letter-spacing: var(--track-tight);
+  color: var(--ink);
+}
+
+/* ── Capsule nav nổi ───────────────────────────────────────────────────── */
+.bv-nav {
+  position: sticky;
+  top: var(--s2);
+  z-index: 10;
+  margin: var(--s2) auto 0;
+  width: min(100% - 2 * var(--s3), 1520px);
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--s1) var(--s2);
+  padding: 10px 10px 10px var(--s3);
+  border-radius: var(--r-nav);
+  background: var(--nav-bg);
+  box-shadow: var(--shadow-nav);
+  backdrop-filter: blur(16px) saturate(1.4);
+  -webkit-backdrop-filter: blur(16px) saturate(1.4);
+}
+.bv-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 1.125rem;
+  font-weight: 500;
+  letter-spacing: 0.162px;
+  color: var(--ink);
+  white-space: nowrap;
+}
+.bv-mark {
+  width: 22px;
+  height: 22px;
+  border-radius: 7px;
+  background: var(--charcoal);
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+}
+.bv-mark::after {
+  content: '';
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--green);
+}
+.bv-spacer {
+  flex: 1;
+}
+
+/* ── Cloud Feature Card ────────────────────────────────────────────────── */
+.bv-card {
+  background: var(--cloud);
+  border-radius: var(--r-card);
+  padding: var(--s4);
+  border: 0;
+  box-shadow: none;
+}
+
+/* ── Chấm + viên trạng thái ────────────────────────────────────────────── */
+.bv-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--c, var(--gray));
+  flex: none;
+  display: inline-block;
+}
+/* Viên trạng thái: nền trắng, chấm màu dữ liệu, chữ Ink (màu không mang chữ → luôn đọc rõ) */
+.bv-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 12px 4px 10px;
+  border-radius: var(--r-pill);
+  background: var(--paper);
+  color: var(--ink);
+  font-size: 0.875rem;
+  font-weight: 500;
+  line-height: 1.3;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.bv-badge::before {
+  content: '';
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--c, var(--gray));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--c, var(--gray)) 22%, transparent);
+  flex: none;
+}
+
+/* ── Chân trang "Mô phỏng" dạng capsule tối nổi ─────────────────────────── */
+.bv-foot {
+  position: fixed;
+  left: 50%;
+  bottom: var(--s2);
+  transform: translateX(-50%);
+  z-index: 9;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  max-width: calc(100% - 2 * var(--s2));
+  padding: 8px 18px 8px 14px;
+  border-radius: var(--r-pill);
+  background: var(--charcoal);
+  color: var(--on-charcoal);
+  font-size: 0.8125rem;
+  font-weight: 500;
+  box-shadow: var(--shadow-md2);
+  text-align: center;
+}
+.bv-foot::before {
+  content: '';
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--gold);
+  flex: none;
+}
+
+/* Điện thoại: chân trang nằm cuối trang (không nổi) để không che nội dung */
+@media (max-width: 767px) {
+  body {
+    padding-bottom: var(--s2) !important;
+  }
+  .bv-foot {
+    position: static;
+    transform: none;
+    display: flex;
+    width: max-content;
+    max-width: calc(100% - 2 * var(--s2));
+    margin: var(--s5) auto 0;
+    text-align: left;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
