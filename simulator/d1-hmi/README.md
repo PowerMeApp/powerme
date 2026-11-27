@@ -86,6 +86,25 @@ Dựng một CSMS ocpp-rpc tối thiểu trong chính script, chạy `server.mjs
 | `rfid-*.test.mjs` | Test đầu đọc: hành động, loopback OCPP + route HTTP (cả `/api/<cpId>/swipeReader` nhiều trụ), giao diện |
 | `docs/` | Ảnh chụp HMI và trang tổng/trang trụ |
 
+## Bật 13 trụ app mẫu trên máy mình (QA-07) — cho người test app và đầu đọc RFID
+
+Seed app có 14 trạm nhưng chỉ `PMAPP-TD-04A` luôn nối, nên app thấy 13 trạm còn lại offline. `app-stations.mjs` bật 13 trụ `PMAPP-*` trong **một** tiến trình HMI, nối vào CSMS bạn chọn, rồi cài vài ngoại lệ (1 súng lỗi, 1 súng đang sạc, 1 súng đang cắm, 1 trụ offline) để app thấy đủ trạng thái.
+
+```bash
+npm ci && npm run sim:tru3d:build            # một lần
+# Staging: app release trên điện thoại thấy các trụ này. Mật khẩu trụ nhận riêng từ Trí.
+CP_PASSWORD=<mật khẩu trụ> node simulator/d1-hmi/app-stations.mjs --url wss://<staging>/ocpp
+# Local (run-demo --port-offset 40): mật khẩu = DEMO_CHARGE_POINT_PASSWORD của bản local
+CP_PASSWORD=$DEMO_CHARGE_POINT_PASSWORD node simulator/d1-hmi/app-stations.mjs --url ws://localhost:9040/ocpp
+```
+
+Mở `http://127.0.0.1:8141/` (trang tổng) hoặc `/tru/<serial>` (từng trụ, có ô **Đầu đọc RFID USB** cho từng súng). Tuỳ chọn: `--sach` (không ngoại lệ), `--off none` (bật cả 13), `--only PMAPP-Q3-01A` (thử một trụ), `--port`.
+
+- **Vì sao chạy trên máy mình, không host:** đầu đọc RFID USB "gõ phím" vào trình duyệt của máy cắm nó, và `swipeReader` chỉ nhận yêu cầu loopback (#214).
+- **Mật khẩu:** một mật khẩu chung cho 13 trụ, đặt trong DB của CSMS đích (staging: Trí đặt 27/11, khác mật khẩu trụ demo, gốc ở `~/.powerme-app-stations-password` trên VM; local: `seed`). Chỉ đi qua biến môi trường, không dán chat/commit.
+- **Khi tắt:** các trụ mất kết nối; sau khoảng 15 phút CSMS mở cảnh báo Offline cho từng trụ (BR-P50) trên màn 21. Trước buổi demo hãy tắt sớm và đóng các cảnh báo đó.
+- Hai trụ 1 súng (`PMAPP-PN-01A`, `PMAPP-Q1-01B`): simulator vẫn giả 2 súng; CSMS bỏ qua súng không có trong DB.
+
 ## Trang từng trụ — cho người test app tài xế (QA-03)
 
 Khối đầu trang **"Phiên sạc trên trụ này"** có một thẻ cho mỗi súng:
