@@ -24,6 +24,8 @@ import type {
   FaultListStatus,
   LoginRequest,
   LoginResponse,
+  OnboardRequest,
+  OnboardResult,
   OperatorFaultList,
   RefreshResponse,
   RfidCard,
@@ -40,6 +42,7 @@ import type {
   RevenueQuery,
   RevenueReport,
   SessionsActiveError,
+  SitePage,
   TransactionPage,
   TransactionQuery,
   UpdateRfidCardRequest,
@@ -225,6 +228,13 @@ export const api = createApi({
       query: (id) => `operator/v1/charge-points/${id}`,
       providesTags: ['ChargePoint', 'Fault'],
     }),
+    // Screen 19 (FE-02, UC-OPS-01): the Operator's Charging Stations for the station picker, and
+    // the onboarding itself. A new charge point shows on screens 17 / 18 as awaiting connection.
+    operatorSites: b.query<SitePage, void>({ query: () => 'operator/v1/sites?page_size=100' }),
+    onboardChargePoint: b.mutation<OnboardResult, OnboardRequest>({
+      query: (body) => ({ url: 'operator/v1/charge-points/onboard', method: 'POST', body }),
+      invalidatesTags: ['ChargePoint', 'Summary'],
+    }),
     // Screen 23 (FE-12, UC-OPS-05): unattributed / review queues and the Operator's decisions.
     // A decision also changes the queue counts on screen 17.
     operatorSessions: b.query<SessionQueuePage, { queue: SessionQueue; page: number }>({
@@ -327,6 +337,8 @@ export const {
   useOperatorSummaryQuery,
   useOperatorChargePointsQuery,
   useOperatorChargePointQuery,
+  useOperatorSitesQuery,
+  useOnboardChargePointMutation,
   useOperatorSessionsQuery,
   useAssignSessionMutation,
   useCloseSessionMutation,
