@@ -8,6 +8,7 @@ import { useAppSelector } from '../core/store/store';
 import { AppShell } from '../layouts/AppShell';
 import { AdminHomePage } from '../pages/admin/AdminHomePage';
 import { AdminRevenuePage } from '../pages/admin/AdminRevenuePage';
+import { BillingExceptionsPage } from '../pages/admin/BillingExceptionsPage';
 import { DeviceRegistryPage } from '../pages/admin/DeviceRegistryPage';
 import { NetworkMonitorPage } from '../pages/admin/NetworkMonitorPage';
 import { RfidCardsPage } from '../pages/admin/RfidCardsPage';
@@ -65,6 +66,7 @@ export const routes: RouteObject[] = [
       { path: 'charge-points', element: <DeviceRegistryPage /> }, // 29
       { path: 'rfid-cards', element: <RfidCardsPage /> }, // 30
       { path: 'network', element: <NetworkMonitorPage /> }, // 31
+      { path: 'billing', element: <BillingExceptionsPage /> }, // 32 (+ 33 sheets)
       { path: 'revenue', element: <AdminRevenuePage /> }, // 35
       { path: '*', element: <Navigate to="/admin" replace /> },
     ],

@@ -13,6 +13,9 @@ import {
 } from '@reduxjs/toolkit/query/react';
 import type {
   AdminSummary,
+  BillingExceptions,
+  InvoiceRetryResult,
+  RecheckResult,
   ApiErrorBody,
   ChargePointLifecycle,
   ChargePointPage,
@@ -197,6 +200,7 @@ export const api = createApi({
     'Tariff',
     'Promotion',
     'User',
+    'Billing',
   ],
   endpoints: (b) => ({
     login: b.mutation<LoginResponse, LoginRequest>({
@@ -447,6 +451,32 @@ export const api = createApi({
       }),
       invalidatesTags: ['User', 'AdminSummary'],
     }),
+    // Screens 32 / 33 (FE-09, UC-ADM-08) on Khang's #212 routes. Each action also moves the
+    // billing counts of screen 27.
+    billingExceptions: b.query<BillingExceptions, void>({
+      query: () => 'admin/v1/billing/exceptions',
+      providesTags: ['Billing'],
+    }),
+    retryInvoice: b.mutation<InvoiceRetryResult, string>({
+      query: (id) => ({ url: `admin/v1/billing/e-invoices/${id}/retry`, method: 'POST' }),
+      invalidatesTags: ['Billing', 'AdminSummary'],
+    }),
+    recheckTopUp: b.mutation<RecheckResult, string>({
+      query: (id) => ({ url: `admin/v1/billing/top-ups/${id}/recheck`, method: 'POST' }),
+      invalidatesTags: ['Billing', 'AdminSummary'],
+    }),
+    markExceptionReviewed: b.mutation<unknown, string>({
+      query: (id) => ({ url: `admin/v1/billing/top-ups/${id}/exception-reviewed`, method: 'POST' }),
+      invalidatesTags: ['Billing', 'AdminSummary'],
+    }),
+    reviewConflict: b.mutation<unknown, { id: string; note: string }>({
+      query: ({ id, note }) => ({
+        url: `admin/v1/billing/payment-conflicts/${id}/review`,
+        method: 'POST',
+        body: { note },
+      }),
+      invalidatesTags: ['Billing', 'AdminSummary'],
+    }),
     // Driver picker of screen 30: active drivers by name, email or phone (T161, admin-users.ts).
     driverSearch: b.query<UserAccountPage, string>({
       query: (q) => {
@@ -490,6 +520,11 @@ export const {
   useCreateRfidCardMutation,
   useUpdateRfidCardMutation,
   useDriverSearchQuery,
+  useBillingExceptionsQuery,
+  useRetryInvoiceMutation,
+  useRecheckTopUpMutation,
+  useMarkExceptionReviewedMutation,
+  useReviewConflictMutation,
   useAdminUsersQuery,
   useCreateUserMutation,
   useUpdateUserMutation,

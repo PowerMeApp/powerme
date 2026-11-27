@@ -62,7 +62,7 @@ const routes = (summary: AdminSummary) => ({
 });
 
 describe('Tổng quan nền tảng (màn 27)', () => {
-  it('shows accounts, charge points and RFID cards; zero groups and billing stay hidden', async () => {
+  it('shows accounts, charge points, RFID cards and billing work; zero groups stay hidden', async () => {
     fakeCsms(routes(SUMMARY));
     renderApp('/admin', session(ADMIN));
     const users = within(await screen.findByRole('region', { name: 'Tài khoản' }));
@@ -86,9 +86,15 @@ describe('Tổng quan nền tảng (màn 27)', () => {
       'href',
       '/admin/rfid-cards',
     );
-    // D36: the billing exceptions tile comes with FE-09, even when the API has counts.
-    expect(screen.queryByRole('region', { name: /thanh toán/i })).toBeNull();
-    expect(screen.queryByText(/hoá đơn/i)).toBeNull();
+    // FE-09: the billing tile shows when there is work; only groups with a count (D36).
+    const billing = within(screen.getByRole('region', { name: 'Ngoại lệ thanh toán' }));
+    expect(billing.getByText('3')).toBeInTheDocument();
+    expect(billing.getByText('Trả muộn chờ hoàn')).toBeInTheDocument();
+    expect(billing.queryByText('Hoàn tiền thất bại')).toBeNull();
+    expect(billing.getByRole('link', { name: 'Xem chi tiết →' })).toHaveAttribute(
+      'href',
+      '/admin/billing',
+    );
   });
 
   it('shows suspended accounts when there are some', async () => {
