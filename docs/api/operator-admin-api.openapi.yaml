@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: PowerMe CSMS — Operator & Admin API
-  version: 0.1.0
+  version: 0.2.0
   summary: Hợp đồng REST cho Operator Dashboard và Admin Console (T98)
   description: |
     Hợp đồng giữa CSMS (WP2) và dashboard React (WP4) cho hai bề mặt:
@@ -2595,32 +2595,6 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
-
-  /admin/v1/billing/refunds/{refundId}/retry:
-    post:
-      tags: [billing-exceptions]
-      operationId: retryRefund
-      x-roles: [admin]
-      x-status: planned
-      x-owner: Khang
-      x-refs: [UC-ADM-08, STM-10, WF-02 D1]
-      summary: Thử lại một refund thất bại (một lượt, không reset bộ đếm)
-      parameters:
-        - name: refundId
-          in: path
-          required: true
-          schema: { $ref: '#/components/schemas/Id' }
-        - $ref: '#/components/parameters/idempotencyKey'
-      responses:
-        '202':
-          description: Refund trở lại `requested`
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/RefundRequested' }
-        '401': { $ref: '#/components/responses/Unauthorized' }
-        '403': { $ref: '#/components/responses/Forbidden' }
-        '404': { $ref: '#/components/responses/NotFound' }
-        '409': { $ref: '#/components/responses/InvalidTransition' }
 
 components:
   securitySchemes:

@@ -1127,6 +1127,53 @@ describeDb('billing: hoàn tiền VNPay (T32 Phần 9a, SD-2e, STM-10)', () => {
       expect(await balance(t.account)).toBe(100_000);
       expect(await refundCount(t.id)).toBe(0);
     });
+
+    // Hoàn tiền thủ công (WF-02 D1, D-AC / BR-P51, review Ân #212): quyết định hoàn không còn chặn
+    // top-up thiếu mã giao dịch VNPay; đi tiếp các kiểm khác như cũ.
+    describe('thiếu gateway_transaction_no không còn chặn quyết định hoàn', () => {
+      const dropTxn = (id: number) =>
+        q('UPDATE top_ups SET gateway_transaction_no = NULL WHERE id=$1', [id]);
+
+      it('credited thiếu mã → hoàn được: refunded, ví −100.000, điểm trả lại, refund requested', async () => {
+        const t = await topUpWithPoints();
+        await dropTxn(t.id);
+        const { refundId } = await topUps.refund(t.id, admin);
+        expect(await balance(t.account)).toBe(0);
+        expect(await ledgerRows(t.id)).toEqual([
+          { transaction_type: 'refund', amount_vnd: -100_000 },
+        ]);
+        expect(await points(t.driver)).toBe(3000);
+        expect(await one('SELECT status::text FROM top_ups WHERE id=$1', [t.id])).toEqual({
+          status: 'refunded',
+        });
+        expect(await refundRow(refundId)).toMatchObject({
+          status: 'requested',
+          amount_vnd: 80_000,
+        });
+        expect(await refundCount(t.id)).toBe(1);
+      });
+
+      it('tài khoản closed kiểm trước: closed + thiếu mã → account_closed', async () => {
+        const t = await topUp();
+        await dropTxn(t.id);
+        await q(`UPDATE credit_accounts SET status='closed', closed_at=now() WHERE id=$1`, [
+          t.account,
+        ]);
+        await expect(topUps.refund(t.id, admin)).rejects.toMatchObject({
+          reason: 'account_closed',
+        });
+      });
+
+      it('thiếu mã + số dư khả dụng thiếu → insufficient_available_balance', async () => {
+        const t = await topUp();
+        await dropTxn(t.id);
+        await holdIntent(t.driver, 1);
+        await expect(topUps.refund(t.id, admin)).rejects.toMatchObject({
+          reason: 'insufficient_available_balance',
+        });
+        expect(await refundCount(t.id)).toBe(0);
+      });
+    });
   });
 
   // ---------------------------------------------------------------------------------------------

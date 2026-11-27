@@ -185,6 +185,25 @@ export class RefundNotFound extends Error {
 }
 
 /**
+ * Admin đánh dấu đã xem (T32 Phần 10a): ngoại lệ top-up (`markExceptionReviewed`) hoặc lần trả mâu
+ * thuẫn (`markConflictReviewed`). Route đổi: `not_found` → 404, còn lại → 409.
+ */
+export type AdminReviewRejectReason =
+  /** Không có top-up / dòng mâu thuẫn. */
+  | 'not_found'
+  /** Top-up không có `exception_kind`. */
+  | 'no_exception'
+  /** Dòng mâu thuẫn đã có `reviewed_at`. */
+  | 'already_reviewed';
+
+export class AdminReviewRejected extends Error {
+  constructor(readonly reason: AdminReviewRejectReason) {
+    super(`admin_review_rejected: ${reason}`);
+    this.name = 'AdminReviewRejected';
+  }
+}
+
+/**
  * Admin retry một hoá đơn không có (T32 Phần 7, `EInvoiceService.adminRetry`). Route Phần 10 map sang
  * 404; sai trạng thái thì STM-7 ném `InvalidTransition` (→ 409).
  */

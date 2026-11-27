@@ -34,6 +34,7 @@ import { DB, Db } from '../db/db.module.js';
 import { BackgroundWork, BackgroundWorkRunner } from './background-work.js';
 import { BACKGROUND_WORK_CONFIG, BackgroundWorkConfig } from './background-work.config.js';
 import {
+  AdminReviewRejected,
   LoyaltyLedgerCorrupt,
   RedemptionRejected,
   RefundNotAllowed,
@@ -44,6 +45,7 @@ import { LeasedRow, lockLeased, runLeasedBatch } from './due-rows.js';
 import { EInvoiceService } from './e-invoice.service.js';
 import { computeQuote } from './loyalty-lots.js';
 import { LoyaltyService } from './loyalty.service.js';
+import type { RefundStatus } from './refund-state-machine.js';
 import { RefundService } from './refund.service.js';
 import {
   ConflictReason,
@@ -269,6 +271,21 @@ export type RecheckResult =
       responseCode?: string;
       transactionStatus?: string;
     };
+
+/** Kết quả `markExceptionReviewed` (Phần 10a). */
+export interface ExceptionReviewed {
+  exceptionKind: string;
+  reviewedAt: Date;
+  /** true = đã xem từ trước, `reviewedAt` là mốc cũ. */
+  alreadyReviewed: boolean;
+}
+
+/** Kết quả `markConflictReviewed` (Phần 10a). */
+export interface ConflictReviewed {
+  reviewedAt: Date;
+  reviewedBy: number;
+  reviewNote: string;
+}
 
 type RecheckIneligible = Extract<RecheckResult, { result: 'not_eligible' }>['reason'];
 
@@ -700,6 +717,88 @@ export class TopUpService implements BackgroundWork, OnModuleInit {
     if (out.conflictLog) this.logConflict('recheck', out.conflictLog);
     if (out.committed) await this.afterCommit(out.committed, 'recheck_after_commit_failed');
     return out.reply;
+  }
+
+  /**
+   * Admin "Đã xem" một ngoại lệ top-up (Billing Exceptions, Phần 10a). Ghi `exception_reviewed_at`
+   * khi có `exception_kind` và chưa xem; đã xem → trả mốc cũ (idempotent). Không đổi `status`.
+   * Sau khi xem, `recheckTopUp` trả `not_eligible` / `already_reviewed` (D10).
+   *
+   * @throws AdminReviewRejected `not_found` / `no_exception`
+   */
+  async markExceptionReviewed(topUpId: number): Promise<ExceptionReviewed> {
+    type Row = { exception_kind: string | null; exception_reviewed_at: Date | null };
+    const updated = (
+      await this.db.$client.query<Row>(
+        `UPDATE top_ups SET exception_reviewed_at = now(), updated_at = now()
+         WHERE id = $1 AND exception_kind IS NOT NULL AND exception_reviewed_at IS NULL
+         RETURNING exception_kind::text, exception_reviewed_at`,
+        [topUpId],
+      )
+    ).rows[0];
+    if (updated)
+      return {
+        exceptionKind: updated.exception_kind!,
+        reviewedAt: updated.exception_reviewed_at!,
+        alreadyReviewed: false,
+      };
+    const row = (
+      await this.db.$client.query<Row>(
+        'SELECT exception_kind::text, exception_reviewed_at FROM top_ups WHERE id = $1',
+        [topUpId],
+      )
+    ).rows[0];
+    if (!row) throw new AdminReviewRejected('not_found');
+    if (row.exception_kind === null || row.exception_reviewed_at === null)
+      throw new AdminReviewRejected('no_exception');
+    return {
+      exceptionKind: row.exception_kind,
+      reviewedAt: row.exception_reviewed_at,
+      alreadyReviewed: true,
+    };
+  }
+
+  /**
+   * Admin "Đã xử lý" một lần trả mâu thuẫn (`top_up_payment_conflicts`, Phần 10a). `note` đã trim,
+   * không rỗng (route kiểm; CHECK 0024 chặn thêm). Không hoàn gì: xử lý ngoài hệ thống.
+   *
+   * @throws AdminReviewRejected `not_found` / `already_reviewed`
+   */
+  async markConflictReviewed(
+    conflictId: number,
+    adminId: number,
+    note: string,
+  ): Promise<ConflictReviewed> {
+    const updated = (
+      await this.db.$client.query<{ reviewed_at: Date }>(
+        `UPDATE top_up_payment_conflicts
+         SET reviewed_at = now(), reviewed_by = $2, review_note = $3, updated_at = now()
+         WHERE id = $1 AND reviewed_at IS NULL
+         RETURNING reviewed_at`,
+        [conflictId, adminId, note],
+      )
+    ).rows[0];
+    if (updated) return { reviewedAt: updated.reviewed_at, reviewedBy: adminId, reviewNote: note };
+    const exists = (
+      await this.db.$client.query('SELECT 1 FROM top_up_payment_conflicts WHERE id = $1', [
+        conflictId,
+      ])
+    ).rowCount;
+    throw new AdminReviewRejected(exists ? 'already_reviewed' : 'not_found');
+  }
+
+  /**
+   * Trạng thái refund `kind = 'top_up'` của top-up (Phần 10a): app hiện "Đang hoàn tiền" khi
+   * `status = refunded` mà refund chưa `done`. Chỉ đường GET `/top-ups/{id}` gọi; null = chưa có.
+   */
+  async refundStatus(topUpId: number): Promise<RefundStatus | null> {
+    const row = (
+      await this.db.$client.query<{ status: RefundStatus }>(
+        `SELECT status::text AS status FROM refunds WHERE top_up_id = $1 AND kind = 'top_up'`,
+        [topUpId],
+      )
+    ).rows[0];
+    return row?.status ?? null;
   }
 
   /** Báo giá dùng điểm cho số tiền nạp (BR-P35). Chỉ đọc. */
