@@ -150,7 +150,12 @@ export function AdminHomePage() {
         {me.data && <p>Xin chào {me.data.full_name}. Bạn đang quản trị toàn nền tảng PowerMe.</p>}
       </div>
       {summary.error && !s && <p role="alert">{errorMessage(summary.error)}</p>}
-      {empty && <p className="muted">Nền tảng chưa có tài khoản, trụ sạc hay thẻ RFID nào.</p>}
+      {empty && (
+        <p className="muted">
+          Nền tảng chưa có tài khoản, trụ sạc hay thẻ RFID nào.{' '}
+          <Link to="/admin/charge-points">Đăng ký trụ sạc đầu tiên →</Link>
+        </p>
+      )}
       {s && !empty && (
         <>
           <h2 className="section-title">Thống kê chung</h2>
@@ -188,6 +193,9 @@ export function AdminHomePage() {
                     <span className="muted">Không có sự cố đang mở.</span>
                   )}
                 </p>
+                <Link className="tile-link" to="/admin/network">
+                  Xem chi tiết →
+                </Link>
               </section>
             )}
             {s.operators.total > 0 && (
@@ -235,6 +243,9 @@ export function AdminHomePage() {
                       ])}
                       values={s.charge_points.by_lifecycle}
                     />
+                    <Link className="tile-link" to="/admin/charge-points">
+                      Xem chi tiết →
+                    </Link>
                   </section>
                 )}
                 {cards > 0 && (
@@ -242,6 +253,9 @@ export function AdminHomePage() {
                     <h2>Thẻ RFID</h2>
                     <p className="tile-number">{formatCount(cards)}</p>
                     <Counts rows={CARD_GROUPS} values={s.rfid_cards} />
+                    <Link className="tile-link" to="/admin/rfid-cards">
+                      Xem chi tiết →
+                    </Link>
                   </section>
                 )}
               </div>

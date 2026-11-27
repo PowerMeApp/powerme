@@ -79,6 +79,33 @@ export function AppShell() {
               <CountBadge count={pendingSessions} label="phiên cần xử lý" />
             </NavLink>
           )}
+          {admin && (
+            <NavLink
+              to="/admin/network"
+              className={({ isActive }) => `nav-link${isActive ? ' active' : ''}`}
+            >
+              <Icon name="alert" />
+              <span>Giám sát mạng lưới</span>
+            </NavLink>
+          )}
+          {admin && (
+            <NavLink
+              to="/admin/charge-points"
+              className={({ isActive }) => `nav-link${isActive ? ' active' : ''}`}
+            >
+              <Icon name="plug" />
+              <span>Sổ đăng ký trụ</span>
+            </NavLink>
+          )}
+          {admin && (
+            <NavLink
+              to="/admin/rfid-cards"
+              className={({ isActive }) => `nav-link${isActive ? ' active' : ''}`}
+            >
+              <Icon name="card" />
+              <span>Thẻ RFID</span>
+            </NavLink>
+          )}
           <NavLink
             to={admin ? '/admin/revenue' : '/operator/revenue'}
             className={({ isActive }) => `nav-link${isActive ? ' active' : ''}`}

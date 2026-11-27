@@ -12,7 +12,20 @@ export const fail = (message) => ({ ok: false, message });
 export const done = (message = 'ok') => ({ ok: true, message });
 
 export function makeHmiActions(s) {
-  const { conns, opt, net, emit, setStatus, idleStatus, startTx, stopTx, tl, changed, jStep } = s;
+  const {
+    conns,
+    opt,
+    net,
+    emit,
+    setStatus,
+    idleStatus,
+    startTx,
+    stopTx,
+    tl,
+    changed,
+    jStep,
+    offlineAccepts,
+  } = s;
   const conn = (a) => conns.get(Number(a?.connector));
   const authorize = (idTag) => emit('Authorize', { idTag }, { buffer: false });
   const readerFail = (code, message) => ({ ok: false, code, message });
@@ -149,10 +162,22 @@ export function makeHmiActions(s) {
         jStep(c, 'authorize', { idTag, status }, { close: !accepted });
         if (!accepted) return fail(`CSMS từ chối thẻ: ${status ?? 'lỗi gửi Authorize'}`);
       } else {
-        accepted = a.card !== 'unknown'; // offline: danh sách cục bộ (giả định)
+        // Offline: danh sách cục bộ (giả định) + cấu hình authorize offline mà CSMS có thể đã tắt (T150).
+        const listed = a.card !== 'unknown';
+        accepted = offlineAccepts(listed);
         jStep(c, 'authorize', { idTag, offline: true, local: accepted }, { close: !accepted });
-        if (!accepted) return fail('Offline: thẻ không có trong danh sách cục bộ');
-        tl('info', `Offline — chấp nhận thẻ ${idTag} theo danh sách cục bộ`);
+        if (!accepted)
+          return fail(
+            listed
+              ? 'Offline: CSMS đã tắt authorize offline (LocalAuthorizeOffline=false), không sạc khi mất mạng'
+              : 'Offline: thẻ không có trong danh sách cục bộ',
+          );
+        tl(
+          'info',
+          listed
+            ? `Offline — chấp nhận thẻ ${idTag} theo danh sách cục bộ`
+            : `Offline — trụ nhận thẻ lạ ${idTag} (AllowOfflineTxForUnknownId), rủi ro BR-P52`,
+        );
       }
       await startTx(c, idTag, 'rfid');
       return done('Thẻ được chấp nhận — bắt đầu sạc');

@@ -22,6 +22,17 @@ unknown road metrics, GPS failure → address/name search, late GPS/address guar
 scope/override reset are covered. Verification/capture details and limitations are in
 README. This is local fixture evidence; actual GPS/provider/staging acceptance is pending.
 
+## T146 — guard dừng và tạm tính theo capability
+
+Views 6/7/9 → FR-04/05/08/16/17, UC-CHG-03/04, UC-PAY-02, BR-P08/34/45,
+NFR-SEC-01 → PKG-3 Charging/History, CD-1/SD-1b, Driver API §5.
+Vòng cost dùng supportsCostEstimate như metrics/summary; RFID/HMI/free-vend
+giữ estimate unavailable, bảng kê posted vẫn hiện tiền/điểm thật.
+Server chặn Stop mới sau received stop hoặc meter cuối; key cũ vẫn đọc kết quả.
+Không đổi domain/controller, selection hoặc lifecycle. Regression:
+charge_session_cost_readout_test.dart, driver-sessions integration và
+t148_rfid_settlement_test.dart. Giới hạn thiết bị/staging ở README.
+
 
 ## T148 — đồng bộ main 25/11/2026
 

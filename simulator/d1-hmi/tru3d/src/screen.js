@@ -3,8 +3,11 @@
 // Chỉ vẽ lại khi nội dung đổi (khoá chuỗi), không vẽ mỗi khung.
 import { VI } from './motion.js';
 
-export const SCREEN_W = 1024;
+export const SCREEN_W = 1024; // kích thước LOGIC để vẽ
 export const SCREEN_H = 640;
+// Canvas thật = logic × 2 (2048 × 1280) để chữ trên màn hình vẫn sắc ở dpr 2 khi phóng gần;
+// Scene đặt ctx.setTransform(SCREEN_SCALE, …) một lần, drawScreen vẫn vẽ theo toạ độ logic.
+export const SCREEN_SCALE = 2;
 const FONT = '"Segoe UI Variable Display", "Segoe UI", system-ui, sans-serif';
 const MONO = '"Cascadia Mono", Consolas, ui-monospace, monospace';
 const INK = '#e9eef5';

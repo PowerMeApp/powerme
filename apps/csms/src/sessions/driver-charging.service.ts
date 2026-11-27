@@ -659,6 +659,9 @@ export class DriverChargingService {
           id: string;
           status: string;
           transaction_no: number;
+          origin: string;
+          received_stopped_at: Date | null;
+          meter_stop_wh: string | null;
           serial_number: string;
           charge_point_id: string;
           connector_no: number;
@@ -708,7 +711,12 @@ export class DriverChargingService {
         ).rowCount;
         if (!eligible) return { commandId: Number(prior.command_id), dispatch: false, session };
       }
-      if (!['active', 'paused', 'orphaned'].includes(session.status))
+      if (
+        session.origin !== 'app_qr' ||
+        session.received_stopped_at !== null ||
+        session.meter_stop_wh !== null ||
+        !['active', 'paused', 'orphaned'].includes(session.status)
+      )
         throw new ChargingError('session_not_stoppable');
       if (
         automatic &&

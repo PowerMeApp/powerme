@@ -1,16 +1,27 @@
-// Scene.jsx — cảnh 3D trụ sạc DC hai súng (react-three-fiber).
+// Scene.jsx — cảnh 3D trụ sạc DC hai súng (react-three-fiber), bản QA-05.
 //
 // Mọi thứ chỉ PHẢN ÁNH snapshot SSE trong `store` (cùng snapshot với hình 2D); không có nút điều
 // khiển trụ. Hình minh hoạ tự dựng: không logo, không kiểu dáng của hãng nào.
 //
-// Toạ độ: đơn vị ~ mét. Trụ ở gốc, cao ~2,4. Súng A bên trái (sg = -1), súng B bên phải (sg = +1).
+// Toạ độ: đơn vị ~ mét. Trụ ở gốc, cao ~2,45. Súng A bên trái (sg = -1), súng B bên phải (sg = +1).
 // Mọi chuyển động đi qua spring/damp (motion.js), không nội suy tuyến tính.
+//
+// Ánh sáng: env map phòng studio (RoomEnvironment + PMREMGenerator, dựng tại chỗ, không tải HDR),
+// một đèn key ấm, một đèn fill lạnh, một đèn viền phía sau màu theo "tâm trạng" của trụ. Vật phát sáng
+// (đèn LED, vòng khay, hạt năng lượng, đèn xe) có màu HDR > 1 để bloom (Effects.jsx) bắt được; bề mặt
+// thường giữ dưới ngưỡng.
+//
+// Cảnh sáng (QA-06, prop `light`): không có nền (canvas trong suốt, lộ gradient Hero Sky của khung CSS),
+// đèn studio sáng hơn, sàn trắng phản chiếu nhạt, bóng tiếp xúc nhẹ hơn; quầng màu trạng thái vẽ bằng
+// pha trộn alpha thường (premultiplied) vì cộng sáng (additive) không thấy được trên nền sáng.
 import { useFrame, useThree } from '@react-three/fiber';
 import { useEffect, useMemo, useRef } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
+import Car, { PORT_LOCAL, WHEEL_R } from './Car.jsx';
+import { BG, ContactShadows, Floor, LIGHT_FOG } from './Floor.jsx';
 import {
   MOOD_GAIN,
   clamp01,
@@ -23,14 +34,17 @@ import {
   speedFactor,
   spring,
 } from './motion.js';
-import { SCREEN_H, SCREEN_W, drawScreen } from './screen.js';
+import { SCREEN_H, SCREEN_SCALE, SCREEN_W, drawScreen } from './screen.js';
 
-const TARGET = new THREE.Vector3(0, 1.12, 0);
-const HOME = { radius: 10.4, phi: 1.36, theta: 0.12 };
-const CAR_X = 2.95; // tâm xe khi đỗ (|x|)
+const TARGET = new THREE.Vector3(0, 1.08, 0);
+const HOME = { radius: 10.6, phi: 1.33, theta: 0.14 };
+// Intro: camera bắt đầu xa hơn, cao hơn, lệch góc rồi "dolly" vào bằng lò xo
+const INTRO = { radius: 17, phi: 1.12, theta: 0.62 };
+const CAR_X = 2.98; // tâm xe khi đỗ (|x|)
 const CAR_AWAY = 9; // xe đi xa thêm bao nhiêu khi chưa cắm
-const CAR_Z = 0.22;
-const N_DOTS = 12;
+const CAR_Z = 0.25;
+const N_DOTS = 14;
+const GLOW = 3; // hệ số HDR cho vật phát sáng (vượt ngưỡng bloom)
 
 // ── Tiện ích hình học / texture ────────────────────────────────────────────
 function RBox({ args, r = 0.05, seg = 4, material, ...props }) {
@@ -38,19 +52,6 @@ function RBox({ args, r = 0.05, seg = 4, material, ...props }) {
   const geo = useMemo(() => new RoundedBoxGeometry(w, h, d, seg, r), [w, h, d, seg, r]);
   useEffect(() => () => geo.dispose(), [geo]);
   return <mesh geometry={geo} material={material} {...props} />;
-}
-
-function radialTexture(stops) {
-  const c = document.createElement('canvas');
-  c.width = c.height = 256;
-  const ctx = c.getContext('2d');
-  const g = ctx.createRadialGradient(128, 128, 0, 128, 128, 128);
-  for (const [o, col] of stops) g.addColorStop(o, col);
-  ctx.fillStyle = g;
-  ctx.fillRect(0, 0, 256, 256);
-  const t = new THREE.CanvasTexture(c);
-  t.colorSpace = THREE.SRGBColorSpace;
-  return t;
 }
 
 // Quầng sáng: shader radial cộng màu (additive), không ghi depth.
@@ -70,8 +71,10 @@ const glowFrag = /* glsl */ `
     #include <colorspace_fragment>
   }
 `;
-function glowMaterial(pow) {
+function glowMaterial(pow, light) {
   return new THREE.ShaderMaterial({
+    // nền sáng: trộn alpha thường (màu đã nhân alpha) thay vì cộng sáng
+    ...(light && { blending: THREE.NormalBlending, premultipliedAlpha: true }),
     uniforms: {
       uColor: { value: new THREE.Color('#7d8da3') },
       uGain: { value: 0.3 },
@@ -81,171 +84,186 @@ function glowMaterial(pow) {
     fragmentShader: glowFrag,
     transparent: true,
     depthWrite: false,
-    blending: THREE.AdditiveBlending,
-    toneMapped: false,
+    ...(!light && { blending: THREE.AdditiveBlending }),
   });
 }
 
 // ── Vật liệu dùng chung ────────────────────────────────────────────────────
 function useMaterials() {
-  return useMemo(() => {
+  const M = useMemo(() => {
     const phys = (o) => new THREE.MeshPhysicalMaterial(o);
-    const glow = (color) => new THREE.MeshBasicMaterial({ color, toneMapped: false });
+    const glow = (color) => new THREE.MeshBasicMaterial({ color });
     return {
-      graphite: phys({
-        color: '#262b33',
-        metalness: 0.72,
-        roughness: 0.34,
-        clearcoat: 1,
-        clearcoatRoughness: 0.18,
+      // nhôm anodized xám không gian: kim loại, nhám vừa, phủ bóng mỏng
+      anodized: phys({
+        color: '#2a2f36',
+        metalness: 0.9,
+        roughness: 0.38,
+        clearcoat: 0.6,
+        clearcoatRoughness: 0.22,
       }),
       alu: phys({
-        color: '#b4bcc6',
+        color: '#aab2bc',
         metalness: 1,
-        roughness: 0.36,
-        clearcoat: 0.5,
-        clearcoatRoughness: 0.25,
+        roughness: 0.3,
+        clearcoat: 0.4,
+        clearcoatRoughness: 0.2,
       }),
-      darkMetal: phys({ color: '#0e1013', metalness: 0.6, roughness: 0.45 }),
+      // mặt trước kính đen bóng
+      blackGlass: phys({
+        color: '#06070a',
+        metalness: 0.1,
+        roughness: 0.12,
+        clearcoat: 1,
+        clearcoatRoughness: 0.04,
+      }),
+      darkMetal: phys({ color: '#0d0f12', metalness: 0.7, roughness: 0.42 }),
       bezel: phys({
-        color: '#040506',
+        color: '#030405',
         metalness: 0.2,
-        roughness: 0.15,
+        roughness: 0.2,
         clearcoat: 1,
         clearcoatRoughness: 0.05,
       }),
-      glass: phys({
-        color: '#ffffff',
+      // lớp kính phủ màn hình: chỉ phản chiếu env, gần như trong suốt (không dùng transmission → không
+      // có lượt vẽ phụ)
+      cover: phys({
+        color: '#000000',
         metalness: 0,
-        roughness: 0.06,
-        transmission: 0.92,
-        thickness: 0.02,
-        ior: 1.45,
+        roughness: 0.04,
         clearcoat: 1,
-        clearcoatRoughness: 0.04,
+        clearcoatRoughness: 0.02,
         transparent: true,
-        opacity: 1,
+        opacity: 0.18,
+        depthWrite: false,
       }),
       frost: phys({
-        color: '#9fb4c8',
+        color: '#a9bccf',
         metalness: 0,
-        roughness: 0.42,
-        transmission: 0.6,
-        thickness: 0.05,
+        roughness: 0.5,
         transparent: true,
-        opacity: 0.55,
+        opacity: 0.22,
+        depthWrite: false,
       }),
-      rubber: phys({ color: '#14171c', metalness: 0.1, roughness: 0.55, clearcoat: 0.35 }),
-      tire: new THREE.MeshStandardMaterial({ color: '#0b0c0e', roughness: 0.9 }),
+      rubber: phys({
+        color: '#121418',
+        metalness: 0.05,
+        roughness: 0.5,
+        clearcoat: 0.5,
+        clearcoatRoughness: 0.35,
+      }),
+      tire: phys({ color: '#0b0c0e', metalness: 0, roughness: 0.82, sheen: 0.3 }),
+      rim: phys({ color: '#c3c9d0', metalness: 1, roughness: 0.22, clearcoat: 0.6 }),
+      rimDark: phys({ color: '#15181c', metalness: 0.8, roughness: 0.35 }),
+      trim: phys({ color: '#4a5058', metalness: 1, roughness: 0.25 }),
+      // sơn xe: trắng ngọc trai và xanh thép, phủ bóng
       paintA: phys({
-        color: '#d7dce3',
-        metalness: 0.55,
-        roughness: 0.32,
-        clearcoat: 1,
-        clearcoatRoughness: 0.08,
-      }),
-      paintB: phys({
-        color: '#344d6b',
-        metalness: 0.6,
+        color: '#dfe3e8',
+        metalness: 0.35,
         roughness: 0.3,
         clearcoat: 1,
-        clearcoatRoughness: 0.08,
+        clearcoatRoughness: 0.05,
       }),
-      cabin: phys({
-        color: '#05080c',
-        metalness: 0.3,
-        roughness: 0.08,
+      paintB: phys({
+        color: '#34465e',
+        metalness: 0.65,
+        roughness: 0.3,
         clearcoat: 1,
-        clearcoatRoughness: 0.03,
+        clearcoatRoughness: 0.05,
       }),
-      blob: new THREE.MeshBasicMaterial({
-        map: radialTexture([
-          [0, 'rgba(0,0,0,0.85)'],
-          [0.45, 'rgba(0,0,0,0.45)'],
-          [1, 'rgba(0,0,0,0)'],
-        ]),
+      // kính cabin tối, phản chiếu studio
+      cabin: phys({
+        color: '#020305',
+        metalness: 0,
+        roughness: 0.12,
+        clearcoat: 0.5,
+        clearcoatRoughness: 0.06,
+        envMapIntensity: 0.16,
+      }),
+      track: phys({
+        color: '#d8e2ee',
+        metalness: 0,
+        roughness: 0.3,
         transparent: true,
+        opacity: 0.14,
         depthWrite: false,
-        toneMapped: false,
       }),
-      head: glow('#e6f0ff'),
-      tail: glow('#7a1820'),
+      head: glow(new THREE.Color('#eaf2ff').multiplyScalar(1.2)),
+      tail: glow(new THREE.Color('#ff2a36').multiplyScalar(1.5)),
       glow,
     };
   }, []);
+  useEffect(
+    () => () => {
+      for (const v of Object.values(M)) if (v?.isMaterial) v.dispose();
+    },
+    [M],
+  );
+  return M;
 }
 
-// ── Ánh sáng studio ────────────────────────────────────────────────────────
-function Studio({ store }) {
+// ── Ánh sáng studio, nền gần OLED, fog ─────────────────────────────────────
+function Studio({ store, M, light }) {
   const { gl, scene } = useThree();
   const rim = useRef();
   useEffect(() => {
     const pm = new THREE.PMREMGenerator(gl);
     const env = pm.fromScene(new RoomEnvironment(), 0.04).texture;
     scene.environment = env;
-    scene.environmentIntensity = 0.62;
+    scene.environmentIntensity = light ? 0.95 : 0.55;
+    // envMapIntensity riêng chỉ có hiệu lực khi vật liệu có envMap của chính nó: kính cabin cần phản
+    // chiếu studio yếu hơn hẳn (kính tối), nên gán env trực tiếp cho nó.
+    M.cabin.envMap = env;
+    // cảnh sáng: không nền (canvas alpha) → gradient Hero Sky của CSS hiện qua
+    scene.background = light ? null : new THREE.Color(BG);
+    scene.fog = new THREE.Fog(light ? LIGHT_FOG : BG, 13, 26);
     return () => {
       scene.environment = null;
+      M.cabin.envMap = null;
+      scene.background = null;
+      scene.fog = null;
       env.dispose();
       pm.dispose();
     };
-  }, [gl, scene]);
+  }, [gl, scene, M, light]);
   const target = useMemo(() => new THREE.Color(), []);
   useFrame((_, dt) => {
     const s = store.get();
     const mood = moodOf(s?.connectors);
     target.set(moodColor(mood, store.lt));
     rim.current.color.lerp(target, 1 - Math.exp(-3 * dt));
-    rim.current.intensity = damp(rim.current.intensity, 5 + 9 * MOOD_GAIN[mood], 3, dt);
+    rim.current.intensity = damp(rim.current.intensity, 4 + 8 * MOOD_GAIN[mood], 3, dt);
   });
   return (
     <>
-      <ambientLight intensity={0.08} />
-      <directionalLight position={[3.5, 7, 6]} intensity={1.15} color="#fff6ec" />
-      <directionalLight position={[-6, 4, 3]} intensity={0.35} color="#cfe0ff" />
+      <ambientLight intensity={light ? 0.45 : 0.05} />
+      <directionalLight position={[3.5, 7, 6]} intensity={light ? 2.1 : 1.0} color="#fff4e8" />
+      <directionalLight position={[-6, 3.5, 2.5]} intensity={light ? 0.9 : 0.3} color="#dbe7ff" />
       {/* đèn viền phía sau, màu theo trạng thái → mép thân trụ ánh màu */}
-      <pointLight ref={rim} position={[0, 2.1, -1.6]} distance={7} decay={1.6} intensity={6} />
+      <pointLight ref={rim} position={[0, 2.2, -1.7]} distance={7} decay={1.6} intensity={5} />
     </>
   );
 }
 
-// ── Nền, bóng mềm, quầng sáng ──────────────────────────────────────────────
-function Stage({ store, M }) {
+// ── Sàn, quầng sáng sau trụ, vòng sàn ─────────────────────────────────────
+function Stage({ store, high, light }) {
   const halo = useRef();
   const { camera } = useThree();
-  const tex = useMemo(
-    () => ({
-      floorAlpha: radialTexture([
-        [0, '#ffffff'],
-        [0.45, '#9a9a9a'],
-        [1, '#000000'],
-      ]),
-    }),
-    [],
-  );
   const mats = useMemo(
     () => ({
-      floor: new THREE.MeshStandardMaterial({
-        color: '#0b0d10',
-        roughness: 0.5,
-        metalness: 0.25,
-        alphaMap: tex.floorAlpha,
-        transparent: true,
-        depthWrite: false,
-      }),
-      halo: glowMaterial(2.1),
-      pool: glowMaterial(1.6),
+      halo: glowMaterial(2.3, light),
+      pool: glowMaterial(1.8, light),
       ring: new THREE.MeshBasicMaterial({
         color: '#7d8da3',
         transparent: true,
-        opacity: 0.4,
-        toneMapped: false,
-        blending: THREE.AdditiveBlending,
+        opacity: 0.3,
+        blending: light ? THREE.NormalBlending : THREE.AdditiveBlending,
         depthWrite: false,
       }),
     }),
-    [tex],
+    [light],
   );
+  useEffect(() => () => Object.values(mats).forEach((m) => m.dispose()), [mats]);
   const c = useMemo(() => new THREE.Color(), []);
   const gain = useRef(0.3);
   useFrame((st, dt) => {
@@ -253,55 +271,64 @@ function Stage({ store, M }) {
     const mood = moodOf(s?.connectors);
     c.set(moodColor(mood, store.lt));
     const t = st.clock.elapsedTime;
-    const breathe = mood === 'charge' ? 0.88 + 0.12 * Math.sin((t * Math.PI * 2) / 3) : 1;
+    const breathe = mood === 'charge' ? 0.9 + 0.1 * Math.sin((t * Math.PI * 2) / 3) : 1;
     gain.current = damp(gain.current, MOOD_GAIN[mood], 2.2, dt);
     for (const m of [mats.halo, mats.pool])
       m.uniforms.uColor.value.lerp(c, 1 - Math.exp(-2.5 * dt));
-    mats.halo.uniforms.uGain.value = 0.62 * gain.current * breathe;
-    mats.pool.uniforms.uGain.value = 0.42 * gain.current * breathe;
+    // nền sáng: quầng nhẹ hơn để chỉ "ửng" màu trạng thái, không thành mảng màu
+    const hk = light ? 0.42 : 0.6;
+    const pk = light ? 0.38 : 0.3;
+    mats.halo.uniforms.uGain.value = hk * gain.current * breathe;
+    mats.pool.uniforms.uGain.value = pk * gain.current * breathe;
     mats.ring.color.copy(mats.halo.uniforms.uColor.value);
-    mats.ring.opacity = 0.18 + 0.5 * gain.current * breathe;
+    mats.ring.opacity = 0.1 + 0.32 * gain.current * breathe;
     // quầng luôn quay mặt về camera (billboard) để kéo xoay vẫn tròn
     halo.current.quaternion.copy(camera.quaternion);
   });
   return (
     <>
-      <mesh rotation-x={-Math.PI / 2} material={mats.floor} renderOrder={-2}>
-        <circleGeometry args={[15, 96]} />
+      <Floor high={high} light={light} />
+      <mesh rotation-x={-Math.PI / 2} position-y={0.004} material={mats.pool} renderOrder={2}>
+        <planeGeometry args={[7, 7]} />
       </mesh>
-      <mesh rotation-x={-Math.PI / 2} position-y={0.004} material={mats.pool} renderOrder={-1}>
-        <planeGeometry args={[7.5, 7.5]} />
+      <mesh rotation-x={-Math.PI / 2} position-y={0.006} material={mats.ring} renderOrder={2}>
+        <ringGeometry args={[1.5, 1.512, 160]} />
       </mesh>
-      <mesh rotation-x={-Math.PI / 2} position-y={0.006} material={mats.ring}>
-        <ringGeometry args={[1.46, 1.485, 128]} />
-      </mesh>
-      <mesh rotation-x={-Math.PI / 2} position-y={0.008} material={M.blob}>
-        <planeGeometry args={[2.6, 1.7]} />
-      </mesh>
-      <mesh ref={halo} position={[0, 1.45, -1.4]} material={mats.halo} renderOrder={-1}>
+      <mesh ref={halo} position={[0, 1.5, -1.5]} material={mats.halo} renderOrder={-1}>
         <planeGeometry args={[9, 9]} />
       </mesh>
     </>
   );
 }
 
-// ── Thân trụ: màn hình, đầu đọc RFID, dải đèn đỉnh, ăng-ten ───────────────
+// ── Thân trụ: kính đen mặt trước, màn hình, đầu đọc RFID, đèn đỉnh, ăng-ten ─
 function Station({ store, M }) {
   const scr = useMemo(() => {
     const canvas = document.createElement('canvas');
-    canvas.width = SCREEN_W;
-    canvas.height = SCREEN_H;
+    canvas.width = SCREEN_W * SCREEN_SCALE;
+    canvas.height = SCREEN_H * SCREEN_SCALE;
+    const ctx = canvas.getContext('2d');
+    ctx.setTransform(SCREEN_SCALE, 0, 0, SCREEN_SCALE, 0, 0);
     const tex = new THREE.CanvasTexture(canvas);
     tex.colorSpace = THREE.SRGBColorSpace;
-    tex.anisotropy = 4;
-    return { ctx: canvas.getContext('2d'), tex, key: '' };
+    tex.anisotropy = 8;
+    return { ctx, tex, key: '' };
   }, []);
+  // Màn hình tự phát sáng nhưng giữ dưới ngưỡng bloom để chữ không nhoè
   const screenMat = useMemo(
-    () => new THREE.MeshBasicMaterial({ map: scr.tex, toneMapped: false }),
+    () => new THREE.MeshBasicMaterial({ map: scr.tex, color: new THREE.Color(0.62, 0.62, 0.62) }),
     [scr],
   );
   const topMat = useMemo(() => M.glow('#7d8da3'), [M]);
+  const kissMat = useMemo(() => M.glow('#7d8da3'), [M]);
   const padMat = useMemo(() => M.glow('#4aa3ff'), [M]);
+  useEffect(
+    () => () => {
+      for (const m of [screenMat, topMat, kissMat, padMat]) m.dispose();
+      scr.tex.dispose();
+    },
+    [screenMat, topMat, kissMat, padMat, scr],
+  );
   const c = useMemo(() => new THREE.Color(), []);
   const padLvl = useRef(0.3);
   useFrame((st, dt) => {
@@ -314,51 +341,58 @@ function Station({ store, M }) {
     }
     const mood = moodOf(s.connectors);
     c.set(moodColor(mood, store.lt));
-    topMat.color.lerp(c.multiplyScalar(0.35 + 1.1 * MOOD_GAIN[mood]), 1 - Math.exp(-3 * dt));
+    const k = 1 - Math.exp(-3 * dt);
+    const g = MOOD_GAIN[mood];
+    topMat.color.lerp(c.clone().multiplyScalar(GLOW * (0.25 + 0.75 * g)), k);
+    kissMat.color.lerp(c.multiplyScalar(GLOW * 0.3 * g), k);
     // Đầu đọc RFID: sáng nhịp khi đang chờ CSMS trả lời một lần quẹt (readerPending)
     const t = st.clock.elapsedTime;
     const waiting = s.connectors.some((x) => x.readerPending);
-    const goal = waiting ? 0.6 + 0.6 * Math.abs(Math.sin(t * 4)) : 0.28;
+    const goal = waiting ? 0.6 + 0.6 * Math.abs(Math.sin(t * 4)) : 0.22;
     padLvl.current = damp(padLvl.current, goal, waiting ? 14 : 3, dt);
-    padMat.color.set(store.lt.Preparing).multiplyScalar(padLvl.current);
+    padMat.color.set(store.lt.Preparing).multiplyScalar(GLOW * padLvl.current);
   });
   return (
     <group>
-      {/* đế + thân + mặt nhôm */}
-      <RBox args={[1.72, 0.1, 0.92]} r={0.03} material={M.darkMetal} position-y={0.05} />
-      <RBox args={[1.5, 2.3, 0.72]} r={0.13} seg={6} material={M.graphite} position-y={1.25} />
-      <RBox args={[1.32, 2.06, 0.04]} r={0.06} material={M.alu} position={[0, 1.24, 0.355]} />
-      {/* nắp + dải đèn đỉnh (màu theo trạng thái chung) */}
-      <RBox args={[1.56, 0.05, 0.78]} r={0.022} material={M.darkMetal} position-y={2.42} />
-      <mesh position={[0, 2.385, 0.405]} material={topMat}>
-        <boxGeometry args={[1.18, 0.016, 0.01]} />
+      {/* đế + vệt sáng sát sàn */}
+      <RBox args={[1.78, 0.08, 0.98]} r={0.03} material={M.darkMetal} position-y={0.04} />
+      <mesh position={[0, 0.012, 0.495]} material={kissMat}>
+        <boxGeometry args={[1.5, 0.008, 0.006]} />
       </mesh>
-      {/* màn hình phát sáng sau lớp kính */}
-      <RBox args={[1.18, 0.78, 0.03]} r={0.03} material={M.bezel} position={[0, 1.78, 0.38]} />
-      <mesh position={[0, 1.78, 0.397]} material={screenMat}>
+      {/* thân nhôm anodized + mặt kính đen */}
+      <RBox args={[1.5, 2.3, 0.72]} r={0.14} seg={8} material={M.anodized} position-y={1.23} />
+      <RBox
+        args={[1.34, 2.1, 0.03]}
+        r={0.06}
+        seg={5}
+        material={M.blackGlass}
+        position={[0, 1.24, 0.366]}
+      />
+      {/* nắp nhôm + dải đèn hắt dưới nắp (màu theo trạng thái chung) */}
+      <RBox args={[1.6, 0.06, 0.82]} r={0.025} seg={4} material={M.alu} position-y={2.41} />
+      <mesh position={[0, 2.37, 0.392]} material={topMat}>
+        <boxGeometry args={[1.26, 0.008, 0.008]} />
+      </mesh>
+      {/* màn hình: viền đen, mặt phát sáng, lớp kính phủ */}
+      <RBox args={[1.16, 0.76, 0.016]} r={0.03} material={M.bezel} position={[0, 1.76, 0.386]} />
+      <mesh position={[0, 1.76, 0.3952]} material={screenMat}>
         <planeGeometry args={[1.08, 0.675]} />
       </mesh>
-      <RBox args={[1.14, 0.74, 0.012]} r={0.006} material={M.glass} position={[0, 1.78, 0.405]} />
-      {/* đầu đọc RFID: tấm kính mờ + ký hiệu không tiếp xúc */}
-      <RBox args={[0.46, 0.28, 0.03]} r={0.04} material={M.bezel} position={[0, 1.17, 0.385]} />
-      <group position={[0, 1.17, 0.402]}>
-        {[0.045, 0.075, 0.105].map((rad) => (
+      <RBox args={[1.14, 0.74, 0.004]} r={0.02} material={M.cover} position={[0, 1.76, 0.398]} />
+      {/* đầu đọc RFID: ký hiệu không tiếp xúc sau tấm kính mờ */}
+      <RBox args={[0.44, 0.26, 0.012]} r={0.035} material={M.bezel} position={[0, 1.1, 0.386]} />
+      <group position={[0, 1.1, 0.394]}>
+        {[0.04, 0.068, 0.096].map((rad) => (
           <mesh key={rad} material={padMat} rotation-z={-Math.PI / 4} position-x={-0.05}>
-            <torusGeometry args={[rad, 0.006, 6, 24, Math.PI / 2]} />
+            <torusGeometry args={[rad, 0.005, 8, 28, Math.PI / 2]} />
           </mesh>
         ))}
       </group>
-      <RBox args={[0.44, 0.26, 0.008]} r={0.03} material={M.frost} position={[0, 1.17, 0.405]} />
-      {/* khe tản nhiệt */}
-      {[0.44, 0.53, 0.62].map((y) => (
-        <RBox
-          key={y}
-          args={[0.86, 0.022, 0.01]}
-          r={0.008}
-          material={M.darkMetal}
-          position={[0, y, 0.38]}
-        />
-      ))}
+      <RBox args={[0.42, 0.24, 0.004]} r={0.03} material={M.frost} position={[0, 1.1, 0.398]} />
+      {/* đường nối mảnh chia mặt kính: chi tiết tối giản */}
+      <mesh position={[0, 0.72, 0.3825]} material={M.trim}>
+        <boxGeometry args={[1.1, 0.004, 0.002]} />
+      </mesh>
       <Antenna store={store} M={M} />
     </group>
   );
@@ -367,6 +401,7 @@ function Station({ store, M }) {
 function Antenna({ store, M }) {
   const tipMat = useMemo(() => M.glow('#35d07f'), [M]);
   const arcMats = useMemo(() => [0, 1, 2].map(() => M.glow('#35d07f')), [M]);
+  useEffect(() => () => [tipMat, ...arcMats].forEach((m) => m.dispose()), [tipMat, arcMats]);
   const base = useMemo(() => new THREE.Color(), []);
   const cur = useMemo(() => new THREE.Color('#8b97a6'), []);
   useFrame((st, dt) => {
@@ -388,126 +423,77 @@ function Antenna({ store, M }) {
               ? 0.3
               : 1
             : 0.55 + 0.45 * (t % 1 < 0.5 ? 1 : 0);
-    tipMat.color.copy(cur).multiplyScalar(0.4 + 0.9 * tip);
+    tipMat.color.copy(cur).multiplyScalar(GLOW * (0.3 + 0.7 * tip));
     arcMats.forEach((m, i) => {
       let lvl;
       if (mode === 'online') {
         // sóng toả ra đều, chu kỳ 1,8 s
         const ph = (((t / 1.8 - i * 0.22) % 1) + 1) % 1;
-        lvl = 0.25 + 0.75 * Math.exp(-ph * 4);
+        lvl = 0.2 + 0.8 * Math.exp(-ph * 4);
       } else if (mode === 'connecting') {
-        lvl = Math.floor(t * 3) % 3 === i ? 1 : 0.12; // quét từng vạch
+        lvl = Math.floor(t * 3) % 3 === i ? 1 : 0.1; // quét từng vạch
       } else if (mode === 'half') {
-        lvl = i === 2 ? 0.05 : i === 1 ? (Math.sin(t * 9) > 0 ? 0.7 : 0.1) : 0.8; // chập chờn
+        lvl = i === 2 ? 0.04 : i === 1 ? (Math.sin(t * 9) > 0 ? 0.7 : 0.1) : 0.8; // chập chờn
       } else {
-        lvl = 0.05; // offline: tắt
+        lvl = 0.04; // offline: tắt
       }
-      m.color.copy(cur).multiplyScalar(lvl * 1.2);
+      m.color.copy(cur).multiplyScalar(GLOW * lvl);
     });
   });
   return (
-    <group position={[0.5, 2.45, -0.16]}>
+    <group position={[0.52, 2.44, -0.18]}>
       <mesh material={M.darkMetal} position-y={0.17}>
-        <cylinderGeometry args={[0.014, 0.02, 0.34, 10]} />
+        <cylinderGeometry args={[0.012, 0.018, 0.34, 12]} />
       </mesh>
       <mesh material={tipMat} position-y={0.36}>
-        <sphereGeometry args={[0.035, 16, 12]} />
+        <sphereGeometry args={[0.03, 20, 14]} />
       </mesh>
       {[0.09, 0.15, 0.21].map((rad, i) => (
         <mesh key={rad} material={arcMats[i]} position-y={0.36} rotation-z={Math.PI / 4}>
-          <torusGeometry args={[rad, 0.008, 6, 28, Math.PI / 2]} />
+          <torusGeometry args={[rad, 0.007, 8, 32, Math.PI / 2]} />
         </mesh>
       ))}
     </group>
   );
 }
 
-// ── Xe minh hoạ low-poly (đuôi xe hướng về trụ, cổng sạc ở hông sau) ──────
-function useCabinGeometry() {
-  return useMemo(() => {
-    const sh = new THREE.Shape();
-    sh.moveTo(-0.98, 0);
-    sh.lineTo(1.22, 0);
-    sh.lineTo(0.86, 0.43);
-    sh.lineTo(-0.2, 0.46);
-    sh.lineTo(-0.72, 0.06);
-    sh.closePath();
-    const g = new THREE.ExtrudeGeometry(sh, {
-      depth: 1.04,
-      bevelEnabled: true,
-      bevelThickness: 0.04,
-      bevelSize: 0.04,
-      bevelSegments: 2,
-    });
-    g.translate(0, 0, -0.52);
-    return g;
-  }, []);
-}
-
-const PORT_LOCAL = new THREE.Vector3(1.24, 0.82, 0.7);
-
-function Car({ M, paint, mirror, carRef, batFill, batMat, portMat }) {
-  const cabin = useCabinGeometry();
-  const track = useMemo(
-    () =>
-      new THREE.MeshPhysicalMaterial({
-        color: '#ffffff',
-        transmission: 0.7,
-        roughness: 0.3,
-        thickness: 0.05,
-        transparent: true,
-        opacity: 0.35,
-      }),
-    [],
-  );
+// ── Đầu súng: mũi cắm nhôm, thân bọc cao su, tay cầm, đèn trạng thái ───────
+// Gốc group = mặt đầu cắm; tay cầm kéo dài về -y.
+function GunHead({ M, tipMat, headRef }) {
   return (
-    <group ref={carRef} scale-x={mirror ? -1 : 1} visible={false}>
-      <RBox args={[3.1, 0.5, 1.38]} r={0.17} seg={5} material={paint} position-y={0.5} />
-      <mesh geometry={cabin} material={M.cabin} position-y={0.73} />
-      {[
-        [-1.0, 0.62],
-        [1.0, 0.62],
-        [-1.0, -0.62],
-        [1.0, -0.62],
-      ].map(([x, z]) => (
-        <group key={`${x}${z}`} position={[x, 0.31, z]} rotation-x={Math.PI / 2}>
-          <mesh material={M.tire}>
-            <cylinderGeometry args={[0.31, 0.31, 0.22, 28]} />
-          </mesh>
-          <mesh material={M.graphite}>
-            <cylinderGeometry args={[0.2, 0.2, 0.226, 20]} />
-          </mesh>
-        </group>
-      ))}
-      {/* đèn pha (mũi, -x) và đèn hậu (đuôi, +x) */}
-      <mesh position={[-1.56, 0.6, 0]} material={M.head}>
-        <boxGeometry args={[0.02, 0.05, 1.04]} />
+    <group ref={headRef}>
+      <mesh material={M.alu} position-y={-0.02}>
+        <cylinderGeometry args={[0.062, 0.066, 0.04, 28]} />
       </mesh>
-      <mesh position={[1.56, 0.62, 0]} material={M.tail}>
-        <boxGeometry args={[0.012, 0.03, 1.1]} />
+      <mesh material={M.bezel} position-y={0.001}>
+        <cylinderGeometry args={[0.052, 0.052, 0.004, 28]} />
       </mesh>
-      {/* cổng sạc ở hông sau, phía camera */}
-      <mesh position={PORT_LOCAL} rotation-x={Math.PI / 2} material={M.bezel}>
-        <cylinderGeometry args={[0.07, 0.07, 0.02, 24]} />
+      <RBox args={[0.15, 0.17, 0.16]} r={0.05} seg={5} material={M.rubber} position-y={-0.12} />
+      <RBox
+        args={[0.1, 0.26, 0.11]}
+        r={0.045}
+        seg={5}
+        material={M.rubber}
+        position={[0, -0.3, -0.025]}
+        rotation-x={0.14}
+      />
+      {/* đèn trạng thái mảnh trên lưng đầu súng */}
+      <mesh material={tipMat} position={[0, -0.12, 0.081]}>
+        <boxGeometry args={[0.07, 0.008, 0.004]} />
       </mesh>
-      <mesh position={[PORT_LOCAL.x, PORT_LOCAL.y, PORT_LOCAL.z + 0.012]} material={portMat}>
-        <torusGeometry args={[0.075, 0.01, 8, 28]} />
+      {/* đuôi chống gập cáp */}
+      <mesh material={M.darkMetal} position={[0, -0.45, -0.045]} rotation-x={0.14}>
+        <cylinderGeometry args={[0.04, 0.05, 0.08, 20]} />
       </mesh>
-      {/* thanh pin nổi trên nóc, đổ theo SoC */}
-      <group position={[0.1, 1.62, 0]}>
-        <RBox args={[1.5, 0.1, 0.1]} r={0.045} material={track} />
-        <RBox args={[0.05, 0.05, 0.05]} r={0.015} material={track} position-x={0.79} />
-        <RBox ref={batFill} args={[1.44, 0.064, 0.064]} r={0.03} material={batMat} />
-      </group>
     </group>
   );
 }
 
-// ── Một khoang súng: khay + vòng đèn + dải đèn mép + cáp + hạt năng lượng + xe ──
+// ── Một khoang súng: khay + vòng đèn + LED viền + cáp + hạt năng lượng + xe ──
 function Bay({ id, store, M }) {
   const sg = id === 1 ? -1 : 1;
   const carRef = useRef();
-  const blobRef = useRef();
+  const wheels = useRef([]);
   const headRef = useRef();
   const batFill = useRef();
   const dots = useRef();
@@ -519,18 +505,18 @@ function Bay({ id, store, M }) {
       port: M.glow('#8b97a6'),
       tip: M.glow('#8b97a6'),
       bat: M.glow('#35d07f'),
-      dot: new THREE.MeshBasicMaterial({ color: '#35d07f', toneMapped: false }),
+      dot: new THREE.MeshBasicMaterial({ color: '#35d07f' }),
       dotHalo: new THREE.MeshBasicMaterial({
         color: '#35d07f',
-        toneMapped: false,
         transparent: true,
-        opacity: 0.22,
+        opacity: 0.16,
         blending: THREE.AdditiveBlending,
         depthWrite: false,
       }),
     }),
     [M],
   );
+  useEffect(() => () => Object.values(mats).forEach((m) => m.dispose()), [mats]);
   const cable = useRef();
   const st8 = useRef({
     seen: false,
@@ -543,6 +529,8 @@ function Bay({ id, store, M }) {
     last: '',
     curve: null,
     phase: 0,
+    prevX: null,
+    spin: 0,
   });
   const tmp = useMemo(
     () => ({
@@ -554,17 +542,19 @@ function Bay({ id, store, M }) {
       q: new THREE.Quaternion(),
       m: new THREE.Matrix4(),
       s: new THREE.Vector3(),
-      pts: Array.from({ length: 6 }, () => new THREE.Vector3()),
+      pts: Array.from({ length: 7 }, () => new THREE.Vector3()),
     }),
     [sg],
   );
-  // Cáp: CatmullRom qua 6 điểm; nội suy điểm giữa vị trí "trên khay" và "đang cắm".
+  // Cáp: CatmullRom qua 7 điểm; nội suy điểm giữa vị trí "trên khay" và "đang cắm". Trên khay cáp
+  // buông thành vòng võng xuống gần sàn rồi vòng lên đầu súng (như cáp thật treo ở hông trụ).
   const dockPts = useMemo(
     () => [
-      [sg * 0.74, 0.42, 0.06],
-      [sg * 0.96, 0.15, 0.24],
-      [sg * 1.18, 0.14, 0.3],
-      [sg * 1.34, 0.55, 0.24],
+      [sg * 0.76, 0.46, 0.06],
+      [sg * 0.9, 0.2, 0.2],
+      [sg * 1.06, 0.09, 0.3],
+      [sg * 1.22, 0.14, 0.3],
+      [sg * 1.3, 0.42, 0.24],
     ],
     [sg],
   );
@@ -586,28 +576,33 @@ function Bay({ id, store, M }) {
     }
     // Xe vào trước rồi súng mới cắm; rút súng xong xe mới đi.
     const carGoal = c.plugged || S.gun.x > 0.08 ? 1 : 0;
-    spring(S.car, carGoal, dt, 26, 0.82);
+    spring(S.car, carGoal, dt, 22, 0.9);
     const gunGoal = c.plugged && S.car.x > 0.93 ? 1 : 0;
-    spring(S.gun, gunGoal, dt, 34, 0.86);
+    spring(S.gun, gunGoal, dt, 30, 0.84);
     const carP = S.car.x;
     const gunP = smooth(S.gun.x);
 
-    // Đèn: màu đổi mượt, cường độ theo kiểu nháy của trạng thái
+    // Đèn: màu đổi mượt, cường độ theo kiểu nháy của trạng thái (HDR → bloom)
     S.goal.set(lt[st]);
     S.base.lerp(S.goal, 1 - Math.exp(-6 * dt));
     const lvl = lightLevel(st, t);
-    mats.ring.color.copy(S.base).multiplyScalar(0.2 + 1.25 * lvl);
-    mats.strip.color.copy(S.base).multiplyScalar(0.12 + 0.95 * lvl);
-    mats.port.color.copy(S.base).multiplyScalar(gunP > 0.5 ? 0.2 + 1.1 * lvl : 0.15);
-    mats.tip.color.copy(S.base).multiplyScalar(0.3 + 0.9 * lvl);
+    mats.ring.color.copy(S.base).multiplyScalar(GLOW * (0.12 + 0.88 * lvl));
+    mats.strip.color.copy(S.base).multiplyScalar(GLOW * (0.08 + 0.75 * lvl));
+    mats.port.color.copy(S.base).multiplyScalar(gunP > 0.5 ? GLOW * (0.15 + 0.85 * lvl) : 0.25);
+    mats.tip.color.copy(S.base).multiplyScalar(GLOW * (0.2 + 0.6 * lvl));
 
-    // Xe
+    // Xe + bánh lăn theo quãng đường
     const car = carRef.current;
     car.visible = carP > 0.005;
     car.position.set(sg * (CAR_X + (1 - carP) * CAR_AWAY), 0, CAR_Z);
     car.updateMatrixWorld();
-    blobRef.current.visible = car.visible;
-    blobRef.current.position.set(car.position.x, 0.009, CAR_Z);
+    if (S.prevX != null) {
+      const localDx = (car.position.x - S.prevX) * (sg === 1 ? -1 : 1);
+      S.spin -= localDx / WHEEL_R;
+    }
+    S.prevX = car.position.x;
+    wheels.current.forEach((w, i) => w && (w.rotation.z = i < 2 ? S.spin : -S.spin));
+
     // Pin theo SoC (lò xo mềm), màu đỏ → hổ phách → xanh
     S.soc = damp(S.soc, clamp01((c.soc ?? 0) / 100), 4, dt);
     const f = Math.max(0.02, S.soc);
@@ -616,12 +611,14 @@ function Bay({ id, store, M }) {
     S.goal.set(S.soc < 0.2 ? lt.Faulted : S.soc < 0.5 ? lt.SuspendedEV : lt.Charging);
     S.bat.lerp(S.goal, 1 - Math.exp(-3 * dt));
     const charging = st === 'Charging' && gunP > 0.97;
-    mats.bat.color.copy(S.bat).multiplyScalar(charging ? 0.85 + 0.35 * lightLevel(st, t) : 0.8);
+    mats.bat.color
+      .copy(S.bat)
+      .multiplyScalar(charging ? GLOW * (0.24 + 0.1 * lightLevel(st, t)) : GLOW * 0.18);
 
     // Đầu súng: vị trí + hướng nội suy giữa khay và cổng sạc, nhấc lên giữa đường
     tmp.port.copy(PORT_LOCAL);
     car.localToWorld(tmp.port);
-    const dockHead = tmp.v.set(sg * 0.8, 1.2, 0.12);
+    const dockHead = tmp.v.set(sg * 0.82, 1.2, 0.12);
     const plugHead = tmp.port.setZ(tmp.port.z + 0.02);
     tmp.head.lerpVectors(dockHead, plugHead, gunP);
     tmp.head.y += Math.sin(Math.PI * gunP) * 0.45;
@@ -635,21 +632,22 @@ function Bay({ id, store, M }) {
     if (sig !== S.last || !S.curve) {
       S.last = sig;
       const P = tmp.pts;
-      const end = P[5].set(0, -0.34, 0).applyQuaternion(tmp.q).add(tmp.head);
-      P[4].set(0, -0.22, 0).applyQuaternion(tmp.q).add(end);
-      // đang cắm: từ gốc cáp chạy sát sàn tới dưới tay cầm rồi vòng lên
+      const end = P[6].set(0, -0.49, -0.05).applyQuaternion(tmp.q).add(tmp.head);
+      P[5].set(0, -0.24, -0.03).applyQuaternion(tmp.q).add(end);
+      // đang cắm: từ gốc cáp võng sát sàn tới dưới đầu súng rồi vòng lên
       const plugged = [
-        [sg * 0.74, 0.42, 0.06],
-        [sg * 0.96, 0.07, 0.42],
-        [(sg * 0.96 + end.x) / 2, 0.05, (0.42 + end.z) / 2 + 0.2],
-        [end.x - sg * 0.12, 0.12, end.z + 0.22],
+        [sg * 0.76, 0.46, 0.06],
+        [sg * 0.92, 0.12, 0.36],
+        [(sg * 0.96 + end.x) / 2, 0.045, (0.42 + end.z) / 2 + 0.24],
+        [end.x - sg * 0.16, 0.05, end.z + 0.26],
+        [end.x - sg * 0.06, 0.16, end.z + 0.16],
       ];
-      for (let i = 0; i < 4; i++) {
+      for (let i = 0; i < 5; i++) {
         const a = dockPts[i];
         const b = plugged[i];
         P[i].set(
           a[0] + (b[0] - a[0]) * gunP,
-          a[1] + (b[1] - a[1]) * gunP + Math.sin(Math.PI * gunP) * 0.3 * (i / 3),
+          a[1] + (b[1] - a[1]) * gunP + Math.sin(Math.PI * gunP) * 0.3 * (i / 4),
           a[2] + (b[2] - a[2]) * gunP,
         );
       }
@@ -658,7 +656,7 @@ function Bay({ id, store, M }) {
         false,
         'centripetal',
       );
-      const geo = new THREE.TubeGeometry(S.curve, 72, 0.034, 10, false);
+      const geo = new THREE.TubeGeometry(S.curve, 110, 0.04, 14, false);
       cable.current.geometry.dispose();
       cable.current.geometry = geo;
     }
@@ -669,13 +667,13 @@ function Bay({ id, store, M }) {
     if (show) {
       const v = (0.1 + c.kw / 420) * speedFactor(s.speed);
       S.phase = (S.phase + dt * v) % 1;
-      mats.dot.color.set(lt.Charging).multiplyScalar(1.6);
-      mats.dotHalo.color.copy(mats.dot.color);
+      mats.dot.color.set(lt.Charging).multiplyScalar(GLOW * 1.3);
+      mats.dotHalo.color.set(lt.Charging);
       for (let i = 0; i < N_DOTS; i++) {
         const u = (S.phase + i / N_DOTS) % 1;
         S.curve.getPointAt(u, tmp.v);
         const k = Math.sin(Math.PI * u); // nhỏ dần ở hai đầu
-        tmp.s.setScalar(0.35 + 0.65 * k);
+        tmp.s.setScalar(0.3 + 0.7 * k);
         tmp.m.compose(tmp.v, tmp.q.identity(), tmp.s);
         dots.current.setMatrixAt(i, tmp.m);
         tmp.s.setScalar(0.4 + 0.8 * k);
@@ -689,30 +687,33 @@ function Bay({ id, store, M }) {
 
   return (
     <group>
-      {/* khay súng ở hông trụ + vòng đèn */}
+      {/* khay súng ở hông trụ: vỏ, lòng khay tối, vòng đèn */}
       <RBox
-        args={[0.16, 0.3, 0.28]}
-        r={0.04}
+        args={[0.16, 0.36, 0.3]}
+        r={0.05}
+        seg={5}
         material={M.darkMetal}
         position={[sg * 0.8, 1.2, 0.12]}
       />
-      <mesh position={[sg * 0.885, 1.2, 0.12]} rotation-y={Math.PI / 2} material={mats.ring}>
-        <torusGeometry args={[0.12, 0.014, 10, 40]} />
+      <mesh position={[sg * 0.885, 1.2, 0.12]} rotation-z={Math.PI / 2} material={M.bezel}>
+        <cylinderGeometry args={[0.1, 0.1, 0.012, 32]} />
       </mesh>
-      {/* dải đèn dọc mép trước, cùng màu/kiểu nháy với khay */}
-      <mesh position={[sg * 0.705, 1.24, 0.37]} material={mats.strip}>
-        <boxGeometry args={[0.014, 1.7, 0.012]} />
+      <mesh position={[sg * 0.888, 1.2, 0.12]} rotation-y={Math.PI / 2} material={mats.ring}>
+        <torusGeometry args={[0.118, 0.009, 12, 48]} />
       </mesh>
-      {/* đầu súng (gốc = đầu cắm; tay cầm kéo dài về -y) */}
-      <group ref={headRef}>
-        <RBox args={[0.13, 0.3, 0.14]} r={0.045} material={M.rubber} position-y={-0.17} />
-        <mesh material={M.alu} position-y={-0.01}>
-          <cylinderGeometry args={[0.055, 0.06, 0.05, 20]} />
-        </mesh>
-        <mesh material={mats.tip} position={[0, -0.12, 0.072]}>
-          <boxGeometry args={[0.06, 0.012, 0.004]} />
-        </mesh>
-      </group>
+      {/* gioăng nơi cáp ra khỏi thân */}
+      <mesh position={[sg * 0.755, 0.46, 0.06]} rotation-y={Math.PI / 2} material={M.trim}>
+        <torusGeometry args={[0.05, 0.014, 10, 28]} />
+      </mesh>
+      {/* LED viền dọc mép mặt kính, cùng màu/kiểu nháy với khay */}
+      <RBox
+        args={[0.012, 1.84, 0.005]}
+        r={0.0024}
+        seg={2}
+        material={mats.strip}
+        position={[sg * 0.622, 1.24, 0.3835]}
+      />
+      <GunHead M={M} tipMat={mats.tip} headRef={headRef} />
       <mesh ref={cable} material={M.rubber}>
         <bufferGeometry />
       </mesh>
@@ -722,7 +723,7 @@ function Bay({ id, store, M }) {
         material={mats.dot}
         frustumCulled={false}
       >
-        <sphereGeometry args={[0.024, 10, 8]} />
+        <sphereGeometry args={[0.02, 12, 10]} />
       </instancedMesh>
       <instancedMesh
         ref={halos}
@@ -730,29 +731,42 @@ function Bay({ id, store, M }) {
         material={mats.dotHalo}
         frustumCulled={false}
       >
-        <sphereGeometry args={[0.048, 10, 8]} />
+        <sphereGeometry args={[0.05, 12, 10]} />
       </instancedMesh>
       <Car
         M={M}
         paint={id === 1 ? M.paintA : M.paintB}
         mirror={sg === 1}
         carRef={carRef}
-        batFill={batFill}
-        batMat={mats.bat}
+        wheels={wheels}
         portMat={mats.port}
-      />
-      <mesh ref={blobRef} rotation-x={-Math.PI / 2} visible={false} material={M.blob}>
-        <planeGeometry args={[3.9, 2.0]} />
-      </mesh>
+      >
+        {/* thanh pin nổi trên nóc, đổ theo SoC */}
+        <group position={[0.15, 1.72, 0]}>
+          <RBox args={[1.5, 0.09, 0.09]} r={0.04} material={M.track} />
+          <RBox args={[0.04, 0.045, 0.045]} r={0.012} material={M.track} position-x={0.785} />
+          <RBox ref={batFill} args={[1.44, 0.05, 0.05]} r={0.024} material={mats.bat} />
+        </group>
+      </Car>
     </group>
   );
 }
 
-// ── Camera: kéo để xoay (giới hạn góc), tự xoay rất chậm khi rảnh, nhấp đúp về góc đầu ──
+// ── Camera: intro dolly, kéo để xoay (giới hạn góc), tự xoay rất chậm khi rảnh, nhấp đúp về góc đầu ──
 function Rig() {
-  const { camera, gl } = useThree();
+  const { camera, gl, scene } = useThree();
   const ctl = useMemo(() => new OrbitControls(camera, gl.domElement), [camera, gl]);
-  const S = useRef({ busy: false, last: -10, homing: false, base: HOME.theta, phase: 0 });
+  const S = useRef({
+    busy: false,
+    last: -10,
+    homing: false,
+    intro: true,
+    base: HOME.theta,
+    phase: 0,
+    r: { x: INTRO.radius, v: 0 },
+    th: { x: INTRO.theta, v: 0 },
+    ph: { x: INTRO.phi, v: 0 },
+  });
   const sph = useMemo(() => new THREE.Spherical(), []);
   const off = useMemo(() => new THREE.Vector3(), []);
   useEffect(() => {
@@ -763,29 +777,39 @@ function Rig() {
     ctl.enableZoom = false; // không chiếm cuộn trang
     ctl.rotateSpeed = 0.55;
     ctl.minPolarAngle = 1.02;
-    ctl.maxPolarAngle = 1.52;
+    ctl.maxPolarAngle = 1.5;
     ctl.minAzimuthAngle = -1.05;
     ctl.maxAzimuthAngle = 1.05;
-    camera.position.setFromSpherical(new THREE.Spherical(HOME.radius, HOME.phi, HOME.theta));
+    camera.position.setFromSpherical(new THREE.Spherical(INTRO.radius, INTRO.phi, INTRO.theta));
     camera.position.add(TARGET);
     ctl.update();
     const now = () => performance.now() / 1000;
-    const onStart = () => {
-      S.current.busy = true;
-      S.current.homing = false;
-    };
-    const onEnd = () => {
-      S.current.busy = false;
-      S.current.last = now();
+    const R = S.current;
+    const sync = () => {
       off.copy(camera.position).sub(ctl.target);
       sph.setFromVector3(off);
-      S.current.base = sph.theta; // tự xoay quanh góc người xem vừa chọn
-      S.current.phase = 0;
+      R.r.x = sph.radius;
+      R.th.x = sph.theta;
+      R.ph.x = sph.phi;
+      R.r.v = R.th.v = R.ph.v = 0;
+    };
+    const onStart = () => {
+      R.busy = true;
+      R.homing = false;
+      R.intro = false;
+    };
+    const onEnd = () => {
+      R.busy = false;
+      R.last = now();
+      sync();
+      R.base = R.th.x; // tự xoay quanh góc người xem vừa chọn
+      R.phase = 0;
     };
     const onDbl = () => {
-      S.current.homing = true;
-      S.current.base = HOME.theta;
-      S.current.phase = 0;
+      sync();
+      R.homing = true;
+      R.base = HOME.theta;
+      R.phase = 0;
     };
     ctl.addEventListener('start', onStart);
     ctl.addEventListener('end', onEnd);
@@ -801,39 +825,60 @@ function Rig() {
     const R = S.current;
     // Khung hẹp/dọc (điện thoại) → lùi camera cho trụ và phần lớn hai xe vẫn lọt khung
     const half = Math.tan((camera.fov * Math.PI) / 360) * camera.aspect;
-    const fitR = Math.min(18, Math.max(HOME.radius, 3.6 / half));
+    const fitR = Math.min(18, Math.max(HOME.radius, 3.7 / half));
     if (!R.busy) {
-      off.copy(camera.position).sub(ctl.target);
-      sph.setFromVector3(off);
-      sph.radius = R.fitted ? damp(sph.radius, fitR, 3, dt) : fitR;
-      R.fitted = true;
-      if (R.homing) {
-        sph.theta = damp(sph.theta, HOME.theta, 4, dt);
-        sph.phi = damp(sph.phi, HOME.phi, 4, dt);
-        if (Math.abs(sph.theta - HOME.theta) + Math.abs(sph.phi - HOME.phi) < 0.002) {
+      if (R.intro) {
+        // dolly vào bằng lò xo gần tới hạn (~1,8 s), lệch góc xoay về góc nhìn chính
+        spring(R.r, fitR, dt, 5.5, 0.96);
+        spring(R.th, HOME.theta, dt, 5.5, 0.96);
+        spring(R.ph, HOME.phi, dt, 5.5, 0.96);
+        if (Math.abs(R.r.x - fitR) + Math.abs(R.th.x - HOME.theta) < 0.003) {
+          R.intro = false;
+          R.last = performance.now() / 1000;
+        }
+      } else if (R.homing) {
+        spring(R.th, HOME.theta, dt, 16, 0.92);
+        spring(R.ph, HOME.phi, dt, 16, 0.92);
+        R.r.x = damp(R.r.x, fitR, 3, dt);
+        if (Math.abs(R.th.x - HOME.theta) + Math.abs(R.ph.x - HOME.phi) < 0.002) {
           R.homing = false;
           R.last = performance.now() / 1000;
         }
-      } else if (performance.now() / 1000 - R.last > 2.5) {
-        // tự xoay rất chậm: dao động ±0,3 rad quanh góc gốc, chu kỳ 70 s
-        R.phase += dt;
-        const goal = R.base + 0.3 * Math.sin((R.phase * Math.PI * 2) / 70);
-        sph.theta = damp(sph.theta, goal, 0.9, dt);
+      } else {
+        R.r.x = damp(R.r.x, fitR, 3, dt);
+        if (performance.now() / 1000 - R.last > 2.5) {
+          // tự xoay rất chậm: dao động ±0,28 rad quanh góc gốc, chu kỳ 80 s
+          R.phase += dt;
+          const goal = R.base + 0.28 * Math.sin((R.phase * Math.PI * 2) / 80);
+          R.th.x = damp(R.th.x, goal, 0.8, dt);
+        }
       }
+      sph.set(R.r.x, R.ph.x, R.th.x);
       camera.position.setFromSpherical(sph).add(ctl.target);
+    }
+    // Fog bám khoảng cách camera: trụ luôn rõ, nền và xe ở xa chìm dần vào đen
+    if (scene.fog) {
+      off.copy(camera.position).sub(ctl.target);
+      const r = off.length();
+      scene.fog.near = r + 2.5;
+      scene.fog.far = r + 15;
     }
     ctl.update();
   });
   return null;
 }
 
-export default function Scene({ store }) {
+export default function Scene({ store, high, light }) {
   const M = useMaterials();
+  const stage = useRef();
   return (
     <>
-      <Studio store={store} />
+      <Studio store={store} M={M} light={light} />
       <Rig />
-      <Stage store={store} M={M} />
+      <group ref={stage}>
+        <Stage store={store} high={high} light={light} />
+      </group>
+      <ContactShadows hide={stage} every={high ? 1 : 3} opacity={light ? 0.6 : 0.92} />
       <Station store={store} M={M} />
       <Bay id={1} store={store} M={M} />
       <Bay id={2} store={store} M={M} />

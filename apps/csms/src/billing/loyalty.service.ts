@@ -7,7 +7,7 @@
  * thay vì để unique `loyalty_transactions_one_earn_per_session` ném 23505.
  *
  * Phần 4 (D3, D11; BR-P35–P37): `quoteRedemption`, `redeemForTopUp`, `restoreForTopUp`,
- * `expireDueForAccount`. Điểm tính theo lô earn (`loyalty-lots.ts`): mỗi dòng redeem / restore /
+ * `expireDueForAccount`. T149: `summary`, `history` (chỉ đọc, cho route app `GET /loyalty*`). Điểm tính theo lô earn (`loyalty-lots.ts`): mỗi dòng redeem / restore /
  * expire ghi đúng một lô và mang `expires_at` của lô đó, **copy bằng SQL** từ dòng earn của lô (JS
  * `Date` mất phần µs). Bất biến `points_balance = Σ points ≥ 0` được kiểm dưới khoá trước khi ghi.
  *
@@ -25,12 +25,16 @@ import {
 import type { LedgerClient } from './credit-ledger.service.js';
 import {
   computeQuote,
+  EXPIRING_SOON_DAYS,
   LotPart,
+  lotsExpiringBy,
+  loyaltyTotals,
   LoyaltyRow,
   LoyaltyTransactionType,
   planExpiry,
   planRedeem,
   planRestore,
+  pointsExpiringBy,
   Quote,
   replayLots,
   validateQuoteInput,
@@ -75,6 +79,35 @@ export interface ExpireResult {
   expiredPoints: number;
   entries: LoyaltyEntry[];
 }
+
+/** Tóm tắt điểm cho màn Loyalty (T149, UC-PAY-04, SRS màn hình 15). */
+export interface LoyaltySummary {
+  /** `none` = tài xế chưa có `loyalty_accounts` (đọc không tạo). */
+  status: 'none' | 'active';
+  /** = `livePoints` (cùng số với `points_available` của quote top-up). */
+  pointsAvailable: number;
+  pointsExpiringSoon: number;
+  expiringWithinDays: number;
+  /** Lô còn sống hết hạn trong cửa sổ, sắp hạn tăng dần; `points` = phần còn lại của lô. */
+  expiringSoon: { expiresAt: Date; points: number }[];
+  pointsEarnedTotal: number;
+  pointsRedeemedTotal: number;
+  asOf: Date;
+}
+
+/** Một dòng `loyalty_transactions` thô cho lịch sử (T149); id dạng chuỗi như DB trả. */
+export interface LoyaltyHistoryRow {
+  id: string;
+  entryNo: number;
+  type: LoyaltyTransactionType;
+  points: number;
+  expiresAt: Date | null;
+  sessionId: string | null;
+  topUpId: string | null;
+  createdAt: Date;
+}
+
+const DAY_MS = 86_400_000;
 
 interface RawRow {
   entry_no: string;
@@ -212,6 +245,109 @@ export class LoyaltyService {
       ])
     ).rows[0];
     return acc ? replayLots(await this.loadRows(exec, Number(acc.id)), at).livePoints : 0;
+  }
+
+  /**
+   * Tóm tắt điểm cho app (T149, UC-PAY-04): phát lại lô tại `asOf` (mặc định `now()` của DB), không
+   * đọc `points_balance` (lô quá hạn còn trong đó tới khi job hết hạn chạy). Chỉ đọc, không khoá;
+   * bên gọi lo snapshot (route dùng REPEATABLE READ READ ONLY). Cùng điều kiện lỗi với `livePoints`
+   * (không kiểm `balance_mismatch`) để `pointsAvailable` luôn bằng số của quote.
+   *
+   * @throws LoyaltyLedgerCorrupt sổ điểm sai dạng.
+   */
+  async summary(
+    exec: LedgerClient,
+    driverId: number,
+    opts: { asOf?: Date } = {},
+  ): Promise<LoyaltySummary> {
+    const asOf = opts.asOf ?? (await this.dbNow(exec));
+    const base: LoyaltySummary = {
+      status: 'none',
+      pointsAvailable: 0,
+      pointsExpiringSoon: 0,
+      expiringWithinDays: EXPIRING_SOON_DAYS,
+      expiringSoon: [],
+      pointsEarnedTotal: 0,
+      pointsRedeemedTotal: 0,
+      asOf,
+    };
+    const acc = (
+      await exec.query<{ id: string }>('SELECT id FROM loyalty_accounts WHERE driver_id=$1', [
+        driverId,
+      ])
+    ).rows[0];
+    if (!acc) return base;
+    const rows = await this.loadRows(exec, Number(acc.id));
+    const state = replayLots(rows, asOf);
+    const until = new Date(asOf.getTime() + EXPIRING_SOON_DAYS * DAY_MS);
+    const totals = loyaltyTotals(rows);
+    return {
+      ...base,
+      status: 'active',
+      pointsAvailable: state.livePoints,
+      pointsExpiringSoon: pointsExpiringBy(state.lots, asOf, until),
+      expiringSoon: lotsExpiringBy(state.lots, asOf, until).map((l) => ({
+        expiresAt: l.expiresAt,
+        points: l.remaining,
+      })),
+      pointsEarnedTotal: totals.earned,
+      pointsRedeemedTotal: totals.redeemed,
+    };
+  }
+
+  /**
+   * Lịch sử điểm của tài xế (T149): dòng thô, `entry_no` giảm dần, phân trang như
+   * `/credit/transactions` (trang vượt cuối vẫn trả `total` đúng). Không phát lại sổ.
+   */
+  async history(
+    exec: LedgerClient,
+    driverId: number,
+    page: number,
+    pageSize: number,
+  ): Promise<{ items: LoyaltyHistoryRow[]; total: number }> {
+    const rows = (
+      await exec.query<{
+        id: string;
+        entry_no: string;
+        transaction_type: LoyaltyTransactionType;
+        points: string;
+        expires_at: Date | null;
+        session_id: string | null;
+        top_up_id: string | null;
+        created_at: Date;
+        total: string;
+      }>(
+        `SELECT t.id,t.entry_no,t.transaction_type,t.points,t.expires_at,t.session_id,t.top_up_id,
+          t.created_at,count(*) OVER () AS total
+         FROM loyalty_transactions t JOIN loyalty_accounts a ON a.id=t.loyalty_account_id
+         WHERE a.driver_id=$1 ORDER BY t.entry_no DESC LIMIT $2 OFFSET $3`,
+        [driverId, pageSize, (page - 1) * pageSize],
+      )
+    ).rows;
+    let total = rows.length ? Number(rows[0]!.total) : 0;
+    if (!rows.length && page > 1)
+      total = Number(
+        (
+          await exec.query<{ total: string }>(
+            `SELECT count(*) AS total FROM loyalty_transactions t
+             JOIN loyalty_accounts a ON a.id=t.loyalty_account_id WHERE a.driver_id=$1`,
+            [driverId],
+          )
+        ).rows[0]!.total,
+      );
+    return {
+      items: rows.map((r) => ({
+        id: r.id,
+        entryNo: Number(r.entry_no),
+        type: r.transaction_type,
+        points: Number(r.points),
+        expiresAt: r.expires_at,
+        sessionId: r.session_id,
+        topUpId: r.top_up_id,
+        createdAt: r.created_at,
+      })),
+      total,
+    };
   }
 
   /**

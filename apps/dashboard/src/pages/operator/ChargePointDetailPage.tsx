@@ -11,7 +11,13 @@ import { Link, useParams } from 'react-router';
 import type { RemoteCommandRow } from '@powerme/shared';
 import { errorMessage, useOperatorChargePointQuery, type ApiError } from '../../core/api/api';
 import { FaultTable } from '../../features/alerts/FaultTable';
-import { ago, connectorTone, LIFECYCLE, useNow } from '../../features/chargePoints/format';
+import {
+  ago,
+  connectorTone,
+  LIFECYCLE,
+  OFFLINE_CARD_RISK,
+  useNow,
+} from '../../features/chargePoints/format';
 
 export const DETAIL_POLL_MS = 5000;
 
@@ -80,6 +86,23 @@ export function ChargePointDetailPage() {
         <span className={`pill ${offline ? 'muted' : ''}`}>{offline ? 'Offline' : 'Online'}</span>
         <span className="muted small">Lần cuối nhận bản tin: {ago(data.last_message_at, now)}</span>
       </div>
+      {data.offline_card_risk ? (
+        <p className="detail-status" role="note" aria-label="Rủi ro thẻ offline">
+          <span className="pill major">Rủi ro thẻ offline</span>{' '}
+          <span className="small">
+            {OFFLINE_CARD_RISK[data.offline_card_risk_reason ?? 'not_checked']}. Khi trụ mất mạng,
+            thẻ lạ hoặc thẻ đã khoá có thể vẫn sạc được và chỉ bị phát hiện khi trụ nối lại
+            (BR-P52).
+            {data.offline_auth_check
+              ? ` Lần kiểm cuối: ${time(data.offline_auth_check.checked_at)}.`
+              : ''}
+          </span>
+        </p>
+      ) : data.offline_auth_check ? (
+        <p className="muted small detail-status">
+          Đã tắt authorize offline trên trụ · kiểm lúc {time(data.offline_auth_check.checked_at)}
+        </p>
+      ) : null}
 
       <div className="tiles">
         <section className="card tile" aria-label="Thông tin trụ sạc">

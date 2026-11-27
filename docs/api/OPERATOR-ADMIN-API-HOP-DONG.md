@@ -325,12 +325,13 @@ tách theo bề mặt — refresh token không mang `role`, role đọc lại t�
 
 | Endpoint | Role | UC / FR / BR | Trạng thái · người làm | Ghi chú |
 |---|---|---|---|---|
-| `GET /operator/v1/sites` | operator_staff | UC-OPS-01, BR-P11 | planned · Ân | ô chọn site trong sheet onboarding |
-| `POST /operator/v1/charge-points/onboard` | operator_staff | UC-OPS-01, FR-09, STM-3 #2, SD-5a | **done** BE-44 · `charge-point-onboarding.ts` → `ChargePointOnboardingService.onboard` · Trí (route) / Ân (service) | body như console T119 (`OnboardRequest`); actor = staff của token (manager và technician đều được); site phải thuộc operator của token (DB) → khác 403 `site_of_other_operator`, không có 404 `site_not_found`; 201, mật khẩu hiện **một lần**, `no-store`, không log; 409 `serial_not_registered` / `already_onboarded`. Đường dẫn có `/onboard` (giống console) thay cho `POST /operator/v1/charge-points` bản nháp, để không chung đường dẫn với `GET` giám sát. Console `/api/operator/charge-points/onboard` vẫn giữ cho demo |
+| `GET /operator/v1/sites` | operator_staff | UC-OPS-01, BR-P11 | **implemented** FE-02 · Nghĩa · `operator-sites.ts` | ô chọn site trong sheet onboarding (màn 19); chỉ site của operator trong token, sắp theo `site_code`; chỉ nhận `page`, `page_size` (1–100, mặc định 50), key khác → 400; trả `SitePage` |
+| `POST /operator/v1/charge-points/onboard` | operator_staff | UC-OPS-01, FR-09, STM-3 #2, SD-5a | **done** BE-44 · `charge-point-onboarding.ts` → `ChargePointOnboardingService.onboard` · Trí (route) / Ân (service) | body như console T119 (`OnboardRequest`); actor = staff của token (manager và technician đều được); site phải thuộc operator của token (DB) → khác 403 `site_of_other_operator`, site không có → 404 `site_not_found` (code và OpenAPI); **`site_id` trong body phải là số nguyên** (`parseOnboardBody`), dù OpenAPI ghi `Id` dạng chuỗi — màn 19 gửi số (FE-02); 201, mật khẩu hiện **một lần**, `no-store`, không log; 409 `serial_not_registered` / `already_onboarded`. Đường dẫn có `/onboard` (giống console) thay cho `POST /operator/v1/charge-points` bản nháp, để không chung đường dẫn với `GET` giám sát. Console `/api/operator/charge-points/onboard` vẫn giữ cho demo |
 | `POST /operator/v1/charge-points/{id}/disable` | operator_staff | STM-3 #4, ADR-0016 | planned · Ân | chỉ có `ChargePointLifecyclePolicy`, chưa có service ghi DB |
 | `POST /operator/v1/charge-points/{id}/enable` | operator_staff | STM-3 #5 | planned · Ân | |
-| `GET /admin/v1/charge-points` | admin | UC-ADM-03, UC-ADM-07, FR-15 | **partial** BE-44 · `charge-point-onboarding.ts` · Trí | đã làm: `lifecycle`, `page`/`page_size`, mới nhất trước, `RegistryChargePoint` (kèm operator, site; không bao giờ có băm/mật khẩu); chưa làm: `operator_id`, `q` (→ 400 `invalid_input`) |
-| `POST /admin/v1/charge-points` | admin | UC-ADM-03, FR-15, STM-3 #1 | **done** BE-44 · `charge-point-onboarding.ts` → `ChargePointOnboardingService.registerDevice` · Trí (route) / Ân (service) | body như console T119 (`RegisterDeviceRequest`); actor = admin của token; 201 `RegistryChargePoint`; 409 `serial_already_registered`. Console `POST /api/admin/charge-points` vẫn giữ cho demo |
+| `GET /admin/v1/network/charge-points` | admin | UC-ADM-07, BR-P38/P39, Table 5 #31 | **implemented** FE-18 · Nghĩa · `admin-network.ts` | màn 31: trụ của mọi operator (trừ dữ liệu lab), cùng trường trực tiếp như `GET /operator/v1/charge-points` (súng, Offline, `status_quality`) + `operator {id, legal_name}` + `open_faults {total, top_severity}`; lọc như màn 18 + `operator_id`; chưa có uptime / utilisation (BR-P43, chờ API metrics) |
+| `GET /admin/v1/charge-points` | admin | UC-ADM-03, UC-ADM-07, FR-15 | **partial** BE-44 · `charge-point-onboarding.ts` · Trí | đã làm: `lifecycle`, `page`/`page_size`, mới nhất trước, `RegistryChargePoint` (kèm operator, site; không bao giờ có băm/mật khẩu); chưa làm: `operator_id`, `q` (→ 400 `invalid_input`); màn 29 (FE-15) lọc theo `lifecycle` |
+| `POST /admin/v1/charge-points` | admin | UC-ADM-03, FR-15, STM-3 #1 | **done** BE-44 · `charge-point-onboarding.ts` → `ChargePointOnboardingService.registerDevice` · Trí (route) / Ân (service) | body như console T119 (`RegisterDeviceRequest`); actor = admin của token; 201 `RegistryChargePoint`; 409 `serial_already_registered`. Console `POST /api/admin/charge-points` vẫn giữ cho demo. Màn 29 (FE-15) gọi route này từ nút "Đăng ký trụ" |
 | `GET /admin/v1/charge-points/{id}` | admin | UC-ADM-03 | planned · Ân | |
 | `PATCH /admin/v1/charge-points/{id}` | admin | UC-ADM-03 | planned · Ân | model, firmware, kW, bảo hành; không đổi serial |
 | `PUT /admin/v1/charge-points/{id}/free-vend-tag` | admin | UC-ADM-05, BR-P09, ADR-0012 | planned · Ân | null = tắt; chỉ áp cho phiên bắt đầu sau đó (BR-P08) |
@@ -406,17 +407,102 @@ thuộc Platform Administration; Operator xem doanh thu trạm mình qua `/opera
 
 | Endpoint | Role | UC / FR / BR | Trạng thái · người làm | Ghi chú |
 |---|---|---|---|---|
-| `GET /admin/v1/users` | admin | UC-ADM-01, FR-14, BR-P05 | planned · Trí | lọc role, trạng thái, operator, `q` |
+| `GET /admin/v1/users` | admin | UC-ADM-01, FR-14, BR-P05 | **implemented** T161 · Nghĩa · `admin-users.ts` | lọc `role`, `account_status`, `operator_id`, `q`; xem §3.8b |
 | `POST /admin/v1/users` | admin | UC-ADM-01/02, BR-P16 | planned · Trí | chỉ `operator_staff`/`admin`; tài xế tự đăng ký (consent BR-P05) |
 | `GET /admin/v1/users/{id}` | admin | UC-ADM-01 | planned · Trí | |
 | `PATCH /admin/v1/users/{id}` | admin | UC-ADM-01 | planned · Trí | họ tên, điện thoại |
 | `PUT /admin/v1/users/{id}/role` | admin | UC-ADM-02, BR-P16 | planned · Trí | một role mỗi user; tài xế không đổi role được (409) |
 | `POST /admin/v1/users/{id}/lock` | admin | UC-ADM-01, F-13 | planned · Trí | `active → suspended`, có hiệu lực ở request kế tiếp |
 | `POST /admin/v1/users/{id}/unlock` | admin | UC-ADM-01, F-13 | planned · Trí | `closed` không mở lại |
-| `GET /admin/v1/operators` | admin | UC-ADM-02, BR-P11 | planned · Trí | để gán nhân viên và lọc báo cáo |
-| `GET /admin/v1/rfid-cards` | admin | UC-ADM-04, FR-15, BR-P15 | planned · Ân | |
-| `POST /admin/v1/rfid-cards` | admin | UC-ADM-04, BR-P15, BR-P23 | planned · Ân | `card_kind` ∈ `online`, `free_vend` |
-| `PATCH /admin/v1/rfid-cards/{id}` | admin | UC-ADM-04, BR-P15 | planned · Ân | gắn/bỏ tài xế, khoá/mở; không đổi loại |
+| `GET /admin/v1/operators` | admin | UC-ADM-02, BR-P11 | **implemented** FE-18 · Nghĩa · `admin-operators.ts` | để gán nhân viên và lọc báo cáo (màn 31, 28); `status`, `page`/`page_size` (1–100, mặc định 50), sắp theo tên; không có operator lab (LOADTEST01) |
+| `GET /admin/v1/rfid-cards` | admin | UC-ADM-04, FR-15, BR-P15 | **implemented local (chưa merge/deploy)** WP3/T146 · `admin-rfid-cards.ts` | |
+| `POST /admin/v1/rfid-cards` | admin | UC-ADM-04, BR-P15, BR-P23 | **implemented local (chưa merge/deploy)** WP3/T146 · `admin-rfid-cards.ts` | `card_kind` ∈ `online`, `free_vend` |
+| `PATCH /admin/v1/rfid-cards/{id}` | admin | UC-ADM-04, BR-P15 | **implemented local (chưa merge/deploy)** WP3/T146 · `admin-rfid-cards.ts` | gắn/bỏ tài xế, khoá/mở; không đổi loại |
+
+### 3.8a WP3/T146 — sổ thẻ RFID (26/11/2026)
+
+Ba route RFID chạy trên listener CSMS hiện có, sau RolesGuard Admin, trước kiểm query chung.
+Không có route xoá. Sai phương thức trả 405 kèm Allow; JWT/role/account được kiểm trước
+method, query, body và cả child path lỗi. OPTIONS/CORS giữ quy tắc chung. Chỉ JSON object
+≤16 KiB cho POST/PATCH (415 sai media, 413 quá lớn); GET không nhận body. Lỗi luôn
+{error, detail}, detail = mã lỗi; không trả lỗi SQL.
+
+GET nhận đúng các bộ lọc card_kind=online|free_vend, status=unlinked|active|blocked,
+driver_id (chuỗi bigint dương ≤9223372036854775807), q (tiền tố idTag 1–20 ký tự),
+page=1..10000, page_size=1..100 (mặc định 50). Không nhận key lạ/trùng. q là tiền tố
+nguyên văn, phân biệt hoa/thường; %, _ và backslash là ký tự thường, không phải wildcard.
+ORDER BY id DESC xác định thứ tự; total/items cùng snapshot REPEATABLE READ của một response.
+Các lần gọi page riêng có thể thấy dữ liệu mới; API không cấp cursor snapshot xuyên request.
+Mọi id tài nguyên được giữ là chuỗi, không chuyển Number. Timestamp trả ISO UTC.
+
+POST chỉ nhận card_identifier, card_kind và driver_id tùy chọn/null. UID không rỗng/trắng,
+không control/unpaired surrogate, tối đa 20 Unicode scalar; giữ nguyên từng ký tự, kể cả
+số 0 đầu, không trim/chuyển decimal/hex/case. UID/kind bất biến sau đăng ký.
+driver_id phải có cả drivers/user đúng role driver (không tự tạo tài khoản); trạng thái
+tài xế/credit vẫn do Authorize kiểm theo BR-P23. Không cần credit để đăng ký/liên kết thẻ.
+
+| Thao tác | online | free_vend trong registry |
+|---|---|---|
+| POST không tài xế | unlinked | active, không tài xế |
+| POST có tài xế | active | 409 card_kind_has_no_driver |
+| PATCH gắn/đổi tài xế, không status | active, trừ blocked giữ blocked | Có tài xế → 409 |
+| PATCH driver_id=null, không status | unlinked, trừ blocked giữ blocked | active/blocked giữ nguyên |
+| PATCH status=blocked | blocked, giữ liên kết hiện có | blocked |
+| PATCH status=active | Cần tài xế sau cập nhật, thiếu → 400 invalid_input | active, không tài xế |
+
+PATCH phải có ít nhất một trong driver_id, status=active|blocked; không cho gửi unlinked.
+Đổi liên kết không tự mở khoá; có thể gắn và mở khoá cùng request. Lock FOR UPDATE tuần tự
+hoá thay đổi đồng thời; driver được kiểm trong transaction, lỗi rollback toàn bộ.
+issued_at giữ nguyên; mỗi PATCH thành công cập nhật updated_at.
+404 driver_not_found cho driver không tồn tại/không đúng quan hệ; 404 not_found cho card
+không có; 409 card_already_registered từ unique constraint kể cả cuộc đua đăng ký;
+400 invalid_input cho path/id/query/body không hợp lệ. Gửi driver cho free_vend trả 409
+card_kind_has_no_driver cả POST/PATCH. Phiên đã bắt đầu giữ owner/payment_mode đã chụp;
+không gửi RemoteStop, không thay session, billing hay ledger khi quản lý thẻ.
+
+Phạm vi free_vend: hợp đồng API hiện tại và SessionsService có registry kind free_vend,
+active không cần driver. Ghi chú STM-8 v1.1 cũ chỉ nói tag cấu hình theo Charge Point;
+registry kind này được hỗ trợ theo hợp đồng hiện tại, không thay đổi cấu hình
+charge_points.free_vend_tag, không thêm endpoint per-station, không sửa diagram/policy.
+
+Nghiên cứu trước triển khai (primary đã đọc source/test, không chạy mã upstream):
+[SteVe controller](https://github.com/steve-community/steve/blob/d5a5d1e6d1d717279c369e88cbe1bb3c533efc93/src/main/java/de/rwth/idsg/steve/web/api/OcppTagsRestController.java),
+[service](https://github.com/steve-community/steve/blob/d5a5d1e6d1d717279c369e88cbe1bb3c533efc93/src/main/java/de/rwth/idsg/steve/service/OcppTagService.java),
+[REST tests](https://github.com/steve-community/steve/blob/d5a5d1e6d1d717279c369e88cbe1bb3c533efc93/src/test/java/de/rwth/idsg/steve/web/api/OcppTagsRestControllerTest.java),
+[GPLv3 license](https://github.com/steve-community/steve/blob/d5a5d1e6d1d717279c369e88cbe1bb3c533efc93/LICENSE.txt).
+SteVe có registry service riêng, bộ lọc, create201, validation400/duplicate422/notfound404,
+và Authorize xét blocked/expired. Java/Spring generic OcppTag không phù hợp trực tiếp với
+kind/driver/409 contract của PowerMe; thêm stack/dependency sẽ tăng bảo trì. Chọn pattern
+nội bộ charge-point-onboarding/admin-platform: TypeScript/native HTTP/RolesGuard/pg,
+không dependency mới, giữ server-side role checks, SQL tham số và transaction. Chỉ áp dụng
+ý tưởng tách registry và nhóm test hợp đồng; không sao chép GPL code, không cài/chạy upstream.
+
+Kiểm chứng local: test/admin-rfid-cards.integration.test.ts (53 cases HTTP/Postgres),
+fe01-dashboard-auth (13), card-authorize (25), tổng 91 pass trên Node 24.22.3 và DB riêng
+port 5546. Chưa nghiệm thu staging/hardware. Runner riêng được allowlist thêm suite RFID:
+npm run test:driver-discovery -w @powerme/csms -- test/admin-rfid-cards.integration.test.ts
+(cần MB03_ALLOW_CREATE_TEST_DATABASE=true và admin URL private của owned local cluster).
+Collection và template rỗng: apps/csms/postman/PowerMe-T146-Admin-RFID.postman_collection.json,
+PowerMe-T146-Local.postman_environment.json. Không import credentials/token vào workspace cloud.
+Script login chỉ dùng pm.variables.set (trong một Collection Runner run); Send riêng lẻ phải
+điền giá trị private local/current, shared vẫn rỗng. Không ghi token vào collection/global/shared env.
+
+### 3.8b T161 — danh sách tài khoản `GET /admin/v1/users` (27/11/2026)
+
+Làm trước cho ô chọn tài xế của màn 30 (RFID Cards): `?role=driver&account_status=active&q=…`.
+Các route khác của §3.8 (tạo, sửa, đổi role, khoá / mở khoá) vẫn planned (Trí).
+
+- Sau RolesGuard Admin; sai phương thức 405. Bộ lọc đều tuỳ chọn, mỗi key tối đa một lần, key
+  lạ / giá trị sai → 400 `invalid_input`: `role` ∈ `driver|operator_staff|admin`,
+  `account_status` ∈ `active|suspended|closed`, `operator_id` (nhân viên của Operator đó),
+  `q`, `page` (1–10000), `page_size` (1–100, mặc định 50).
+- `q` 2–100 ký tự (bỏ khoảng trắng đầu cuối): email hoặc họ tên **chứa** `q`, không phân biệt
+  hoa thường; `%`, `_`, `\` là ký tự thường. Thêm cho T161: hoặc số điện thoại **bằng** `q` sau
+  khi chuẩn hoá BE-30 (`0901…`, `84901…`, `+84 901…` cùng một số).
+- Trả `UserAccountPage` (OpenAPI): `operator` và `staff_role` chỉ có với `operator_staff`,
+  còn lại `null`. Thứ tự `id DESC`; total / items cùng snapshot REPEATABLE READ.
+- Không lọc dữ liệu lab (NFR-03 / RQ1) như `GET /admin/v1/summary`; tìm theo `q` nên ít gặp.
+- Test: `test/t161-admin-users.integration.test.ts` (8 ca HTTP / Postgres).
 
 ### 3.9 Tổng quan nền tảng (5) và ngoại lệ thanh toán (8)
 
@@ -458,10 +544,10 @@ với BE-31: +1 refresh (T125), +2 giao dịch Admin (T108).
 | Biểu giá & khuyến mãi | 6 | 0 | 0 | 0 | 0 | 6 |
 | Doanh thu & giao dịch | 6 | 6 | 0 | 0 | 0 | 0 |
 | Tài khoản & role | 8 | 0 | 0 | 0 | 0 | 8 |
-| Thẻ RFID | 3 | 0 | 0 | 0 | 0 | 3 |
+| Thẻ RFID | 3 | 3 | 0 | 0 | 0 | 0 |
 | Tổng quan nền tảng | 5 | 0 | 5 | 0 | 0 | 0 |
 | Ngoại lệ thanh toán | 8 | 0 | 0 | 0 | 0 | 8 |
-| **Cộng** | **76** | **16** | **14** | **9** | **2** | **35** |
+| **Cộng** | **76** | **19** | **14** | **9** | **2** | **32** |
 
 ## 4. Doanh thu theo BR-P46
 
@@ -476,7 +562,7 @@ Hợp đồng biến luật thành truy vấn:
 | Luật | Trong API |
 |---|---|
 | Chỉ `csms_billed` đã `reconciled` | ~~`csms_billed_revenue_vnd` = Σ `credit_transactions.amount_vnd` (giá trị tuyệt đối) loại `session_debit` của phiên `payment_mode = csms_billed AND status = reconciled`~~ → thay bởi T108 20/11: phiên vào doanh thu = `payment_mode = csms_billed` **và** `status = reconciled` **và có dòng `session_debit`**; `csms_billed_revenue_vnd` = Σ \|`amount_vnd`\| của các dòng đó; `csms_billed_session_count` và `csms_billed_energy_wh` chỉ đếm các phiên này. Doanh thu là giá trị credit đã trừ cho phiên: không trừ điểm đổi lúc nạp, gồm cả phần thiếu đang nằm trong số dư âm (BR-P20) |
-| Đã đối soát nhưng chưa trừ tiền (T108) | phiên `csms_billed` `reconciled` **chưa có** `session_debit` (thẻ RFID chưa trừ tiền — T115; quyết toán treo: `promotion_unsupported`, `late_start_operator_review`, `missing_meter`, `invalid_energy`, `policy_unconfigured`…) không vào doanh thu, không vào `csms_billed_session_count`; đếm ở `unsettled: {session_count, by_reason}`. `reason` = `charge_settlement_jobs.reason` khi job `pending`; không có job hoặc job `ineligible` → `ineligible`; job `posted` mà không có debit → `posted_without_debit` (lệch sổ, cần kiểm tra). Mỗi phiên tối đa một job (`session_id` là khoá chính) |
+| Đã đối soát nhưng chưa trừ tiền (T108) | phiên `csms_billed` `reconciled` **chưa có** `session_debit` (thẻ RFID chưa trừ tiền — T115; quyết toán treo: `promotion_unsupported`, `late_start_operator_review`, `missing_meter`, `invalid_energy`, `policy_unconfigured`…) không vào doanh thu, không vào `csms_billed_session_count`; đếm ở `unsettled: {session_count, by_reason}`. `reason` = `charge_settlement_jobs.reason` khi job `pending`; job `ineligible/account_closed` → `account_closed` (T158, đã dừng tự thử lại, chưa thu nợ); không có job hoặc job `ineligible` khác → `ineligible`; job `posted` mà không có debit → `posted_without_debit` (lệch sổ, cần kiểm tra). Mỗi phiên tối đa một job (`session_id` là khoá chính) |
 | Mỗi phiên một lần | unique index `credit_transactions_one_debit_per_session` đã bảo đảm một `session_debit` mỗi phiên; báo cáo join theo phiên, không theo dòng sổ cái khác |
 | Phiên unattributed là dòng riêng (UC-OPS-09) | `unattributed_session_count`, `unattributed_energy_wh` — **không có cột tiền** (không có ai để thu). Gồm mọi phiên `payment_mode = unattributed` đã dừng (`closed`, `review`, `reconciled`), **kể cả free vend** (`origin = free_vend`). Số này không so với hàng đợi unattributed của FE-03 / BE-24, vì hàng đợi chỉ đếm phiên chưa xử lý |
 | Phiên chưa đối soát xong | không vào doanh thu; đếm ở `pending_reconciliation.session_count` (phiên `csms_billed` ở `closed` / `review`) để người xem biết số còn có thể tăng. Phiên đang chạy, `orphaned`, `failed` không vào nhóm nào (K11); phiên trên trụ chưa gắn site cũng không |
@@ -775,7 +861,7 @@ trạng thái (2xx/4xx nghiệp vụ khác với 401/403). Ba điều kiện c�
 | 2 | `POST /api/auth/v1/refresh` | công khai | — | — | — | implemented (T125) |
 | 3 | `GET /api/operator/v1/me` | 401 | 403 | ✓ | 403 | implemented |
 | 4 | `GET /api/admin/v1/me` | 401 | 403 | 403 | ✓ | implemented |
-| 5 | `GET /api/operator/v1/sites` | 401 | 403 | ✓ | 403 | planned |
+| 5 | `GET /api/operator/v1/sites` | 401 | 403 | ✓ | 403 | implemented (FE-02) |
 | 6 | `GET /api/operator/v1/charge-points` | 401 | 403 | ✓ | 403 | implemented (FE-03) |
 | 7 | `POST /api/operator/v1/charge-points/onboard` | 401 | 403 | ✓ | 403 | implemented (BE-44) |
 | 8 | `GET /api/operator/v1/charge-points/{chargePointId}` | 401 | 403 | ✓ | 403 | implemented (FE-05) |
@@ -823,17 +909,18 @@ trạng thái (2xx/4xx nghiệp vụ khác với 401/403). Ba điều kiện c�
 | 50 | `GET /api/admin/v1/revenue.csv` | 401 | 403 | 403 | ✓ | planned |
 | 51 | `GET /api/admin/v1/transactions` | 401 | 403 | 403 | ✓ | planned |
 | 52 | `GET /api/admin/v1/transactions.csv` | 401 | 403 | 403 | ✓ | planned |
-| 53 | `GET /api/admin/v1/users` | 401 | 403 | 403 | ✓ | planned |
+| 53 | `GET /api/admin/v1/users` | 401 | 403 | 403 | ✓ | implemented (T161) |
 | 54 | `POST /api/admin/v1/users` | 401 | 403 | 403 | ✓ | planned |
 | 55 | `GET /api/admin/v1/users/{userId}` | 401 | 403 | 403 | ✓ | planned |
 | 56 | `PATCH /api/admin/v1/users/{userId}` | 401 | 403 | 403 | ✓ | planned |
 | 57 | `PUT /api/admin/v1/users/{userId}/role` | 401 | 403 | 403 | ✓ | planned |
 | 58 | `POST /api/admin/v1/users/{userId}/lock` | 401 | 403 | 403 | ✓ | planned |
 | 59 | `POST /api/admin/v1/users/{userId}/unlock` | 401 | 403 | 403 | ✓ | planned |
-| 60 | `GET /api/admin/v1/operators` | 401 | 403 | 403 | ✓ | planned |
-| 61 | `GET /api/admin/v1/rfid-cards` | 401 | 403 | 403 | ✓ | planned |
-| 62 | `POST /api/admin/v1/rfid-cards` | 401 | 403 | 403 | ✓ | planned |
-| 63 | `PATCH /api/admin/v1/rfid-cards/{cardId}` | 401 | 403 | 403 | ✓ | planned |
+| 60 | `GET /api/admin/v1/operators` | 401 | 403 | 403 | ✓ | implemented (FE-18) |
+| 60a | `GET /api/admin/v1/network/charge-points` | 401 | 403 | 403 | ✓ | implemented (FE-18) |
+| 61 | `GET /api/admin/v1/rfid-cards` | 401 | 403 | 403 | ✓ | implemented local (chưa merge/deploy) · WP3/T146 |
+| 62 | `POST /api/admin/v1/rfid-cards` | 401 | 403 | 403 | ✓ | implemented local (chưa merge/deploy) · WP3/T146 |
+| 63 | `PATCH /api/admin/v1/rfid-cards/{cardId}` | 401 | 403 | 403 | ✓ | implemented local (chưa merge/deploy) · WP3/T146 |
 | 64 | `GET /api/admin/v1/summary` | 401 | 403 | 403 | ✓ | implemented (FE-14) |
 | 65 | `GET /api/admin/v1/sessions` | 401 | 403 | 403 | ✓ | console |
 | 66 | `GET /api/admin/v1/sessions/{sessionId}` | 401 | 403 | 403 | ✓ | console |

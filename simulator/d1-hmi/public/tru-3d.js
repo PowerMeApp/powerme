@@ -1,4 +1,4 @@
-// tru-3d.js — bộ nạp hình trụ sạc 3D trên trang từng trụ (QA-03 → QA-04).
+// tru-3d.js — bộ nạp hình trụ sạc 3D trên trang từng trụ (QA-03 → QA-04 → QA-05).
 //
 // LÀM GÌ
 //   Kiểm điều kiện, rồi nạp bundle React + react-three-fiber (GET /tru3d/tru3d.js, build từ
@@ -11,6 +11,9 @@
 //   không có WebGL, `prefers-reduced-motion: reduce`, nút "Tắt hoạt ảnh", nút "Hình 2D" (nhớ trong
 //   localStorage), `?3d=off`, chưa build bundle (/tru3d/tru3d.js → 404), không nạp được three.js
 //   (/vendor/three/ → 404, ví dụ image Docker cài --omit=dev), hoặc cảnh 3D lỗi khi chạy.
+// CHẤT LƯỢNG (QA-05)
+//   mặc định tự hạ: FPS < 30 trong 2 s → tắt bloom + phản chiếu; `?3d=lite` ép chế độ nhẹ ngay;
+//   `?3d=hq` giữ chất lượng cao, không tự hạ (chụp ảnh, máy chiếu đã thử trước).
 
 const root = document.getElementById('tru');
 const box = document.getElementById('tru3d');
@@ -60,6 +63,7 @@ function start(m) {
   let want = store.get('tru.3d') !== '0';
   const ctl = m.mount(box, {
     initial: window.__truLast ?? null,
+    quality: qs.get('3d'),
     // Cảnh 3D lỗi khi chạy (vd. mất context WebGL lúc tạo) → về 2D, ẩn nút 3D
     onFail() {
       broken = true;

@@ -47,6 +47,8 @@ const cp = (over: Partial<OperatorChargePoint> = {}): OperatorChargePoint => ({
       active_session_id: null,
     },
   ],
+  offline_card_risk: false,
+  offline_card_risk_reason: null,
   ...over,
 });
 const offline = cp({
@@ -157,6 +159,28 @@ describe('Danh sách trụ sạc (màn 18)', () => {
       '/operator/stations/1',
     );
     expect(seen[0]).toMatchObject({ search: '?page=1&page_size=20' });
+  });
+
+  it('[TC-BRP52-05] T150: a charge point whose offline card authorisation is not confirmed off shows a warning badge', async () => {
+    fakeCsms({
+      [LIST_URL]: page([
+        cp(),
+        cp({
+          id: '3',
+          serial_number: 'RH24D1-00003',
+          display_code: 'PM-D1-HCM-0003',
+          offline_card_risk: true,
+          offline_card_risk_reason: 'rejected',
+        }),
+      ]),
+    });
+    renderApp('/operator/charge-points', session(STAFF));
+    const risky = within(await screen.findByRole('row', { name: 'Trụ sạc PM-D1-HCM-0003' }));
+    const badge = risky.getByText('Rủi ro thẻ offline');
+    expect(badge).toHaveClass('pill', 'major');
+    expect(badge).toHaveAttribute('title', expect.stringContaining('Rejected'));
+    const safe = within(screen.getByRole('row', { name: 'Trụ sạc PM-D1-HCM-0001' }));
+    expect(safe.queryByText('Rủi ro thẻ offline')).toBeNull();
   });
 
   it('filters send online / lifecycle from page 1; the pager asks for page 2', async () => {
