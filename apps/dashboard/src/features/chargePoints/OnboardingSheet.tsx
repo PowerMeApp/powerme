@@ -9,7 +9,9 @@
  * Manager and technician alike (D42).
  */
 import { zodResolver } from '@hookform/resolvers/zod';
-import { useEffect, useId, useState } from 'react';
+import { Button, Group } from '@mantine/core';
+import { IconCopy } from '@tabler/icons-react';
+import { useEffect, useState } from 'react';
 import { useFieldArray, useForm } from 'react-hook-form';
 import { Link } from 'react-router';
 import type { ConnectorType, OnboardResult } from '@powerme/shared';
@@ -20,6 +22,9 @@ import {
   useOperatorSitesQuery,
   type ApiError,
 } from '../../core/api/api';
+import { Notice } from '../../ui/Notice';
+import { Sheet } from '../../ui/Sheet';
+import { StatusBadge } from '../../ui/StatusBadge';
 import { LIFECYCLE } from './format';
 import { onboardSchema, type OnboardForm, type OnboardValues } from './onboardSchema';
 
@@ -77,43 +82,47 @@ function Credential({ result, onClose }: { result: OnboardResult; onClose: () =>
     <>
       <p>
         Trụ <b>{result.display_code}</b> đã được gắn vào trạm ·{' '}
-        <span className="pill muted">{LIFECYCLE[result.lifecycle]}</span>
+        <StatusBadge tone="muted">{LIFECYCLE[result.lifecycle]}</StatusBadge>
       </p>
-      <p className="queue-note error" role="alert">
-        Mật khẩu chỉ hiện một lần — nhập vào trụ trước khi đóng.
-      </p>
+      <Notice tone="error">Mật khẩu chỉ hiện một lần — nhập vào trụ trước khi đóng.</Notice>
       <dl className="credential">
         {rows.map(([label, value]) => (
           <div key={label}>
             <dt>{label}</dt>
             <dd>
               <code>{value}</code>
-              <button
+              <Button
                 type="button"
-                className="btn small ghost"
+                size="compact-sm"
+                variant="subtle"
+                color="slate"
+                leftSection={<IconCopy size={14} aria-hidden="true" />}
                 aria-label={`Sao chép ${label}`}
                 onClick={() => copy(label, value)}
               >
                 {copied === label ? 'Đã chép' : 'Sao chép'}
-              </button>
+              </Button>
             </dd>
           </div>
         ))}
       </dl>
-      <div className="btn-row">
-        <Link className="btn ghost" to={`/operator/charge-points/${result.charge_point_id}`}>
+      <Group justify="flex-end" gap="sm">
+        <Button
+          component={Link}
+          variant="default"
+          to={`/operator/charge-points/${result.charge_point_id}`}
+        >
           Xem trụ sạc
-        </Link>
-        <button type="button" className="btn primary" onClick={onClose}>
+        </Button>
+        <Button type="button" onClick={onClose}>
           Đã lưu, đóng
-        </button>
-      </div>
+        </Button>
+      </Group>
     </>
   );
 }
 
 export function OnboardingSheet({ onClose }: { onClose: () => void }) {
-  const titleId = useId();
   const sites = useOperatorSitesQuery();
   const [onboard, { data: result, isLoading, reset }] = useOnboardChargePointMutation();
   const {
@@ -151,12 +160,6 @@ export function OnboardingSheet({ onClose }: { onClose: () => void }) {
     reset(); // the password must not stay in the store
     onClose();
   };
-  // Escape cancels the form only; the credential needs an explicit "Đã lưu, đóng".
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && !result && !busy && onClose();
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [result, busy, onClose]);
 
   async function onValid(v: OnboardValues) {
     const res = await onboard({
@@ -174,114 +177,105 @@ export function OnboardingSheet({ onClose }: { onClose: () => void }) {
   }
 
   return (
-    <div className="backdrop">
-      <div
-        className="card dialog onboarding-sheet"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby={titleId}
-      >
-        <h2 id={titleId}>{result ? 'Thông tin đăng nhập của trụ sạc' : 'Đưa trụ vào vận hành'}</h2>
-        {result ? (
-          <Credential result={result} onClose={close} />
-        ) : (
-          <>
-            <p className="muted small">
-              Gắn một số seri đã được quản trị viên đăng ký vào trạm sạc của đơn vị vận hành. Trụ
-              chuyển sang "Chờ kết nối" cho tới khi kết nối bằng thông tin đăng nhập.
-            </p>
-            <Field label="Số seri" error={errors.serial_number?.message}>
-              {(a11y) => (
-                <input
-                  {...a11y}
-                  {...register('serial_number')}
-                  className="input"
-                  maxLength={40}
-                  placeholder="VD: SIM-0005"
-                  autoFocus
-                />
-              )}
-            </Field>
-            <Field label="Trạm sạc" error={errors.site_id?.message}>
-              {(a11y) => (
-                <select {...a11y} {...register('site_id')} className="input" disabled={noSites}>
-                  {siteList.map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {s.site_code} · {s.site_name}
-                    </option>
-                  ))}
-                </select>
-              )}
-            </Field>
-            {sites.error && <FieldError message={errorMessage(sites.error)} />}
-            {noSites && <p className="muted small">Đơn vị vận hành chưa có trạm sạc nào.</p>}
-            <fieldset className="connectors">
-              <legend>Súng</legend>
-              {fields.map((f, i) => (
-                <div key={f.id} className="connector-row">
-                  <span>Súng {f.connector_no}</span>
-                  <Field label={`Loại súng ${f.connector_no}`}>
-                    {(a11y) => (
-                      <select
-                        {...a11y}
-                        {...register(`connectors.${i}.connector_type`)}
-                        className="input"
-                      >
-                        {(Object.keys(CONNECTOR_LABEL) as ConnectorType[]).map((t) => (
-                          <option key={t} value={t}>
-                            {CONNECTOR_LABEL[t]}
-                          </option>
-                        ))}
-                      </select>
-                    )}
-                  </Field>
-                  <Field
-                    label={`Công suất súng ${f.connector_no} (kW, tuỳ chọn)`}
-                    error={errors.connectors?.[i]?.max_power_kw?.message}
-                  >
-                    {(a11y) => (
-                      <input
-                        {...a11y}
-                        {...register(`connectors.${i}.max_power_kw`)}
-                        className="input"
-                        inputMode="decimal"
-                      />
-                    )}
-                  </Field>
-                </div>
-              ))}
-              <button
-                type="button"
-                className="btn small ghost"
-                onClick={() =>
-                  fields.length === 2
-                    ? remove(1)
-                    : append({ connector_no: 2, connector_type: 'ccs2', max_power_kw: '' })
-                }
-              >
-                {fields.length === 2 ? 'Bỏ súng 2' : 'Thêm súng 2'}
-              </button>
-              <FieldError
-                message={errors.connectors?.root?.message ?? errors.connectors?.message}
+    // Escape cancels the form only; the credential needs an explicit "Đã lưu, đóng".
+    <Sheet
+      title={result ? 'Thông tin đăng nhập của trụ sạc' : 'Đưa trụ vào vận hành'}
+      onClose={onClose}
+      closeOnEscape={!result && !busy}
+    >
+      {result ? (
+        <Credential result={result} onClose={close} />
+      ) : (
+        <>
+          <p className="muted small">
+            Gắn một số seri đã được quản trị viên đăng ký vào trạm sạc của đơn vị vận hành. Trụ
+            chuyển sang "Chờ kết nối" cho tới khi kết nối bằng thông tin đăng nhập.
+          </p>
+          <Field label="Số seri" error={errors.serial_number?.message}>
+            {(a11y) => (
+              <input
+                {...a11y}
+                {...register('serial_number')}
+                className="input"
+                maxLength={40}
+                placeholder="VD: SIM-0005"
+                data-autofocus
               />
-            </fieldset>
-            <FieldError message={errors.root?.server?.message} />
-            <div className="btn-row">
-              <button type="button" className="btn ghost" disabled={busy} onClick={close}>
-                Huỷ
-              </button>
-              <button
-                type="button"
-                className="btn primary"
-                disabled={busy || noSites}
-                onClick={() => void handleSubmit(onValid)()}
-              >
-                {busy ? 'Đang gửi…' : 'Đưa vào vận hành'}
-              </button>
-            </div>
-          </>
-        )}
-      </div>
-    </div>
+            )}
+          </Field>
+          <Field label="Trạm sạc" error={errors.site_id?.message}>
+            {(a11y) => (
+              <select {...a11y} {...register('site_id')} className="input" disabled={noSites}>
+                {siteList.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.site_code} · {s.site_name}
+                  </option>
+                ))}
+              </select>
+            )}
+          </Field>
+          {sites.error && <FieldError message={errorMessage(sites.error)} />}
+          {noSites && <p className="muted small">Đơn vị vận hành chưa có trạm sạc nào.</p>}
+          <fieldset className="connectors">
+            <legend>Súng</legend>
+            {fields.map((f, i) => (
+              <div key={f.id} className="connector-row">
+                <span>Súng {f.connector_no}</span>
+                <Field label={`Loại súng ${f.connector_no}`}>
+                  {(a11y) => (
+                    <select
+                      {...a11y}
+                      {...register(`connectors.${i}.connector_type`)}
+                      className="input"
+                    >
+                      {(Object.keys(CONNECTOR_LABEL) as ConnectorType[]).map((t) => (
+                        <option key={t} value={t}>
+                          {CONNECTOR_LABEL[t]}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                </Field>
+                <Field
+                  label={`Công suất súng ${f.connector_no} (kW, tuỳ chọn)`}
+                  error={errors.connectors?.[i]?.max_power_kw?.message}
+                >
+                  {(a11y) => (
+                    <input
+                      {...a11y}
+                      {...register(`connectors.${i}.max_power_kw`)}
+                      className="input"
+                      inputMode="decimal"
+                    />
+                  )}
+                </Field>
+              </div>
+            ))}
+            <Button
+              type="button"
+              size="compact-sm"
+              variant="subtle"
+              onClick={() =>
+                fields.length === 2
+                  ? remove(1)
+                  : append({ connector_no: 2, connector_type: 'ccs2', max_power_kw: '' })
+              }
+            >
+              {fields.length === 2 ? 'Bỏ súng 2' : 'Thêm súng 2'}
+            </Button>
+            <FieldError message={errors.connectors?.root?.message ?? errors.connectors?.message} />
+          </fieldset>
+          <FieldError message={errors.root?.server?.message} />
+          <Group justify="flex-end" gap="sm">
+            <Button variant="subtle" color="slate" disabled={busy} onClick={close}>
+              Huỷ
+            </Button>
+            <Button disabled={busy || noSites} onClick={() => void handleSubmit(onValid)()}>
+              {busy ? 'Đang gửi…' : 'Đưa vào vận hành'}
+            </Button>
+          </Group>
+        </>
+      )}
+    </Sheet>
   );
 }

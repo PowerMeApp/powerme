@@ -7,15 +7,14 @@
  * (D10 order); resolve a payment conflict with a note. Refund actions and the customer-care refund
  * list come with T152 (manual refunds, D-AC).
  */
-import { useState } from 'react';
+import { Button, Group, Loader, Table } from '@mantine/core';
+import { useState, type ReactNode } from 'react';
 import { useSearchParams } from 'react-router';
 import type {
   InvoiceNeedsReviewItem,
   PaymentConflictItem,
   TopUpExceptionItem,
 } from '@powerme/shared';
-import { Breadcrumbs } from '../../components/Breadcrumbs';
-import { CountBadge } from '../../components/CountBadge';
 import { useBillingExceptionsQuery, useRecheckTopUpMutation } from '../../core/api/api';
 import {
   ConflictReviewSheet,
@@ -30,6 +29,10 @@ import {
   vnd,
   when,
 } from '../../features/billing/format';
+import { DataTable, EmptyState } from '../../ui/DataTable';
+import { Notice, type Note } from '../../ui/Notice';
+import { PageHeader } from '../../ui/PageHeader';
+import { QueueSwitch } from '../../ui/QueueSwitch';
 
 const TABS = [
   ['late', 'Trả muộn', 'late_payments'],
@@ -42,7 +45,6 @@ type Sheet =
   | { kind: 'retry'; item: InvoiceNeedsReviewItem }
   | { kind: 'reviewed'; item: TopUpExceptionItem }
   | { kind: 'conflict'; item: PaymentConflictItem };
-type Note = { tone: 'ok' | 'error'; text: string } | null;
 
 function Driver({ d }: { d: { full_name: string; phone_number: string | null } }) {
   return (
@@ -53,24 +55,20 @@ function Driver({ d }: { d: { full_name: string; phone_number: string | null } }
   );
 }
 
-function Table({ head, children }: { head: string[]; children: React.ReactNode }) {
+function ListTable({ head, children }: { head: string[]; children: ReactNode }) {
   return (
-    <div className="card table-card">
-      <div className="table-wrap">
-        <table className="data-table">
-          <thead>
-            <tr>
-              {head.map((h) => (
-                <th key={h} scope="col">
-                  {h}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>{children}</tbody>
-        </table>
-      </div>
-    </div>
+    <DataTable minWidth={820}>
+      <Table.Thead>
+        <Table.Tr>
+          {head.map((h) => (
+            <Table.Th key={h} scope="col">
+              {h}
+            </Table.Th>
+          ))}
+        </Table.Tr>
+      </Table.Thead>
+      <Table.Tbody>{children}</Table.Tbody>
+    </DataTable>
   );
 }
 
@@ -109,39 +107,27 @@ export function BillingExceptionsPage() {
     setSheet(null);
     setNote({ tone: 'ok', text });
   };
-  const empty = <p className="muted">Không có mục nào.</p>;
+  const empty = <EmptyState>Không có mục nào.</EmptyState>;
 
   return (
     <>
-      <Breadcrumbs items={[{ label: 'Ngoại lệ thanh toán' }]} />
-      <div className="page-head">
-        <h1>Ngoại lệ thanh toán</h1>
-      </div>
-      <div className="filters">
-        <div className="queue-switch" role="group" aria-label="Danh sách">
-          {TABS.map(([id, label, key]) => (
-            <button
-              key={id}
-              type="button"
-              className={`btn small ${tab === id ? '' : 'ghost'}`}
-              aria-pressed={tab === id}
-              onClick={() => switchTab(id)}
-            >
-              {label}
-              <CountBadge count={data?.[key].total} label="mục" />
-            </button>
-          ))}
-        </div>
-      </div>
-      {note && (
-        <p className={`queue-note ${note.tone}`} role={note.tone === 'ok' ? 'status' : 'alert'}>
-          {note.text}
-        </p>
-      )}
+      <PageHeader crumbs={[{ label: 'Ngoại lệ thanh toán' }]} title="Ngoại lệ thanh toán" />
+      <QueueSwitch
+        label="Danh sách"
+        value={tab}
+        onChange={switchTab}
+        items={TABS.map(([key, label, total]) => ({
+          key,
+          label,
+          count: data?.[total].total,
+          countLabel: 'mục',
+        }))}
+      />
+      {note && <Notice tone={note.tone}>{note.text}</Notice>}
       {isLoading ? (
-        <p className="muted">Đang tải…</p>
+        <Loader size="sm" aria-label="Đang tải…" />
       ) : error && !data ? (
-        <p role="alert">{billingError(error)}</p>
+        <Notice tone="error">{billingError(error)}</Notice>
       ) : !data ? null : tab === 'late' ? (
         <>
           <p className="muted small">
@@ -149,123 +135,143 @@ export function BillingExceptionsPage() {
             đã trả (BR-P13). Nút hoàn tiền có khi luồng hoàn tiền thủ công (T152) xong.
           </p>
           {data.late_payments.items.length === 0 ? (
-            <div className="card">{empty}</div>
+            empty
           ) : (
-            <Table head={['Lần nạp', 'Tài xế', 'Số tiền trả muộn', 'Mã giao dịch', 'Lúc trả']}>
+            <ListTable head={['Lần nạp', 'Tài xế', 'Số tiền trả muộn', 'Mã giao dịch', 'Lúc trả']}>
               {data.late_payments.items.map((l) => (
-                <tr key={l.top_up_id} aria-label={`Trả muộn lần nạp #${l.top_up_id}`}>
-                  <td>
+                <Table.Tr
+                  data-tone="major"
+                  key={l.top_up_id}
+                  aria-label={`Trả muộn lần nạp #${l.top_up_id}`}
+                >
+                  <Table.Td>
                     <span className="cell-title">#{l.top_up_id}</span>
                     <div className="muted small">{l.gateway_reference}</div>
-                  </td>
-                  <td>
+                  </Table.Td>
+                  <Table.Td>
                     <Driver d={l.driver} />
-                  </td>
-                  <td className="nowrap">{vnd(l.late_amount_vnd)}</td>
-                  <td>{l.late_gateway_ref}</td>
-                  <td className="nowrap">{when(l.late_paid_at)}</td>
-                </tr>
+                  </Table.Td>
+                  <Table.Td className="nowrap">{vnd(l.late_amount_vnd)}</Table.Td>
+                  <Table.Td>{l.late_gateway_ref}</Table.Td>
+                  <Table.Td className="nowrap">{when(l.late_paid_at)}</Table.Td>
+                </Table.Tr>
               ))}
-            </Table>
+            </ListTable>
           )}
         </>
       ) : tab === 'invoices' ? (
         data.invoices_needs_review.items.length === 0 ? (
-          <div className="card">{empty}</div>
+          empty
         ) : (
-          <Table head={['Lần nạp', 'Tài xế', 'Số tiền', 'Lỗi nhà cung cấp', 'Số lần', 'Xử lý']}>
+          <ListTable head={['Lần nạp', 'Tài xế', 'Số tiền', 'Lỗi nhà cung cấp', 'Số lần', 'Xử lý']}>
             {data.invoices_needs_review.items.map((i) => (
-              <tr key={i.e_invoice_id} aria-label={`Hoá đơn lần nạp #${i.top_up_id}`}>
-                <td className="cell-title">#{i.top_up_id}</td>
-                <td>
+              <Table.Tr
+                data-tone="major"
+                key={i.e_invoice_id}
+                aria-label={`Hoá đơn lần nạp #${i.top_up_id}`}
+              >
+                <Table.Td className="cell-title">#{i.top_up_id}</Table.Td>
+                <Table.Td>
                   <Driver d={i.driver} />
-                </td>
-                <td className="nowrap">{vnd(i.amount_vnd)}</td>
-                <td className="small">
+                </Table.Td>
+                <Table.Td className="nowrap">{vnd(i.amount_vnd)}</Table.Td>
+                <Table.Td className="small">
                   {i.last_error_kind && <b>{ERROR_KIND[i.last_error_kind]}: </b>}
                   {i.last_error_message ?? '—'}
-                </td>
-                <td>{i.attempt_count}</td>
-                <td>
-                  <button
+                </Table.Td>
+                <Table.Td>{i.attempt_count}</Table.Td>
+                <Table.Td>
+                  <Button
                     type="button"
-                    className="btn small"
+                    size="compact-sm"
+                    variant="light"
                     onClick={() => setSheet({ kind: 'retry', item: i })}
                   >
                     Thử lại
-                  </button>
-                </td>
-              </tr>
+                  </Button>
+                </Table.Td>
+              </Table.Tr>
             ))}
-          </Table>
+          </ListTable>
         )
       ) : tab === 'exceptions' ? (
         data.top_up_exceptions.items.length === 0 ? (
-          <div className="card">{empty}</div>
+          empty
         ) : (
-          <Table head={['Lần nạp', 'Tài xế', 'Ngoại lệ', 'Số tiền', 'Xử lý']}>
+          <ListTable head={['Lần nạp', 'Tài xế', 'Ngoại lệ', 'Số tiền', 'Xử lý']}>
             {data.top_up_exceptions.items.map((x) => (
-              <tr key={x.top_up_id} aria-label={`Ngoại lệ lần nạp #${x.top_up_id}`}>
-                <td>
+              <Table.Tr
+                data-tone="major"
+                key={x.top_up_id}
+                aria-label={`Ngoại lệ lần nạp #${x.top_up_id}`}
+              >
+                <Table.Td>
                   <span className="cell-title">#{x.top_up_id}</span>
                   <div className="muted small">{x.gateway_reference}</div>
-                </td>
-                <td>
+                </Table.Td>
+                <Table.Td>
                   <Driver d={x.driver} />
-                </td>
-                <td className="small">{EXCEPTION_KIND[x.exception_kind]}</td>
-                <td className="nowrap">{vnd(x.amount_paid_vnd)}</td>
-                <td>
-                  <div className="btn-row">
-                    <button
+                </Table.Td>
+                <Table.Td className="small">{EXCEPTION_KIND[x.exception_kind]}</Table.Td>
+                <Table.Td className="nowrap">{vnd(x.amount_paid_vnd)}</Table.Td>
+                <Table.Td>
+                  <Group gap={6} wrap="nowrap">
+                    <Button
                       type="button"
-                      className="btn small"
+                      size="compact-sm"
+                      variant="light"
                       disabled={r.isLoading}
                       onClick={() => void doRecheck(x)}
                     >
                       Kiểm tra lại
-                    </button>
-                    <button
+                    </Button>
+                    <Button
                       type="button"
-                      className="btn small ghost"
+                      size="compact-sm"
+                      variant="default"
                       onClick={() => setSheet({ kind: 'reviewed', item: x })}
                     >
                       Đã xem
-                    </button>
-                  </div>
-                </td>
-              </tr>
+                    </Button>
+                  </Group>
+                </Table.Td>
+              </Table.Tr>
             ))}
-          </Table>
+          </ListTable>
         )
       ) : data.payment_conflicts.items.length === 0 ? (
-        <div className="card">{empty}</div>
+        empty
       ) : (
-        <Table head={['Lần nạp', 'Tài xế', 'Số tiền', 'Lý do', 'Lúc trả', 'Xử lý']}>
+        <ListTable head={['Lần nạp', 'Tài xế', 'Số tiền', 'Lý do', 'Lúc trả', 'Xử lý']}>
           {data.payment_conflicts.items.map((c) => (
-            <tr key={c.conflict_id} aria-label={`Trả mâu thuẫn lần nạp #${c.top_up_id}`}>
-              <td>
+            <Table.Tr
+              data-tone="critical"
+              key={c.conflict_id}
+              aria-label={`Trả mâu thuẫn lần nạp #${c.top_up_id}`}
+            >
+              <Table.Td>
                 <span className="cell-title">#{c.top_up_id}</span>
                 <div className="muted small">{c.gateway_transaction_no}</div>
-              </td>
-              <td>
+              </Table.Td>
+              <Table.Td>
                 <Driver d={c.driver} />
-              </td>
-              <td className="nowrap">{vnd(c.amount_vnd)}</td>
-              <td className="small">{c.reason}</td>
-              <td className="nowrap">{when(c.paid_at)}</td>
-              <td>
-                <button
+              </Table.Td>
+              <Table.Td className="nowrap">{vnd(c.amount_vnd)}</Table.Td>
+              <Table.Td className="small">{c.reason}</Table.Td>
+              <Table.Td className="nowrap">{when(c.paid_at)}</Table.Td>
+              <Table.Td>
+                <Button
                   type="button"
-                  className="btn small"
+                  size="compact-sm"
+                  variant="light"
                   onClick={() => setSheet({ kind: 'conflict', item: c })}
                 >
                   Đã xử lý
-                </button>
-              </td>
-            </tr>
+                </Button>
+              </Table.Td>
+            </Table.Tr>
           ))}
-        </Table>
+        </ListTable>
       )}
       {sheet?.kind === 'retry' && (
         <RetryInvoiceSheet item={sheet.item} onDone={done} onCancel={() => setSheet(null)} />

@@ -1,0 +1,55 @@
+/*
+ * PowerMe tokens — same values as the driver app (apps/mobile/lib/core/theme/app_theme.dart):
+ * Rich Black page, Graphite cards (radius 20), inputs radius 14 with a teal focus border,
+ * pills radius 30 on a 12 % tint. Dark only. Mantine reads these through ui/theme.ts.
+ */
+:root {
+  --rich-black: #0a0a0a;
+  --graphite: #141414;
+  --graphite-2: #1b1d22;
+  --graphite-3: #22252c;
+  --line: #2b2f3a;
+  --line-soft: #1f2229;
+  --teal: #00e0c2;
+  --teal-soft: rgba(0, 224, 194, 0.12);
+  --teal-indicator: rgba(39, 229, 193, 0.2);
+  --gold: #d4af37;
+  --gold-deep: #a8841d;
+  --gold-soft: rgba(212, 175, 55, 0.12);
+  --danger: #ff6b6b;
+  --danger-soft: rgba(255, 107, 107, 0.12);
+  --danger-wash: rgba(255, 107, 107, 0.07);
+  --danger-edge: rgba(255, 107, 107, 0.45);
+  --warning: #ffc857;
+  --warning-soft: rgba(255, 200, 87, 0.12);
+  --warning-wash: rgba(255, 200, 87, 0.06);
+  --warning-edge: rgba(255, 200, 87, 0.4);
+  --muted: #9ea4b3;
+  --muted-soft: rgba(158, 164, 179, 0.12);
+  --nav-text: #d6d9e0;
+  --text: #ffffff;
+  --on-danger: #ffffff;
+  --scrim: rgba(0, 0, 0, 0.6);
+  --topbar-bg: rgba(10, 10, 10, 0.85);
+
+  --radius-card: 20px;
+  --radius-input: 14px;
+  --radius-pill: 30px;
+
+  --font-body:
+    'Inter Variable', 'Inter', 'Roboto', system-ui, -apple-system, 'Segoe UI', Arial, sans-serif;
+  --font-mono: ui-monospace, 'SFMono-Regular', Menlo, monospace;
+
+  /* Type scale, ratio about 1.15 (app screens: fixed, no fluid heads). */
+  --text-xs: 0.75rem;
+  --text-sm: 0.8125rem;
+  --text-md: 0.9375rem;
+  --text-lg: 1.0625rem;
+  --text-xl: 1.25rem;
+  --text-2xl: 1.625rem;
+  --text-figure: 1.875rem;
+  --text-figure-lg: 2.5rem;
+
+  --dur-micro: 120ms;
+  --dur-short: 180ms;
+}

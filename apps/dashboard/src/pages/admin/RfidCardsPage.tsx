@@ -9,10 +9,12 @@
  *     (sent together, as the API requires).
  * Each change refreshes the list and the card counts of screen 27 (tags RfidCard, AdminSummary).
  */
+import { Button, Group, Loader, NativeSelect, Table, TextInput } from '@mantine/core';
+import { IconPlus } from '@tabler/icons-react';
 import { useState } from 'react';
 import type { UserAccount, RfidCard, RfidCardKind, RfidCardStatus } from '@powerme/shared';
-import { Breadcrumbs } from '../../components/Breadcrumbs';
 import { ConfirmDialog } from '../../components/ConfirmDialog';
+import { FieldError } from '../../components/Field';
 import {
   RFID_PAGE_SIZE,
   useAdminRfidCardsQuery,
@@ -31,9 +33,14 @@ import {
   validCardId,
   type CardAction,
 } from '../../features/rfidCards/format';
+import { DataTable, EmptyState } from '../../ui/DataTable';
+import { FilterBar, SearchInput, SelectFilter } from '../../ui/FilterBar';
+import { Notice, type Note } from '../../ui/Notice';
+import { PageHeader } from '../../ui/PageHeader';
+import { Pager, pageCount } from '../../ui/Pager';
+import { StatusBadge } from '../../ui/StatusBadge';
 
 type Dialog = { kind: 'register' } | { kind: CardAction; card: RfidCard };
-type Note = { tone: 'ok' | 'error'; text: string } | null;
 
 const ACTION_LABEL: Record<CardAction, string> = {
   link: 'Gắn tài xế',
@@ -82,36 +89,25 @@ function RegisterDialog({
       onCancel={onCancel}
       onConfirm={() => void submit()}
     >
-      <label className="field">
-        Mã thẻ
-        <input
-          className="input"
-          value={cardId}
-          maxLength={MAX_CARD_ID + 10}
-          placeholder="Mã in trên thẻ"
-          onChange={(e) => setCardId(e.target.value)}
-        />
-      </label>
-      <label className="field">
-        Loại
-        <select
-          className="input"
-          value={kind}
-          onChange={(e) => setKind(e.target.value as RfidCardKind)}
-        >
-          {(Object.keys(KIND) as RfidCardKind[]).map((k) => (
-            <option key={k} value={k}>
-              {KIND[k]}
-            </option>
-          ))}
-        </select>
-      </label>
+      <TextInput
+        label="Mã thẻ"
+        value={cardId}
+        maxLength={MAX_CARD_ID + 10}
+        placeholder="Mã in trên thẻ"
+        onChange={(e) => setCardId(e.currentTarget.value)}
+      />
+      <NativeSelect
+        label="Loại"
+        value={kind}
+        onChange={(e) => setKind(e.currentTarget.value as RfidCardKind)}
+        data={(Object.keys(KIND) as RfidCardKind[]).map((k) => ({ value: k, label: KIND[k] }))}
+      />
       {kind === 'online' ? (
         <DriverPicker value={driver} onChange={setDriver} label="Tài xế (tuỳ chọn)" />
       ) : (
         <p className="muted small">Thẻ sạc miễn phí không gắn tài xế và dùng được ngay.</p>
       )}
-      {error && <p role="alert">{error}</p>}
+      <FieldError message={error ?? undefined} />
     </ConfirmDialog>
   );
 }
@@ -168,6 +164,7 @@ function ActionDialog({
     <ConfirmDialog
       title={`${ACTION_LABEL[action]} thẻ ${id}`}
       confirmLabel={ACTION_LABEL[action]}
+      danger={action === 'block'}
       busy={isLoading}
       onCancel={onCancel}
       onConfirm={() => void submit()}
@@ -185,7 +182,7 @@ function ActionDialog({
         <p>Thẻ chưa gắn tài xế: chọn tài xế để mở khoá thẻ.</p>
       )}
       {needsDriver && <DriverPicker value={driver} onChange={setDriver} />}
-      {error && <p role="alert">{error}</p>}
+      <FieldError message={error ?? undefined} />
     </ConfirmDialog>
   );
 }
@@ -193,13 +190,16 @@ function ActionDialog({
 function CardRow({ card, onAction }: { card: RfidCard; onAction: (a: CardAction) => void }) {
   const [label, tone] = STATUS[card.status];
   return (
-    <tr aria-label={`Thẻ ${card.card_identifier}`}>
-      <td className="cell-title">{card.card_identifier}</td>
-      <td>{KIND[card.card_kind]}</td>
-      <td>
-        <span className={`pill ${tone}`}>{label}</span>
-      </td>
-      <td>
+    <Table.Tr
+      aria-label={`Thẻ ${card.card_identifier}`}
+      data-tone={card.status === 'blocked' ? 'major' : undefined}
+    >
+      <Table.Td className="cell-title">{card.card_identifier}</Table.Td>
+      <Table.Td>{KIND[card.card_kind]}</Table.Td>
+      <Table.Td>
+        <StatusBadge tone={tone}>{label}</StatusBadge>
+      </Table.Td>
+      <Table.Td>
         {card.driver ? (
           <>
             {card.driver.full_name}
@@ -208,23 +208,24 @@ function CardRow({ card, onAction }: { card: RfidCard; onAction: (a: CardAction)
         ) : (
           <span className="muted">—</span>
         )}
-      </td>
-      <td className="nowrap">{day(card.issued_at)}</td>
-      <td>
-        <div className="btn-row">
+      </Table.Td>
+      <Table.Td className="nowrap">{day(card.issued_at)}</Table.Td>
+      <Table.Td>
+        <Group gap={6} wrap="nowrap">
           {cardActions(card).map((a) => (
-            <button
+            <Button
               key={a}
               type="button"
-              className={`btn small ${a === 'block' || a === 'unlink' ? 'ghost' : ''}`}
+              size="compact-sm"
+              variant={a === 'block' || a === 'unlink' ? 'default' : 'light'}
               onClick={() => onAction(a)}
             >
               {ACTION_LABEL[a]}
-            </button>
+            </Button>
           ))}
-        </div>
-      </td>
-    </tr>
+        </Group>
+      </Table.Td>
+    </Table.Tr>
   );
 }
 
@@ -243,7 +244,7 @@ export function RfidCardsPage() {
     ...(search.trim() ? { q: search } : {}),
   });
   const total = data?.total ?? 0;
-  const pages = Math.max(1, Math.ceil(total / RFID_PAGE_SIZE));
+  const pages = pageCount(total, RFID_PAGE_SIZE);
   if (data && page > pages) setPage(pages);
   const filtered = !!(status || kind || search.trim());
   const done = (text: string) => {
@@ -262,134 +263,100 @@ export function RfidCardsPage() {
     setNote({ tone: 'error', text: rfidError(res.error) });
   }
 
+  const first = ((data?.page ?? 1) - 1) * (data?.page_size ?? RFID_PAGE_SIZE) + 1;
+
   return (
     <>
-      <Breadcrumbs items={[{ label: 'Thẻ RFID' }]} />
-      <div className="page-head">
-        <h1>Thẻ RFID</h1>
-        <button
-          type="button"
-          className="btn primary page-action"
-          onClick={() => {
-            setNote(null);
-            setDialog({ kind: 'register' });
+      <PageHeader
+        crumbs={[{ label: 'Thẻ RFID' }]}
+        title="Thẻ RFID"
+        actions={
+          <Button
+            leftSection={<IconPlus size={16} aria-hidden="true" />}
+            onClick={() => {
+              setNote(null);
+              setDialog({ kind: 'register' });
+            }}
+          >
+            Đăng ký thẻ
+          </Button>
+        }
+      />
+      <FilterBar>
+        <SearchInput
+          label="Tìm thẻ"
+          value={search}
+          maxLength={MAX_CARD_ID}
+          placeholder="Mã thẻ (phần đầu, phân biệt hoa thường)"
+          onChange={(v) => {
+            setSearch(v);
+            setPage(1);
           }}
-        >
-          Đăng ký thẻ
-        </button>
-      </div>
-      <div className="filters">
-        <label className="field search-field">
-          Tìm thẻ
-          <input
-            className="input"
-            type="search"
-            value={search}
-            maxLength={MAX_CARD_ID}
-            placeholder="Mã thẻ (phần đầu, phân biệt hoa thường)"
-            onChange={(e) => {
-              setSearch(e.target.value);
-              setPage(1);
-            }}
-          />
-        </label>
-        <label className="field">
-          Trạng thái
-          <select
-            className="input"
-            value={status}
-            onChange={(e) => {
-              setStatus(e.target.value as RfidCardStatus | '');
-              setPage(1);
-            }}
-          >
-            <option value="">Tất cả</option>
-            {(Object.keys(STATUS) as RfidCardStatus[]).map((s) => (
-              <option key={s} value={s}>
-                {STATUS[s][0]}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="field">
-          Loại
-          <select
-            className="input"
-            value={kind}
-            onChange={(e) => {
-              setKind(e.target.value as RfidCardKind | '');
-              setPage(1);
-            }}
-          >
-            <option value="">Tất cả</option>
-            {(Object.keys(KIND) as RfidCardKind[]).map((k) => (
-              <option key={k} value={k}>
-                {KIND[k]}
-              </option>
-            ))}
-          </select>
-        </label>
-      </div>
-      {note && (
-        <p className={`queue-note ${note.tone}`} role={note.tone === 'ok' ? 'status' : 'alert'}>
-          {note.text}
-        </p>
-      )}
+        />
+        <SelectFilter
+          label="Trạng thái"
+          value={status}
+          options={[
+            ['', 'Tất cả'],
+            ...(Object.keys(STATUS) as RfidCardStatus[]).map((k) => [k, STATUS[k][0]] as const),
+          ]}
+          onChange={(v) => {
+            setStatus(v);
+            setPage(1);
+          }}
+        />
+        <SelectFilter
+          label="Loại"
+          value={kind}
+          options={[
+            ['', 'Tất cả'],
+            ...(Object.keys(KIND) as RfidCardKind[]).map((k) => [k, KIND[k]] as const),
+          ]}
+          onChange={(v) => {
+            setKind(v);
+            setPage(1);
+          }}
+        />
+      </FilterBar>
+      {note && <Notice tone={note.tone}>{note.text}</Notice>}
       {isLoading ? (
-        <p className="muted">Đang tải…</p>
+        <Loader size="sm" aria-label="Đang tải…" />
       ) : error && !data ? (
-        <p role="alert">{rfidError(error)}</p>
+        <Notice tone="error">{rfidError(error)}</Notice>
       ) : !data || data.items.length === 0 ? (
-        <div className="card">
-          <p className="muted">
-            {filtered ? 'Không có thẻ nào khớp bộ lọc.' : 'Chưa có thẻ RFID nào được đăng ký.'}
-          </p>
-        </div>
+        <EmptyState>
+          {filtered ? 'Không có thẻ nào khớp bộ lọc.' : 'Chưa có thẻ RFID nào được đăng ký.'}
+        </EmptyState>
       ) : (
-        <div className="card table-card">
-          <div className="table-wrap">
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th scope="col">Mã thẻ</th>
-                  <th scope="col">Loại</th>
-                  <th scope="col">Trạng thái</th>
-                  <th scope="col">Tài xế</th>
-                  <th scope="col">Ngày đăng ký</th>
-                  <th scope="col">Thao tác</th>
-                </tr>
-              </thead>
-              <tbody>
-                {data.items.map((card) => (
-                  <CardRow key={card.id} card={card} onAction={(a) => void act(card, a)} />
-                ))}
-              </tbody>
-            </table>
-          </div>
-          <nav className="pager" aria-label="Phân trang">
-            <span className="muted">
-              {total} thẻ · Trang {page} / {pages}
-            </span>
-            <div className="btn-row">
-              <button
-                type="button"
-                className="btn small ghost"
-                disabled={page <= 1}
-                onClick={() => setPage(page - 1)}
-              >
-                ‹ Trước
-              </button>
-              <button
-                type="button"
-                className="btn small ghost"
-                disabled={page >= pages}
-                onClick={() => setPage(page + 1)}
-              >
-                Sau ›
-              </button>
-            </div>
-          </nav>
-        </div>
+        <DataTable
+          minWidth={860}
+          footer={
+            <Pager
+              first={first}
+              last={first + data.items.length - 1}
+              total={total}
+              page={page}
+              pages={pages}
+              onPage={setPage}
+            />
+          }
+        >
+          <Table.Thead>
+            <Table.Tr>
+              <Table.Th scope="col">Mã thẻ</Table.Th>
+              <Table.Th scope="col">Loại</Table.Th>
+              <Table.Th scope="col">Trạng thái</Table.Th>
+              <Table.Th scope="col">Tài xế</Table.Th>
+              <Table.Th scope="col">Ngày đăng ký</Table.Th>
+              <Table.Th scope="col">Thao tác</Table.Th>
+            </Table.Tr>
+          </Table.Thead>
+          <Table.Tbody>
+            {data.items.map((card) => (
+              <CardRow key={card.id} card={card} onAction={(a) => void act(card, a)} />
+            ))}
+          </Table.Tbody>
+        </DataTable>
       )}
       {dialog?.kind === 'register' && (
         <RegisterDialog onDone={done} onCancel={() => setDialog(null)} />

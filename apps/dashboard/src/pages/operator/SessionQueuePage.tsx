@@ -10,12 +10,12 @@
  * live in Trí's services (BE-18, BE-24); this page only collects the decision. Queue kept in
  * `?queue=review`; polled every 10 s.
  */
+import { Button, Group, Loader, NativeSelect, Table, Textarea, TextInput } from '@mantine/core';
 import { useState } from 'react';
 import { Link, useSearchParams } from 'react-router';
 import type { ReviewSession, SessionQueue, UnattributedSession } from '@powerme/shared';
-import { Breadcrumbs } from '../../components/Breadcrumbs';
 import { ConfirmDialog } from '../../components/ConfirmDialog';
-import { CountBadge } from '../../components/CountBadge';
+import { FieldError } from '../../components/Field';
 import {
   errorMessage,
   SESSION_PAGE_SIZE,
@@ -27,6 +27,12 @@ import {
   type ApiError,
 } from '../../core/api/api';
 import { ago, useNow } from '../../features/chargePoints/format';
+import { DataTable, EmptyState } from '../../ui/DataTable';
+import { Notice, type Note } from '../../ui/Notice';
+import { PageHeader } from '../../ui/PageHeader';
+import { Pager, pageCount } from '../../ui/Pager';
+import { QueueSwitch } from '../../ui/QueueSwitch';
+import { StatusBadge } from '../../ui/StatusBadge';
 
 export const SESSION_POLL_MS = 10_000;
 
@@ -139,7 +145,6 @@ type Decision =
   | { kind: 'assign'; s: UnattributedSession }
   | { kind: 'close'; s: UnattributedSession }
   | { kind: 'resolve'; s: ReviewSession };
-type Note = { tone: 'ok' | 'error'; text: string } | null;
 
 function DecisionDialog({
   decision,
@@ -221,38 +226,33 @@ function DecisionDialog({
             : 'Chốt số đo dùng để tính tiền. Phiên đã kết thúc sẽ được trừ tiền vào tài khoản tài xế.'}
       </p>
       {decision.kind === 'assign' ? (
-        <label className="field">
-          ID tài xế
-          <input
-            className="input"
-            inputMode="numeric"
-            value={driverId}
-            onChange={(e) => setDriverId(e.target.value)}
-          />
-        </label>
-      ) : (
-        <label className="field">
-          {decision.kind === 'close' ? 'Lý do' : 'Kết luận'}
-          <select className="input" value={code} onChange={(e) => setCode(e.target.value)}>
-            {(decision.kind === 'close' ? CLOSE_REASONS : RESOLUTIONS).map(([id, label]) => (
-              <option key={id} value={id}>
-                {label}
-              </option>
-            ))}
-          </select>
-        </label>
-      )}
-      <label className="field">
-        Ghi chú (bắt buộc)
-        <textarea
-          className="input"
-          rows={3}
-          maxLength={500}
-          value={note}
-          onChange={(e) => setNote(e.target.value)}
+        <TextInput
+          label="ID tài xế"
+          inputMode="numeric"
+          value={driverId}
+          onChange={(e) => setDriverId(e.currentTarget.value)}
         />
-      </label>
-      {error && <p role="alert">{error}</p>}
+      ) : (
+        <NativeSelect
+          label={decision.kind === 'close' ? 'Lý do' : 'Kết luận'}
+          value={code}
+          onChange={(e) => setCode(e.currentTarget.value)}
+          data={(decision.kind === 'close' ? CLOSE_REASONS : RESOLUTIONS).map(([value, label]) => ({
+            value,
+            label,
+          }))}
+        />
+      )}
+      <Textarea
+        label="Ghi chú (bắt buộc)"
+        rows={3}
+        autosize
+        minRows={3}
+        maxLength={500}
+        value={note}
+        onChange={(e) => setNote(e.currentTarget.value)}
+      />
+      <FieldError message={error ?? undefined} />
     </ConfirmDialog>
   );
 }
@@ -268,87 +268,88 @@ function UnattributedRow({
 }) {
   const blocked = s.not_assignable_reason ? NOT_ASSIGNABLE[s.not_assignable_reason] : null;
   return (
-    <tr aria-label={`Phiên #${s.transaction_no}`}>
-      <td>
+    <Table.Tr aria-label={`Phiên #${s.transaction_no}`} data-tone={blocked ? 'muted' : 'major'}>
+      <Table.Td>
         <span className="cell-title">#{s.transaction_no}</span>
         <div className="muted small">dừng {ago(s.stopped_at, now)}</div>
-      </td>
-      <td>
+      </Table.Td>
+      <Table.Td>
         <Link className="cell-title" to={`/operator/charge-points/${s.charge_point_id}`}>
           {s.charge_point_serial}
         </Link>
         <div className="muted small">
           Súng {s.connector_no} · <Link to={`/operator/stations/${s.site_id}`}>{s.site_name}</Link>
         </div>
-        {s.delivered_offline && <span className="pill major">gửi bù sau khi nối lại</span>}
-      </td>
-      <td>
+        {s.delivered_offline && (
+          <div>
+            <StatusBadge tone="major">gửi bù sau khi nối lại</StatusBadge>
+          </div>
+        )}
+      </Table.Td>
+      <Table.Td>
         {s.id_tag}
         <div className="muted small">{ORIGIN[s.origin] ?? s.origin}</div>
-      </td>
-      <td className="nowrap">{kwh(s.energy_wh)}</td>
-      <td className="small">
+      </Table.Td>
+      <Table.Td className="nowrap">{kwh(s.energy_wh)}</Table.Td>
+      <Table.Td className="small">
         {blocked ?? <RecordList records={s.open_records} fallback="Thẻ không xác định" />}
-      </td>
-      <td>
-        <div className="btn-row">
-          <button
+      </Table.Td>
+      <Table.Td>
+        <Group gap={6} wrap="nowrap">
+          <Button
             type="button"
-            className="btn small"
+            size="compact-sm"
             disabled={!!blocked}
             title={blocked ?? undefined}
             onClick={() => onDecide({ kind: 'assign', s })}
           >
             Gán tài xế
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
-            className="btn small ghost"
+            size="compact-sm"
+            variant="default"
             onClick={() => onDecide({ kind: 'close', s })}
           >
             Đóng
-          </button>
-        </div>
-      </td>
-    </tr>
+          </Button>
+        </Group>
+      </Table.Td>
+    </Table.Tr>
   );
 }
 
 function ReviewRow({ s, onDecide }: { s: ReviewSession; onDecide: (d: Decision) => void }) {
   return (
-    <tr aria-label={`Phiên #${s.transaction_no}`}>
-      <td>
+    <Table.Tr aria-label={`Phiên #${s.transaction_no}`} data-tone="major">
+      <Table.Td>
         <span className="cell-title">#{s.transaction_no}</span>
         <div className="muted small">{s.stopped ? 'đã dừng' : 'trụ chưa báo kết thúc phiên'}</div>
-      </td>
-      <td>
+      </Table.Td>
+      <Table.Td>
         <Link className="cell-title" to={`/operator/charge-points/${s.charge_point_id}`}>
           {s.charge_point_serial}
         </Link>
         <div className="muted small">
           Súng {s.connector_no} · <Link to={`/operator/stations/${s.site_id}`}>{s.site_name}</Link>
         </div>
-      </td>
-      <td>
+      </Table.Td>
+      <Table.Td>
         {s.id_tag}
         <div className="muted small">
           {ORIGIN[s.origin] ?? s.origin} · {PAYMENT[s.payment_mode] ?? s.payment_mode}
         </div>
-      </td>
-      <td className="nowrap">{kwh(s.energy_wh)}</td>
-      <td className="small">
+      </Table.Td>
+      <Table.Td className="nowrap">{kwh(s.energy_wh)}</Table.Td>
+      <Table.Td className="small">
         <RecordList records={s.open_records} fallback="—" />
-      </td>
-      <td>
-        <button
-          type="button"
-          className="btn small"
-          onClick={() => onDecide({ kind: 'resolve', s })}
-        >
+      </Table.Td>
+      <Table.Td>
+        <Button type="button" size="compact-sm" onClick={() => onDecide({ kind: 'resolve', s })}>
           Chốt đối soát
-        </button>
-      </td>
-    </tr>
+        </Button>
+      </Table.Td>
+    </Table.Tr>
   );
 }
 
@@ -365,7 +366,7 @@ export function SessionQueuePage() {
   );
   const current = data?.queue === queue ? data : undefined;
   const total = current?.total ?? 0;
-  const pages = Math.max(1, Math.ceil(total / SESSION_PAGE_SIZE));
+  const pages = pageCount(total, SESSION_PAGE_SIZE);
   if (current && page > pages) setPage(pages);
 
   // Count of each queue on its tab (same summary as the menu badge).
@@ -391,94 +392,67 @@ export function SessionQueuePage() {
     );
   };
 
+  const first = (page - 1) * SESSION_PAGE_SIZE + 1;
+
   return (
     <>
-      <Breadcrumbs items={[{ label: 'Phiên cần xử lý' }]} />
-      <div className="page-head">
-        <h1>Phiên cần xử lý</h1>
-      </div>
-      <div className="filters">
-        <div className="queue-switch" role="group" aria-label="Hàng đợi">
-          {QUEUES.map(([id, label]) => (
-            <button
-              key={id}
-              type="button"
-              className={`btn small ${queue === id ? '' : 'ghost'}`}
-              aria-pressed={queue === id}
-              onClick={() => switchQueue(id)}
-            >
-              {label}
-              <CountBadge count={counts[id]} label="phiên" />
-            </button>
-          ))}
-        </div>
-      </div>
-      {note && (
-        <p className={`queue-note ${note.tone}`} role={note.tone === 'ok' ? 'status' : 'alert'}>
-          {note.text}
-        </p>
-      )}
+      <PageHeader crumbs={[{ label: 'Phiên cần xử lý' }]} title="Phiên cần xử lý" />
+      <QueueSwitch
+        label="Hàng đợi"
+        value={queue}
+        onChange={switchQueue}
+        items={QUEUES.map(([key, label]) => ({
+          key,
+          label,
+          count: counts[key],
+          countLabel: 'phiên',
+        }))}
+      />
+      {note && <Notice tone={note.tone}>{note.text}</Notice>}
       {isLoading || (!current && !error) ? (
-        <p className="muted">Đang tải…</p>
+        <Loader size="sm" aria-label="Đang tải…" />
       ) : error && !current ? (
-        <p role="alert">{sessionError(error)}</p>
+        <Notice tone="error">{sessionError(error)}</Notice>
       ) : !current || current.items.length === 0 ? (
-        <div className="card">
-          <p className="muted">
-            {queue === 'review'
-              ? 'Không có phiên nào cần xem lại.'
-              : 'Không có phiên nào chưa gắn tài xế.'}
-          </p>
-        </div>
+        <EmptyState>
+          {queue === 'review'
+            ? 'Không có phiên nào cần xem lại.'
+            : 'Không có phiên nào chưa gắn tài xế.'}
+        </EmptyState>
       ) : (
-        <div className="card table-card">
-          <div className="table-wrap">
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th scope="col">Phiên</th>
-                  <th scope="col">Trụ sạc · trạm sạc</th>
-                  <th scope="col">Thẻ / nguồn</th>
-                  <th scope="col">Năng lượng</th>
-                  <th scope="col">{queue === 'review' ? 'Bản ghi đối soát' : 'Lý do'}</th>
-                  <th scope="col">Xử lý</th>
-                </tr>
-              </thead>
-              <tbody>
-                {current.queue === 'unattributed'
-                  ? current.items.map((s) => (
-                      <UnattributedRow key={s.session_id} s={s} now={now} onDecide={setDecision} />
-                    ))
-                  : current.items.map((s) => (
-                      <ReviewRow key={s.session_id} s={s} onDecide={setDecision} />
-                    ))}
-              </tbody>
-            </table>
-          </div>
-          <nav className="pager" aria-label="Phân trang">
-            <span className="muted">
-              {total} phiên · Trang {page} / {pages}
-            </span>
-            <div className="btn-row">
-              <button
-                type="button"
-                className="btn small ghost"
-                disabled={page <= 1}
-                onClick={() => setPage(page - 1)}
-              >
-                ‹ Trước
-              </button>
-              <button
-                type="button"
-                className="btn small ghost"
-                disabled={page >= pages}
-                onClick={() => setPage(page + 1)}
-              >
-                Sau ›
-              </button>
-            </div>
-          </nav>
-        </div>
+        <DataTable
+          minWidth={960}
+          footer={
+            <Pager
+              first={first}
+              last={first + current.items.length - 1}
+              total={total}
+              page={page}
+              pages={pages}
+              onPage={setPage}
+            />
+          }
+        >
+          <Table.Thead>
+            <Table.Tr>
+              <Table.Th scope="col">Phiên</Table.Th>
+              <Table.Th scope="col">Trụ sạc · trạm sạc</Table.Th>
+              <Table.Th scope="col">Thẻ / nguồn</Table.Th>
+              <Table.Th scope="col">Năng lượng</Table.Th>
+              <Table.Th scope="col">{queue === 'review' ? 'Bản ghi đối soát' : 'Lý do'}</Table.Th>
+              <Table.Th scope="col">Xử lý</Table.Th>
+            </Table.Tr>
+          </Table.Thead>
+          <Table.Tbody>
+            {current.queue === 'unattributed'
+              ? current.items.map((s) => (
+                  <UnattributedRow key={s.session_id} s={s} now={now} onDecide={setDecision} />
+                ))
+              : current.items.map((s) => (
+                  <ReviewRow key={s.session_id} s={s} onDecide={setDecision} />
+                ))}
+          </Table.Tbody>
+        </DataTable>
       )}
       {decision && (
         <DecisionDialog

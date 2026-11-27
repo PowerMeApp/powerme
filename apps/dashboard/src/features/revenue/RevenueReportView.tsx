@@ -12,6 +12,8 @@
  * (operator scope): trụ sạc → screen 20, trạm sạc → station page. Export: T108's revenue.csv with
  * the same query (SRS UC-ADM-10). Period and grouping live in the URL (?from=&to=&group_by=).
  */
+import { Button, Card, Group, Loader, NativeSelect, Table, TextInput } from '@mantine/core';
+import { IconDownload, IconSearch } from '@tabler/icons-react';
 import { useState } from 'react';
 import { Link, useSearchParams } from 'react-router';
 import type { RevenueGroupBy, RevenueQuery, RevenueReport, RevenueRow } from '@powerme/shared';
@@ -34,6 +36,10 @@ import {
   rowLabel,
 } from './revenueModel';
 import { saveCsv } from './saveCsv';
+import { DataTable, EmptyState } from '../../ui/DataTable';
+import { Notice } from '../../ui/Notice';
+import { Pager } from '../../ui/Pager';
+import { Figure, StatCard } from '../../ui/StatCard';
 
 export const REVENUE_PAGE_SIZE = 20;
 
@@ -96,21 +102,18 @@ function Totals({ report }: { report: RevenueReport }) {
   const t = report.totals;
   return (
     <div className="tiles revenue-tiles">
-      <section className="card tile" aria-label="Doanh thu">
-        <h2>Doanh thu</h2>
-        <p className="tile-number">{formatVnd(t.csms_billed_revenue_vnd)}</p>
+      <StatCard label="Doanh thu">
+        <Figure value={formatVnd(t.csms_billed_revenue_vnd)} />
         <p className="muted small">Từ các phiên đã đối soát và đã trừ tiền</p>
-      </section>
-      <section className="card tile" aria-label="Phiên tính tiền">
-        <h2>Phiên tính tiền</h2>
-        <p className="tile-number">{formatCount(t.csms_billed_session_count)}</p>
+      </StatCard>
+      <StatCard label="Phiên tính tiền">
+        <Figure value={formatCount(t.csms_billed_session_count)} />
         <p className="muted small">{formatKwh(t.csms_billed_energy_wh)}</p>
-      </section>
-      <section className="card tile" aria-label="Phiên không định danh">
-        <h2>Phiên không định danh</h2>
-        <p className="tile-number">{formatCount(t.unattributed_session_count)}</p>
+      </StatCard>
+      <StatCard label="Phiên không định danh">
+        <Figure value={formatCount(t.unattributed_session_count)} />
         <p className="muted small">{formatKwh(t.unattributed_energy_wh)} · không tính tiền</p>
-      </section>
+      </StatCard>
     </div>
   );
 }
@@ -137,7 +140,7 @@ function NameCell({
       )
     ) : null;
   return (
-    <td>
+    <Table.Td>
       {groupBy === 'charge_point' && linkable && row.charge_point_id ? (
         <Link className="cell-title" to={`/operator/charge-points/${row.charge_point_id}`}>
           {label}
@@ -153,7 +156,7 @@ function NameCell({
       {scope === 'admin' && groupBy !== 'operator' && row.operator_name && (
         <div className="muted small">{row.operator_name}</div>
       )}
-    </td>
+    </Table.Td>
   );
 }
 
@@ -226,181 +229,159 @@ export function RevenueReportView({
 
   return (
     <>
-      <section className="card revenue-filters" aria-label="Bộ lọc">
-        <label className="field">
-          Từ ngày
-          <input
-            className="input"
+      <Card component="section" className="revenue-filters" aria-label="Bộ lọc" padding="md">
+        <Group gap="sm" align="flex-end" wrap="wrap" className="filters">
+          <TextInput
+            label="Từ ngày"
             type="date"
             value={from}
             max={to}
-            onChange={(e) => update({ from: e.target.value })}
+            onChange={(e) => update({ from: e.currentTarget.value })}
           />
-        </label>
-        <label className="field">
-          Đến ngày
-          <input
-            className="input"
+          <TextInput
+            label="Đến ngày"
             type="date"
             value={to}
             min={from}
-            onChange={(e) => update({ to: e.target.value })}
+            onChange={(e) => update({ to: e.currentTarget.value })}
           />
-        </label>
-        <label className="field">
-          Nhóm theo
-          <select
-            className="input"
+          <NativeSelect
+            className="select-field"
+            label="Nhóm theo"
             value={groupBy}
-            onChange={(e) => update({ group_by: e.target.value })}
-          >
-            {groups.map((g) => (
-              <option key={g} value={g}>
-                {GROUP_LABEL[g]}
-              </option>
-            ))}
-          </select>
-        </label>
-        {fields.map((f) => (
-          <label key={f.param} className="field search-field">
-            {f.label}
-            <input
-              className="input"
+            onChange={(e) => update({ group_by: e.currentTarget.value })}
+            data={groups.map((g) => ({ value: g, label: GROUP_LABEL[g] }))}
+          />
+          {fields.map((f) => (
+            <TextInput
+              key={f.param}
+              className="search-field"
+              label={f.label}
               type="search"
               value={params.get(f.param) ?? ''}
               maxLength={MAX_SEARCH}
               placeholder={f.hint}
-              onChange={(e) => update({ [f.param]: e.target.value })}
+              leftSection={<IconSearch size={16} aria-hidden="true" />}
+              onChange={(e) => update({ [f.param]: e.currentTarget.value })}
             />
-          </label>
-        ))}
-        <button
-          type="button"
-          className="btn small revenue-export"
-          disabled={!current || csvState.isLoading}
-          onClick={() => void download()}
-        >
-          {csvState.isLoading ? 'Đang tải tệp…' : 'Tải tệp bảng tính (CSV)'}
-        </button>
-      </section>
-      {exportError && <p role="alert">{exportError}</p>}
+          ))}
+          <Button
+            type="button"
+            variant="default"
+            className="revenue-export"
+            leftSection={<IconDownload size={16} aria-hidden="true" />}
+            disabled={!current || csvState.isLoading}
+            onClick={() => void download()}
+          >
+            {csvState.isLoading ? 'Đang tải tệp…' : 'Tải tệp bảng tính (CSV)'}
+          </Button>
+        </Group>
+      </Card>
+      {exportError && <Notice tone="error">{exportError}</Notice>}
       {!valid ? (
-        <p role="alert">
+        <Notice tone="error">
           Kỳ báo cáo không hợp lệ: ngày đầu phải trước ngày cuối và dài tối đa 366 ngày.
-        </p>
+        </Notice>
       ) : !current && isFetching ? (
-        <p className="muted">Đang tải…</p>
+        <Loader size="sm" aria-label="Đang tải…" />
       ) : error && !current ? (
-        <p role="alert">{errorMessage(error)}</p>
+        <Notice tone="error">{errorMessage(error)}</Notice>
       ) : current ? (
         <>
           <Totals report={current} />
           {rows.length === 0 ? (
-            <div className="card">
-              <p className="muted">
-                {allRows.length > 0 && searching
-                  ? 'Không có dòng nào khớp ô tìm kiếm.'
-                  : 'Không có phiên nào trong kỳ.'}
-              </p>
-            </div>
+            <EmptyState>
+              {allRows.length > 0 && searching
+                ? 'Không có dòng nào khớp ô tìm kiếm.'
+                : 'Không có phiên nào trong kỳ.'}
+            </EmptyState>
           ) : (
-            <div className="card table-card">
-              <div className="table-wrap">
-                <table className="data-table revenue-table">
-                  <thead>
-                    <tr>
-                      <th scope="col">{GROUP_LABEL[groupBy]}</th>
-                      <th scope="col" className="revenue-num">
-                        Phiên tính tiền
-                      </th>
-                      <th scope="col" className="revenue-num">
-                        Năng lượng
-                      </th>
-                      <th scope="col" className="revenue-num">
-                        Doanh thu
-                      </th>
-                      <th scope="col" className="revenue-num">
-                        Phiên không định danh
-                      </th>
-                      <th scope="col" className="revenue-num">
-                        Năng lượng không định danh
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {pageRows.map((r) => {
-                      const empty =
-                        r.csms_billed_session_count === 0 && r.unattributed_session_count === 0;
-                      return (
-                        <tr
-                          key={r.key}
-                          aria-label={rowLabel(r, groupBy)}
-                          className={empty ? 'muted' : undefined}
-                        >
-                          <NameCell row={r} groupBy={groupBy} scope={scope} />
-                          <td className="revenue-num">
-                            {formatCount(r.csms_billed_session_count)}
-                          </td>
-                          <td className="revenue-num">{formatKwh(r.csms_billed_energy_wh)}</td>
-                          <td className="revenue-num">{formatVnd(r.csms_billed_revenue_vnd)}</td>
-                          <td className="revenue-num">
-                            {formatCount(r.unattributed_session_count)}
-                          </td>
-                          <td className="revenue-num">{formatKwh(r.unattributed_energy_wh)}</td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                  <tfoot>
-                    <tr aria-label="Tổng">
-                      <th scope="row">Tổng cả kỳ</th>
-                      <td className="revenue-num">
-                        {formatCount(current.totals.csms_billed_session_count)}
-                      </td>
-                      <td className="revenue-num">
-                        {formatKwh(current.totals.csms_billed_energy_wh)}
-                      </td>
-                      <td className="revenue-num">
-                        {formatVnd(current.totals.csms_billed_revenue_vnd)}
-                      </td>
-                      <td className="revenue-num">
-                        {formatCount(current.totals.unattributed_session_count)}
-                      </td>
-                      <td className="revenue-num">
-                        {formatKwh(current.totals.unattributed_energy_wh)}
-                      </td>
-                    </tr>
-                  </tfoot>
-                </table>
-              </div>
-              <nav className="pager" aria-label="Phân trang">
-                <span className="muted">
-                  Hiển thị {first + 1}–{first + pageRows.length} / {rows.length}
-                  {rows.length < allRows.length && ` (lọc từ ${allRows.length})`}
-                </span>
-                <div className="btn-row">
-                  <button
-                    type="button"
-                    className="btn small ghost"
-                    disabled={shownPage <= 1}
-                    onClick={() => setPage(shownPage - 1)}
-                  >
-                    ‹ Trước
-                  </button>
-                  <span className="pager-page">
-                    Trang {shownPage} / {pages}
-                  </span>
-                  <button
-                    type="button"
-                    className="btn small ghost"
-                    disabled={shownPage >= pages}
-                    onClick={() => setPage(shownPage + 1)}
-                  >
-                    Sau ›
-                  </button>
-                </div>
-              </nav>
-            </div>
+            <DataTable
+              className="revenue-card"
+              minWidth={860}
+              footer={
+                <Pager
+                  first={first + 1}
+                  last={first + pageRows.length}
+                  total={rows.length}
+                  note={rows.length < allRows.length ? `(lọc từ ${allRows.length})` : undefined}
+                  page={shownPage}
+                  pages={pages}
+                  onPage={setPage}
+                />
+              }
+            >
+              <Table.Thead>
+                <Table.Tr>
+                  <Table.Th scope="col">{GROUP_LABEL[groupBy]}</Table.Th>
+                  <Table.Th scope="col" className="revenue-num">
+                    Phiên tính tiền
+                  </Table.Th>
+                  <Table.Th scope="col" className="revenue-num">
+                    Năng lượng
+                  </Table.Th>
+                  <Table.Th scope="col" className="revenue-num">
+                    Doanh thu
+                  </Table.Th>
+                  <Table.Th scope="col" className="revenue-num">
+                    Phiên không định danh
+                  </Table.Th>
+                  <Table.Th scope="col" className="revenue-num">
+                    Năng lượng không định danh
+                  </Table.Th>
+                </Table.Tr>
+              </Table.Thead>
+              <Table.Tbody>
+                {pageRows.map((r) => {
+                  const empty =
+                    r.csms_billed_session_count === 0 && r.unattributed_session_count === 0;
+                  return (
+                    <Table.Tr
+                      key={r.key}
+                      aria-label={rowLabel(r, groupBy)}
+                      className={empty ? 'muted' : undefined}
+                    >
+                      <NameCell row={r} groupBy={groupBy} scope={scope} />
+                      <Table.Td className="revenue-num">
+                        {formatCount(r.csms_billed_session_count)}
+                      </Table.Td>
+                      <Table.Td className="revenue-num">
+                        {formatKwh(r.csms_billed_energy_wh)}
+                      </Table.Td>
+                      <Table.Td className="revenue-num">
+                        {formatVnd(r.csms_billed_revenue_vnd)}
+                      </Table.Td>
+                      <Table.Td className="revenue-num">
+                        {formatCount(r.unattributed_session_count)}
+                      </Table.Td>
+                      <Table.Td className="revenue-num">
+                        {formatKwh(r.unattributed_energy_wh)}
+                      </Table.Td>
+                    </Table.Tr>
+                  );
+                })}
+              </Table.Tbody>
+              <Table.Tfoot>
+                <Table.Tr aria-label="Tổng">
+                  <Table.Th scope="row">Tổng cả kỳ</Table.Th>
+                  <Table.Td className="revenue-num">
+                    {formatCount(current.totals.csms_billed_session_count)}
+                  </Table.Td>
+                  <Table.Td className="revenue-num">
+                    {formatKwh(current.totals.csms_billed_energy_wh)}
+                  </Table.Td>
+                  <Table.Td className="revenue-num">
+                    {formatVnd(current.totals.csms_billed_revenue_vnd)}
+                  </Table.Td>
+                  <Table.Td className="revenue-num">
+                    {formatCount(current.totals.unattributed_session_count)}
+                  </Table.Td>
+                  <Table.Td className="revenue-num">
+                    {formatKwh(current.totals.unattributed_energy_wh)}
+                  </Table.Td>
+                </Table.Tr>
+              </Table.Tfoot>
+            </DataTable>
           )}
         </>
       ) : null}

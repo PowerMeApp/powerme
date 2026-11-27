@@ -22,7 +22,7 @@ function staffNeedsOperator(
 
 export const createUserSchema = z
   .object({
-    email: z.string().trim().max(254, 'Tối đa 254 ký tự').email('Thư điện tử không hợp lệ'),
+    email: z.string().trim().max(254, 'Tối đa 254 ký tự').email('Email không hợp lệ'),
     full_name: z.string().trim().min(1, 'Nhập họ tên').max(100, 'Tối đa 100 ký tự'),
     phone_number: z
       .string()

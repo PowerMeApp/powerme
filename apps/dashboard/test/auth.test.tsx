@@ -23,7 +23,7 @@ const fail = (status: number, error: string, headers?: Record<string, string>) =
 });
 
 async function submit(user: ReturnType<typeof renderApp>['user'], email: string) {
-  await user.type(await screen.findByLabelText('Thư điện tử'), email);
+  await user.type(await screen.findByLabelText('Email'), email);
   await user.type(screen.getByLabelText('Mật khẩu'), 'mat-khau-123');
   await user.click(screen.getByRole('button', { name: 'Đăng nhập' }));
 }
@@ -80,7 +80,7 @@ describe('Đăng nhập (màn 16 / 26) và phân quyền', () => {
   );
 
   it.each([
-    [fail(401, 'invalid_credentials'), 'Thư điện tử hoặc mật khẩu không đúng'],
+    [fail(401, 'invalid_credentials'), 'Email hoặc mật khẩu không đúng'],
     [fail(403, 'account_locked'), 'Tài khoản đã bị khoá'],
     [fail(403, 'operator_inactive'), 'Đơn vị vận hành đã ngừng hoạt động'],
     [fail(429, 'too_many_attempts', { 'Retry-After': '840' }), 'thử lại sau 14 phút'],

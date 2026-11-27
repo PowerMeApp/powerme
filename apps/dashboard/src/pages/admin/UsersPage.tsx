@@ -5,12 +5,13 @@
  * an admin (drivers sign up themselves). Per row: Sửa, Đổi vai trò (not for drivers), Khoá / Mở
  * khoá with a note. The signed-in Admin cannot change their own role or lock themselves. No delete.
  */
+import { Button, Group, Loader, Table } from '@mantine/core';
+import { IconPlus } from '@tabler/icons-react';
 import { useState } from 'react';
 import type { UserAccount } from '@powerme/shared';
-import { Breadcrumbs } from '../../components/Breadcrumbs';
 import { useAdminOperatorsQuery, useAdminUsersQuery, USER_PAGE_SIZE } from '../../core/api/api';
 import { useAppSelector } from '../../core/store/store';
-import { MAX_SEARCH, useDebounced } from '../../core/search/search';
+import { useDebounced } from '../../core/search/search';
 import { ROLE, STAFF_ROLE, STATUS, userError } from '../../features/users/format';
 import {
   CreateUserDialog,
@@ -18,9 +19,14 @@ import {
   LockDialog,
   RoleDialog,
 } from '../../features/users/UserDialogs';
+import { DataTable, EmptyState } from '../../ui/DataTable';
+import { FilterBar, SearchInput, SelectFilter } from '../../ui/FilterBar';
+import { Notice, type Note } from '../../ui/Notice';
+import { PageHeader } from '../../ui/PageHeader';
+import { Pager, pageCount } from '../../ui/Pager';
+import { StatusBadge } from '../../ui/StatusBadge';
 
 type Dialog = { kind: 'create' } | { kind: 'edit' | 'role' | 'lock'; user: UserAccount };
-type Note = { tone: 'ok' | 'error'; text: string } | null;
 
 const day = (iso: string) => new Date(iso).toLocaleDateString('vi-VN');
 
@@ -35,16 +41,26 @@ function Row({
 }) {
   const [label, tone] = STATUS[u.account_status];
   return (
-    <tr aria-label={`Tài khoản ${u.email}`}>
-      <td>
+    <Table.Tr
+      aria-label={`Tài khoản ${u.email}`}
+      data-tone={u.account_status === 'suspended' ? 'major' : undefined}
+    >
+      <Table.Td>
         <span className="cell-title">{u.full_name}</span>
-        {self && <span className="pill muted"> Bạn</span>}
-      </td>
-      <td>
+        {self && (
+          <>
+            {' '}
+            <StatusBadge tone="muted" size="sm">
+              Bạn
+            </StatusBadge>
+          </>
+        )}
+      </Table.Td>
+      <Table.Td>
         {u.email}
         {u.phone_number && <div className="muted small">{u.phone_number}</div>}
-      </td>
-      <td>
+      </Table.Td>
+      <Table.Td>
         {ROLE[u.role]}
         {u.role === 'operator_staff' && (
           <div className="muted small">
@@ -52,29 +68,39 @@ function Row({
             {u.operator ? ` · ${u.operator.legal_name}` : ''}
           </div>
         )}
-      </td>
-      <td>
-        <span className={`pill ${tone}`}>{label}</span>
-      </td>
-      <td className="nowrap">{day(u.created_at)}</td>
-      <td>
-        <div className="btn-row">
-          <button type="button" className="btn small" onClick={() => onAction('edit')}>
+      </Table.Td>
+      <Table.Td>
+        <StatusBadge tone={tone}>{label}</StatusBadge>
+      </Table.Td>
+      <Table.Td className="nowrap">{day(u.created_at)}</Table.Td>
+      <Table.Td>
+        <Group gap={6} wrap="nowrap">
+          <Button type="button" size="compact-sm" variant="light" onClick={() => onAction('edit')}>
             Sửa
-          </button>
+          </Button>
           {u.role !== 'driver' && !self && (
-            <button type="button" className="btn small ghost" onClick={() => onAction('role')}>
+            <Button
+              type="button"
+              size="compact-sm"
+              variant="default"
+              onClick={() => onAction('role')}
+            >
               Đổi vai trò
-            </button>
+            </Button>
           )}
           {!self && u.account_status !== 'closed' && (
-            <button type="button" className="btn small ghost" onClick={() => onAction('lock')}>
+            <Button
+              type="button"
+              size="compact-sm"
+              variant="default"
+              onClick={() => onAction('lock')}
+            >
               {u.account_status === 'active' ? 'Khoá' : 'Mở khoá'}
-            </button>
+            </Button>
           )}
-        </div>
-      </td>
-    </tr>
+        </Group>
+      </Table.Td>
+    </Table.Tr>
   );
 }
 
@@ -100,7 +126,7 @@ export function UsersPage() {
     ...(query ? { q: query } : {}),
   });
   const total = data?.total ?? 0;
-  const pages = Math.max(1, Math.ceil(total / USER_PAGE_SIZE));
+  const pages = pageCount(total, USER_PAGE_SIZE);
   if (data && page > pages) setPage(pages);
   const filtered = !!(role || status || operatorId || query);
   const done = (text: string) => {
@@ -108,160 +134,118 @@ export function UsersPage() {
     setNote({ tone: 'ok', text });
   };
 
+  const first = ((data?.page ?? 1) - 1) * (data?.page_size ?? USER_PAGE_SIZE) + 1;
+
   return (
     <>
-      <Breadcrumbs items={[{ label: 'Tài khoản & vai trò' }]} />
-      <div className="page-head">
-        <h1>Tài khoản &amp; vai trò</h1>
-        <button
-          type="button"
-          className="btn primary page-action"
-          onClick={() => {
-            setNote(null);
-            setDialog({ kind: 'create' });
+      <PageHeader
+        crumbs={[{ label: 'Tài khoản & vai trò' }]}
+        title="Tài khoản & vai trò"
+        actions={
+          <Button
+            leftSection={<IconPlus size={16} aria-hidden="true" />}
+            onClick={() => {
+              setNote(null);
+              setDialog({ kind: 'create' });
+            }}
+          >
+            Tạo tài khoản
+          </Button>
+        }
+      />
+      <FilterBar>
+        <SearchInput
+          label="Tìm tài khoản"
+          value={search}
+          placeholder="Tên, email hoặc số điện thoại"
+          onChange={(v) => {
+            setSearch(v);
+            setPage(1);
           }}
-        >
-          Tạo tài khoản
-        </button>
-      </div>
-      <div className="filters">
-        <label className="field search-field">
-          Tìm tài khoản
-          <input
-            className="input"
-            type="search"
-            value={search}
-            maxLength={MAX_SEARCH}
-            placeholder="Tên, thư điện tử hoặc số điện thoại"
-            onChange={(e) => {
-              setSearch(e.target.value);
-              setPage(1);
-            }}
-          />
-        </label>
-        <label className="field">
-          Vai trò
-          <select
-            className="input"
-            value={role}
-            onChange={(e) => {
-              setRole(e.target.value as UserAccount['role'] | '');
-              setPage(1);
-            }}
-          >
-            <option value="">Tất cả</option>
-            {(Object.keys(ROLE) as UserAccount['role'][]).map((r) => (
-              <option key={r} value={r}>
-                {ROLE[r]}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="field">
-          Trạng thái
-          <select
-            className="input"
-            value={status}
-            onChange={(e) => {
-              setStatus(e.target.value as UserAccount['account_status'] | '');
-              setPage(1);
-            }}
-          >
-            <option value="">Tất cả</option>
-            {(Object.keys(STATUS) as UserAccount['account_status'][]).map((s) => (
-              <option key={s} value={s}>
-                {STATUS[s][0]}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="field">
-          Đơn vị vận hành
-          <select
-            className="input"
-            value={operatorId}
-            onChange={(e) => {
-              setOperatorId(e.target.value);
-              setPage(1);
-            }}
-          >
-            <option value="">Tất cả</option>
-            {operatorList.map((o) => (
-              <option key={o.id} value={o.id}>
-                {o.legal_name}
-              </option>
-            ))}
-          </select>
-        </label>
-      </div>
-      {note && (
-        <p className={`queue-note ${note.tone}`} role={note.tone === 'ok' ? 'status' : 'alert'}>
-          {note.text}
-        </p>
-      )}
+        />
+        <SelectFilter
+          label="Vai trò"
+          value={role}
+          options={[
+            ['', 'Tất cả'],
+            ...(Object.keys(ROLE) as UserAccount['role'][]).map((r) => [r, ROLE[r]] as const),
+          ]}
+          onChange={(v) => {
+            setRole(v);
+            setPage(1);
+          }}
+        />
+        <SelectFilter
+          label="Trạng thái"
+          value={status}
+          options={[
+            ['', 'Tất cả'],
+            ...(Object.keys(STATUS) as UserAccount['account_status'][]).map(
+              (k) => [k, STATUS[k][0]] as const,
+            ),
+          ]}
+          onChange={(v) => {
+            setStatus(v);
+            setPage(1);
+          }}
+        />
+        <SelectFilter
+          label="Đơn vị vận hành"
+          value={operatorId}
+          options={[['', 'Tất cả'], ...operatorList.map((o) => [o.id, o.legal_name] as const)]}
+          onChange={(v) => {
+            setOperatorId(v);
+            setPage(1);
+          }}
+        />
+      </FilterBar>
+      {note && <Notice tone={note.tone}>{note.text}</Notice>}
       {isLoading ? (
-        <p className="muted">Đang tải…</p>
+        <Loader size="sm" aria-label="Đang tải…" />
       ) : error && !data ? (
-        <p role="alert">{userError(error)}</p>
+        <Notice tone="error">{userError(error)}</Notice>
       ) : !data || data.items.length === 0 ? (
-        <div className="card">
-          <p className="muted">
-            {filtered ? 'Không có tài khoản nào khớp bộ lọc.' : 'Chưa có tài khoản nào.'}
-          </p>
-        </div>
+        <EmptyState>
+          {filtered ? 'Không có tài khoản nào khớp bộ lọc.' : 'Chưa có tài khoản nào.'}
+        </EmptyState>
       ) : (
-        <div className="card table-card">
-          <div className="table-wrap">
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th scope="col">Họ tên</th>
-                  <th scope="col">Thư điện tử · điện thoại</th>
-                  <th scope="col">Vai trò</th>
-                  <th scope="col">Trạng thái</th>
-                  <th scope="col">Ngày tạo</th>
-                  <th scope="col">Thao tác</th>
-                </tr>
-              </thead>
-              <tbody>
-                {data.items.map((u) => (
-                  <Row
-                    key={u.id}
-                    u={u}
-                    self={u.id === selfId}
-                    onAction={(kind) => {
-                      setNote(null);
-                      setDialog({ kind, user: u });
-                    }}
-                  />
-                ))}
-              </tbody>
-            </table>
-          </div>
-          <nav className="pager" aria-label="Phân trang">
-            <span className="muted">
-              {total} tài khoản · Trang {page} / {pages}
-            </span>
-            <div className="btn-row">
-              <button
-                type="button"
-                className="btn small ghost"
-                disabled={page <= 1}
-                onClick={() => setPage(page - 1)}
-              >
-                ‹ Trước
-              </button>
-              <button
-                type="button"
-                className="btn small ghost"
-                disabled={page >= pages}
-                onClick={() => setPage(page + 1)}
-              >
-                Sau ›
-              </button>
-            </div>
-          </nav>
-        </div>
+        <DataTable
+          minWidth={900}
+          footer={
+            <Pager
+              first={first}
+              last={first + data.items.length - 1}
+              total={total}
+              page={page}
+              pages={pages}
+              onPage={setPage}
+            />
+          }
+        >
+          <Table.Thead>
+            <Table.Tr>
+              <Table.Th scope="col">Họ tên</Table.Th>
+              <Table.Th scope="col">Email · điện thoại</Table.Th>
+              <Table.Th scope="col">Vai trò</Table.Th>
+              <Table.Th scope="col">Trạng thái</Table.Th>
+              <Table.Th scope="col">Ngày tạo</Table.Th>
+              <Table.Th scope="col">Thao tác</Table.Th>
+            </Table.Tr>
+          </Table.Thead>
+          <Table.Tbody>
+            {data.items.map((u) => (
+              <Row
+                key={u.id}
+                u={u}
+                self={u.id === selfId}
+                onAction={(kind) => {
+                  setNote(null);
+                  setDialog({ kind, user: u });
+                }}
+              />
+            ))}
+          </Table.Tbody>
+        </DataTable>
       )}
       {dialog?.kind === 'create' && (
         <CreateUserDialog operators={operatorList} onDone={done} onCancel={() => setDialog(null)} />

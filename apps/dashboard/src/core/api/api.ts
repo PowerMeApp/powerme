@@ -562,7 +562,7 @@ export function errorMessage(err: unknown): string {
   if (!e || e.status === 'network' || e.status === undefined) return 'Không kết nối được máy chủ';
   switch (e.code) {
     case 'invalid_credentials':
-      return 'Thư điện tử hoặc mật khẩu không đúng';
+      return 'Email hoặc mật khẩu không đúng';
     case 'account_locked':
       return 'Tài khoản đã bị khoá';
     case 'operator_inactive':

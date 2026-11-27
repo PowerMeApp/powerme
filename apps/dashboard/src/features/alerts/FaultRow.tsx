@@ -6,6 +6,8 @@
  * `sessions_active` a second confirmation lists the sessions and resends with `force`.
  * Ported from the FE-01 reference; the serial links to Charge Point Detail (FE-05, D41).
  */
+import { Badge, Button, Group, Table } from '@mantine/core';
+import { IconClockHour4 } from '@tabler/icons-react';
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router';
 import type { FaultAction, OperatorFault, ResetType } from '@powerme/shared';
@@ -17,9 +19,11 @@ import {
   useResetFaultMutation,
   type ApiError,
 } from '../../core/api/api';
+import { Notice, type Note } from '../../ui/Notice';
+import { StatusBadge } from '../../ui/StatusBadge';
+import { SEVERITY_TONE } from '../../ui/tones';
 
 type Pending = FaultAction | 'force' | null;
-type Note = { tone: 'ok' | 'warn' | 'error'; text: string } | null;
 
 const STATUS = {
   raised: 'Mới',
@@ -57,7 +61,17 @@ function Countdown({ deadline }: { deadline: string }) {
     return () => clearInterval(t);
   }, []);
   const left = Math.max(0, Math.ceil((Date.parse(deadline) - now) / 1000));
-  return <span className="muted">Chờ súng hoạt động lại · còn {left} s</span>;
+  return (
+    <Badge
+      color="warning"
+      variant="outline"
+      size="md"
+      className="status-badge"
+      leftSection={<IconClockHour4 size={14} aria-hidden="true" />}
+    >
+      Chờ súng hoạt động lại · còn {left} s
+    </Badge>
+  );
 }
 
 export function FaultRow({ fault }: { fault: OperatorFault }) {
@@ -106,31 +120,45 @@ export function FaultRow({ fault }: { fault: OperatorFault }) {
     setPending(null);
   };
 
+  const open = fault.status !== 'resolved';
   return (
-    <tr
+    <Table.Tr
       aria-label={`Sự cố ${no}`}
-      className={`sev-${fault.status === 'resolved' ? 'none' : fault.severity}`}
+      className={`sev-${open ? fault.severity : 'none'}`}
+      data-tone={open ? SEVERITY_TONE[fault.severity] : 'none'}
+      data-dim={!open}
     >
-      <td className="num">{no}</td>
-      <td>
+      <Table.Td className="num cell-title">{no}</Table.Td>
+      <Table.Td miw={240}>
         <div className="cell-title">{kindLabel(fault)}</div>
         <div className="muted small">{fault.hint}</div>
         {fault.report_count > 0 && (
-          <span className="pill major">{fault.report_count} tài xế báo lỗi</span>
+          <div>
+            <StatusBadge tone="major">{fault.report_count} tài xế báo lỗi</StatusBadge>
+          </div>
         )}
-      </td>
-      <td>
+      </Table.Td>
+      <Table.Td>
         <Link className="nowrap" to={`/operator/charge-points/${fault.charge_point_id}`}>
           {fault.charge_point_serial}
         </Link>
         {fault.station_name && <div className="muted small">{fault.station_name}</div>}
-        {!fault.charge_point_online && <span className="pill muted">Trụ sạc mất kết nối</span>}
-      </td>
-      <td>
-        <span className={`pill ${fault.severity}`}>{SEVERITY[fault.severity]}</span>
-      </td>
-      <td>
-        <span className="pill">{STATUS[fault.status]}</span>
+        {!fault.charge_point_online && (
+          <div>
+            <StatusBadge tone="muted">Trụ sạc mất kết nối</StatusBadge>
+          </div>
+        )}
+      </Table.Td>
+      <Table.Td>
+        <StatusBadge
+          tone={fault.severity}
+          variant={fault.severity === 'critical' ? 'filled' : 'light'}
+        >
+          {SEVERITY[fault.severity]}
+        </StatusBadge>
+      </Table.Td>
+      <Table.Td>
+        <StatusBadge tone={open ? '' : 'muted'}>{STATUS[fault.status]}</StatusBadge>
         {fault.status === 'resetting' && fault.reset?.deadline && (
           <div className="small">
             <Countdown deadline={fault.reset.deadline} />
@@ -139,16 +167,17 @@ export function FaultRow({ fault }: { fault: OperatorFault }) {
         {fault.status === 'resolved' && fault.resolved_at && (
           <div className="muted small">Xử lý xong {time(fault.resolved_at)}</div>
         )}
-      </td>
-      <td className="nowrap">{time(fault.raised_at)}</td>
-      <td>
+      </Table.Td>
+      <Table.Td className="nowrap">{time(fault.raised_at)}</Table.Td>
+      <Table.Td>
         {fault.allowed_actions.length > 0 && (
-          <div className="btn-row">
+          <Group gap={6} wrap="wrap">
             {fault.allowed_actions.map((a) => (
-              <button
+              <Button
                 key={a}
                 type="button"
-                className={`btn small${a === 'acknowledge' ? ' primary' : ''}`}
+                size="compact-sm"
+                variant={a === 'acknowledge' ? 'filled' : 'default'}
                 disabled={busy}
                 onClick={() => {
                   setNote(null);
@@ -157,14 +186,14 @@ export function FaultRow({ fault }: { fault: OperatorFault }) {
                 }}
               >
                 {BUTTON[a]}
-              </button>
+              </Button>
             ))}
-          </div>
+          </Group>
         )}
         {note && (
-          <p className={`note ${note.tone}`} role={note.tone === 'error' ? 'alert' : 'status'}>
+          <Notice tone={note.tone} className="note">
             {note.text}
-          </p>
+          </Notice>
         )}
         {pending && (
           <ConfirmDialog
@@ -186,6 +215,7 @@ export function FaultRow({ fault }: { fault: OperatorFault }) {
                     ? 'Gửi lệnh'
                     : 'Vẫn gửi lệnh'
             }
+            danger={pending === 'force'}
             busy={busy}
             onCancel={() => setPending(null)}
             onConfirm={run}
@@ -199,13 +229,13 @@ export function FaultRow({ fault }: { fault: OperatorFault }) {
                 <fieldset className="field">
                   <legend>Kiểu khởi động lại</legend>
                   {(['Soft', 'Hard'] as const).map((t) => (
-                    <label key={t}>
+                    <label key={t} className="radio-row">
                       <input
                         type="radio"
                         name={`reset-${fault.id}`}
                         checked={type === t}
                         onChange={() => setType(t)}
-                      />{' '}
+                      />
                       {t === 'Soft'
                         ? 'Khởi động lại phần mềm'
                         : 'Khởi động lại toàn trụ (tắt rồi bật)'}
@@ -219,7 +249,7 @@ export function FaultRow({ fault }: { fault: OperatorFault }) {
               </>
             )}
             {pending === 'force' && (
-              <>
+              <Notice tone="warn" role="note" className="note">
                 <p>Khởi động lại sẽ dừng giữa chừng các phiên sạc này:</p>
                 <ul>
                   {(sessions ?? []).map((s) => (
@@ -229,11 +259,11 @@ export function FaultRow({ fault }: { fault: OperatorFault }) {
                   ))}
                 </ul>
                 <p>Chỉ tiếp tục khi không thể chờ các phiên kết thúc.</p>
-              </>
+              </Notice>
             )}
           </ConfirmDialog>
         )}
-      </td>
-    </tr>
+      </Table.Td>
+    </Table.Tr>
   );
 }

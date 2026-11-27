@@ -101,8 +101,8 @@ describe('Tài khoản & vai trò (màn 28)', () => {
     expect(errorUnder(dialog.getByLabelText('Đơn vị vận hành'))).toHaveTextContent(
       'Chọn đơn vị vận hành',
     );
-    expect(errorUnder(dialog.getByLabelText('Thư điện tử'))).toHaveTextContent(
-      'Thư điện tử không hợp lệ',
+    expect(errorUnder(dialog.getByLabelText('Email'))).toHaveTextContent(
+      'Email không hợp lệ',
     );
     expect(errorUnder(dialog.getByLabelText('Mật khẩu ban đầu'))).toHaveTextContent(
       'Ít nhất 8 ký tự',
@@ -110,13 +110,13 @@ describe('Tài khoản & vai trò (màn 28)', () => {
     expect(seen.some((r) => r.method === 'POST')).toBe(false);
     await u.selectOptions(dialog.getByLabelText('Đơn vị vận hành'), '1');
     await u.selectOptions(dialog.getByLabelText('Chức vụ'), 'manager');
-    await u.type(dialog.getByLabelText('Thư điện tử'), 'new@powerme.test');
+    await u.type(dialog.getByLabelText('Email'), 'new@powerme.test');
     await u.type(dialog.getByLabelText('Họ tên'), 'Nguyễn Quản Lý');
     await u.type(dialog.getByLabelText('Mật khẩu ban đầu'), 'mat-khau-123');
     await u.click(dialog.getByRole('button', { name: 'Tạo' }));
-    const email = dialog.getByLabelText('Thư điện tử');
+    const email = dialog.getByLabelText('Email');
     await waitFor(() =>
-      expect(errorUnder(email)).toHaveTextContent('Thư điện tử đã được dùng cho tài khoản khác'),
+      expect(errorUnder(email)).toHaveTextContent('Email đã được dùng cho tài khoản khác'),
     );
     expect(seen.find((r) => r.method === 'POST')!.body).toEqual({
       email: 'new@powerme.test',
@@ -139,7 +139,7 @@ describe('Tài khoản & vai trò (màn 28)', () => {
     const dialog = within(screen.getByRole('dialog'));
     await u.selectOptions(dialog.getByLabelText('Vai trò'), 'admin');
     expect(dialog.queryByLabelText('Đơn vị vận hành')).toBeNull();
-    await u.type(dialog.getByLabelText('Thư điện tử'), 'admin2@powerme.test');
+    await u.type(dialog.getByLabelText('Email'), 'admin2@powerme.test');
     await u.type(dialog.getByLabelText('Họ tên'), 'Admin Hai');
     await u.type(dialog.getByLabelText('Mật khẩu ban đầu'), 'mat-khau-123');
     await u.click(dialog.getByRole('button', { name: 'Tạo' }));

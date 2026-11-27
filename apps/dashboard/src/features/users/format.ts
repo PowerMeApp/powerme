@@ -30,7 +30,7 @@ export function userErrorField(err: unknown): 'email' | 'phone_number' | 'operat
 export function userError(err: unknown): string {
   switch ((err as Partial<ApiError> | undefined)?.code) {
     case 'email_taken':
-      return 'Thư điện tử đã được dùng cho tài khoản khác';
+      return 'Email đã được dùng cho tài khoản khác';
     case 'phone_taken':
       return 'Số điện thoại đã được dùng cho tài khoản khác';
     case 'operator_not_found':

@@ -142,7 +142,7 @@ export function CreateUserDialog({
           error={errors.operator_id?.message}
         />
       )}
-      <Field label="Thư điện tử" error={errors.email?.message}>
+      <Field label="Email" error={errors.email?.message}>
         {(a11y) => <input {...a11y} {...register('email')} className="input" type="email" />}
       </Field>
       <Field label="Họ tên" error={errors.full_name?.message}>
@@ -342,6 +342,7 @@ export function LockDialog({
   return (
     <ConfirmDialog
       title={`${lock ? 'Khoá' : 'Mở khoá'} tài khoản ${user.email}`}
+      danger={lock}
       confirmLabel={lock ? 'Khoá' : 'Mở khoá'}
       busy={isLoading || isSubmitting}
       onCancel={onCancel}

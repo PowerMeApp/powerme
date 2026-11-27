@@ -2,6 +2,8 @@
  * Choose a driver for an RFID card (T161 point 2): search active drivers by name, email or phone
  * (GET /api/admin/v1/users, at least 2 characters, 300 ms after the last keystroke).
  */
+import { Button, Text, TextInput } from '@mantine/core';
+import { IconSearch } from '@tabler/icons-react';
 import { useEffect, useState } from 'react';
 import type { UserAccount } from '@powerme/shared';
 import { useDriverSearchQuery } from '../../core/api/api';
@@ -40,44 +42,51 @@ export function DriverPicker({
               {value.phone_number && ` · ${value.phone_number}`}
             </span>
           </span>
-          <button type="button" className="btn small ghost" onClick={() => onChange(null)}>
+          <Button type="button" size="compact-sm" variant="default" onClick={() => onChange(null)}>
             Đổi
-          </button>
+          </Button>
         </div>
       </div>
     );
   return (
     <div>
-      <label className="field">
-        {label}
-        <input
-          className="input"
-          type="search"
-          value={text}
-          maxLength={100}
-          placeholder="Tên, thư điện tử hoặc số điện thoại"
-          onChange={(e) => setText(e.target.value)}
-        />
-      </label>
+      <TextInput
+        label={label}
+        type="search"
+        value={text}
+        maxLength={100}
+        placeholder="Tên, email hoặc số điện thoại"
+        leftSection={<IconSearch size={16} aria-hidden="true" />}
+        onChange={(e) => setText(e.currentTarget.value)}
+      />
       {!skip &&
         (error ? (
-          <p role="alert">{rfidError(error)}</p>
+          <p role="alert" className="form-error">
+            {rfidError(error)}
+          </p>
         ) : isFetching || !data ? (
-          <p className="muted small">Đang tìm…</p>
+          <Text size="sm" c="dimmed" mt={6}>
+            Đang tìm…
+          </Text>
         ) : data.items.length === 0 ? (
           <p className="muted small">Không có tài xế đang hoạt động nào khớp.</p>
         ) : (
           <ul className="driver-results" aria-label="Kết quả tìm tài xế">
             {data.items.map((d) => (
               <li key={d.id}>
-                <button type="button" className="btn small ghost" onClick={() => onChange(d)}>
+                <Button
+                  type="button"
+                  variant="default"
+                  justify="flex-start"
+                  onClick={() => onChange(d)}
+                >
                   <b>{d.full_name}</b>
                   <span className="muted small">
                     {' '}
                     · {d.email}
                     {d.phone_number && ` · ${d.phone_number}`}
                   </span>
-                </button>
+                </Button>
               </li>
             ))}
           </ul>
