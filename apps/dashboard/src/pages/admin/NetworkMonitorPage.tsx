@@ -257,9 +257,6 @@ export function NetworkMonitorPage() {
           </Table.Tbody>
         </DataTable>
       )}
-      <p className="muted small">
-        Uptime và tỉ lệ sử dụng (BR-P43) sẽ hiện khi có API số liệu theo trụ.
-      </p>
     </>
   );
 }
