@@ -10,7 +10,7 @@
  *        operator-sessions.ts; logic in Trí's SessionReviewService / UnattributedSessionService)
  *   GET  /api/operator/v1/revenue[.csv], GET /api/admin/v1/revenue[.csv]  (T108a, revenue-report.ts)
  *   GET  /api/admin/v1/transactions[.csv]  (T108b, admin-transactions.ts)
- *   GET  /api/admin/v1/billing/exceptions, POST …/billing/{refunds|e-invoices}/{id}/retry,
+ *   GET  /api/admin/v1/billing/exceptions, POST …/billing/e-invoices/{id}/retry,
  *        …/billing/top-ups/{id}/recheck|exception-reviewed, …/billing/payment-conflicts/{id}/review
  *        (T32 Phần 10a, admin-billing.ts)
  *   GET  /api/admin/v1/me     admin

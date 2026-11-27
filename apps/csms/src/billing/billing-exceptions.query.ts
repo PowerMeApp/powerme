@@ -2,28 +2,22 @@
  * BillingExceptionsQuery — màn Billing Exceptions của Admin, chỉ đọc (T32 Phần 10a; D1, D4, D10;
  * UC-ADM-08). Route: `GET /api/admin/v1/billing/exceptions` (`operator-api/admin-billing.ts`).
  *
- * Năm mục, mỗi mục mới nhất trước, tối đa `limit` dòng, kèm `total` của cả mục. Năm câu SELECT chạy
+ * Bốn mục, mỗi mục mới nhất trước, tối đa `limit` dòng, kèm `total` của cả mục. Bốn câu SELECT chạy
  * trong MỘT transaction `REPEATABLE READ READ ONLY` nên cùng một snapshot (một dòng không hiện ở hai
  * mục do đổi trạng thái giữa hai câu):
- * - `failed_refunds`: `refunds.status = 'failed'`, mọi kind (gồm `account_closure`), kèm
- *   `retry_warning` để dashboard hiện nguyên văn trên nút retry (D1: Admin retry = khẳng định đã kiểm
- *   trên cổng VNPay là chưa hoàn).
  * - `late_payments`: `late_gateway_ref IS NOT NULL` và chưa có dòng `refunds` `late_payment` của
  *   top-up (kể cả dòng đó `failed`), không lọc `status` (D4, STM-4 #8).
  * - `invoices_needs_review`: `e_invoices.status = 'needs_review'`.
  * - `top_up_exceptions`: `exception_kind IS NOT NULL AND exception_reviewed_at IS NULL`.
  * - `payment_conflicts`: `top_up_payment_conflicts.reviewed_at IS NULL` (partial index 0024).
- * Tên lỗi giữ đúng DB (`transient | data`, D10).
+ * Tên lỗi giữ đúng DB (`transient | data`, D10). Không có mục refund: hoàn tiền làm thủ công (D1,
+ * D-AC / SRS BR-P51); danh sách refund chờ CSKH thuộc PR ghi nhận hoàn thủ công.
  */
 import type { PoolClient } from 'pg';
 import type { Db } from '../db/db.module.js';
 
 /** Mặc định số dòng mỗi mục. */
 export const BILLING_EXCEPTIONS_LIMIT = 200;
-
-/** Cảnh báo cố định trên nút retry refund; `{TxnRef}` thay bằng `vnp_TxnRef` của top-up gốc. */
-export const REFUND_RETRY_WARNING =
-  'Chỉ thử lại khi đã kiểm trên cổng VNPay rằng giao dịch {TxnRef} CHƯA được hoàn. Nếu VNPay đã nhận lệnh trước đó, thử lại có thể hoàn hai lần.';
 
 export interface ExceptionDriver {
   driver_id: string;
@@ -34,22 +28,6 @@ export interface ExceptionDriver {
 export interface Section<T> {
   total: number;
   items: T[];
-}
-
-export interface FailedRefundItem {
-  refund_id: string;
-  kind: string;
-  top_up_id: string;
-  gateway_reference: string;
-  amount_vnd: number;
-  attempt_count: number;
-  last_error_kind: string | null;
-  last_error_message: string | null;
-  requested_by: string | null;
-  created_at: string;
-  last_attempt_at: string | null;
-  driver: ExceptionDriver;
-  retry_warning: string;
 }
 
 export interface LatePaymentItem {
@@ -99,7 +77,6 @@ export interface PaymentConflictItem {
 export interface BillingExceptions {
   generated_at: string;
   limit: number;
-  failed_refunds: Section<FailedRefundItem>;
   late_payments: Section<LatePaymentItem>;
   invoices_needs_review: Section<InvoiceNeedsReviewItem>;
   top_up_exceptions: Section<TopUpExceptionItem>;
@@ -135,34 +112,6 @@ export class BillingExceptionsQuery {
       return {
         generated_at: generatedAt.toISOString(),
         limit,
-        failed_refunds: await section(
-          `SELECT f.id::text AS refund_id, f.kind::text AS kind, f.top_up_id::text AS top_up_id,
-             t.gateway_reference, f.amount_vnd::text AS amount_vnd, f.attempt_count,
-             f.last_error_kind::text AS last_error_kind, f.last_error_message,
-             f.requested_by::text AS requested_by, f.created_at, f.last_attempt_at, ${DRIVER_COLS},
-             count(*) OVER()::int AS total
-           FROM refunds f JOIN top_ups t ON t.id = f.top_up_id ${DRIVER_JOIN}
-           WHERE f.status = 'failed'
-           ORDER BY f.created_at DESC, f.id DESC LIMIT $1`,
-          (r) => ({
-            refund_id: r['refund_id'] as string,
-            kind: r['kind'] as string,
-            top_up_id: r['top_up_id'] as string,
-            gateway_reference: r['gateway_reference'] as string,
-            amount_vnd: Number(r['amount_vnd']),
-            attempt_count: r['attempt_count'] as number,
-            last_error_kind: r['last_error_kind'] as string | null,
-            last_error_message: r['last_error_message'] as string | null,
-            requested_by: r['requested_by'] as string | null,
-            created_at: iso(r['created_at'])!,
-            last_attempt_at: iso(r['last_attempt_at']),
-            driver: driver(r),
-            retry_warning: REFUND_RETRY_WARNING.replace(
-              '{TxnRef}',
-              r['gateway_reference'] as string,
-            ),
-          }),
-        ),
         late_payments: await section(
           `SELECT t.id::text AS top_up_id, t.gateway_reference, t.status::text AS status,
              t.late_amount_vnd::text AS late_amount_vnd, t.late_gateway_ref, t.late_paid_at,
@@ -241,22 +190,6 @@ export class BillingExceptionsQuery {
         ),
       };
     });
-  }
-
-  /**
-   * `vnp_TxnRef` (`top_ups.gateway_reference`) của top-up gốc của refund, mọi kind; null = không có
-   * refund. Route retry so với `confirm_txn_ref` (D1). `gateway_reference` không bao giờ đổi sau khi
-   * tạo top-up, nên đọc ngoài transaction của `RefundService.retry` vẫn đúng.
-   */
-  async refundGatewayReference(refundId: number): Promise<string | null> {
-    const row = (
-      await this.db.$client.query<{ gateway_reference: string }>(
-        `SELECT t.gateway_reference FROM refunds f JOIN top_ups t ON t.id = f.top_up_id
-         WHERE f.id = $1`,
-        [refundId],
-      )
-    ).rows[0];
-    return row?.gateway_reference ?? null;
   }
 
   private async snapshot<T>(work: (c: PoolClient) => Promise<T>): Promise<T> {

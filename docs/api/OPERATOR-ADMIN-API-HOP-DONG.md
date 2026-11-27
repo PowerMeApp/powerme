@@ -5,7 +5,7 @@
 CSV — T108) · **sửa 20/11/2026** (T108a: 4 route doanh thu đã chạy, `unsettled`, K2 / K3 / K6, §4)
 **Task:** T98 — hợp đồng API Operator/Admin, cần có trước T97 (Nghĩa nối dashboard) và T108 (màn hình doanh thu)
 **Người chịu trách nhiệm:** Ngô Văn Minh Trí (WP2) — hợp đồng; route theo cột "Người làm" ở §3
-**File hợp đồng:** [`operator-admin-api.openapi.yaml`](operator-admin-api.openapi.yaml) (OpenAPI 3.1, v0.1.0)
+**File hợp đồng:** [`operator-admin-api.openapi.yaml`](operator-admin-api.openapi.yaml) (OpenAPI 3.1, v0.2.0)
 **Mẫu theo:** [`DRIVER-API-HOP-DONG.md`](DRIVER-API-HOP-DONG.md) và [`driver-api.openapi.yaml`](driver-api.openapi.yaml)
 — cùng quy ước JSON, lỗi, id chuỗi, phân trang.
 **Trạng thái trên `main` 9c90f34:** đăng nhập và RolesGuard **đã chạy** (FE-01a #118,
@@ -501,8 +501,7 @@ Script login chỉ dùng pm.variables.set (trong một Collection Runner run); S
 | `POST /admin/v1/billing/top-ups/{id}/late-refund` | admin | SD-2e, BR-P13 | planned · Khang | 202 |
 | `GET /admin/v1/billing/e-invoices?status=needs_review` | admin | BR-P44 | planned · Khang | |
 | `POST /admin/v1/billing/e-invoices/{id}/retry` | admin | SD-2c, BR-P44 | planned · Khang | `last_error_kind` ∈ `transient`, `data` (theo DB) |
-| `GET /admin/v1/billing/refunds?status=failed` | admin | STM-10, WF-02 D1 | planned · Khang | gồm cả `account_closure` |
-| `POST /admin/v1/billing/refunds/{id}/retry` | admin | STM-10 | planned · Khang | một lượt, không reset bộ đếm |
+| `GET /admin/v1/billing/refunds?status=failed` | admin | STM-10, WF-02 D1 | planned · Khang | định nghĩa lại ở PR ghi nhận hoàn thủ công (requested + failed, chờ CSKH) |
 
 Không còn route Admin "hoàn tiền tài khoản đóng": hệ thống tự hoàn khi tài xế đóng (WF-02 D6, 09/11),
 nên `credit-accounts/{id}/closure-refund` trong mock dashboard bỏ.
@@ -511,9 +510,11 @@ nên `credit-accounts/{id}/closure-refund` trong mock dashboard bỏ.
 
 Cập nhật 23/11/2026 theo x-status của YAML sau T108b (#200) và FE-07: đã chạy 9 → 13 (auth +1, giám sát +3).
 BE-44 (25/11): 13 → 16 (onboard, đăng ký serial, sổ trụ — `GET` mới làm một phần bộ lọc).
+27/11 (T32 Phần 10a, review Ân #212): bỏ `POST /admin/v1/billing/refunds/{id}/retry` vì hoàn tiền làm
+thủ công (WF-02 D1, D-AC / SRS BR-P51), 76 → 75.
 
-**76 endpoint** (bản 10/11: 76; bản BE-31 12/11: 73): 2 dưới `/api/auth/v1` (đăng nhập và refresh,
-công khai — hai route công khai duy nhất), 39 dưới `/api/operator/v1`, 35 dưới `/api/admin/v1`. So
+**75 endpoint** (bản 10/11: 76; bản BE-31 12/11: 73): 2 dưới `/api/auth/v1` (đăng nhập và refresh,
+công khai — hai route công khai duy nhất), 39 dưới `/api/operator/v1`, 34 dưới `/api/admin/v1`. So
 với BE-31: +1 refresh (T125), +2 giao dịch Admin (T108).
 
 | Nhóm | Tổng | đã chạy | console | service | in progress | planned |
@@ -528,8 +529,8 @@ với BE-31: +1 refresh (T125), +2 giao dịch Admin (T108).
 | Tài khoản & role | 8 | 0 | 0 | 0 | 0 | 8 |
 | Thẻ RFID | 3 | 3 | 0 | 0 | 0 | 0 |
 | Tổng quan nền tảng | 5 | 0 | 5 | 0 | 0 | 0 |
-| Ngoại lệ thanh toán | 8 | 0 | 0 | 0 | 0 | 8 |
-| **Cộng** | **76** | **19** | **14** | **9** | **2** | **32** |
+| Ngoại lệ thanh toán | 7 | 0 | 0 | 0 | 0 | 7 |
+| **Cộng** | **75** | **19** | **14** | **9** | **2** | **31** |
 
 ## 4. Doanh thu theo BR-P46
 
@@ -914,4 +915,3 @@ trạng thái (2xx/4xx nghiệp vụ khác với 401/403). Ba điều kiện c�
 | 73 | `GET /api/admin/v1/billing/e-invoices` | 401 | 403 | 403 | ✓ | planned |
 | 74 | `POST /api/admin/v1/billing/e-invoices/{invoiceId}/retry` | 401 | 403 | 403 | ✓ | planned |
 | 75 | `GET /api/admin/v1/billing/refunds` | 401 | 403 | 403 | ✓ | planned |
-| 76 | `POST /api/admin/v1/billing/refunds/{refundId}/retry` | 401 | 403 | 403 | ✓ | planned |

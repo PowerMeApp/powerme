@@ -1,12 +1,10 @@
 /**
  * T32 Phần 10a — `BillingExceptionsQuery` (màn Billing Exceptions, chỉ đọc) trên Postgres thật.
- * Mỗi mục: đúng điều kiện lọc kể cả nhánh loại trừ, giới hạn + total, mới nhất trước, `retry_warning`.
+ * Mỗi mục: đúng điều kiện lọc kể cả nhánh loại trừ, giới hạn + total, mới nhất trước. Không có mục
+ * refund (hoàn tiền thủ công, WF-02 D1, D-AC / BR-P51).
  * Route + phân quyền: `admin-billing-route.integration.test.ts`. Cần DATABASE_URL; reset schema.
  */
-import {
-  BillingExceptionsQuery,
-  REFUND_RETRY_WARNING,
-} from '../src/billing/billing-exceptions.query.js';
+import { BillingExceptionsQuery } from '../src/billing/billing-exceptions.query.js';
 import { createDb, Db } from '../src/db/db.module.js';
 import { resetAndMigrate } from './helpers/apply-migrations.js';
 
@@ -140,46 +138,23 @@ describeDb('billing: BillingExceptionsQuery (T32 Phần 10a)', () => {
     await db?.$client.end();
   });
 
-  it('failed_refunds: chỉ failed, mọi kind (gồm account_closure); requested / done không hiện; đủ trường + retry_warning', async () => {
+  it('bốn mục, không có failed_refunds: refund failed (mọi kind) không thành mục riêng', async () => {
     const a = await topUp({ status: 'refunded' });
-    const failedTopUp = await refund(a.id, 'top_up', 'failed');
-    const b = await topUp({ status: 'refunded', late: true });
-    const failedLate = await refund(b.id, 'late_payment', 'failed');
+    await refund(a.id, 'top_up', 'failed');
     const c = await topUp({ status: 'refunded' });
-    const failedClosure = await refund(c.id, 'account_closure', 'failed');
-    const d = await topUp({ status: 'refunded' });
-    const requested = await refund(d.id, 'top_up', 'requested');
-    const e = await topUp({ status: 'refunded' });
-    const done = await refund(e.id, 'top_up', 'done');
-
+    await refund(c.id, 'account_closure', 'failed');
     const r = await query.list();
-    const got = ids(r.failed_refunds.items, 'refund_id');
-    expect(got).toEqual(expect.arrayContaining([failedTopUp, failedLate, failedClosure]));
-    expect(got).not.toContain(requested);
-    expect(got).not.toContain(done);
-    // Mới nhất trước.
-    expect(got.indexOf(failedClosure)).toBeLessThan(got.indexOf(failedTopUp));
-
-    const row = r.failed_refunds.items.find((i) => Number(i.refund_id) === failedTopUp)!;
-    expect(row).toMatchObject({
-      refund_id: String(failedTopUp),
-      kind: 'top_up',
-      top_up_id: String(a.id),
-      gateway_reference: a.ref,
-      amount_vnd: 50000,
-      attempt_count: 4,
-      last_error_kind: 'transient',
-      last_error_message: 'retry_exhausted',
-      requested_by: String(admin),
-      driver: { driver_id: String(a.driver), full_name: expect.stringMatching(/^Tài xế/) },
-    });
-    expect(typeof row.created_at).toBe('string');
-    expect(typeof row.last_attempt_at).toBe('string');
-    expect(row.retry_warning).toBe(REFUND_RETRY_WARNING.replace('{TxnRef}', a.ref));
-    expect(row.retry_warning).toContain(a.ref);
-    const closure = r.failed_refunds.items.find((i) => Number(i.refund_id) === failedClosure)!;
-    expect(closure).toMatchObject({ kind: 'account_closure', requested_by: null });
-    expect(closure.retry_warning).toContain(c.ref);
+    expect(Object.keys(r).sort()).toEqual(
+      [
+        'generated_at',
+        'limit',
+        'late_payments',
+        'invoices_needs_review',
+        'top_up_exceptions',
+        'payment_conflicts',
+      ].sort(),
+    );
+    expect(r).not.toHaveProperty('failed_refunds');
   });
 
   it('late_payments: chưa có refund late_payment (kể cả refund đó failed thì không hiện); mọi status', async () => {
@@ -288,7 +263,6 @@ describeDb('billing: BillingExceptionsQuery (T32 Phần 10a)', () => {
       (
         await q(
           `SELECT
-             (SELECT count(*)::int FROM refunds WHERE status='failed') AS failed_refunds,
              (SELECT count(*)::int FROM top_ups t WHERE late_gateway_ref IS NOT NULL AND NOT EXISTS
                 (SELECT 1 FROM refunds f WHERE f.top_up_id=t.id AND f.kind='late_payment')) AS late_payments,
              (SELECT count(*)::int FROM e_invoices WHERE status='needs_review') AS invoices_needs_review,
@@ -299,26 +273,17 @@ describeDb('billing: BillingExceptionsQuery (T32 Phần 10a)', () => {
         )
       ).map((row) => Object.entries(row))[0]!,
     ) as Record<string, number>;
-    expect(counts['failed_refunds']).toBeGreaterThan(2);
+    expect(counts['late_payments']).toBeGreaterThan(2);
     const small = await query.list(2);
     expect(small.limit).toBe(2);
     for (const key of Object.keys(counts) as (keyof typeof counts)[]) {
-      const section = small[key as 'failed_refunds'];
+      const section = small[key as 'late_payments'];
       expect(section.total).toBe(counts[key]);
       expect(section.items.length).toBe(Math.min(2, counts[key]!));
     }
     const all = await query.list();
     expect(all.limit).toBe(200);
-    expect(all.failed_refunds.items).toHaveLength(counts['failed_refunds']!);
+    expect(all.late_payments.items).toHaveLength(counts['late_payments']!);
     expect(typeof all.generated_at).toBe('string');
-  });
-
-  it('refundGatewayReference: vnp_TxnRef của top-up gốc theo mọi kind; không có → null', async () => {
-    const t = await topUp({ status: 'refunded', late: true });
-    const r1 = await refund(t.id, 'late_payment', 'failed');
-    const r2 = await refund(t.id, 'account_closure', 'failed');
-    expect(await query.refundGatewayReference(r1)).toBe(t.ref);
-    expect(await query.refundGatewayReference(r2)).toBe(t.ref);
-    expect(await query.refundGatewayReference(999_999_999)).toBeNull();
   });
 });

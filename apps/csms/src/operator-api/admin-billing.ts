@@ -2,26 +2,21 @@
  * Admin billing routes (T32 Phần 10a; UC-ADM-08 Billing Exceptions; WF-02 D1, D4, D10) behind
  * RolesGuard `admin`, under /api/admin/v1:
  *   GET  /billing/exceptions                        → BillingExceptionsQuery.list (200)
- *   POST /billing/refunds/{id}/retry                { confirm_txn_ref } → RefundService.retry (202)
  *   POST /billing/e-invoices/{id}/retry             → EInvoiceService.adminRetry (202)
  *   POST /billing/top-ups/{id}/recheck              → TopUpService.recheckTopUp (200)
  *   POST /billing/top-ups/{id}/exception-reviewed   → TopUpService.markExceptionReviewed (200)
  *   POST /billing/payment-conflicts/{id}/review     { note } → TopUpService.markConflictReviewed (200)
- * No refund creation here (10b). The repo has no audit table: every Admin action is a structured
- * log line with `admin_id` (as `e_invoice_admin_retry`). Domain errors → `{ error, detail }` here;
+ * Refunds are manual (WF-02 D1, D-AC / SRS BR-P51): customer care refunds on the VNPay merchant
+ * portal and the Admin records the result; those routes come in a later PR. The repo has no audit
+ * table: every Admin action is a structured log line with `admin_id` (as `e_invoice_admin_retry`).
+ * Domain errors → `{ error, detail }` here;
  * 401 / 403 / 405 / 415 / 413 come from the router (operator-api.http.ts), like the other routes.
  */
 import { Logger } from '@nestjs/common';
 import { BillingExceptionsQuery } from '../billing/billing-exceptions.query.js';
-import {
-  AdminReviewRejected,
-  EInvoiceNotFound,
-  RefundNotFound,
-  TopUpRejected,
-} from '../billing/billing-errors.js';
+import { AdminReviewRejected, EInvoiceNotFound, TopUpRejected } from '../billing/billing-errors.js';
 import type { EInvoiceService } from '../billing/e-invoice.service.js';
 import { InvalidTransition } from '../billing/invalid-transition.js';
-import type { RefundService } from '../billing/refund.service.js';
 import type { RecheckResult, TopUpService } from '../billing/top-up.service.js';
 import { AuthError } from '../users/auth.js';
 import type { Principal } from '../users/roles-guard.js';
@@ -29,13 +24,11 @@ import type { Principal } from '../users/roles-guard.js';
 /** Billing services the routes need (BillingModule, via ConsoleServer). */
 export interface AdminBillingDeps {
   topUps: TopUpService;
-  refunds: RefundService;
   eInvoices: EInvoiceService;
 }
 
 export type BillingRoute =
   | { kind: 'exceptions' }
-  | { kind: 'refund_retry'; id: number }
   | { kind: 'invoice_retry'; id: number }
   | { kind: 'recheck'; id: number }
   | { kind: 'exception_reviewed'; id: number }
@@ -44,7 +37,6 @@ export type BillingRoute =
 type ActionKind = Exclude<BillingRoute['kind'], 'exceptions'>;
 
 const ACTIONS: Record<string, ActionKind> = {
-  'refunds/retry': 'refund_retry',
   'e-invoices/retry': 'invoice_retry',
   'top-ups/recheck': 'recheck',
   'top-ups/exception-reviewed': 'exception_reviewed',
@@ -53,8 +45,6 @@ const ACTIONS: Record<string, ActionKind> = {
 const ACTION_PATH = /^\/billing\/([a-z-]+)\/([^/]+)\/([a-z-]+)$/;
 /** Safe integer, no sign or leading zero (as the fault routes). */
 const ID = /^[1-9][0-9]{0,14}$/;
-/** `top_ups.gateway_reference` is varchar(100). */
-const TXN_REF_MAX = 100;
 export const REVIEW_NOTE_MAX = 1000;
 /** VNPay blocks a repeated querydr (RC 94) for a few minutes (sandbox 16/11, D4). */
 const RECHECK_RETRY_AFTER_MINUTES = 15;
@@ -72,8 +62,7 @@ export function matchBillingRoute(rest: string): BillingRoute | null {
 
 export const billingRouteMethod = (r: BillingRoute) => (r.kind === 'exceptions' ? 'GET' : 'POST');
 /** Routes with a JSON body (the others take none and do not read it). */
-export const billingRouteHasBody = (r: BillingRoute) =>
-  r.kind === 'refund_retry' || r.kind === 'conflict_review';
+export const billingRouteHasBody = (r: BillingRoute) => r.kind === 'conflict_review';
 
 export interface RouteReply {
   status: number;
@@ -108,8 +97,6 @@ export async function runBillingRoute(
   switch (route.kind) {
     case 'exceptions':
       return { status: 200, body: await exceptions.list() };
-    case 'refund_retry':
-      return retryRefund(route.id, adminId, deps, exceptions, body);
     case 'invoice_retry':
       try {
         const r = await deps.eInvoices.adminRetry(route.id, adminId);
@@ -181,47 +168,6 @@ export async function runBillingRoute(
         throw error;
       }
     }
-  }
-}
-
-/**
- * D1: Admin retry = "đã kiểm trên cổng VNPay là chưa hoàn". `confirm_txn_ref` phải đúng `vnp_TxnRef`
- * của top-up gốc (mọi kind), để Admin phải tra đúng giao dịch trên cổng merchant trước khi bấm.
- */
-async function retryRefund(
-  refundId: number,
-  adminId: number,
-  deps: AdminBillingDeps,
-  exceptions: BillingExceptionsQuery,
-  body: Record<string, unknown> | undefined,
-): Promise<RouteReply> {
-  const confirm = onlyString(body, 'confirm_txn_ref');
-  if (confirm === '' || confirm.length > TXN_REF_MAX) throw new AuthError(400, 'invalid_input');
-  const ref = await exceptions.refundGatewayReference(refundId);
-  if (ref === null) return err(404, 'not_found', 'Không có refund này');
-  if (confirm !== ref) {
-    log('warn', 'refund_admin_retry_rejected', {
-      refund_id: refundId,
-      admin_id: adminId,
-      reason: 'confirmation_mismatch',
-    });
-    return err(
-      422,
-      'confirmation_mismatch',
-      'confirm_txn_ref không khớp mã giao dịch (vnp_TxnRef) của top-up gốc',
-    );
-  }
-  try {
-    const r = await deps.refunds.retry(refundId, adminId);
-    return {
-      status: 202,
-      body: { refund_id: String(r.refundId), status: r.status, attempt_count: r.attemptCount },
-    };
-  } catch (error) {
-    if (error instanceof RefundNotFound) return err(404, 'not_found', 'Không có refund này');
-    if (error instanceof InvalidTransition)
-      return err(409, 'invalid_state', 'Chỉ thử lại refund đang failed');
-    throw error;
   }
 }
 

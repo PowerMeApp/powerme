@@ -499,11 +499,8 @@ export class TopUpService implements BackgroundWork, OnModuleInit {
    * duy nhất có điểm) và BR-P22 nạp tối thiểu 50.000, nên số trả ≥ 25.000. CHECK `top_ups_amount_check`
    * tự nó cho phép 0, nên dòng ghi ngoài API có số 0 → ném `refund_invalid_paid_amount`, rollback.
    *
-   * Thứ tự kiểm (D1): `payment_unconfigured` (trước transaction), `not_found`, `account_closed`,
-   * `not_refundable`, `missing_gateway_transaction_no` (Phần 10a: VNPay cần `vnp_TransactionNo`, nên
-   * chặn trước khi trừ ví), `insufficient_available_balance`.
-   *
-   * @throws RefundNotAllowed theo thứ tự trên, không ghi gì
+   * @throws RefundNotAllowed `payment_unconfigured` / `not_found` / `account_closed` /
+   *   `not_refundable` / `insufficient_available_balance`, không ghi gì
    * @throws Error `refund_invalid_paid_amount` — dữ liệu sai, không ghi gì
    */
   async refund(topUpId: number, adminId: number): Promise<RefundDecision> {
@@ -519,8 +516,6 @@ export class TopUpService implements BackgroundWork, OnModuleInit {
       const account = await this.lockAccount(c, top.credit_account_id);
       if (account.status === 'closed') throw new RefundNotAllowed('account_closed');
       if (top.status !== 'credited') throw new RefundNotAllowed('not_refundable');
-      if (top.gateway_transaction_no === null)
-        throw new RefundNotAllowed('missing_gateway_transaction_no');
       if (Number(top.amount_paid_vnd) <= 0)
         throw new Error(`refund_invalid_paid_amount: top_up ${topUpId}`);
       const amountVnd = Number(top.amount_vnd);

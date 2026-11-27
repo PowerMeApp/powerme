@@ -1,12 +1,12 @@
 /**
  * T32 Phần 10a — route Admin billing qua HTTP thật (ConsoleServer → operator-api) + Postgres:
  *   GET  /api/admin/v1/billing/exceptions
- *   POST /api/admin/v1/billing/refunds/{id}/retry              body {confirm_txn_ref}
  *   POST /api/admin/v1/billing/e-invoices/{id}/retry
  *   POST /api/admin/v1/billing/top-ups/{id}/recheck
  *   POST /api/admin/v1/billing/top-ups/{id}/exception-reviewed
  *   POST /api/admin/v1/billing/payment-conflicts/{id}/review   body {note}
- * Phân quyền (RolesGuard admin), mã HTTP từng nhánh, xác nhận TxnRef trước khi retry refund.
+ * Phân quyền (RolesGuard admin), mã HTTP từng nhánh. Không có route retry refund: hoàn tiền thủ
+ * công (WF-02 D1, D-AC / BR-P51), `…/refunds/{id}/retry` → 404 như đường lạ.
  * Điều kiện lọc của danh sách: `billing-exceptions.integration.test.ts`. Cần DATABASE_URL.
  */
 import { randomBytes } from 'node:crypto';
@@ -168,13 +168,6 @@ describeDb('T32 Phần 10a: route Admin billing qua HTTP', () => {
     );
     return { refundId, ref: t.ref, topUpId: t.id };
   }
-  const refundRow = (refundId: number) =>
-    one(
-      `SELECT status::text, attempt_count, unfinished_claims, next_attempt_at <= now() AS due
-       FROM refunds WHERE id=$1`,
-      [refundId],
-    );
-
   async function driverToken(): Promise<string> {
     const now = Math.floor(Date.now() / 1000);
     return new SignJWT({ role: 'driver' })
@@ -187,7 +180,6 @@ describeDb('T32 Phần 10a: route Admin billing qua HTTP', () => {
       .sign(DRIVER.secret);
   }
 
-  let warnSpy: jest.SpyInstance;
   let logSpy: jest.SpyInstance;
   const logged = (spy: jest.SpyInstance, event: string) =>
     spy.mock.calls
@@ -233,7 +225,6 @@ describeDb('T32 Phần 10a: route Admin billing qua HTTP', () => {
       topUps,
       undefined,
       undefined,
-      refunds,
       eInvoices,
     );
     await server.start();
@@ -248,7 +239,6 @@ describeDb('T32 Phần 10a: route Admin billing qua HTTP', () => {
     }
   });
   beforeEach(() => {
-    warnSpy = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
     logSpy = jest.spyOn(Logger.prototype, 'log').mockImplementation(() => undefined);
   });
   afterEach(() => jest.restoreAllMocks());
@@ -260,7 +250,6 @@ describeDb('T32 Phần 10a: route Admin billing qua HTTP', () => {
 
   const ROUTES: [string, string, unknown][] = [
     ['GET', `${B}/exceptions`, undefined],
-    ['POST', `${B}/refunds/1/retry`, { confirm_txn_ref: 'X' }],
     ['POST', `${B}/e-invoices/1/retry`, undefined],
     ['POST', `${B}/top-ups/1/recheck`, undefined],
     ['POST', `${B}/top-ups/1/exception-reviewed`, undefined],
@@ -281,17 +270,12 @@ describeDb('T32 Phần 10a: route Admin billing qua HTTP', () => {
       const a = await call('POST', `${B}/exceptions`, { body: {} });
       expect(a.status).toBe(405);
       expect(a.headers.get('allow')).toBe('GET, OPTIONS');
-      const b = await call('GET', `${B}/refunds/1/retry`);
+      const b = await call('GET', `${B}/e-invoices/1/retry`);
       expect(b.status).toBe(405);
       expect(b.headers.get('allow')).toBe('POST, OPTIONS');
     });
 
     it('route có body: Content-Type khác JSON → 415', async () => {
-      const r = await call('POST', `${B}/refunds/1/retry`, {
-        body: 'confirm_txn_ref=X',
-        contentType: 'text/plain',
-      });
-      expect(r.status).toBe(415);
       const c = await call('POST', `${B}/payment-conflicts/1/review`, {
         body: 'note=x',
         contentType: 'text/plain',
@@ -308,99 +292,37 @@ describeDb('T32 Phần 10a: route Admin billing qua HTTP', () => {
       expect((await post(`${B}/top-ups/1/refund`)).status).toBe(404);
       expect((await call('GET', `${B}/nothing`)).status).toBe(404);
     });
+
+    it('route retry refund đã gỡ (hoàn thủ công, D1) → 404 not_found như đường lạ', async () => {
+      const f = await failedRefund();
+      for (const path of [`${B}/refunds/1/retry`, `${B}/refunds/${f.refundId}/retry`]) {
+        const r = await post(path, {});
+        expect(r.status).toBe(404);
+        expect(r.body).toMatchObject({ error: 'not_found' });
+      }
+      const row = await one('SELECT status::text, attempt_count FROM refunds WHERE id=$1', [
+        f.refundId,
+      ]);
+      expect(row).toEqual({ status: 'failed', attempt_count: 4 });
+    });
   });
 
   describe('GET /exceptions', () => {
-    it('200 đủ năm mục, refund failed có retry_warning chứa TxnRef', async () => {
-      const f = await failedRefund();
+    it('200 đúng bốn mục, không có failed_refunds (kể cả khi có refund failed)', async () => {
+      await failedRefund();
       const r = await call('GET', `${B}/exceptions`);
       expect(r.status).toBe(200);
-      for (const key of [
-        'failed_refunds',
+      const keys = [
         'late_payments',
         'invoices_needs_review',
         'top_up_exceptions',
         'payment_conflicts',
-      ]) {
+      ];
+      expect(Object.keys(r.body!).sort()).toEqual(['generated_at', 'limit', ...keys].sort());
+      expect(r.body).not.toHaveProperty('failed_refunds');
+      for (const key of keys)
         expect(r.body![key]).toEqual({ total: expect.any(Number), items: expect.any(Array) });
-      }
-      const row = r.body!['failed_refunds'].items.find(
-        (i: any) => i.refund_id === String(f.refundId),
-      );
-      expect(row.retry_warning).toContain(f.ref);
-      expect(row.retry_warning).toContain('CHƯA được hoàn');
       expect(r.headers.get('cache-control')).toBe('no-store');
-    });
-  });
-
-  describe('POST /refunds/{id}/retry', () => {
-    it('đúng confirm_txn_ref → 202, requested, attempt_count giữ, unfinished_claims 0, log admin_id', async () => {
-      const f = await failedRefund();
-      const r = await post(`${B}/refunds/${f.refundId}/retry`, { confirm_txn_ref: f.ref });
-      expect(r.status).toBe(202);
-      expect(r.body).toEqual({
-        refund_id: String(f.refundId),
-        status: 'requested',
-        attempt_count: 4,
-      });
-      expect(await refundRow(f.refundId)).toMatchObject({
-        status: 'requested',
-        attempt_count: 4,
-        unfinished_claims: 0,
-        due: true,
-      });
-      expect(logged(logSpy, 'refund_admin_retry')).toEqual([
-        expect.objectContaining({ refund_id: f.refundId, admin_id: admin }),
-      ]);
-    });
-
-    it.each(['late_payment', 'account_closure'] as const)(
-      'refund %s dùng TxnRef của top-up gốc',
-      async (kind) => {
-        const f = await failedRefund(kind);
-        const r = await post(`${B}/refunds/${f.refundId}/retry`, { confirm_txn_ref: f.ref });
-        expect(r.status).toBe(202);
-        expect((await refundRow(f.refundId))['status']).toBe('requested');
-      },
-    );
-
-    it('sai TxnRef → 422 confirmation_mismatch, refund vẫn failed, log refund_admin_retry_rejected', async () => {
-      const f = await failedRefund();
-      const r = await post(`${B}/refunds/${f.refundId}/retry`, { confirm_txn_ref: `${f.ref}X` });
-      expect(r.status).toBe(422);
-      expect(r.body).toMatchObject({ error: 'confirmation_mismatch' });
-      expect(await refundRow(f.refundId)).toMatchObject({ status: 'failed', unfinished_claims: 3 });
-      expect(logged(warnSpy, 'refund_admin_retry_rejected')).toEqual([
-        expect.objectContaining({
-          refund_id: f.refundId,
-          admin_id: admin,
-          reason: 'confirmation_mismatch',
-        }),
-      ]);
-    });
-
-    it.each([
-      ['thiếu', {}],
-      ['rỗng', { confirm_txn_ref: '' }],
-      ['không phải chuỗi', { confirm_txn_ref: 123 }],
-      ['key lạ', { confirm_txn_ref: 'A', force: true }],
-      ['quá dài', { confirm_txn_ref: 'A'.repeat(101) }],
-    ])('confirm_txn_ref %s → 400, refund vẫn failed', async (_n, body) => {
-      const f = await failedRefund();
-      const r = await post(`${B}/refunds/${f.refundId}/retry`, body);
-      expect(r.status).toBe(400);
-      expect(r.body).toMatchObject({ error: 'invalid_input' });
-      expect((await refundRow(f.refundId))['status']).toBe('failed');
-    });
-
-    it('refund không ở failed → 409 invalid_state; không có → 404', async () => {
-      const f = await failedRefund('top_up', 'requested');
-      const r = await post(`${B}/refunds/${f.refundId}/retry`, { confirm_txn_ref: f.ref });
-      expect(r.status).toBe(409);
-      expect(r.body).toMatchObject({ error: 'invalid_state' });
-      const missing = await post(`${B}/refunds/999999999/retry`, { confirm_txn_ref: 'X' });
-      expect(missing.status).toBe(404);
-      expect(missing.body).toMatchObject({ error: 'not_found' });
     });
   });
 
