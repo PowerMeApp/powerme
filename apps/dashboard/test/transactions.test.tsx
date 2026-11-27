@@ -128,6 +128,22 @@ describe('Danh sách giao dịch (màn 35, Admin)', () => {
     expect(txCalls(seen)).toEqual([`${PERIOD}&page=1&page_size=50`]);
   });
 
+  it('T158 labels a closed account as stopped automatic settlement', async () => {
+    fakeCsms({
+      [REV]: ok(revenue),
+      [TX]: ok(
+        txPage({
+          items: [tx({ kind: 'unsettled', amount_vnd: null, unsettled_reason: 'account_closed' })],
+        }),
+      ),
+    });
+    renderApp(`/admin/revenue${PERIOD}`, session(ADMIN));
+    const row = within(await screen.findByRole('row', { name: 'Phiên #101' }));
+    expect(row.getByText('Tài khoản đã đóng, đã dừng tự động quyết toán')).toBeInTheDocument();
+    expect(row.getByText('Chưa trừ tiền')).toBeInTheDocument();
+    expect(row.getByText('—')).toBeInTheDocument();
+  });
+
   it('filters go to the API and back to page 1; paging asks the next page', async () => {
     const seen = fakeCsms({ [REV]: ok(revenue), [TX]: ok(txPage({ total: 120 })) });
     const { user } = renderApp(`/admin/revenue${PERIOD}`, session(ADMIN));

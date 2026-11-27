@@ -3,7 +3,7 @@
 skinparam nodesep 35
 skinparam ranksep 50
 title CD-2 (Software level, CSMS billing) — Class diagram of WF-02: top-up, payment, e-invoice, refunds\nbilling partly in code (CreditLedgerService, LoyaltyService, TopUp / Refund state machines; other classes «planned»), tables in migrations 0003 / 0015 · Behaviour: SD-2a…2f · State: STM-4, 5, 7, 10
-footer Owner: Lê Bảo Khang (WP5) · v2.1 · 10/11/2026 · v0.3 (28/10) + RefundService, Refund, InvoiceAdjustment, EInvoiceProviderAdapter (ERD v1.1, R8) · main members only
+footer Owner: Lê Bảo Khang (WP5) · v3.0 · 26/11/2026 · manual refund (decision D-AC): refund sending, retries and VnpayAdapter.refund removed, Admin refund operations added · v2.2 (23/11) + livePoints, expireDueForAccount, claim counter (T124, T129) · v0.3 (28/10) + RefundService, Refund, InvoiceAdjustment, EInvoiceProviderAdapter (ERD v1.1, R8) · main members only
 
 package "controllers" {
   class TopUpController <<controller>> {
@@ -14,8 +14,9 @@ package "controllers" {
     + handleIpn(query : VnpayIpn) : IpnResponse
   }
   class AdminBillingController <<controller>> {
-    + refundTopUp(topUpId : number) : RefundView
-    + refundLatePayment(topUpId : number) : RefundView
+    + createRefund(topUpId : number, kind : RefundKind) : RefundView
+    + confirmRefund(refundId : number, refundNo : string) : RefundView
+    + markRefundFailed(refundId : number, reason : string) : RefundView
     + retryRefund(refundId : number) : RefundView
     + retryInvoice(invoiceId : number) : void
   }
@@ -37,15 +38,17 @@ package "services" {
     + post(accountId : number, type : CreditTransactionType, amountVnd : number, ref : LedgerRef) : CreditTransaction
   }
   class LoyaltyService <<component>> {
+    + livePoints(driverId : number, asOf : Date) : number
     + redeemForTopUp(topUp : TopUp) : void
     + restoreForTopUp(topUp : TopUp) : void
     + forfeitOnClosure(driverId : number) : number
-    + expireDue(now : Date) : void
+    + expireDueForAccount(accountId : number, now : Date) : void
   }
   class RefundService <<component>> {
     + create(topUpId : number, kind : RefundKind, amountVnd : number, requestedBy : number [0..1]) : Refund
-    + send(refundId : number) : void
-    + retry(refundId : number, adminId : number) : void
+    + confirmDone(refundId : number, gatewayRefundNo : string, adminId : number) : Refund
+    + markFailed(refundId : number, reason : string, adminId : number) : Refund
+    + redo(refundId : number, adminId : number) : Refund
   }
   class EInvoiceService <<component>> {
     + requestForTopUp(topUp : TopUp) : EInvoice
@@ -62,7 +65,6 @@ package "adapters" {
   class VnpayAdapter <<port>> {
     + buildPaymentUrl(topUp : TopUp, amountVnd : number) : string
     + queryTransaction(ref : string) : GatewayStatus
-    + refund(ref : string, amountVnd : number) : GatewayRefundResult
   }
   class EInvoiceProviderAdapter <<port>> {
     + createInvoice(data : InvoiceData) : string
@@ -86,12 +88,16 @@ package "entities (tables)" {
     + amountPaidVnd : number
     + status : pending | credited | failed | expired | refunded
     + expiresAt : Date
+    + nextAttemptAt : Date [0..1]
+    + unfinishedClaims : number
+    + exceptionKind : unresolved_04 | unresolved_07 | loyalty_error | retry_exhausted [0..1]
   }
   class Refund <<entity>> {
     + kind : top_up | late_payment | account_closure
     + amountVnd : number
     + status : requested | done | failed
-    + attemptCount : number
+    + gatewayRefundNo : string [0..1] {unique}
+    + failureReason : string [0..1]
   }
   class EInvoice <<entity>> {
     + status : requested | issued | failed | needs_review
@@ -117,7 +123,6 @@ TopUpService ..> EInvoiceService : <<async>>
 AccountClosureService --> CreditLedgerService
 AccountClosureService --> LoyaltyService
 AccountClosureService --> RefundService
-RefundService --> VnpayAdapter
 RefundService ..> EInvoiceService : <<async>>
 EInvoiceService --> EInvoiceProviderAdapter
 
@@ -128,9 +133,23 @@ TopUp "1" -- "0..1" EInvoice : invoiced as >
 EInvoice "1" -- "0..*" InvoiceAdjustment
 Refund "1" -- "0..1" InvoiceAdjustment : invoiced as >
 
+note bottom of LoyaltyService
+  quotes and redemption use livePoints (lots not
+  expired at asOf); loyalty_accounts.points_balance
+  is only a snapshot. Shortfall at payment: adjust 0;
+  ledger corrupt: no adjust, loyalty_error
+end note
 note bottom of RefundService
-  4 attempts (5 min, 30 min, 2 h);
-  closure refunds created by the system
+  manual refund: customer service refunds in the
+  VNPay merchant portal, outside PowerMe; the Admin
+  records the result (confirmDone / markFailed / redo).
+  No refund call to the gateway, no querydr for refunds,
+  no automatic retry, no refund worker.
+  Closure refunds created by the system
   (requestedBy = null, R8 Q1, D3 09/11)
+end note
+note bottom of VnpayAdapter
+  top-ups only: payment URL
+  and querydr for top-ups
 end note
 @enduml

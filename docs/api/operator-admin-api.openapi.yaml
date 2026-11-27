@@ -3809,7 +3809,8 @@ components:
             số phiên; lý do = `charge_settlement_jobs.reason` khi job `pending` (vd
             `promotion_unsupported`, `late_start_operator_review`, `missing_meter`,
             `invalid_energy`, `policy_unconfigured`), `ineligible` khi không có job hoặc job
-            `ineligible`, `posted_without_debit` khi job `posted` mà không có debit (lệch sổ).
+            `ineligible` khác; riêng `ineligible/account_closed` giữ `account_closed` (T158,
+            dừng tự thử lại, chưa thu nợ); `posted_without_debit` khi job `posted` mà không có debit (lệch sổ).
           required: [session_count, by_reason]
           properties:
             session_count: { type: integer, minimum: 0 }
