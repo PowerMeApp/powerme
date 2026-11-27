@@ -109,7 +109,7 @@ describe('Giá & khuyến mãi (màn 24)', () => {
     });
     const { user } = renderApp('/operator/pricing', session(STAFF));
     await user.click(await screen.findByRole('button', { name: 'Lập biểu giá mới' }));
-    const dialog = within(screen.getByRole('dialog'));
+    const dialog = within(await screen.findByRole('dialog'));
     const end3 = dialog.getByLabelText('Đến (khung 3)');
     await user.clear(end3);
     await user.type(end3, '23:00');
