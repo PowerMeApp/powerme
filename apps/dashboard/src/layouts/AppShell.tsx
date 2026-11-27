@@ -37,7 +37,7 @@ export function AppShell() {
             <div className="brand-name">
               Power<b>Me</b>
             </div>
-            <div className="brand-sub">{admin ? 'Admin Console' : 'Operator Dashboard'}</div>
+            <div className="brand-sub">{admin ? 'Trang quản trị' : 'Trang đơn vị vận hành'}</div>
           </div>
         </div>
         <nav aria-label={admin ? 'Quản trị nền tảng' : 'Vận hành'}>
@@ -162,7 +162,7 @@ export function AppShell() {
             {user.full_name}
             <small>
               {admin
-                ? 'Admin · toàn nền tảng'
+                ? 'Quản trị viên · toàn nền tảng'
                 : `${user.staff_role ? STAFF_ROLE[user.staff_role] : 'Operator'} · ${user.operator_name ?? ''}`}
             </small>
           </div>

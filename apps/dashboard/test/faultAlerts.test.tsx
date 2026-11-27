@@ -78,23 +78,23 @@ describe('Cảnh báo sự cố (màn 21)', () => {
   it('lists the three kinds with labels; buttons only from allowed_actions; nav link', async () => {
     const seen = fakeCsms({ [LIST]: list(base, offline, report) });
     open();
-    expect(await screen.findByText('Faulted · GroundFailure · Súng 1')).toBeInTheDocument();
-    expect(screen.getByText('Offline · toàn trụ sạc')).toBeInTheDocument();
+    expect(await screen.findByText('Trụ báo lỗi · GroundFailure · Súng 1')).toBeInTheDocument();
+    expect(screen.getByText('Mất kết nối · toàn trụ sạc')).toBeInTheDocument();
     expect(
       within(screen.getByRole('navigation', { name: 'Breadcrumb' })).getByText('Cảnh báo sự cố'),
     ).toHaveAttribute('aria-current', 'page');
-    expect(screen.getByText('Driver report · Súng 2')).toBeInTheDocument();
+    expect(screen.getByText('Tài xế báo lỗi · Súng 2')).toBeInTheDocument();
     expect(kindLabel({ ...report, error_code: 'GroundFailure' })).toBe(
-      'Driver report · GroundFailure · Súng 2',
+      'Tài xế báo lỗi · GroundFailure · Súng 2',
     );
     expect(screen.getByText('2 tài xế báo lỗi')).toBeInTheDocument();
     const a = within(await alert(1007));
-    expect(a.getByRole('button', { name: 'Reset' })).toBeInTheDocument();
+    expect(a.getByRole('button', { name: 'Khởi động lại' })).toBeInTheDocument();
     expect(a.getByRole('button', { name: 'Đóng' })).toBeInTheDocument();
     expect(a.queryByRole('button', { name: 'Xác nhận' })).toBeNull();
     const o = within(await alert(1008));
     expect(o.getByRole('button', { name: 'Xác nhận' })).toBeInTheDocument();
-    expect(o.getByText('Trụ sạc offline')).toBeInTheDocument();
+    expect(o.getByText('Trụ sạc mất kết nối')).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Cảnh báo sự cố' })).toBeInTheDocument();
     // D41 (FE-05): the serial opens Charge Point Detail.
     expect(a.getByRole('link', { name: 'RH24D1-00001' })).toHaveAttribute(
@@ -112,7 +112,7 @@ describe('Cảnh báo sự cố (màn 21)', () => {
     const { user } = open();
     expect(await screen.findByText(/Không có cảnh báo/)).toBeInTheDocument();
     for (const [label, status] of [
-      ['Đang reset', 'resetting'],
+      ['Đang khởi động lại', 'resetting'],
       ['Đã xử lý', 'resolved'],
       ['Tất cả', 'all'],
     ] as const) {
@@ -126,7 +126,7 @@ describe('Cảnh báo sự cố (màn 21)', () => {
       'Đang mở',
       'Mới',
       'Đã xác nhận',
-      'Đang reset',
+      'Đang khởi động lại',
       'Đã xử lý',
       'Tất cả',
     ]);
@@ -178,11 +178,11 @@ describe('Cảnh báo sự cố (màn 21)', () => {
       },
     });
     const { user } = open();
-    await user.click(within(await alert(1007)).getByRole('button', { name: 'Reset' }));
-    const dialog = screen.getByRole('dialog', { name: 'Gửi Reset tới RH24D1-00001?' });
-    expect(within(dialog).getByRole('radio', { name: /Soft/ })).toBeChecked();
-    await user.click(within(dialog).getByRole('button', { name: 'Gửi Reset' }));
-    expect(await screen.findByText('Trụ sạc nhận lệnh Reset Soft')).toBeInTheDocument();
+    await user.click(within(await alert(1007)).getByRole('button', { name: 'Khởi động lại' }));
+    const dialog = screen.getByRole('dialog', { name: 'Khởi động lại RH24D1-00001?' });
+    expect(within(dialog).getByRole('radio', { name: 'Khởi động lại phần mềm' })).toBeChecked();
+    await user.click(within(dialog).getByRole('button', { name: 'Gửi lệnh' }));
+    expect(await screen.findByText('Trụ sạc nhận lệnh khởi động lại phần mềm')).toBeInTheDocument();
     expect(seen.find((r) => r.path.endsWith('/reset'))?.body).toEqual({ type: 'Soft' });
   });
 
@@ -218,14 +218,14 @@ describe('Cảnh báo sự cố (màn 21)', () => {
       return fetchFake(r);
     }) as typeof fetch;
     const { user } = open();
-    await user.click(within(await alert(1007)).getByRole('button', { name: 'Reset' }));
-    await user.click(screen.getByRole('radio', { name: /Hard/ }));
-    await user.click(screen.getByRole('button', { name: 'Gửi Reset' }));
+    await user.click(within(await alert(1007)).getByRole('button', { name: 'Khởi động lại' }));
+    await user.click(screen.getByRole('radio', { name: /toàn trụ/ }));
+    await user.click(screen.getByRole('button', { name: 'Gửi lệnh' }));
     const second = await screen.findByRole('dialog', { name: 'RH24D1-00001 đang có phiên sạc' });
     expect(within(second).getByText('Súng 2 — phiên 55')).toBeInTheDocument();
-    await user.click(within(second).getByRole('button', { name: 'Vẫn Reset' }));
+    await user.click(within(second).getByRole('button', { name: 'Vẫn gửi lệnh' }));
     expect(
-      await screen.findByText('Trụ sạc nhận lệnh Reset Hard (đã cắt phiên đang sạc)'),
+      await screen.findByText('Trụ sạc nhận lệnh khởi động lại toàn trụ (đã cắt phiên đang sạc)'),
     ).toBeInTheDocument();
     expect(seen.filter((r) => r.path.endsWith('/reset')).map((r) => r.body)).toEqual([
       { type: 'Hard' },
@@ -234,13 +234,13 @@ describe('Cảnh báo sự cố (màn 21)', () => {
   });
 
   it.each([
-    [502, 'station_error', 'Trụ sạc không trả lời lệnh Reset hợp lệ'],
-    [409, 'station_offline', 'Trụ sạc đang offline, không gửi được lệnh Reset'],
+    [502, 'station_error', 'Trụ sạc không trả lời lệnh khởi động lại hợp lệ'],
+    [409, 'station_offline', 'Trụ sạc đang mất kết nối, không gửi được lệnh khởi động lại'],
   ])('%s %s → Vietnamese message on the alert', async (status, error, text) => {
     fakeCsms({ [LIST]: list(base), [RESET]: { status, body: { error, detail: error } } });
     const { user } = open();
-    await user.click(within(await alert(1007)).getByRole('button', { name: 'Reset' }));
-    await user.click(screen.getByRole('button', { name: 'Gửi Reset' }));
+    await user.click(within(await alert(1007)).getByRole('button', { name: 'Khởi động lại' }));
+    await user.click(screen.getByRole('button', { name: 'Gửi lệnh' }));
     expect(await screen.findByRole('alert')).toHaveTextContent(text);
     expect(screen.queryByRole('dialog')).toBeNull();
   });
@@ -257,7 +257,7 @@ describe('Cảnh báo sự cố (màn 21)', () => {
     });
     open();
     const a = within(await alert(1007));
-    expect(a.getByText(/Chờ connector hoạt động lại · còn (89|90) s/)).toBeInTheDocument();
+    expect(a.getByText(/Chờ súng hoạt động lại · còn (89|90) s/)).toBeInTheDocument();
     expect(a.queryByRole('button')).toBeNull();
   });
 });

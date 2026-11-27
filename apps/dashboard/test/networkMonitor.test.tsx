@@ -64,12 +64,12 @@ describe('Giám sát mạng lưới (màn 31)', () => {
     const a = within(await screen.findByRole('row', { name: 'Trụ sạc PM-D1-HCM-0001' }));
     expect(a.getByText('An Phát EV')).toBeInTheDocument();
     expect(a.getByText('HCM-Q1 · Trạm Quận 1')).toBeInTheDocument();
-    expect(a.getByText('Online')).toBeInTheDocument();
+    expect(a.getByText('Đang kết nối')).toBeInTheDocument();
     expect(a.getByText('Nghiêm trọng')).toHaveClass('pill', 'critical');
     expect(a.getByLabelText('2 sự cố đang mở')).toBeInTheDocument();
     const b = within(screen.getByRole('row', { name: 'Trụ sạc PM-D1-HCM-0002' }));
     expect(b.getByText('Bình Minh Charging')).toBeInTheDocument();
-    expect(b.getByText('Offline')).toBeInTheDocument();
+    expect(b.getByText('Mất kết nối')).toBeInTheDocument();
     expect(b.getByText('—')).toBeInTheDocument();
     // Read-only: no links into the Operator-only screens.
     expect(a.queryByRole('link')).toBeNull();
@@ -87,7 +87,7 @@ describe('Giám sát mạng lưới (màn 31)', () => {
     const { user } = renderApp('/admin/network', session(ADMIN));
     await screen.findByRole('row', { name: 'Trụ sạc PM-D1-HCM-0001' });
     await user.selectOptions(
-      await screen.findByRole('combobox', { name: 'Operator' }),
+      await screen.findByRole('combobox', { name: 'Đơn vị vận hành' }),
       await screen.findByRole('option', { name: 'Bình Minh Charging' }),
     );
     await user.selectOptions(screen.getByLabelText('Kết nối'), 'offline');

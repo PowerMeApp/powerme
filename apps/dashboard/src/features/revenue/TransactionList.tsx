@@ -42,7 +42,7 @@ export const ORIGIN_LABEL: Record<TransactionOrigin, string> = {
   app_qr: 'Ứng dụng (QR)',
   rfid: 'Thẻ RFID',
   hmi_password: 'Mật khẩu trên trụ',
-  free_vend: 'Free vend',
+  free_vend: 'Sạc miễn phí',
 };
 const KINDS = Object.keys(KIND_LABEL) as TransactionKind[];
 const ORIGINS = Object.keys(ORIGIN_LABEL) as TransactionOrigin[];
@@ -132,7 +132,7 @@ export function TransactionList() {
       </div>
       <section className="card revenue-filters" aria-label="Lọc giao dịch">
         <label className="field">
-          Operator
+          Đơn vị vận hành
           <select
             className="input"
             value={operatorId}
@@ -182,7 +182,7 @@ export function TransactionList() {
           disabled={!valid || csvState.isLoading}
           onClick={() => void download()}
         >
-          {csvState.isLoading ? 'Đang tải CSV…' : 'Tải CSV giao dịch'}
+          {csvState.isLoading ? 'Đang tải tệp…' : 'Tải tệp giao dịch (CSV)'}
         </button>
       </section>
       {exportError && <p role="alert">{exportError}</p>}
@@ -210,7 +210,7 @@ export function TransactionList() {
                   <tr>
                     <th scope="col">Phiên</th>
                     <th scope="col">Thời điểm</th>
-                    <th scope="col">Operator</th>
+                    <th scope="col">Đơn vị vận hành</th>
                     <th scope="col">Trạm · trụ sạc</th>
                     <th scope="col">Nguồn</th>
                     <th scope="col">Loại</th>

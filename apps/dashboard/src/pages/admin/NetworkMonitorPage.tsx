@@ -32,8 +32,8 @@ const SEVERITY = {
 } as const;
 const ONLINE_FILTERS = [
   ['all', 'Tất cả'],
-  ['online', 'Online'],
-  ['offline', 'Offline'],
+  ['online', 'Đang kết nối'],
+  ['offline', 'Mất kết nối'],
 ] as const;
 type OnlineFilter = (typeof ONLINE_FILTERS)[number][0];
 
@@ -59,7 +59,9 @@ function Row({ cp, now }: { cp: NetworkChargePoint; now: number }) {
         <span className="pill">{LIFECYCLE[cp.lifecycle]}</span>
       </td>
       <td className="nowrap">
-        <span className={`pill ${offline ? 'muted' : ''}`}>{offline ? 'Offline' : 'Online'}</span>
+        <span className={`pill ${offline ? 'muted' : ''}`}>
+          {offline ? 'Mất kết nối' : 'Đang kết nối'}
+        </span>
         <div className="muted small">{ago(cp.last_message_at, now)}</div>
       </td>
       <td>
@@ -95,11 +97,12 @@ function Totals() {
         <h2>Trụ đang hoạt động</h2>
         <p className="tile-number">
           {formatCount(net.in_service_online)}
-          <span className="muted"> / {formatCount(inService)} online</span>
+          <span className="muted"> / {formatCount(inService)} đang kết nối</span>
         </p>
         {net.in_service_offline > 0 && (
           <p>
-            <span className="pill muted">Offline</span> <b>{formatCount(net.in_service_offline)}</b>
+            <span className="pill muted">Mất kết nối</span>{' '}
+            <b>{formatCount(net.in_service_offline)}</b>
           </p>
         )}
       </section>
@@ -150,14 +153,11 @@ export function NetworkMonitorPage() {
       <Breadcrumbs items={[{ label: 'Giám sát mạng lưới' }]} />
       <div className="page-head">
         <h1>Giám sát mạng lưới</h1>
-        <p>
-          Trụ sạc của mọi Operator, trạng thái từng súng và sự cố đang mở · cập nhật mỗi 10 giây
-        </p>
       </div>
       <Totals />
       <div className="filters">
         <label className="field">
-          Operator
+          Đơn vị vận hành
           <select
             className="input"
             value={operatorId}
@@ -181,7 +181,7 @@ export function NetworkMonitorPage() {
             type="search"
             value={cpSearch}
             maxLength={MAX_SEARCH}
-            placeholder="Mã, serial hoặc ID trụ"
+            placeholder="Mã, số seri hoặc ID trụ"
             onChange={(e) => {
               setCpSearch(e.target.value);
               reset();
@@ -255,7 +255,7 @@ export function NetworkMonitorPage() {
               <thead>
                 <tr>
                   <th scope="col">Trụ sạc</th>
-                  <th scope="col">Operator · trạm sạc</th>
+                  <th scope="col">Đơn vị vận hành · trạm sạc</th>
                   <th scope="col">Vòng đời</th>
                   <th scope="col">Kết nối</th>
                   <th scope="col">Súng</th>

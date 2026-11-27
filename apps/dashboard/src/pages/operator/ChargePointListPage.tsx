@@ -3,7 +3,7 @@
  * GET /api/operator/v1/charge-points, one row each, with every connector's raw OCPP status (D21),
  * Offline overriding it (D20) and a "possibly out of date" mark when stale (D22, BR-P39). Filters:
  * online / offline and lifecycle; decommissioned is hidden unless chosen (D24). Polled every 5 s
- * (D5); the map is FE-03c (D23). "Onboard trụ sạc" opens screen 19 (FE-02, OnboardingSheet).
+ * (D5); the map is FE-03c (D23). "Đưa trụ vào vận hành" opens screen 19 (FE-02, OnboardingSheet).
  */
 import { Breadcrumbs } from '../../components/Breadcrumbs';
 import { useState } from 'react';
@@ -23,8 +23,8 @@ export const LIST_POLL_MS = 5000;
 
 const ONLINE_FILTERS = [
   ['all', 'Tất cả'],
-  ['online', 'Online'],
-  ['offline', 'Offline'],
+  ['online', 'Đang kết nối'],
+  ['offline', 'Mất kết nối'],
 ] as const;
 type OnlineFilter = (typeof ONLINE_FILTERS)[number][0];
 
@@ -43,9 +43,9 @@ function Row({ cp, now }: { cp: OperatorChargePoint; now: number }) {
         {cp.offline_card_risk && (
           <span
             className="pill major small"
-            title={`Rủi ro thẻ offline: ${OFFLINE_CARD_RISK[cp.offline_card_risk_reason ?? 'not_checked']}`}
+            title={`Rủi ro thẻ khi mất kết nối: ${OFFLINE_CARD_RISK[cp.offline_card_risk_reason ?? 'not_checked']}`}
           >
-            Rủi ro thẻ offline
+            Rủi ro thẻ khi mất kết nối
           </span>
         )}
       </td>
@@ -57,7 +57,9 @@ function Row({ cp, now }: { cp: OperatorChargePoint; now: number }) {
         <span className="pill">{LIFECYCLE[cp.lifecycle]}</span>
       </td>
       <td className="nowrap">
-        <span className={`pill ${offline ? 'muted' : ''}`}>{offline ? 'Offline' : 'Online'}</span>
+        <span className={`pill ${offline ? 'muted' : ''}`}>
+          {offline ? 'Mất kết nối' : 'Đang kết nối'}
+        </span>
         <div className="muted small">{ago(cp.last_message_at, now)}</div>
       </td>
       <td>
@@ -99,13 +101,12 @@ export function ChargePointListPage() {
       <Breadcrumbs items={[{ label: 'Trụ sạc' }]} />
       <div className="page-head">
         <h1>Trụ sạc</h1>
-        <p>Trạng thái từng súng theo bản tin OCPP mới nhất · cập nhật mỗi 5 giây</p>
         <button
           type="button"
           className="btn primary page-action"
           onClick={() => setOnboarding(true)}
         >
-          Onboard trụ sạc
+          Đưa trụ vào vận hành
         </button>
       </div>
       <div className="filters">
@@ -116,7 +117,7 @@ export function ChargePointListPage() {
             type="search"
             value={cpSearch}
             maxLength={MAX_SEARCH}
-            placeholder="Mã, serial hoặc ID trụ"
+            placeholder="Mã, số seri hoặc ID trụ"
             onChange={(e) => {
               setCpSearch(e.target.value);
               setPage(1);

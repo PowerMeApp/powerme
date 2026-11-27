@@ -269,9 +269,6 @@ export function PricingPage() {
       <Breadcrumbs items={[{ label: 'Giá & khuyến mãi' }]} />
       <div className="page-head">
         <h1>Giá &amp; khuyến mãi</h1>
-        <p>
-          Biểu giá theo khung giờ (cao điểm, bình thường, thấp điểm) và mã khuyến mãi của Operator
-        </p>
       </div>
       <div className="filters">
         <div className="queue-switch" role="group" aria-label="Mục">

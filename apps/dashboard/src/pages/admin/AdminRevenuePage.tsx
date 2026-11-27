@@ -12,7 +12,6 @@ export function AdminRevenuePage() {
       <Breadcrumbs items={[{ label: 'Giao dịch & doanh thu' }]} />
       <div className="page-head">
         <h1>Giao dịch &amp; doanh thu</h1>
-        <p>Doanh thu toàn nền tảng theo Operator, trạm sạc, trụ sạc và ngày</p>
       </div>
       <RevenueReportView scope="admin" />
       <TransactionList />

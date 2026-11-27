@@ -24,13 +24,13 @@ type Note = { tone: 'ok' | 'warn' | 'error'; text: string } | null;
 const STATUS = {
   raised: 'Mới',
   acknowledged: 'Đã xác nhận',
-  resetting: 'Đang reset',
+  resetting: 'Đang khởi động lại',
   resolved: 'Đã xử lý',
 } as const;
 const SEVERITY = { critical: 'Nghiêm trọng', major: 'Nặng', minor: 'Nhẹ', none: '—' } as const;
 const BUTTON: Record<FaultAction, string> = {
   acknowledge: 'Xác nhận',
-  reset: 'Reset',
+  reset: 'Khởi động lại',
   close: 'Đóng',
 };
 
@@ -41,10 +41,10 @@ const where = (no: number | null) => (no ? `Súng ${no}` : 'toàn trụ sạc');
  * A driver report that also got a hardware code (T131) shows it: Driver report · code · Connector.
  */
 export function kindLabel(f: OperatorFault): string {
-  if (f.kind === 'offline') return 'Offline · toàn trụ sạc';
+  if (f.kind === 'offline') return 'Mất kết nối · toàn trụ sạc';
   if (f.kind === 'driver_report')
-    return `Driver report · ${f.error_code ? `${f.error_code} · ` : ''}${where(f.connector_no)}`;
-  return `Faulted · ${f.error_code ?? '—'} · ${where(f.connector_no)}`;
+    return `Tài xế báo lỗi · ${f.error_code ? `${f.error_code} · ` : ''}${where(f.connector_no)}`;
+  return `Trụ báo lỗi · ${f.error_code ?? '—'} · ${where(f.connector_no)}`;
 }
 
 const time = (iso: string) =>
@@ -57,7 +57,7 @@ function Countdown({ deadline }: { deadline: string }) {
     return () => clearInterval(t);
   }, []);
   const left = Math.max(0, Math.ceil((Date.parse(deadline) - now) / 1000));
-  return <span className="muted">Chờ connector hoạt động lại · còn {left} s</span>;
+  return <span className="muted">Chờ súng hoạt động lại · còn {left} s</span>;
 }
 
 export function FaultRow({ fault }: { fault: OperatorFault }) {
@@ -95,12 +95,12 @@ export function FaultRow({ fault }: { fault: OperatorFault }) {
       else if (r.data?.reset_status === 'Rejected')
         setNote({
           tone: 'warn',
-          text: `Trụ sạc từ chối Reset — sự cố ${no} về "Đã xác nhận"`,
+          text: `Trụ sạc từ chối khởi động lại — sự cố ${no} về "Đã xác nhận"`,
         });
       else
         setNote({
           tone: 'ok',
-          text: `Trụ sạc nhận lệnh Reset ${type}${r.data?.forced ? ' (đã cắt phiên đang sạc)' : ''}`,
+          text: `Trụ sạc nhận lệnh khởi động lại ${type === 'Soft' ? 'phần mềm' : 'toàn trụ'}${r.data?.forced ? ' (đã cắt phiên đang sạc)' : ''}`,
         });
     }
     setPending(null);
@@ -124,7 +124,7 @@ export function FaultRow({ fault }: { fault: OperatorFault }) {
           {fault.charge_point_serial}
         </Link>
         {fault.station_name && <div className="muted small">{fault.station_name}</div>}
-        {!fault.charge_point_online && <span className="pill muted">Trụ sạc offline</span>}
+        {!fault.charge_point_online && <span className="pill muted">Trụ sạc mất kết nối</span>}
       </td>
       <td>
         <span className={`pill ${fault.severity}`}>{SEVERITY[fault.severity]}</span>
@@ -174,7 +174,7 @@ export function FaultRow({ fault }: { fault: OperatorFault }) {
                 : pending === 'close'
                   ? `Đóng sự cố ${no}?`
                   : pending === 'reset'
-                    ? `Gửi Reset tới ${fault.charge_point_serial}?`
+                    ? `Khởi động lại ${fault.charge_point_serial}?`
                     : `${fault.charge_point_serial} đang có phiên sạc`
             }
             confirmLabel={
@@ -183,8 +183,8 @@ export function FaultRow({ fault }: { fault: OperatorFault }) {
                 : pending === 'close'
                   ? 'Đóng sự cố'
                   : pending === 'reset'
-                    ? 'Gửi Reset'
-                    : 'Vẫn Reset'
+                    ? 'Gửi lệnh'
+                    : 'Vẫn gửi lệnh'
             }
             busy={busy}
             onCancel={() => setPending(null)}
@@ -192,12 +192,12 @@ export function FaultRow({ fault }: { fault: OperatorFault }) {
           >
             {pending === 'acknowledge' && <p>Bạn đã thấy cảnh báo này và sẽ xử lý.</p>}
             {pending === 'close' && (
-              <p>Chỉ đóng sau khi kỹ thuật đã kiểm tra tại chỗ. Trạng thái connector do trụ báo.</p>
+              <p>Chỉ đóng sau khi kỹ thuật đã kiểm tra tại chỗ. Trạng thái súng do trụ báo.</p>
             )}
             {pending === 'reset' && (
               <>
                 <fieldset className="field">
-                  <legend>Kiểu Reset</legend>
+                  <legend>Kiểu khởi động lại</legend>
                   {(['Soft', 'Hard'] as const).map((t) => (
                     <label key={t}>
                       <input
@@ -207,20 +207,20 @@ export function FaultRow({ fault }: { fault: OperatorFault }) {
                         onChange={() => setType(t)}
                       />{' '}
                       {t === 'Soft'
-                        ? 'Soft — khởi động lại phần mềm'
-                        : 'Hard — khởi động lại toàn trụ'}
+                        ? 'Khởi động lại phần mềm'
+                        : 'Khởi động lại toàn trụ (tắt rồi bật)'}
                     </label>
                   ))}
                 </fieldset>
                 <p className="muted">
-                  Reset khởi động lại cả trụ sạc. Sự cố chuyển sang "Đang reset" cho tới khi
-                  connector hoạt động lại hoặc hết hạn chờ.
+                  Lệnh này khởi động lại cả trụ sạc. Sự cố chuyển sang "Đang khởi động lại" cho tới
+                  khi connector hoạt động lại hoặc hết hạn chờ.
                 </p>
               </>
             )}
             {pending === 'force' && (
               <>
-                <p>Reset sẽ dừng giữa chừng các phiên sạc này:</p>
+                <p>Khởi động lại sẽ dừng giữa chừng các phiên sạc này:</p>
                 <ul>
                   {(sessions ?? []).map((s) => (
                     <li key={s.session_id}>

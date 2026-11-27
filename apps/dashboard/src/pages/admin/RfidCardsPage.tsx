@@ -88,7 +88,7 @@ function RegisterDialog({
           className="input"
           value={cardId}
           maxLength={MAX_CARD_ID + 10}
-          placeholder="Mã in trên thẻ (idTag)"
+          placeholder="Mã in trên thẻ"
           onChange={(e) => setCardId(e.target.value)}
         />
       </label>
@@ -109,7 +109,7 @@ function RegisterDialog({
       {kind === 'online' ? (
         <DriverPicker value={driver} onChange={setDriver} label="Tài xế (tuỳ chọn)" />
       ) : (
-        <p className="muted small">Thẻ free vend không gắn tài xế và dùng được ngay.</p>
+        <p className="muted small">Thẻ sạc miễn phí không gắn tài xế và dùng được ngay.</p>
       )}
       {error && <p role="alert">{error}</p>}
     </ConfirmDialog>
@@ -267,7 +267,6 @@ export function RfidCardsPage() {
       <Breadcrumbs items={[{ label: 'Thẻ RFID' }]} />
       <div className="page-head">
         <h1>Thẻ RFID</h1>
-        <p>Đăng ký, gắn tài xế, khoá và mở khoá thẻ dùng để bắt đầu sạc tại trụ</p>
         <button
           type="button"
           className="btn primary page-action"

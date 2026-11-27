@@ -9,7 +9,7 @@ import { MAX_MODEL } from './format';
 
 export const registerSchema = z.object({
   serial_number: serialField,
-  model: z.string().trim().max(MAX_MODEL, `Model tối đa ${MAX_MODEL} ký tự`),
+  model: z.string().trim().max(MAX_MODEL, `Dòng máy tối đa ${MAX_MODEL} ký tự`),
   rated_power_kw: optionalKw('Công suất phải là số lớn hơn 0'),
 });
 

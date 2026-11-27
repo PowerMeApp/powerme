@@ -35,9 +35,9 @@ export function billingError(err: unknown): string {
     case 'invalid_state':
       return 'Hoá đơn không còn ở trạng thái cần xem lại, danh sách đã được làm mới';
     case 'not_eligible':
-      return 'Top-up không còn đủ điều kiện kiểm tra lại (có thể đã được đánh dấu đã xem)';
+      return 'Lần nạp không còn đủ điều kiện kiểm tra lại (có thể đã được đánh dấu đã xem)';
     case 'no_exception':
-      return 'Top-up không còn ngoại lệ, danh sách đã được làm mới';
+      return 'Lần nạp không còn ngoại lệ, danh sách đã được làm mới';
     case 'already_reviewed':
       return 'Mục này đã được xử lý, danh sách đã được làm mới';
     case 'payment_unconfigured':

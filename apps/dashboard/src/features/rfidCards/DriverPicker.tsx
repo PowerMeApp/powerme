@@ -55,7 +55,7 @@ export function DriverPicker({
           type="search"
           value={text}
           maxLength={100}
-          placeholder="Tên, email hoặc số điện thoại"
+          placeholder="Tên, thư điện tử hoặc số điện thoại"
           onChange={(e) => setText(e.target.value)}
         />
       </label>

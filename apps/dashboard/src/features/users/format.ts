@@ -4,8 +4,8 @@ import { errorMessage, type ApiError } from '../../core/api/api';
 
 export const ROLE: Record<UserAccount['role'], string> = {
   driver: 'Tài xế',
-  operator_staff: 'Nhân viên Operator',
-  admin: 'Admin',
+  operator_staff: 'Nhân viên đơn vị vận hành',
+  admin: 'Quản trị viên',
 };
 export const STAFF_ROLE = { manager: 'Quản lý', technician: 'Kỹ thuật viên' } as const;
 export const STATUS: Record<UserAccount['account_status'], [string, string]> = {
@@ -30,11 +30,11 @@ export function userErrorField(err: unknown): 'email' | 'phone_number' | 'operat
 export function userError(err: unknown): string {
   switch ((err as Partial<ApiError> | undefined)?.code) {
     case 'email_taken':
-      return 'Email đã được dùng cho tài khoản khác';
+      return 'Thư điện tử đã được dùng cho tài khoản khác';
     case 'phone_taken':
       return 'Số điện thoại đã được dùng cho tài khoản khác';
     case 'operator_not_found':
-      return 'Không tìm thấy Operator này';
+      return 'Không tìm thấy đơn vị vận hành này';
     case 'role_change_not_allowed':
       return 'Không đổi được vai trò của tài xế';
     case 'cannot_change_own_role':

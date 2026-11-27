@@ -2,7 +2,10 @@
 import type { RfidCard, RfidCardKind, RfidCardStatus } from '@powerme/shared';
 import { errorMessage, type ApiError } from '../../core/api/api';
 
-export const KIND: Record<RfidCardKind, string> = { online: 'Online', free_vend: 'Free vend' };
+export const KIND: Record<RfidCardKind, string> = {
+  online: 'Thẻ trả phí',
+  free_vend: 'Thẻ sạc miễn phí',
+};
 
 /** Same words as the RFID tile of screen 27; [label, pill tone]. */
 export const STATUS: Record<RfidCardStatus, [string, string]> = {
@@ -47,13 +50,13 @@ export function rfidError(err: unknown): string {
     case 'card_identifier_taken':
       return 'Mã thẻ đã được đăng ký';
     case 'tag_conflicts_with_card':
-      return 'Mã thẻ trùng free-vend tag của một trụ sạc';
+      return 'Mã thẻ trùng mã sạc miễn phí của một trụ sạc';
     case 'driver_not_eligible':
       return 'Tài xế bị khoá hoặc đã đóng tài khoản';
     case 'driver_not_found':
       return 'Không tìm thấy tài xế này';
     case 'card_kind_has_no_driver':
-      return 'Thẻ free vend không gắn tài xế';
+      return 'Thẻ sạc miễn phí không gắn tài xế';
     case 'invalid_card_transition':
       return 'Thẻ đã đổi trạng thái, danh sách đã được tải lại';
     case 'not_found':

@@ -37,7 +37,7 @@ export function StationPage() {
           items={[{ label: 'Trụ sạc', to: '/operator/charge-points' }, { label: 'Trạm sạc' }]}
         />
         <div className="card">
-          <p role="alert">Không tìm thấy trạm sạc này trong các trạm của Operator.</p>
+          <p role="alert">Không tìm thấy trạm sạc này trong các trạm của đơn vị vận hành.</p>
           <Link to="/operator/charge-points">← Danh sách trụ sạc</Link>
         </div>
       </>
@@ -51,7 +51,7 @@ export function StationPage() {
       <div className="page-head">
         <h1>{site.site_name}</h1>
         <p>
-          Trạm sạc {site.site_code} · {online}/{items.length} trụ sạc online · cập nhật mỗi 5 giây
+          Trạm sạc {site.site_code} · {online}/{items.length} trụ sạc đang kết nối
         </p>
       </div>
       <section aria-label="Trụ sạc của trạm">
@@ -86,7 +86,7 @@ export function StationPage() {
                       </td>
                       <td className="nowrap">
                         <span className={`pill ${off ? 'muted' : ''}`}>
-                          {off ? 'Offline' : 'Online'}
+                          {off ? 'Mất kết nối' : 'Đang kết nối'}
                         </span>
                         <div className="muted small">{ago(cp.last_message_at, now)}</div>
                       </td>

@@ -34,7 +34,7 @@ import {
 const TABS = [
   ['late', 'Trả muộn', 'late_payments'],
   ['invoices', 'Hoá đơn cần xem lại', 'invoices_needs_review'],
-  ['exceptions', 'Ngoại lệ top-up', 'top_up_exceptions'],
+  ['exceptions', 'Ngoại lệ nạp tiền', 'top_up_exceptions'],
   ['conflicts', 'Trả mâu thuẫn', 'payment_conflicts'],
 ] as const;
 type Tab = (typeof TABS)[number][0];
@@ -102,7 +102,7 @@ export function BillingExceptionsPage() {
     setNote(
       'error' in res
         ? { tone: 'error', text: billingError(res.error) }
-        : { tone: 'ok', text: `Top-up #${item.top_up_id}: ${recheckText(res.data)}` },
+        : { tone: 'ok', text: `Lần nạp #${item.top_up_id}: ${recheckText(res.data)}` },
     );
   }
   const done = (text: string) => {
@@ -116,7 +116,6 @@ export function BillingExceptionsPage() {
       <Breadcrumbs items={[{ label: 'Ngoại lệ thanh toán' }]} />
       <div className="page-head">
         <h1>Ngoại lệ thanh toán</h1>
-        <p>Việc cần Admin xử lý về nạp tiền và hoá đơn · cập nhật mỗi 30 giây</p>
       </div>
       <div className="filters">
         <div className="queue-switch" role="group" aria-label="Danh sách">
@@ -146,15 +145,15 @@ export function BillingExceptionsPage() {
       ) : !data ? null : tab === 'late' ? (
         <>
           <p className="muted small">
-            Khoản trả sau khi top-up đã hết hạn hoặc thất bại: không cộng vào ví, Admin hoàn lại số
+            Khoản trả sau khi lần nạp đã hết hạn hoặc thất bại: không cộng vào ví, Admin hoàn lại số
             đã trả (BR-P13). Nút hoàn tiền có khi luồng hoàn tiền thủ công (T152) xong.
           </p>
           {data.late_payments.items.length === 0 ? (
             <div className="card">{empty}</div>
           ) : (
-            <Table head={['Top-up', 'Tài xế', 'Số tiền trả muộn', 'Mã giao dịch', 'Lúc trả']}>
+            <Table head={['Lần nạp', 'Tài xế', 'Số tiền trả muộn', 'Mã giao dịch', 'Lúc trả']}>
               {data.late_payments.items.map((l) => (
-                <tr key={l.top_up_id} aria-label={`Trả muộn top-up #${l.top_up_id}`}>
+                <tr key={l.top_up_id} aria-label={`Trả muộn lần nạp #${l.top_up_id}`}>
                   <td>
                     <span className="cell-title">#{l.top_up_id}</span>
                     <div className="muted small">{l.gateway_reference}</div>
@@ -174,9 +173,9 @@ export function BillingExceptionsPage() {
         data.invoices_needs_review.items.length === 0 ? (
           <div className="card">{empty}</div>
         ) : (
-          <Table head={['Top-up', 'Tài xế', 'Số tiền', 'Lỗi nhà cung cấp', 'Số lần', 'Xử lý']}>
+          <Table head={['Lần nạp', 'Tài xế', 'Số tiền', 'Lỗi nhà cung cấp', 'Số lần', 'Xử lý']}>
             {data.invoices_needs_review.items.map((i) => (
-              <tr key={i.e_invoice_id} aria-label={`Hoá đơn top-up #${i.top_up_id}`}>
+              <tr key={i.e_invoice_id} aria-label={`Hoá đơn lần nạp #${i.top_up_id}`}>
                 <td className="cell-title">#{i.top_up_id}</td>
                 <td>
                   <Driver d={i.driver} />
@@ -204,9 +203,9 @@ export function BillingExceptionsPage() {
         data.top_up_exceptions.items.length === 0 ? (
           <div className="card">{empty}</div>
         ) : (
-          <Table head={['Top-up', 'Tài xế', 'Ngoại lệ', 'Số tiền', 'Xử lý']}>
+          <Table head={['Lần nạp', 'Tài xế', 'Ngoại lệ', 'Số tiền', 'Xử lý']}>
             {data.top_up_exceptions.items.map((x) => (
-              <tr key={x.top_up_id} aria-label={`Ngoại lệ top-up #${x.top_up_id}`}>
+              <tr key={x.top_up_id} aria-label={`Ngoại lệ lần nạp #${x.top_up_id}`}>
                 <td>
                   <span className="cell-title">#{x.top_up_id}</span>
                   <div className="muted small">{x.gateway_reference}</div>
@@ -242,9 +241,9 @@ export function BillingExceptionsPage() {
       ) : data.payment_conflicts.items.length === 0 ? (
         <div className="card">{empty}</div>
       ) : (
-        <Table head={['Top-up', 'Tài xế', 'Số tiền', 'Lý do', 'Lúc trả', 'Xử lý']}>
+        <Table head={['Lần nạp', 'Tài xế', 'Số tiền', 'Lý do', 'Lúc trả', 'Xử lý']}>
           {data.payment_conflicts.items.map((c) => (
-            <tr key={c.conflict_id} aria-label={`Trả mâu thuẫn top-up #${c.top_up_id}`}>
+            <tr key={c.conflict_id} aria-label={`Trả mâu thuẫn lần nạp #${c.top_up_id}`}>
               <td>
                 <span className="cell-title">#{c.top_up_id}</span>
                 <div className="muted small">{c.gateway_transaction_no}</div>

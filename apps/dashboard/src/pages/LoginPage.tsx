@@ -11,8 +11,8 @@ import { homePath, loggedIn, loginPath } from '../core/auth/authSlice';
 import { useAppDispatch, useAppSelector } from '../core/store/store';
 
 const AREA: Record<DashboardRole, { name: string; other: DashboardRole; account: string }> = {
-  operator_staff: { name: 'Operator Dashboard', other: 'admin', account: 'Operator' },
-  admin: { name: 'Admin Console', other: 'operator_staff', account: 'Admin' },
+  operator_staff: { name: 'Trang đơn vị vận hành', other: 'admin', account: 'Đơn vị vận hành' },
+  admin: { name: 'Trang quản trị', other: 'operator_staff', account: 'Quản trị viên' },
 };
 
 export function LoginPage({ role }: { role: DashboardRole }) {
@@ -60,17 +60,12 @@ export function LoginPage({ role }: { role: DashboardRole }) {
         <h1>
           {area.name} <span>· vận hành mạng trụ sạc</span>
         </h1>
-        <p className="muted">
-          {role === 'admin'
-            ? 'Admin Console cho quản trị nền tảng PowerMe.'
-            : 'Operator Dashboard cho nhân viên của Operator đối tác.'}
-        </p>
       </div>
       <div className="auth-form">
         <form onSubmit={submit} aria-label="Đăng nhập">
           <h2 style={{ fontSize: 24 }}>Đăng nhập {area.name}</h2>
           <label className="field">
-            Email
+            Thư điện tử
             <input
               className="input"
               type="email"

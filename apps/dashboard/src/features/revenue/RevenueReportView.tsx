@@ -47,7 +47,7 @@ interface SearchField {
 const CP_SEARCH: SearchField = {
   param: 'cp_search',
   label: 'Tìm trụ sạc',
-  hint: 'Serial hoặc ID trụ',
+  hint: 'Số seri hoặc ID trụ',
   values: (r) => [r.serial_number, r.charge_point_id],
 };
 const SITE_SEARCH: SearchField = {
@@ -70,8 +70,8 @@ function searchFields(groupBy: RevenueGroupBy, inStation: boolean): SearchField[
       return [
         {
           param: 'search',
-          label: 'Tìm Operator',
-          hint: 'Tên hoặc ID Operator',
+          label: 'Tìm đơn vị vận hành',
+          hint: 'Tên hoặc ID đơn vị vận hành',
           values: (r) => [r.operator_name, r.operator_id],
         },
       ];
@@ -280,7 +280,7 @@ export function RevenueReportView({
           disabled={!current || csvState.isLoading}
           onClick={() => void download()}
         >
-          {csvState.isLoading ? 'Đang tải CSV…' : 'Tải CSV'}
+          {csvState.isLoading ? 'Đang tải tệp…' : 'Tải tệp bảng tính (CSV)'}
         </button>
       </section>
       {exportError && <p role="alert">{exportError}</p>}

@@ -11,9 +11,6 @@ export function FaultAlertsPage() {
       <Breadcrumbs items={[{ label: 'Cảnh báo sự cố' }]} />
       <div className="page-head">
         <h1>Cảnh báo sự cố</h1>
-        <p>
-          Faulted, trụ sạc offline và tài xế báo lỗi · Mới → Đã xác nhận → Đang reset → Đã xử lý
-        </p>
       </div>
       <FaultTable />
     </>

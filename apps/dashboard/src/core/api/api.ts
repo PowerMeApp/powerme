@@ -562,11 +562,11 @@ export function errorMessage(err: unknown): string {
   if (!e || e.status === 'network' || e.status === undefined) return 'Không kết nối được máy chủ';
   switch (e.code) {
     case 'invalid_credentials':
-      return 'Email hoặc mật khẩu không đúng';
+      return 'Thư điện tử hoặc mật khẩu không đúng';
     case 'account_locked':
       return 'Tài khoản đã bị khoá';
     case 'operator_inactive':
-      return 'Operator đã ngừng hoạt động';
+      return 'Đơn vị vận hành đã ngừng hoạt động';
     case 'invalid_refresh_token':
       return 'Phiên đăng nhập đã hết hạn, vui lòng đăng nhập lại';
     case 'auth_unavailable':
@@ -575,13 +575,13 @@ export function errorMessage(err: unknown): string {
     case 'invalid_transition':
       return 'Sự cố đã đổi trạng thái, danh sách đã được làm mới';
     case 'fault_not_acknowledged':
-      return 'Phải xác nhận sự cố trước khi Reset';
+      return 'Phải xác nhận sự cố trước khi khởi động lại';
     case 'station_offline':
-      return 'Trụ sạc đang offline, không gửi được lệnh Reset';
+      return 'Trụ sạc đang mất kết nối, không gửi được lệnh khởi động lại';
     case 'reset_in_progress':
-      return 'Trụ sạc đang chờ kết quả một lệnh Reset khác, thử lại sau';
+      return 'Trụ sạc đang chờ kết quả một lệnh khởi động lại khác, thử lại sau';
     case 'station_error':
-      return 'Trụ sạc không trả lời lệnh Reset hợp lệ, sự cố quay về "Đã xác nhận"';
+      return 'Trụ sạc không trả lời lệnh khởi động lại hợp lệ, sự cố quay về "Đã xác nhận"';
     case 'not_found':
       return 'Không tìm thấy sự cố này';
     // FE-07 revenue (T108).

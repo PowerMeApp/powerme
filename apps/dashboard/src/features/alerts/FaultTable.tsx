@@ -16,7 +16,7 @@ const FILTERS: [FaultListStatus, string][] = [
   ['open', 'Đang mở'],
   ['raised', 'Mới'],
   ['acknowledged', 'Đã xác nhận'],
-  ['resetting', 'Đang reset'],
+  ['resetting', 'Đang khởi động lại'],
   ['resolved', 'Đã xử lý'],
   ['all', 'Tất cả'],
 ];
@@ -79,7 +79,7 @@ export function FaultTable({
             {status === 'open'
               ? chargePointId
                 ? 'Trụ sạc này không có sự cố đang mở.'
-                : 'Không có cảnh báo. Mọi connector đang hoạt động bình thường.'
+                : 'Không có cảnh báo. Mọi súng đang hoạt động bình thường.'
               : 'Không có sự cố ở trạng thái này.'}
           </p>
         </div>

@@ -54,7 +54,7 @@ describe('Sổ đăng ký trụ', () => {
     const full = within(await screen.findByRole('row', { name: 'Trụ SIM-0001' }));
     expect(full.getByText('HCM-0001')).toBeInTheDocument();
     expect(full.getByText('D1-120')).toBeInTheDocument();
-    expect(full.getByText('FW 1.4.2')).toBeInTheDocument();
+    expect(full.getByText('Phần mềm 1.4.2')).toBeInTheDocument();
     expect(full.getByText('120')).toBeInTheDocument();
     expect(full.getByText('31/03/2028')).toBeInTheDocument();
     expect(full.getByText('Đang hoạt động')).toBeInTheDocument();
@@ -90,18 +90,20 @@ describe('Sổ đăng ký trụ', () => {
     await screen.findByRole('row', { name: 'Trụ SIM-0001' });
     await user.click(screen.getByRole('button', { name: 'Đăng ký trụ' }));
     const dialog = within(screen.getByRole('dialog', { name: 'Đăng ký trụ sạc' }));
-    await user.type(dialog.getByLabelText('Serial'), 'a b');
+    await user.type(dialog.getByLabelText('Số seri'), 'a b');
     await user.click(dialog.getByRole('button', { name: 'Đăng ký' }));
-    expect(await dialog.findByRole('alert')).toHaveTextContent('Serial 3–25 ký tự');
+    expect(await dialog.findByRole('alert')).toHaveTextContent('Số seri 3–25 ký tự');
     expect(seen.some((r) => r.method === 'POST')).toBe(false);
-    await user.clear(dialog.getByLabelText('Serial'));
-    await user.type(dialog.getByLabelText('Serial'), ' SIM-0099 ');
-    await user.type(dialog.getByLabelText('Model (tuỳ chọn)'), 'D1-60');
+    await user.clear(dialog.getByLabelText('Số seri'));
+    await user.type(dialog.getByLabelText('Số seri'), ' SIM-0099 ');
+    await user.type(dialog.getByLabelText('Dòng máy (tuỳ chọn)'), 'D1-60');
     await user.type(dialog.getByLabelText('Công suất định mức, kW (tuỳ chọn)'), '60');
     const lists = seen.filter((r) => r.method === 'GET').length;
     await user.click(dialog.getByRole('button', { name: 'Đăng ký' }));
     expect(
-      await screen.findByText('Đã đăng ký trụ SIM-0099, operator có thể onboard trụ này'),
+      await screen.findByText(
+        'Đã đăng ký trụ SIM-0099, đơn vị vận hành có thể đưa trụ này vào vận hành',
+      ),
     ).toHaveClass('queue-note', 'ok');
     expect(seen.find((r) => r.method === 'POST')!.body).toEqual({
       serial_number: 'SIM-0099',
@@ -121,15 +123,15 @@ describe('Sổ đăng ký trụ', () => {
     await screen.findByRole('row', { name: 'Trụ SIM-0001' });
     await user.click(screen.getByRole('button', { name: 'Đăng ký trụ' }));
     const dialog = within(screen.getByRole('dialog', { name: 'Đăng ký trụ sạc' }));
-    const serial = dialog.getByLabelText('Serial');
-    const model = dialog.getByLabelText('Model (tuỳ chọn)');
+    const serial = dialog.getByLabelText('Số seri');
+    const model = dialog.getByLabelText('Dòng máy (tuỳ chọn)');
     const kw = dialog.getByLabelText('Công suất định mức, kW (tuỳ chọn)');
     await user.type(model, 'M'.repeat(21));
     await user.type(kw, '0');
     await user.click(dialog.getByRole('button', { name: 'Đăng ký' }));
     for (const [input, text] of [
-      [serial, 'Serial 3–25 ký tự'],
-      [model, 'Model tối đa 20 ký tự'],
+      [serial, 'Số seri 3–25 ký tự'],
+      [model, 'Dòng máy tối đa 20 ký tự'],
       [kw, 'Công suất phải là số lớn hơn 0'],
     ] as const) {
       expect(input).toHaveAttribute('aria-invalid', 'true');
@@ -155,12 +157,12 @@ describe('Sổ đăng ký trụ', () => {
     await screen.findByRole('row', { name: 'Trụ SIM-0001' });
     await user.click(screen.getByRole('button', { name: 'Đăng ký trụ' }));
     const dialog = within(screen.getByRole('dialog'));
-    const serial = dialog.getByLabelText('Serial');
+    const serial = dialog.getByLabelText('Số seri');
     await user.type(serial, 'SIM-0001');
     await user.click(dialog.getByRole('button', { name: 'Đăng ký' }));
     // The 409 goes under the Serial field, in red.
     await waitFor(() =>
-      expect(errorUnder(serial)).toHaveTextContent('Serial đã có trong sổ đăng ký'),
+      expect(errorUnder(serial)).toHaveTextContent('Số seri đã có trong sổ đăng ký'),
     );
     expect(errorUnder(serial)).toHaveClass('form-error');
   });

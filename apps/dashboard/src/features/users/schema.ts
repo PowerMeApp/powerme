@@ -17,12 +17,12 @@ function staffNeedsOperator(
   ctx: z.RefinementCtx,
 ) {
   if (v.role === 'operator_staff' && !v.operator_id)
-    ctx.addIssue({ code: 'custom', path: ['operator_id'], message: 'Chọn Operator' });
+    ctx.addIssue({ code: 'custom', path: ['operator_id'], message: 'Chọn đơn vị vận hành' });
 }
 
 export const createUserSchema = z
   .object({
-    email: z.string().trim().max(254, 'Tối đa 254 ký tự').email('Email không hợp lệ'),
+    email: z.string().trim().max(254, 'Tối đa 254 ký tự').email('Thư điện tử không hợp lệ'),
     full_name: z.string().trim().min(1, 'Nhập họ tên').max(100, 'Tối đa 100 ký tự'),
     phone_number: z
       .string()

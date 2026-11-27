@@ -30,8 +30,8 @@ export const ADMIN_SUMMARY_POLL_MS = 10_000;
 
 const USER_GROUPS: [keyof AdminSummary['users'], string, string][] = [
   ['driver', 'Tài xế', ''],
-  ['operator_staff', 'Nhân viên Operator', ''],
-  ['admin', 'Admin', ''],
+  ['operator_staff', 'Nhân viên đơn vị vận hành', ''],
+  ['admin', 'Quản trị viên', ''],
   ['suspended', 'Đang bị khoá', 'major'],
 ];
 const CARD_GROUPS: [keyof AdminSummary['rfid_cards'], string, string][] = [
@@ -49,7 +49,7 @@ const CONNECTOR_GROUPS: [keyof AdminSummary['network']['connectors'], string, st
   ['in_use', 'Đang dùng', ''],
   ['freeing_soon', 'Sắp trống', ''],
   ['unavailable', 'Không dùng được', 'major'],
-  ['offline', 'Offline', 'muted'],
+  ['offline', 'Mất kết nối', 'muted'],
 ];
 const LIFECYCLE_ORDER: ChargePointLifecycle[] = [
   'registered',
@@ -110,7 +110,7 @@ function MonthRevenue() {
               ` · ${formatCount(data.totals.unattributed_session_count)} phiên không định danh`}
           </p>
           {top.length > 0 && (
-            <ol className="tile-list top-list" aria-label="Operator dẫn đầu">
+            <ol className="tile-list top-list" aria-label="Đơn vị vận hành dẫn đầu">
               {top.map((r) => (
                 <li key={r.key}>
                   {r.operator_name ?? r.key} <b>{formatVnd(r.csms_billed_revenue_vnd)}</b>
@@ -157,7 +157,9 @@ export function AdminHomePage() {
       <div className="card">
         {me.isLoading && <p className="muted">Đang tải…</p>}
         {me.error && <p role="alert">{errorMessage(me.error)}</p>}
-        {me.data && <p>Xin chào {me.data.full_name}. Bạn đang quản trị toàn nền tảng PowerMe.</p>}
+        {me.data && (
+          <p>Xin chào {me.data.full_name}. Bạn đang quản trị toàn bộ nền tảng PowerMe.</p>
+        )}
       </div>
       {summary.error && !s && <p role="alert">{errorMessage(summary.error)}</p>}
       {empty && (
@@ -188,12 +190,12 @@ export function AdminHomePage() {
                   {formatCount(net.in_service_online)}
                   <span className="muted">
                     {' '}
-                    / {formatCount(inService)} trụ đang hoạt động online
+                    / {formatCount(inService)} trụ đang hoạt động, đang kết nối
                   </span>
                 </p>
                 {net.in_service_offline > 0 && (
                   <p>
-                    <span className="pill muted">Offline</span>{' '}
+                    <span className="pill muted">Mất kết nối</span>{' '}
                     <b>{formatCount(net.in_service_offline)}</b> trụ
                   </p>
                 )}
@@ -219,11 +221,11 @@ export function AdminHomePage() {
               </section>
             )}
             {s.operators.total > 0 && (
-              <section className="card tile" aria-label="Operator và trạm sạc">
-                <h2>Operator &amp; trạm sạc</h2>
+              <section className="card tile" aria-label="Đơn vị vận hành và trạm sạc">
+                <h2>Đơn vị vận hành &amp; trạm sạc</h2>
                 <p className="tile-number">
                   {formatCount(s.operators.total)}
-                  <span className="muted"> Operator</span>
+                  <span className="muted"> đơn vị vận hành</span>
                 </p>
                 <ul className="tile-list">
                   {s.operators.total > s.operators.active && (

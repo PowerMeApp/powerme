@@ -2,7 +2,7 @@
  * Screen 23 — Unattributed Sessions (UC-OPS-05, F-12, WF-03; FE-12). Two queues of the signed-in
  * staff's Operator, from GET /api/operator/v1/sessions:
  *   - "Chưa gắn tài xế": stopped `unattributed` sessions (unknown card, free vend…). Assign to a
- *     driver (then billed, BR-P06) or close without billing. Free vend / wallet-card sessions can
+ *     driver (then billed, BR-P06) or close without billing. Sạc miễn phí / wallet-card sessions can
  *     only be closed (BR-P08).
  *   - "Cần xem lại": sessions in `review` (reconciliation conflict). Resolve → `reconciled`
  *     (STM-1 #17), which also settles the bill.
@@ -37,7 +37,7 @@ const QUEUES: readonly [SessionQueue, string][] = [
 
 const ORIGIN: Record<string, string> = {
   rfid: 'Thẻ RFID',
-  free_vend: 'Free vend',
+  free_vend: 'Sạc miễn phí',
   app: 'App',
   remote: 'Lệnh từ xa',
 };
@@ -45,7 +45,7 @@ const ORIGIN: Record<string, string> = {
 /** Close reasons (service: a-z, 0-9, _). */
 const CLOSE_REASONS: readonly [string, string][] = [
   ['owner_unknown', 'Không xác định được chủ thẻ'],
-  ['free_vend_ok', 'Free vend hợp lệ, không tính tiền'],
+  ['free_vend_ok', 'Thẻ sạc miễn phí hợp lệ, không tính tiền'],
   ['test_session', 'Phiên thử nghiệm / bảo trì'],
   ['other', 'Lý do khác (ghi trong ghi chú)'],
 ];
@@ -57,7 +57,7 @@ const RESOLUTIONS: readonly [string, string][] = [
 ];
 
 const NOT_ASSIGNABLE: Record<string, string> = {
-  free_vend_not_billable: 'Free vend — không bao giờ tính tiền, chỉ đóng được',
+  free_vend_not_billable: 'Sạc miễn phí — không bao giờ tính tiền, chỉ đóng được',
   wallet_card_not_billable: 'Thẻ ví đã trả tại trụ — chỉ đóng được',
 };
 
@@ -103,9 +103,9 @@ function RecordList({ records, fallback }: { records: string[]; fallback: string
 export function sessionError(err: unknown): string {
   switch ((err as Partial<ApiError> | undefined)?.code) {
     case 'not_found':
-      return 'Không tìm thấy phiên này trong các trụ sạc của Operator';
+      return 'Không tìm thấy phiên này trong các trụ sạc của đơn vị vận hành';
     case 'driver_not_eligible':
-      return 'Tài xế không hoạt động hoặc không có Charging Credit đang mở';
+      return 'Tài xế không hoạt động hoặc không có tín dụng sạc đang mở';
     case 'free_vend_not_billable':
     case 'wallet_card_not_billable':
       return 'Phiên này không tính tiền được — chỉ đóng được';
@@ -127,6 +127,13 @@ export function sessionError(err: unknown): string {
 
 const kwh = (wh: number | null) =>
   wh === null ? '—' : `${(wh / 1000).toLocaleString('vi-VN', { maximumFractionDigits: 2 })} kWh`;
+
+/** Settlement result after a decision, in words (the raw value is the CSMS job state). */
+const SETTLEMENT: Record<string, string> = {
+  posted: 'đã trừ tiền',
+  pending: 'đang chờ',
+  ineligible: 'không đủ điều kiện trừ tiền',
+};
 
 type Decision =
   | { kind: 'assign'; s: UnattributedSession }
@@ -170,13 +177,15 @@ function DecisionDialog({
           ? await close({ id, reason: code, note: text })
           : await resolve({ id, resolution: code, note: text });
     if ('error' in res) return setError(sessionError(res.error));
-    const settled = res.data.settlement ? ` · quyết toán: ${res.data.settlement}` : '';
+    const settled = res.data.settlement
+      ? ` · quyết toán: ${SETTLEMENT[res.data.settlement] ?? res.data.settlement}`
+      : '';
     onDone(
       decision.kind === 'assign'
         ? `Đã gán phiên ${no} cho tài xế ${driverId.trim()}${settled}`
         : decision.kind === 'close'
           ? `Đã đóng phiên ${no}, không tính tiền`
-          : `Phiên ${no} đã chốt đối soát (reconciled)${settled}`,
+          : `Phiên ${no} đã chốt đối soát${settled}`,
     );
   }
 
@@ -206,7 +215,7 @@ function DecisionDialog({
       </p>
       <p>
         {decision.kind === 'assign'
-          ? 'Phiên chuyển sang tính tiền, trừ vào Charging Credit của tài xế. Không hoàn tác được.'
+          ? 'Phiên chuyển sang tính tiền, trừ vào tín dụng sạc của tài xế. Không hoàn tác được.'
           : decision.kind === 'close'
             ? 'Phiên giữ không tính tiền và rời hàng đợi; quyết định được ghi lại.'
             : 'Chốt số đo dùng để tính tiền. Phiên đã kết thúc sẽ được trừ tiền vào tài khoản tài xế.'}
@@ -310,7 +319,7 @@ function ReviewRow({ s, onDecide }: { s: ReviewSession; onDecide: (d: Decision) 
     <tr aria-label={`Phiên #${s.transaction_no}`}>
       <td>
         <span className="cell-title">#{s.transaction_no}</span>
-        <div className="muted small">{s.stopped ? 'đã dừng' : 'chưa có StopTransaction'}</div>
+        <div className="muted small">{s.stopped ? 'đã dừng' : 'trụ chưa báo kết thúc phiên'}</div>
       </td>
       <td>
         <Link className="cell-title" to={`/operator/charge-points/${s.charge_point_id}`}>
@@ -387,7 +396,6 @@ export function SessionQueuePage() {
       <Breadcrumbs items={[{ label: 'Phiên cần xử lý' }]} />
       <div className="page-head">
         <h1>Phiên cần xử lý</h1>
-        <p>Phiên chưa gắn tài xế và phiên cần xem lại của Operator · cập nhật mỗi 10 giây</p>
       </div>
       <div className="filters">
         <div className="queue-switch" role="group" aria-label="Hàng đợi">

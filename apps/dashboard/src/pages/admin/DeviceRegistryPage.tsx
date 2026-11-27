@@ -70,7 +70,7 @@ function RegisterDialog({
         message: registryError(res.error),
       });
     }
-    onDone(`Đã đăng ký trụ ${v.serial_number}, operator có thể onboard trụ này`);
+    onDone(`Đã đăng ký trụ ${v.serial_number}, đơn vị vận hành có thể đưa trụ này vào vận hành`);
   }
 
   return (
@@ -81,18 +81,18 @@ function RegisterDialog({
       onCancel={onCancel}
       onConfirm={() => void handleSubmit(onValid)()}
     >
-      <Field label="Serial" error={errors.serial_number?.message}>
+      <Field label="Số seri" error={errors.serial_number?.message}>
         {(a11y) => (
           <input
             {...a11y}
             {...register('serial_number')}
             className="input"
             maxLength={40}
-            placeholder="Số serial in trên trụ"
+            placeholder="Số seri in trên trụ"
           />
         )}
       </Field>
-      <Field label="Model (tuỳ chọn)" error={errors.model?.message}>
+      <Field label="Dòng máy (tuỳ chọn)" error={errors.model?.message}>
         {(a11y) => (
           <input {...a11y} {...register('model')} className="input" maxLength={MAX_MODEL + 10} />
         )}
@@ -114,7 +114,7 @@ function RegistryRow({ cp }: { cp: RegistryChargePoint }) {
       <td>{cp.display_code ?? dash}</td>
       <td>
         {cp.model ?? dash}
-        {cp.firmware_version && <div className="muted small">FW {cp.firmware_version}</div>}
+        {cp.firmware_version && <div className="muted small">Phần mềm {cp.firmware_version}</div>}
       </td>
       <td>{cp.rated_power_kw ?? dash}</td>
       <td className="nowrap">
@@ -160,7 +160,6 @@ export function DeviceRegistryPage() {
       <Breadcrumbs items={[{ label: 'Sổ đăng ký trụ' }]} />
       <div className="page-head">
         <h1>Sổ đăng ký trụ</h1>
-        <p>Model, firmware, bảo hành và vòng đời của mọi trụ sạc trên nền tảng</p>
         <button
           type="button"
           className="btn primary page-action"
@@ -213,13 +212,13 @@ export function DeviceRegistryPage() {
             <table className="data-table">
               <thead>
                 <tr>
-                  <th scope="col">Serial</th>
+                  <th scope="col">Số seri</th>
                   <th scope="col">Mã hiển thị</th>
-                  <th scope="col">Model / firmware</th>
+                  <th scope="col">Dòng máy / phần mềm</th>
                   <th scope="col">Công suất (kW)</th>
                   <th scope="col">Bảo hành đến</th>
                   <th scope="col">Vòng đời</th>
-                  <th scope="col">Operator / trạm</th>
+                  <th scope="col">Đơn vị vận hành / trạm</th>
                   <th scope="col">Ngày đăng ký</th>
                 </tr>
               </thead>

@@ -16,7 +16,7 @@ const CONNECTOR_GROUPS: [keyof OperatorSummary['connectors'], string, string][] 
   ['in_use', 'Đang sạc', ''],
   ['freeing_soon', 'Sắp trống', ''],
   ['unavailable', 'Không dùng được', 'major'],
-  ['offline', 'Offline', 'muted'],
+  ['offline', 'Mất kết nối', 'muted'],
 ];
 const SEVERITIES: [keyof OperatorSummary['open_faults'], string, string][] = [
   ['critical', 'Nghiêm trọng', 'critical'],
@@ -102,15 +102,15 @@ export function OperatorHomePage() {
             <Tile title="Trụ sạc" to="/operator/charge-points">
               <p className="tile-number">
                 {s.charge_points.online}
-                <span className="muted"> / {s.charge_points.total} online</span>
+                <span className="muted"> / {s.charge_points.total} đang kết nối</span>
               </p>
               {s.charge_points.offline > 0 && (
-                <span className="pill muted">{s.charge_points.offline} offline</span>
+                <span className="pill muted">{s.charge_points.offline} mất kết nối</span>
               )}
             </Tile>
           ) : (
             <Tile title="Trụ sạc">
-              <p className="muted">Operator chưa có trụ sạc nào.</p>
+              <p className="muted">Đơn vị vận hành chưa có trụ sạc nào.</p>
             </Tile>
           )}
           {s.charge_points.total > 0 && (

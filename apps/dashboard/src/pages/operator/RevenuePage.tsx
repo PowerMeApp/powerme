@@ -8,7 +8,6 @@ export function RevenuePage() {
       <Breadcrumbs items={[{ label: 'Doanh thu' }]} />
       <div className="page-head">
         <h1>Doanh thu</h1>
-        <p>Doanh thu theo trạm sạc, trụ sạc và ngày, từ các phiên đã đối soát</p>
       </div>
       <RevenueReportView scope="operator" />
     </>

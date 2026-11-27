@@ -29,24 +29,24 @@ const CONNECTOR_LABEL: Record<ConnectorType, string> = {
   ccs2: 'CCS2',
   chademo: 'CHAdeMO',
   gbt: 'GB/T',
-  type2: 'Type 2',
+  type2: 'Loại 2 (châu Âu)',
 };
 
 /** Vietnamese text for each onboarding error (AD-8 "refuse with reason"); never the raw error. */
 export function onboardError(err: unknown): string {
   switch ((err as Partial<ApiError> | undefined)?.code) {
     case 'serial_not_registered':
-      return 'Serial chưa được Admin đăng ký';
+      return 'Số seri chưa được quản trị viên đăng ký';
     case 'already_onboarded':
-      return 'Trụ này đã được onboard';
+      return 'Trụ này đã được đưa vào vận hành';
     case 'site_of_other_operator':
-      return 'Trạm sạc này thuộc Operator khác';
+      return 'Trạm sạc này thuộc đơn vị vận hành khác';
     case 'site_not_found':
       return 'Không tìm thấy trạm sạc này';
     case 'invalid_input':
-      return 'Dữ liệu không hợp lệ: serial 3–25 ký tự (chữ, số, . _ -), 1–2 súng';
+      return 'Dữ liệu không hợp lệ: số seri 3–25 ký tự (chữ, số, . _ -), 1–2 súng';
     case 'onboarding_unavailable':
-      return 'Máy chủ chưa bật onboarding';
+      return 'Máy chủ chưa bật chức năng đưa trụ vào vận hành';
   }
   return errorMessage(err);
 }
@@ -69,8 +69,8 @@ function Credential({ result, onClose }: { result: OnboardResult; onClose: () =>
   const copy = (label: string, value: string) =>
     void navigator.clipboard?.writeText(value).then(() => setCopied(label));
   const rows: [string, string][] = [
-    ['OCPP URL', result.ocpp_url],
-    ['Identity', result.identity],
+    ['Địa chỉ kết nối', result.ocpp_url],
+    ['Tên đăng nhập của trụ', result.identity],
     ['Mật khẩu', result.password],
   ];
   return (
@@ -181,16 +181,16 @@ export function OnboardingSheet({ onClose }: { onClose: () => void }) {
         aria-modal="true"
         aria-labelledby={titleId}
       >
-        <h2 id={titleId}>{result ? 'Credential của trụ sạc' : 'Onboard trụ sạc'}</h2>
+        <h2 id={titleId}>{result ? 'Thông tin đăng nhập của trụ sạc' : 'Đưa trụ vào vận hành'}</h2>
         {result ? (
           <Credential result={result} onClose={close} />
         ) : (
           <>
             <p className="muted small">
-              Gắn một serial Admin đã đăng ký vào trạm sạc của Operator. Trụ chuyển sang "Chờ kết
-              nối" cho tới khi kết nối bằng credential.
+              Gắn một số seri đã được quản trị viên đăng ký vào trạm sạc của đơn vị vận hành. Trụ
+              chuyển sang "Chờ kết nối" cho tới khi kết nối bằng thông tin đăng nhập.
             </p>
-            <Field label="Serial" error={errors.serial_number?.message}>
+            <Field label="Số seri" error={errors.serial_number?.message}>
               {(a11y) => (
                 <input
                   {...a11y}
@@ -214,7 +214,7 @@ export function OnboardingSheet({ onClose }: { onClose: () => void }) {
               )}
             </Field>
             {sites.error && <FieldError message={errorMessage(sites.error)} />}
-            {noSites && <p className="muted small">Operator chưa có trạm sạc nào.</p>}
+            {noSites && <p className="muted small">Đơn vị vận hành chưa có trạm sạc nào.</p>}
             <fieldset className="connectors">
               <legend>Súng</legend>
               {fields.map((f, i) => (
@@ -276,7 +276,7 @@ export function OnboardingSheet({ onClose }: { onClose: () => void }) {
                 disabled={busy || noSites}
                 onClick={() => void handleSubmit(onValid)()}
               >
-                {busy ? 'Đang gửi…' : 'Onboard'}
+                {busy ? 'Đang gửi…' : 'Đưa vào vận hành'}
               </button>
             </div>
           </>

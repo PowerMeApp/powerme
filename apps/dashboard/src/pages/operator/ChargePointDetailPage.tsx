@@ -16,6 +16,7 @@ import {
   connectorTone,
   LIFECYCLE,
   OFFLINE_CARD_RISK,
+  statusLabel,
   useNow,
 } from '../../features/chargePoints/format';
 
@@ -57,11 +58,11 @@ export function ChargePointDetailPage() {
 
   const offline = !data.is_online || data.connectors.some((c) => c.status_quality === 'offline');
   const info: [string, string][] = [
-    ['Serial', data.serial_number],
-    ['Model', data.model ?? '—'],
-    ['Firmware', data.firmware_version ?? '—'],
+    ['Số seri', data.serial_number],
+    ['Dòng máy', data.model ?? '—'],
+    ['Phần mềm', data.firmware_version ?? '—'],
     ['Công suất định mức', data.rated_power_kw ? `${data.rated_power_kw} kW` : '—'],
-    ['Gửi SoC', data.reports_soc ? 'Có' : 'Không'],
+    ['Báo mức pin', data.reports_soc ? 'Có' : 'Không'],
     ['Hỗ trợ đặt chỗ', data.supports_reservation ? 'Có' : 'Không'],
   ];
 
@@ -83,12 +84,14 @@ export function ChargePointDetailPage() {
       </div>
       <div className="btn-row detail-status">
         <span className="pill">{LIFECYCLE[data.lifecycle]}</span>
-        <span className={`pill ${offline ? 'muted' : ''}`}>{offline ? 'Offline' : 'Online'}</span>
+        <span className={`pill ${offline ? 'muted' : ''}`}>
+          {offline ? 'Mất kết nối' : 'Đang kết nối'}
+        </span>
         <span className="muted small">Lần cuối nhận bản tin: {ago(data.last_message_at, now)}</span>
       </div>
       {data.offline_card_risk ? (
-        <p className="detail-status" role="note" aria-label="Rủi ro thẻ offline">
-          <span className="pill major">Rủi ro thẻ offline</span>{' '}
+        <p className="detail-status" role="note" aria-label="Rủi ro thẻ khi mất kết nối">
+          <span className="pill major">Rủi ro thẻ khi mất kết nối</span>{' '}
           <span className="small">
             {OFFLINE_CARD_RISK[data.offline_card_risk_reason ?? 'not_checked']}. Khi trụ mất mạng,
             thẻ lạ hoặc thẻ đã khoá có thể vẫn sạc được và chỉ bị phát hiện khi trụ nối lại
@@ -100,7 +103,8 @@ export function ChargePointDetailPage() {
         </p>
       ) : data.offline_auth_check ? (
         <p className="muted small detail-status">
-          Đã tắt authorize offline trên trụ · kiểm lúc {time(data.offline_auth_check.checked_at)}
+          Đã tắt chấp nhận thẻ khi mất kết nối trên trụ · kiểm lúc{' '}
+          {time(data.offline_auth_check.checked_at)}
         </p>
       ) : null}
 
@@ -120,8 +124,8 @@ export function ChargePointDetailPage() {
           <section key={c.connector_id} className="card tile" aria-label={`Súng ${c.connector_no}`}>
             <h2>Súng {c.connector_no}</h2>
             <p>
-              <span className={`pill ${connectorTone(c)}`}>
-                {c.status_quality === 'offline' ? 'Offline' : c.status}
+              <span className={`pill ${connectorTone(c)}`} title={c.status}>
+                {c.status_quality === 'offline' ? 'Mất kết nối' : statusLabel(c.status)}
                 {c.status === 'Faulted' && c.error_code ? ` · ${c.error_code}` : ''}
               </span>
               {c.status_quality === 'stale' && <span className="muted small"> · có thể đã cũ</span>}

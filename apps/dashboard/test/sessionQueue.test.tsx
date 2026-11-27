@@ -80,7 +80,7 @@ describe('Phiên cần xử lý (màn 23)', () => {
     expect(row.getByRole('button', { name: 'Gán tài xế' })).toBeEnabled();
     const free = within(screen.getByRole('row', { name: 'Phiên #102' }));
     expect(free.getByRole('button', { name: 'Gán tài xế' })).toBeDisabled();
-    expect(free.getByText(/Free vend — không bao giờ tính tiền/)).toBeInTheDocument();
+    expect(free.getByText(/Sạc miễn phí — không bao giờ tính tiền/)).toBeInTheDocument();
     expect(free.getByRole('button', { name: 'Đóng' })).toBeEnabled();
     expect(seen[0]).toMatchObject({ search: '?queue=unattributed&page=1&page_size=20' });
     // FE-07 look: breadcrumb and Vietnamese names.
@@ -116,7 +116,7 @@ describe('Phiên cần xử lý (màn 23)', () => {
     const lists = seen.filter((r) => r.method === 'GET').length;
     await user.click(dialog.getByRole('button', { name: 'Gán và tính tiền' }));
     expect(
-      await screen.findByText('Đã gán phiên #101 cho tài xế 5 · quyết toán: posted'),
+      await screen.findByText('Đã gán phiên #101 cho tài xế 5 · quyết toán: đã trừ tiền'),
     ).toHaveClass('queue-note', 'ok');
     expect(screen.queryByRole('dialog')).toBeNull();
     const post = seen.find((r) => r.method === 'POST')!;
@@ -177,7 +177,7 @@ describe('Phiên cần xử lý (màn 23)', () => {
     await user.type(dialog.getByLabelText('Ghi chú (bắt buộc)'), 'Đã xem ảnh công tơ');
     await user.click(dialog.getByRole('button', { name: 'Chốt đối soát' }));
     expect(
-      await screen.findByText('Phiên #107 đã chốt đối soát (reconciled) · quyết toán: pending'),
+      await screen.findByText('Phiên #107 đã chốt đối soát · quyết toán: đang chờ'),
     ).toHaveClass('queue-note', 'ok');
     expect(seen.find((r) => r.method === 'POST')).toMatchObject({
       body: { resolution: 'meter_confirmed', note: 'Đã xem ảnh công tơ' },

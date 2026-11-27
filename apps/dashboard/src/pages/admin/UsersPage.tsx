@@ -113,7 +113,6 @@ export function UsersPage() {
       <Breadcrumbs items={[{ label: 'Tài khoản & vai trò' }]} />
       <div className="page-head">
         <h1>Tài khoản &amp; vai trò</h1>
-        <p>Tài khoản tài xế, nhân viên Operator và Admin; mỗi tài khoản một vai trò</p>
         <button
           type="button"
           className="btn primary page-action"
@@ -133,7 +132,7 @@ export function UsersPage() {
             type="search"
             value={search}
             maxLength={MAX_SEARCH}
-            placeholder="Tên, email hoặc số điện thoại"
+            placeholder="Tên, thư điện tử hoặc số điện thoại"
             onChange={(e) => {
               setSearch(e.target.value);
               setPage(1);
@@ -177,7 +176,7 @@ export function UsersPage() {
           </select>
         </label>
         <label className="field">
-          Operator
+          Đơn vị vận hành
           <select
             className="input"
             value={operatorId}
@@ -217,7 +216,7 @@ export function UsersPage() {
               <thead>
                 <tr>
                   <th scope="col">Họ tên</th>
-                  <th scope="col">Email · điện thoại</th>
+                  <th scope="col">Thư điện tử · điện thoại</th>
                   <th scope="col">Vai trò</th>
                   <th scope="col">Trạng thái</th>
                   <th scope="col">Ngày tạo</th>

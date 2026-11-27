@@ -137,7 +137,7 @@ describe('Tổng quan nền tảng (màn 27)', () => {
       rev.getByText(/40 phiên tính tiền · 400 kWh · 2 phiên không định danh/),
     ).toBeInTheDocument();
     // Top 3 by revenue, Operators without revenue left out.
-    const top = within(rev.getByRole('list', { name: 'Operator dẫn đầu' }));
+    const top = within(rev.getByRole('list', { name: 'Đơn vị vận hành dẫn đầu' }));
     expect(top.getAllByRole('listitem').map((li) => li.textContent)).toEqual([
       'B Operator 900.000 ₫',
       'D Operator 500.000 ₫',
@@ -158,12 +158,12 @@ describe('Tổng quan nền tảng (màn 27)', () => {
       ).toBe(true),
     );
     const net = within(screen.getByRole('region', { name: 'Mạng lưới trụ sạc' }));
-    expect(net.getByText(/\/ 10 trụ đang hoạt động online/)).toBeInTheDocument();
+    expect(net.getByText(/\/ 10 trụ đang hoạt động, đang kết nối/)).toBeInTheDocument();
     expect(net.getByText('Sẵn sàng')).toBeInTheDocument();
     expect(net.queryByText('Sắp trống')).toBeNull();
     expect(net.getByLabelText('4 sự cố đang mở')).toHaveClass('count-badge');
     expect(net.getByText('1 nghiêm trọng')).toBeInTheDocument();
-    const ops = within(screen.getByRole('region', { name: 'Operator và trạm sạc' }));
+    const ops = within(screen.getByRole('region', { name: 'Đơn vị vận hành và trạm sạc' }));
     expect(ops.getByText('Ngừng hoạt động')).toBeInTheDocument();
     expect(ops.getByText('Trạm sạc')).toBeInTheDocument();
     expect(ops.getByText('7')).toBeInTheDocument();

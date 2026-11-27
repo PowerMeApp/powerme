@@ -13,7 +13,7 @@ export const MAX_KW = 99_999.99;
 export const serialField = z
   .string()
   .trim()
-  .regex(SERIAL_RE, 'Serial 3–25 ký tự: chữ, số, dấu . _ -');
+  .regex(SERIAL_RE, 'Số seri 3–25 ký tự: chữ, số, dấu . _ -');
 
 /** Optional kW as typed: empty, or a number above 0 and at most MAX_KW. */
 export const optionalKw = (message: string) =>
