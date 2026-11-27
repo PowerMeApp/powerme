@@ -294,6 +294,22 @@ h3 {
   flex: none;
 }
 
+/* Điện thoại: chân trang nằm cuối trang (không nổi) để không che nội dung */
+@media (max-width: 767px) {
+  body {
+    padding-bottom: var(--s2) !important;
+  }
+  .bv-foot {
+    position: static;
+    transform: none;
+    display: flex;
+    width: max-content;
+    max-width: calc(100% - 2 * var(--s2));
+    margin: var(--s5) auto 0;
+    text-align: left;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

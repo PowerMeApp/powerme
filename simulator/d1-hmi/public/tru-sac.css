@@ -272,14 +272,16 @@
   font-weight: 600;
   text-anchor: middle;
 }
+/* QA-06: nền nhãn chỉ ửng màu trạng thái (màu dữ liệu không làm mảng nền đặc), chữ Ink */
 #tru .badge {
   fill: var(--lt, var(--lt-Unavailable));
-  stroke: var(--line);
+  fill-opacity: 0.3;
+  stroke: var(--lt, var(--lt-Unavailable));
   stroke-width: 1.5;
 }
 #tru .badge-t1,
 #tru .badge-t2 {
-  fill: #0b1620;
+  fill: var(--ink, #0b1620);
   text-anchor: middle;
 }
 #tru .badge-t1 {
