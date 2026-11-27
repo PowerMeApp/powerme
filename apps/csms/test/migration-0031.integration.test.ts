@@ -1,6 +1,7 @@
 // WP3: migration adds protection without allocating historical credit or reviving terminal settlement.
-import { copyFileSync, mkdirSync, readFileSync, readdirSync } from 'node:fs';
+import { copyFileSync, mkdtempSync, readFileSync, readdirSync } from 'node:fs';
 import path from 'node:path';
+import { tmpdir } from 'node:os';
 import { createDb, type Db } from '../src/db/db.module.js';
 import { creditSummary } from '../src/driver/driver-credit.js';
 import { migrate, MIGRATIONS_DIR } from './helpers/apply-migrations.js';
@@ -23,8 +24,7 @@ const url = process.env.MB03_TEST_DATABASE_URL;
     await db?.$client.end();
   });
   it('preserves old evidence and closed-account terminal jobs, reruns, and enforces ownership/amount/state constraints', async () => {
-    const prior = path.join(process.env.TEMP!, 'pre-0031');
-    mkdirSync(prior, { recursive: true });
+    const prior = mkdtempSync(path.join(tmpdir(), 'powerme-pre-0031-'));
     for (const file of readdirSync(MIGRATIONS_DIR).filter(
       (f) => /^\d{4}_.*\.sql$/.test(f) && f < '0031',
     ))
