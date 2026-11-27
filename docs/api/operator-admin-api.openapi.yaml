@@ -1903,8 +1903,9 @@ paths:
       tags: [accounts]
       operationId: createStaffUser
       x-roles: [admin]
-      x-status: planned
-      x-owner: Trí
+      x-status: implemented
+      x-source: 'operator-api/admin-user-actions.ts (FE-19)'
+      x-owner: Nghĩa (FE-19)
       x-refs: [UC-ADM-01, UC-ADM-02, FR-14, BR-P16]
       summary: Tạo tài khoản nhân viên operator hoặc admin
       description: |
@@ -1931,7 +1932,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
         '409':
-          description: '`email_taken`'
+          description: '`email_taken`, `phone_taken`'
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
@@ -1941,8 +1942,9 @@ paths:
       tags: [accounts]
       operationId: getUser
       x-roles: [admin]
-      x-status: planned
-      x-owner: Trí
+      x-status: implemented
+      x-source: 'operator-api/admin-user-actions.ts (FE-19)'
+      x-owner: Nghĩa (FE-19)
       x-refs: [UC-ADM-01]
       summary: Một tài khoản
       parameters:
@@ -1960,8 +1962,9 @@ paths:
       tags: [accounts]
       operationId: updateUser
       x-roles: [admin]
-      x-status: planned
-      x-owner: Trí
+      x-status: implemented
+      x-source: 'operator-api/admin-user-actions.ts (FE-19)'
+      x-owner: Nghĩa (FE-19)
       x-refs: [UC-ADM-01]
       summary: Sửa họ tên, số điện thoại
       parameters:
@@ -1987,8 +1990,9 @@ paths:
       tags: [accounts]
       operationId: setUserRole
       x-roles: [admin]
-      x-status: planned
-      x-owner: Trí
+      x-status: implemented
+      x-source: 'operator-api/admin-user-actions.ts (FE-19)'
+      x-owner: Nghĩa (FE-19)
       x-refs: [UC-ADM-02, FR-14, BR-P16]
       summary: Đổi role giữa operator_staff và admin, hoặc đổi operator / staff_role
       description: |
@@ -2023,8 +2027,9 @@ paths:
       tags: [accounts]
       operationId: lockUser
       x-roles: [admin]
-      x-status: planned
-      x-owner: Trí
+      x-status: implemented
+      x-source: 'operator-api/admin-user-actions.ts (FE-19)'
+      x-owner: Nghĩa (FE-19)
       x-refs: [UC-ADM-01, F-13]
       summary: Khoá tài khoản (active → suspended); đăng nhập và mọi request sau đó bị 403
       parameters:
@@ -2055,8 +2060,9 @@ paths:
       tags: [accounts]
       operationId: unlockUser
       x-roles: [admin]
-      x-status: planned
-      x-owner: Trí
+      x-status: implemented
+      x-source: 'operator-api/admin-user-actions.ts (FE-19)'
+      x-owner: Nghĩa (FE-19)
       x-refs: [UC-ADM-01, F-13]
       summary: Mở khoá (suspended → active); tài khoản closed không mở lại được
       parameters:

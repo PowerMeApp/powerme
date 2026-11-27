@@ -408,12 +408,12 @@ thuộc Platform Administration; Operator xem doanh thu trạm mình qua `/opera
 | Endpoint | Role | UC / FR / BR | Trạng thái · người làm | Ghi chú |
 |---|---|---|---|---|
 | `GET /admin/v1/users` | admin | UC-ADM-01, FR-14, BR-P05 | **implemented** T161 · Nghĩa · `admin-users.ts` | lọc `role`, `account_status`, `operator_id`, `q`; xem §3.8b |
-| `POST /admin/v1/users` | admin | UC-ADM-01/02, BR-P16 | planned · Trí | chỉ `operator_staff`/`admin`; tài xế tự đăng ký (consent BR-P05) |
-| `GET /admin/v1/users/{id}` | admin | UC-ADM-01 | planned · Trí | |
-| `PATCH /admin/v1/users/{id}` | admin | UC-ADM-01 | planned · Trí | họ tên, điện thoại |
-| `PUT /admin/v1/users/{id}/role` | admin | UC-ADM-02, BR-P16 | planned · Trí | một role mỗi user; tài xế không đổi role được (409) |
-| `POST /admin/v1/users/{id}/lock` | admin | UC-ADM-01, F-13 | planned · Trí | `active → suspended`, có hiệu lực ở request kế tiếp |
-| `POST /admin/v1/users/{id}/unlock` | admin | UC-ADM-01, F-13 | planned · Trí | `closed` không mở lại |
+| `POST /admin/v1/users` | admin | UC-ADM-01/02, BR-P16 | **implemented** FE-19 · Nghĩa · `admin-user-actions.ts` | chỉ `operator_staff`/`admin`; tài xế tự đăng ký (consent BR-P05) |
+| `GET /admin/v1/users/{id}` | admin | UC-ADM-01 | **implemented** FE-19 · Nghĩa | |
+| `PATCH /admin/v1/users/{id}` | admin | UC-ADM-01 | **implemented** FE-19 · Nghĩa | họ tên, điện thoại (chuẩn hoá BE-30, `null` xoá; trùng → 409 `phone_taken`) |
+| `PUT /admin/v1/users/{id}/role` | admin | UC-ADM-02, BR-P16 | **implemented** FE-19 · Nghĩa | một role mỗi user; tài xế không đổi role được (409) |
+| `POST /admin/v1/users/{id}/lock` | admin | UC-ADM-01, F-13 | **implemented** FE-19 · Nghĩa | `active → suspended`, có hiệu lực ở request kế tiếp |
+| `POST /admin/v1/users/{id}/unlock` | admin | UC-ADM-01, F-13 | **implemented** FE-19 · Nghĩa | `closed` không mở lại |
 | `GET /admin/v1/operators` | admin | UC-ADM-02, BR-P11 | **implemented** FE-18 · Nghĩa · `admin-operators.ts` | để gán nhân viên và lọc báo cáo (màn 31, 28); `status`, `page`/`page_size` (1–100, mặc định 50), sắp theo tên; không có operator lab (LOADTEST01) |
 | `GET /admin/v1/rfid-cards` | admin | UC-ADM-04, FR-15, BR-P15 | **implemented local (chưa merge/deploy)** WP3/T146 · `admin-rfid-cards.ts` | |
 | `POST /admin/v1/rfid-cards` | admin | UC-ADM-04, BR-P15, BR-P23 | **implemented local (chưa merge/deploy)** WP3/T146 · `admin-rfid-cards.ts` | `card_kind` ∈ `online`, `free_vend` |
@@ -486,6 +486,24 @@ Collection và template rỗng: apps/csms/postman/PowerMe-T146-Admin-RFID.postma
 PowerMe-T146-Local.postman_environment.json. Không import credentials/token vào workspace cloud.
 Script login chỉ dùng pm.variables.set (trong một Collection Runner run); Send riêng lẻ phải
 điền giá trị private local/current, shared vẫn rỗng. Không ghi token vào collection/global/shared env.
+
+### 3.8c FE-19 — tạo / sửa / đổi role / khoá tài khoản (27/11/2026)
+
+Làm cho màn 28 (Users & Roles), đúng OpenAPI. Admin chỉ tạo `operator_staff` hoặc `admin`; tài xế tự
+đăng ký (consent BR-P05) nên không tạo được và không đổi role được (409 `role_change_not_allowed`).
+
+- `POST /users`: email hạ chữ thường, trùng (không phân biệt hoa thường) → 409 `email_taken`;
+  `phone_number` chuẩn hoá BE-30, trùng → 409 `phone_taken`; `operator_id` không có → 404
+  `operator_not_found`; `initial_password` 8–128 ký tự, băm scrypt như mật khẩu đăng nhập; ghi
+  `users` + `admins` hoặc `operator_staff` trong một transaction. 201 `UserAccount`.
+- `PUT /users/{id}/role`: đổi chính mình → 409 `cannot_change_own_role`; xoá dòng role cũ, thêm dòng
+  role mới. Token cũ hết dùng được ở request kế tiếp (RolesGuard đọc lại DB; refresh trả 401).
+- `POST /users/{id}/lock` / `unlock`: body `{note}` 1–500 ký tự; `active → suspended` /
+  `suspended → active`, sai trạng thái (kể cả `closed`) → 409 `invalid_transition`; khoá chính mình
+  → 409 `cannot_lock_self`. Có hiệu lực ở request kế tiếp (403 `account_locked`), cả Driver API.
+  **Ghi chú chỉ ghi vào log** kèm id Admin: chưa có bảng audit (như WF-02 D10).
+- Route hành động không nhận query string (400); chỉ `GET /users` (danh sách) nhận query.
+- Test: `test/fe19-admin-user-actions.integration.test.ts` (9 ca HTTP / Postgres).
 
 ### 3.8b T161 — danh sách tài khoản `GET /admin/v1/users` (27/11/2026)
 
@@ -910,12 +928,12 @@ trạng thái (2xx/4xx nghiệp vụ khác với 401/403). Ba điều kiện c�
 | 51 | `GET /api/admin/v1/transactions` | 401 | 403 | 403 | ✓ | planned |
 | 52 | `GET /api/admin/v1/transactions.csv` | 401 | 403 | 403 | ✓ | planned |
 | 53 | `GET /api/admin/v1/users` | 401 | 403 | 403 | ✓ | implemented (T161) |
-| 54 | `POST /api/admin/v1/users` | 401 | 403 | 403 | ✓ | planned |
-| 55 | `GET /api/admin/v1/users/{userId}` | 401 | 403 | 403 | ✓ | planned |
-| 56 | `PATCH /api/admin/v1/users/{userId}` | 401 | 403 | 403 | ✓ | planned |
-| 57 | `PUT /api/admin/v1/users/{userId}/role` | 401 | 403 | 403 | ✓ | planned |
-| 58 | `POST /api/admin/v1/users/{userId}/lock` | 401 | 403 | 403 | ✓ | planned |
-| 59 | `POST /api/admin/v1/users/{userId}/unlock` | 401 | 403 | 403 | ✓ | planned |
+| 54 | `POST /api/admin/v1/users` | 401 | 403 | 403 | ✓ | implemented (FE-19) |
+| 55 | `GET /api/admin/v1/users/{userId}` | 401 | 403 | 403 | ✓ | implemented (FE-19) |
+| 56 | `PATCH /api/admin/v1/users/{userId}` | 401 | 403 | 403 | ✓ | implemented (FE-19) |
+| 57 | `PUT /api/admin/v1/users/{userId}/role` | 401 | 403 | 403 | ✓ | implemented (FE-19) |
+| 58 | `POST /api/admin/v1/users/{userId}/lock` | 401 | 403 | 403 | ✓ | implemented (FE-19) |
+| 59 | `POST /api/admin/v1/users/{userId}/unlock` | 401 | 403 | 403 | ✓ | implemented (FE-19) |
 | 60 | `GET /api/admin/v1/operators` | 401 | 403 | 403 | ✓ | implemented (FE-18) |
 | 60a | `GET /api/admin/v1/network/charge-points` | 401 | 403 | 403 | ✓ | implemented (FE-18) |
 | 61 | `GET /api/admin/v1/rfid-cards` | 401 | 403 | 403 | ✓ | implemented local (chưa merge/deploy) · WP3/T146 |

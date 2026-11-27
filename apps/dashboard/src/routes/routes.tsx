@@ -11,6 +11,7 @@ import { AdminRevenuePage } from '../pages/admin/AdminRevenuePage';
 import { DeviceRegistryPage } from '../pages/admin/DeviceRegistryPage';
 import { NetworkMonitorPage } from '../pages/admin/NetworkMonitorPage';
 import { RfidCardsPage } from '../pages/admin/RfidCardsPage';
+import { UsersPage } from '../pages/admin/UsersPage';
 import { LoginPage } from '../pages/LoginPage';
 import { ChargePointDetailPage } from '../pages/operator/ChargePointDetailPage';
 import { ChargePointListPage } from '../pages/operator/ChargePointListPage';
@@ -60,6 +61,7 @@ export const routes: RouteObject[] = [
     ),
     children: [
       { index: true, element: <AdminHomePage /> }, // 27
+      { path: 'users', element: <UsersPage /> }, // 28
       { path: 'charge-points', element: <DeviceRegistryPage /> }, // 29
       { path: 'rfid-cards', element: <RfidCardsPage /> }, // 30
       { path: 'network', element: <NetworkMonitorPage /> }, // 31

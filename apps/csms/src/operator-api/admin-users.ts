@@ -27,7 +27,7 @@ export interface UserSearch {
   pageSize: number;
 }
 
-interface UserRow {
+export interface UserRow {
   id: string;
   email: string;
   full_name: string;
@@ -72,8 +72,7 @@ export async function searchUsers(db: Db, s: UserSearch) {
     s.q === null ? null : '%' + s.q.replace(/[\\%_]/g, '\\$&') + '%',
     s.q === null ? null : normalizePhoneNumber(s.q),
   ];
-  const where = ` FROM users u
-    LEFT JOIN operator_staff os ON os.user_id=u.id LEFT JOIN operators o ON o.id=os.operator_id
+  const where = `${USER_FROM}
     WHERE ($1::text IS NULL OR u.role::text=$1)
       AND ($2::text IS NULL OR u.account_status::text=$2)
       AND ($3::bigint IS NULL OR os.operator_id=$3)
@@ -86,30 +85,38 @@ export async function searchUsers(db: Db, s: UserSearch) {
       (await client.query<{ n: string }>('SELECT count(*)::text AS n' + where, params)).rows[0]!.n,
     );
     const rows = (
-      await client.query<UserRow>(
-        `SELECT u.id::text AS id,u.email,u.full_name,u.phone_number,u.role::text AS role,
-           u.account_status::text AS account_status,o.id::text AS operator_id,o.legal_name,
-           os.staff_role::text AS staff_role,u.created_at` +
-          where +
-          ' ORDER BY u.id DESC LIMIT $6 OFFSET $7',
-        [...params, s.pageSize, (s.page - 1) * s.pageSize],
-      )
+      await client.query<UserRow>(USER_COLUMNS + where + ' ORDER BY u.id DESC LIMIT $6 OFFSET $7', [
+        ...params,
+        s.pageSize,
+        (s.page - 1) * s.pageSize,
+      ])
     ).rows;
     return {
-      items: rows.map((r) => ({
-        id: r.id,
-        email: r.email,
-        full_name: r.full_name,
-        phone_number: r.phone_number,
-        role: r.role,
-        account_status: r.account_status,
-        operator: r.operator_id ? { id: r.operator_id, legal_name: r.legal_name } : null,
-        staff_role: r.staff_role,
-        created_at: r.created_at.toISOString(),
-      })),
+      items: rows.map(presentUser),
       total,
       page: s.page,
       page_size: s.pageSize,
     };
   });
+}
+
+/** Columns and joins of one `UserAccount` (OpenAPI), shared with the account actions (FE-19). */
+export const USER_COLUMNS = `SELECT u.id::text AS id,u.email,u.full_name,u.phone_number,u.role::text AS role,
+  u.account_status::text AS account_status,o.id::text AS operator_id,o.legal_name,
+  os.staff_role::text AS staff_role,u.created_at`;
+export const USER_FROM = ` FROM users u
+  LEFT JOIN operator_staff os ON os.user_id=u.id LEFT JOIN operators o ON o.id=os.operator_id`;
+
+export function presentUser(r: UserRow) {
+  return {
+    id: r.id,
+    email: r.email,
+    full_name: r.full_name,
+    phone_number: r.phone_number,
+    role: r.role,
+    account_status: r.account_status,
+    operator: r.operator_id ? { id: r.operator_id, legal_name: r.legal_name } : null,
+    staff_role: r.staff_role,
+    created_at: r.created_at.toISOString(),
+  };
 }

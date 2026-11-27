@@ -229,6 +229,9 @@ export function AdminHomePage() {
                     <h2>Tài khoản</h2>
                     <p className="tile-number">{formatCount(users)}</p>
                     <Counts rows={USER_GROUPS} values={s.users} />
+                    <Link className="tile-link" to="/admin/users">
+                      Xem chi tiết →
+                    </Link>
                   </section>
                 )}
                 {chargePoints > 0 && (

@@ -16,6 +16,7 @@ import type {
   ApiErrorBody,
   ChargePointLifecycle,
   ChargePointPage,
+  CreateStaffUserRequest,
   CreateRfidCardRequest,
   OperatorChargePointDetail,
   OperatorSummary,
@@ -52,7 +53,12 @@ import type {
   RevenueQuery,
   RevenueReport,
   SessionsActiveError,
+  NoteRequest,
+  SetRoleRequest,
   SitePage,
+  UpdateUserRequest,
+  UserAccount,
+  UserQuery,
   TariffScheduleRequest,
   TariffScheduleView,
   TransactionPage,
@@ -73,6 +79,8 @@ export const CHARGE_POINT_PAGE_SIZE = 20;
 export const TRANSACTION_PAGE_SIZE = 50;
 /** Rows per page on screen 30. */
 export const RFID_PAGE_SIZE = 20;
+/** Rows per page on screen 28. */
+export const USER_PAGE_SIZE = 20;
 /** Rows per page on screen 31. */
 export const NETWORK_PAGE_SIZE = 20;
 /** Rows per page of the device registry. */
@@ -188,6 +196,7 @@ export const api = createApi({
     'Network',
     'Tariff',
     'Promotion',
+    'User',
   ],
   endpoints: (b) => ({
     login: b.mutation<LoginResponse, LoginRequest>({
@@ -404,6 +413,40 @@ export const api = createApi({
     adminOperators: b.query<PlatformOperatorPage, void>({
       query: () => 'admin/v1/operators?page_size=100',
     }),
+    // Screen 28 (FE-19, UC-ADM-01/02): accounts and roles. Changes also move the screen-27 counts.
+    adminUsers: b.query<UserAccountPage, UserQuery & { page: number }>({
+      query: ({ page, ...f }) => {
+        const p = new URLSearchParams();
+        if (f.role) p.set('role', f.role);
+        if (f.account_status) p.set('account_status', f.account_status);
+        if (f.operator_id) p.set('operator_id', f.operator_id);
+        if (f.q?.trim()) p.set('q', f.q.trim());
+        p.set('page', String(page));
+        p.set('page_size', String(USER_PAGE_SIZE));
+        return `admin/v1/users?${p}`;
+      },
+      providesTags: ['User'],
+    }),
+    createUser: b.mutation<UserAccount, CreateStaffUserRequest>({
+      query: (body) => ({ url: 'admin/v1/users', method: 'POST', body }),
+      invalidatesTags: ['User', 'AdminSummary'],
+    }),
+    updateUser: b.mutation<UserAccount, { id: string } & UpdateUserRequest>({
+      query: ({ id, ...body }) => ({ url: `admin/v1/users/${id}`, method: 'PATCH', body }),
+      invalidatesTags: ['User'],
+    }),
+    setUserRole: b.mutation<UserAccount, { id: string; body: SetRoleRequest }>({
+      query: ({ id, body }) => ({ url: `admin/v1/users/${id}/role`, method: 'PUT', body }),
+      invalidatesTags: ['User', 'AdminSummary'],
+    }),
+    setUserLock: b.mutation<UserAccount, { id: string; lock: boolean } & NoteRequest>({
+      query: ({ id, lock, note }) => ({
+        url: `admin/v1/users/${id}/${lock ? 'lock' : 'unlock'}`,
+        method: 'POST',
+        body: { note },
+      }),
+      invalidatesTags: ['User', 'AdminSummary'],
+    }),
     // Driver picker of screen 30: active drivers by name, email or phone (T161, admin-users.ts).
     driverSearch: b.query<UserAccountPage, string>({
       query: (q) => {
@@ -447,6 +490,11 @@ export const {
   useCreateRfidCardMutation,
   useUpdateRfidCardMutation,
   useDriverSearchQuery,
+  useAdminUsersQuery,
+  useCreateUserMutation,
+  useUpdateUserMutation,
+  useSetUserRoleMutation,
+  useSetUserLockMutation,
   useAdminRegistryQuery,
   useAdminNetworkQuery,
   useAdminOperatorsQuery,
