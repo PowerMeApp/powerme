@@ -124,6 +124,7 @@ Trả lời T10 §2: tên bảng thật, module chủ theo `PACKAGE-DIAGRAM-CSMS
 | `remote_commands` | ocpp-gateway | lệnh CSMS → trụ bất đồng bộ (`202 + commandId`), migration 0001 (BM02 F08) |
 | `session_status_history` | sessions | lịch sử chuyển trạng thái phiên, append-only, migration 0001 (BM02 F13) |
 | `charge_point_offline_auth_checks` | stations (ghi bởi ocpp-gateway) | kết quả kiểm authorize offline sau mỗi BootNotification, append-only, migration 0030 (T150, BR-P52) |
+| `driver_refresh_revocations` | users (ghi bởi Driver API) | refresh token đã thu hồi khi tài xế "đăng xuất thiết bị này", append-only, migration 0033 (BE-49, UC-ACC-05) |
 
 ---
 
@@ -134,7 +135,7 @@ Trả lời T10 §2: tên bảng thật, module chủ theo `PACKAGE-DIAGRAM-CSMS
 ### 3.1. Module `users`
 
 **`users`** — mọi người dùng, phân biệt bằng `role` (`driver` · `operator_staff` · `admin`).
-Cột: `email` (BK), `full_name`, `phone_number`, `role`, `account_status` (`active` · `suspended` · `closed`), `password_hash` (argon2, null nếu chưa đặt).
+Cột: `email` (BK), `full_name`, `phone_number`, `role`, `account_status` (`active` · `suspended` · `closed`), `password_hash` (argon2, null nếu chưa đặt), `token_version` (0033 / BE-49: `integer NOT NULL DEFAULT 0`, CHECK `users_token_version_check` ≥ 0; tăng khi tài xế "đăng xuất mọi thiết bị", token Driver API có claim `ver` khác bị từ chối).
 Khoá: PK `id`; UNIQUE `email`; UNIQUE `phone_number` (`users_phone_number_key`, từ 0017 / BE-30 — thay index thường; NULL không đụng nhau; giá trị E.164 do Driver API chuẩn hoá).
 
 **`drivers`** — mở rộng của `users` khi `role = driver`. Chỉ tồn tại vì Driver có thuộc tính riêng.
@@ -147,6 +148,10 @@ Cột: `user_id` (PK, FK → `users`, `ON DELETE CASCADE`). Migration backfill t
 **`operator_staff`** — mở rộng của `users` khi `role = operator_staff`.
 Cột: `user_id` (PK, FK → `users`), `operator_id` (FK → `operators`), `staff_role` (`manager` · `technician`).
 Các FK "người xử lý" (`fault_events.acknowledged_by`, `fault_reports.cleared_by`, `maintenance_tickets.assigned_to`) trỏ vào đây.
+
+**`driver_refresh_revocations`** (0033 / BE-49) — refresh token bị thu hồi khi tài xế đăng xuất một thiết bị. Mỗi lần đăng nhập là một phiên thiết bị: `jti` của refresh token, chép vào claim `sid` của access token; Driver API từ chối token có `jti`/`sid` nằm ở bảng này.
+Cột: `jti` (PK, `uuid`), `user_id` (FK → `drivers`, FK thường), `revoked_at`, `expires_at` (= `exp` của refresh token; quá mốc này dòng vô hại, có thể dọn).
+Khoá: PK `jti`; index `driver_refresh_revocations_user_id_idx` cho FK. Chỉ ghi thêm (`ON CONFLICT DO NOTHING` khi đăng xuất lại).
 
 ### 3.2. Module `stations`
 
