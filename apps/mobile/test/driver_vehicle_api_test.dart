@@ -67,6 +67,7 @@ void main() {
     final repo = ApiProfileRepository(session);
     await session.signIn('test@example.invalid', 'fixture password');
     expect(repo.read().vehicles, isEmpty);
+    repo.selectLanguage(AppLanguage.english);
     final models = await repo.listModels();
     expect(models.map((m) => m.id), ['9007199254740997', '10']);
     expect(models.map((m) => m.label), [
@@ -86,13 +87,16 @@ void main() {
       '51K-901.01',
     );
     expect(repo.read().vehicles, hasLength(2));
+    expect(repo.read().language, AppLanguage.english);
     expect(repo.read().vehicles.last.imageUrl, leafPhotoUrl);
     final selected = await repo.selectVehicle('9007199254741001', 0);
     expect(selected.selectedVehicle?.isVinFast, isFalse);
     expect(selected.selectedVehicle?.imageCredit, leafPhotoCredit);
     expect(selected.vehicleId, '9007199254741001');
+    expect(selected.language, AppLanguage.english);
     expect((await repo.removeVehicle(selected.vehicleId, 0)).vehicleId, '9');
     expect(repo.read().vehicles, hasLength(1));
+    expect(repo.read().language, AppLanguage.english);
     expect(fixture.requests.map((request) => request.path), [
       'auth/login',
       'me',
