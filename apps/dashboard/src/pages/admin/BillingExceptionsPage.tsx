@@ -4,20 +4,35 @@
  * (each ≤ 200 rows, no paging): late payments, e-invoices that need review, top-up exceptions,
  * payment conflicts. One tab each, kept in the URL (`?tab=`), with a count badge.
  * Actions (screen 33 sheets): retry an e-invoice; "Kiểm tra lại" then "Đã xem" on a top-up exception
- * (D10 order); resolve a payment conflict with a note. Refund actions and the customer-care refund
- * list come with T152 (manual refunds, D-AC).
+ * (D10 order); resolve a payment conflict with a note.
+ * Manual refunds (D-AC, BR-P51, Khang's #257): a fifth tab lists the refunds customer service still
+ * has to make (GET /api/admin/v1/billing/refunds, oldest first) with "Đã hoàn" (gateway refund
+ * number), "Cổng từ chối" (reason) and "Làm lại"; a late payment gets "Hoàn"; "Tạo yêu cầu hoàn" asks
+ * for a top-up refund by its number. Error codes show as plain Vietnamese (`billingError`).
  */
 import { Button, Group, Loader, Table } from '@mantine/core';
 import { Children, useState, type ReactNode } from 'react';
 import { useSearchParams } from 'react-router';
 import type {
   InvoiceNeedsReviewItem,
+  LatePaymentItem,
   PaymentConflictItem,
+  RefundQueue,
+  RefundQueueItem,
   TopUpExceptionItem,
 } from '@powerme/shared';
-import { useBillingExceptionsQuery, useRecheckTopUpMutation } from '../../core/api/api';
 import {
+  useBillingExceptionsQuery,
+  useRecheckTopUpMutation,
+  useRefundQueueQuery,
+} from '../../core/api/api';
+import {
+  ConfirmRefundSheet,
   ConflictReviewSheet,
+  CreateTopUpRefundSheet,
+  FailRefundSheet,
+  LateRefundSheet,
+  RedoRefundSheet,
   RetryInvoiceSheet,
   ReviewedSheet,
 } from '../../features/billing/BillingSheets';
@@ -26,6 +41,7 @@ import {
   ERROR_KIND,
   EXCEPTION_KIND,
   recheckText,
+  REFUND_KIND,
   vnd,
   when,
 } from '../../features/billing/format';
@@ -40,12 +56,18 @@ const TABS = [
   ['invoices', 'Hoá đơn cần xem lại', 'invoices_needs_review'],
   ['exceptions', 'Ngoại lệ nạp tiền', 'top_up_exceptions'],
   ['conflicts', 'Trả mâu thuẫn', 'payment_conflicts'],
+  ['refunds', 'Hoàn tiền', null],
 ] as const;
 type Tab = (typeof TABS)[number][0];
 type Sheet =
   | { kind: 'retry'; item: InvoiceNeedsReviewItem }
   | { kind: 'reviewed'; item: TopUpExceptionItem }
-  | { kind: 'conflict'; item: PaymentConflictItem };
+  | { kind: 'conflict'; item: PaymentConflictItem }
+  | { kind: 'create-refund' }
+  | { kind: 'late-refund'; item: LatePaymentItem }
+  | { kind: 'confirm-refund'; item: RefundQueueItem }
+  | { kind: 'fail-refund'; item: RefundQueueItem }
+  | { kind: 'redo-refund'; item: RefundQueueItem };
 
 function Driver({ d }: { d: { full_name: string; phone_number: string | null } }) {
   return (
@@ -82,6 +104,10 @@ export function BillingExceptionsPage() {
     pollingInterval: 30_000,
     skipPollingIfUnfocused: true,
   });
+  const refunds = useRefundQueueQuery(undefined, {
+    pollingInterval: 30_000,
+    skipPollingIfUnfocused: true,
+  });
   const [recheck, r] = useRecheckTopUpMutation();
   const [sheet, setSheet] = useState<Sheet | null>(null);
   const [note, setNote] = useState<Note>(null);
@@ -114,7 +140,15 @@ export function BillingExceptionsPage() {
 
   return (
     <>
-      <PageHeader crumbs={[{ label: 'Ngoại lệ thanh toán' }]} title="Ngoại lệ thanh toán" />
+      <PageHeader
+        crumbs={[{ label: 'Ngoại lệ thanh toán' }]}
+        title="Ngoại lệ thanh toán"
+        actions={
+          <Button type="button" onClick={() => setSheet({ kind: 'create-refund' })}>
+            Tạo yêu cầu hoàn
+          </Button>
+        }
+      />
       <QueueSwitch
         label="Danh sách"
         value={tab}
@@ -122,12 +156,19 @@ export function BillingExceptionsPage() {
         items={TABS.map(([key, label, total]) => ({
           key,
           label,
-          count: data?.[total].total,
+          count: total ? data?.[total].total : refunds.data?.total,
           countLabel: 'mục',
         }))}
       />
       {note && <Notice tone={note.tone}>{note.text}</Notice>}
-      {isLoading ? (
+      {tab === 'refunds' ? (
+        <RefundTab
+          queue={refunds}
+          onConfirm={(item) => setSheet({ kind: 'confirm-refund', item })}
+          onFail={(item) => setSheet({ kind: 'fail-refund', item })}
+          onRedo={(item) => setSheet({ kind: 'redo-refund', item })}
+        />
+      ) : isLoading ? (
         <Loader size="sm" aria-label="Đang tải…" />
       ) : error && !data ? (
         <Notice tone="error">{billingError(error)}</Notice>
@@ -135,14 +176,14 @@ export function BillingExceptionsPage() {
         <>
           <p className="muted small">
             Khoản trả sau khi lần nạp đã hết hạn hoặc thất bại: không cộng vào tín dụng sạc, quản
-            trị viên hoàn lại số đã trả.
+            trị viên tạo yêu cầu hoàn, CSKH hoàn trên cổng VNPay.
           </p>
           {data.late_payments.items.length === 0 ? (
             empty
           ) : (
             <ListTable
               key={tab}
-              head={['Lần nạp', 'Tài xế', 'Số tiền trả muộn', 'Mã giao dịch', 'Lúc trả']}
+              head={['Lần nạp', 'Tài xế', 'Số tiền trả muộn', 'Mã giao dịch', 'Lúc trả', 'Xử lý']}
             >
               {data.late_payments.items.map((l) => (
                 <Table.Tr
@@ -160,6 +201,16 @@ export function BillingExceptionsPage() {
                   <Table.Td className="nowrap">{vnd(l.late_amount_vnd)}</Table.Td>
                   <Table.Td>{l.late_gateway_ref}</Table.Td>
                   <Table.Td className="nowrap">{when(l.late_paid_at)}</Table.Td>
+                  <Table.Td>
+                    <Button
+                      type="button"
+                      size="compact-sm"
+                      variant="light"
+                      onClick={() => setSheet({ kind: 'late-refund', item: l })}
+                    >
+                      Hoàn
+                    </Button>
+                  </Table.Td>
                 </Table.Tr>
               ))}
             </ListTable>
@@ -290,6 +341,116 @@ export function BillingExceptionsPage() {
       )}
       {sheet?.kind === 'conflict' && (
         <ConflictReviewSheet item={sheet.item} onDone={done} onCancel={() => setSheet(null)} />
+      )}
+      {sheet?.kind === 'create-refund' && (
+        <CreateTopUpRefundSheet onDone={done} onCancel={() => setSheet(null)} />
+      )}
+      {sheet?.kind === 'late-refund' && (
+        <LateRefundSheet item={sheet.item} onDone={done} onCancel={() => setSheet(null)} />
+      )}
+      {sheet?.kind === 'confirm-refund' && (
+        <ConfirmRefundSheet item={sheet.item} onDone={done} onCancel={() => setSheet(null)} />
+      )}
+      {sheet?.kind === 'fail-refund' && (
+        <FailRefundSheet item={sheet.item} onDone={done} onCancel={() => setSheet(null)} />
+      )}
+      {sheet?.kind === 'redo-refund' && (
+        <RedoRefundSheet item={sheet.item} onDone={done} onCancel={() => setSheet(null)} />
+      )}
+    </>
+  );
+}
+
+/** Customer-service work list (BR-P51): requested and failed refunds, oldest first. */
+function RefundTab({
+  queue: { data, error, isLoading },
+  onConfirm,
+  onFail,
+  onRedo,
+}: {
+  queue: { data?: RefundQueue | undefined; error?: unknown; isLoading: boolean };
+  onConfirm: (item: RefundQueueItem) => void;
+  onFail: (item: RefundQueueItem) => void;
+  onRedo: (item: RefundQueueItem) => void;
+}) {
+  if (isLoading) return <Loader size="sm" aria-label="Đang tải…" />;
+  if (error && !data) return <Notice tone="error">{billingError(error)}</Notice>;
+  if (!data) return null;
+  return (
+    <>
+      <p className="muted small">
+        CSKH hoàn đúng số tiền trên cổng merchant VNPay trong 7 ngày làm việc, rồi Admin ghi nhận mã
+        hoàn. Cũ nhất ở trên.
+      </p>
+      {data.items.length === 0 ? (
+        <EmptyState>Không có yêu cầu hoàn nào đang chờ.</EmptyState>
+      ) : (
+        <ListTable
+          head={[
+            'Ngày tạo',
+            'Tài xế',
+            'Lần nạp',
+            'Loại',
+            'Số tiền cần hoàn',
+            'Trạng thái',
+            'Xử lý',
+          ]}
+        >
+          {data.items.map((f) => (
+            <Table.Tr
+              data-tone={f.status === 'failed' ? 'critical' : 'major'}
+              key={f.refund_id}
+              aria-label={`Hoàn tiền lần nạp #${f.top_up_id}`}
+            >
+              <Table.Td className="nowrap">{when(f.created_at)}</Table.Td>
+              <Table.Td>
+                <Driver d={f.driver} />
+              </Table.Td>
+              <Table.Td>
+                <span className="cell-title">#{f.top_up_id}</span>
+                <div className="muted small">{f.gateway_reference}</div>
+                {f.gateway_transaction_no && (
+                  <div className="muted small">GD {f.gateway_transaction_no}</div>
+                )}
+              </Table.Td>
+              <Table.Td className="small">
+                {REFUND_KIND[f.kind]}
+                {f.requested_by === null && <div className="muted small">Hệ thống tạo</div>}
+              </Table.Td>
+              <Table.Td className="nowrap">{vnd(f.amount_vnd)}</Table.Td>
+              <Table.Td className="small">
+                {f.status === 'failed' ? <b>Cổng từ chối</b> : 'Chờ hoàn'}
+                {f.failure_reason && <div className="muted small">{f.failure_reason}</div>}
+              </Table.Td>
+              <Table.Td>
+                {f.status === 'requested' ? (
+                  <Group gap={6} wrap="nowrap">
+                    <Button
+                      type="button"
+                      size="compact-sm"
+                      variant="light"
+                      onClick={() => onConfirm(f)}
+                    >
+                      Đã hoàn
+                    </Button>
+                    <Button
+                      type="button"
+                      size="compact-sm"
+                      variant="default"
+                      onClick={() => onFail(f)}
+                    >
+                      Cổng từ chối
+                    </Button>
+                  </Group>
+                ) : (
+                  <Button type="button" size="compact-sm" variant="light" onClick={() => onRedo(f)}>
+                    Làm lại
+                  </Button>
+                )}
+              </Table.Td>
+            </Table.Tr>
+          ))}
+        </ListTable>
       )}
     </>
   );
