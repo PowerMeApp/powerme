@@ -12,20 +12,28 @@ class ApiProfileRepository
   ApiProfileRepository(this._session);
 
   final DriverApiSession _session;
+  // Retain vehicle identities when only the local language changes.
+  DriverAccountResponse? _account;
+  DriverProfile _snapshot = DriverProfile.empty;
 
   @override
-  DriverProfile read() {
-    final account = _session.account;
-    return account == null ? DriverProfile.empty : _profile(account);
-  }
+  DriverProfile read() => _profile(_session.account);
 
   @override
   Future<DriverProfile> refresh() async =>
       _profile(await _session.refreshAccount());
 
-  DriverProfile _profile(DriverAccountResponse account) => DriverProfile(
+  DriverProfile _profile(DriverAccountResponse? account) {
+    if (identical(account, _account)) return _snapshot;
+    _account = account;
+    return _snapshot = account == null
+        ? DriverProfile.empty.withLanguage(_snapshot.language)
+        : _map(account);
+  }
+
+  DriverProfile _map(DriverAccountResponse account) => DriverProfile(
     displayName: account.fullName,
-    language: AppLanguage.vietnamese,
+    language: _snapshot.language,
     vehicles: List.unmodifiable(
       account.vehicles.map(
         (vehicle) => Vehicle(
@@ -50,7 +58,12 @@ class ApiProfileRepository
   );
 
   @override
-  DriverProfile selectLanguage(AppLanguage language) => _unavailable();
+  DriverProfile selectLanguage(AppLanguage language) {
+    final profile = read();
+    return _snapshot = profile.language == language
+        ? profile
+        : profile.withLanguage(language);
+  }
 
   @override
   Future<DriverProfile> updateName(String name, int revision) async =>

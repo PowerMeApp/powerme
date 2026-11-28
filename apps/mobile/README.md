@@ -1,5 +1,20 @@
 # @powerme/mobile — App tài xế PowerMe (WP3)
 
+## Đổi Việt / Anh — 28/11/2026
+
+Tài khoản → Ngôn ngữ gần Đăng xuất → English/Tiếng Việt; copy và nhãn tab đổi ngay.
+Giữ lựa chọn qua navigation, refresh, thao tác xe và logout/login trong cùng ApiApp;
+app mới về VI. Login/registration vẫn VI, English còn từng phần; không API/storage/dependency mới.
+Local: 65/65 focused (gồm 6 ca ngôn ngữ), analyze sạch; chạy từ `apps/mobile` với SDK/cache có sẵn:
+
+```sh
+flutter analyze --no-pub
+flutter test --no-pub --concurrency=1 --reporter expanded test/driver_language_test.dart test/profile_controller_test.dart test/driver_vehicle_api_test.dart test/driver_vehicle_widget_test.dart test/driver_api_widget_test.dart test/driver_api_session_test.dart test/auth_profile_test.dart test/auth_profile_widget_test.dart test/driver_garage_navigation_test.dart
+```
+
+Ảnh [VI](docs/assets/mb-01-language/390-1x-vi-selector.png)/[EN](docs/assets/mb-01-language/390-1x-en-selector.png): offscreen API fixtures, SDK fonts, 390px/100%; chưa native/staging/TalkBack/VoiceOver.
+Evidence cũ có 320px/200%: nhãn tab chồng và account-top EN cắt header; không thay UX trong packaging.
+
 ## T163 — thông báo phiên đã kết thúc, 28/11/2026
 
 Khi Stop trả HTTP 409 `session_not_stoppable`, app hiện MSG30 inline đúng VI/EN

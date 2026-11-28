@@ -45,6 +45,7 @@ class ProfileController extends Notifier<ProfileState> {
     if (state.busy) return;
     state = ProfileState(
       ref.read(profileRepositoryProvider).selectLanguage(language),
+      failure: state.failure,
     );
   }
 

@@ -1,5 +1,12 @@
 # Coding reference 1 — màn hình và chức năng WP3
 
+## Đổi ngôn ngữ API Account — 28/11/2026
+
+View 10 → FR-02, UC-ACC-02/03, BR-P05/16/17, NFR-SEC-01 → PKG-3 Profile.
+Selector VI/EN dùng chung API/legacy, giữ keys/semantics/≥48dp, route/auth/xe và needsRefresh; busy khóa đổi.
+Navigation/refresh/thao tác xe/logout-login giữ lựa chọn; app mới về VI. Sáu ca ngôn ngữ trong 65 focused pass;
+[README](../README.md) ghi lệnh/evidence/giới hạn; chưa nghiệm thu native/staging, English còn từng phần.
+
 ## T163 — Stop sau khi trụ kết thúc, 28/11/2026
 
 Views 6/7 → FR-05/08, UC-CHG-03/04, MSG30, BR-P01/34/45,

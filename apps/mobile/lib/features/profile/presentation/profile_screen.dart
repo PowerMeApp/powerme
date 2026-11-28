@@ -216,6 +216,8 @@ class ProfileScreen extends ConsumerWidget {
           const SizedBox(height: 12),
           const VehicleProfileFeedback(showReload: true),
           const SizedBox(height: 24),
+          const _LanguageSelector(),
+          const SizedBox(height: 20),
           _SignOutButton(copy: copy),
         ],
       );
@@ -498,55 +500,7 @@ class ProfileScreen extends ConsumerWidget {
             ),
           ),
         const SizedBox(height: 28),
-        Text(copy.languageTitle, style: text.titleMedium),
-        const SizedBox(height: 12),
-        for (final language in AppLanguage.values) ...[
-          Semantics(
-            selected: profile.language == language,
-            child: OutlinedButton(
-              key: Key('language-${language.name}'),
-              style: OutlinedButton.styleFrom(
-                minimumSize: const Size(48, 56),
-                padding: const EdgeInsets.all(16),
-                foregroundColor: profile.language == language
-                    ? PowerMeColors.teal
-                    : PowerMeColors.text,
-                side: BorderSide(
-                  color: profile.language == language
-                      ? PowerMeColors.teal
-                      : PowerMeColors.outline,
-                ),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
-                ),
-              ),
-              onPressed: state.busy
-                  ? null
-                  : () => ref
-                        .read(profileControllerProvider.notifier)
-                        .selectLanguage(language),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      language == AppLanguage.vietnamese
-                          ? 'Tiếng Việt'
-                          : 'English',
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Icon(
-                    profile.language == language
-                        ? Icons.check_circle_outline_rounded
-                        : Icons.circle_outlined,
-                    size: 22,
-                  ),
-                ],
-              ),
-            ),
-          ),
-          const SizedBox(height: 10),
-        ],
+        const _LanguageSelector(),
         const SizedBox(height: 20),
         _SignOutButton(copy: copy),
         const SizedBox(height: 8),
@@ -596,6 +550,72 @@ class ProfileScreen extends ConsumerWidget {
             copy.text('Yêu cầu đóng tài khoản', 'Request account closure'),
           ),
         ),
+      ],
+    );
+  }
+}
+
+class _LanguageSelector extends ConsumerWidget {
+  const _LanguageSelector();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final state = ref.watch(profileControllerProvider);
+    final profile = state.profile;
+    final copy = AppCopy(profile.language);
+    final text = Theme.of(context).textTheme;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Text(copy.languageTitle, style: text.titleMedium),
+        const SizedBox(height: 12),
+        for (final language in AppLanguage.values) ...[
+          Semantics(
+            selected: profile.language == language,
+            child: OutlinedButton(
+              key: Key('language-${language.name}'),
+              style: OutlinedButton.styleFrom(
+                minimumSize: const Size(48, 56),
+                padding: const EdgeInsets.all(16),
+                foregroundColor: profile.language == language
+                    ? PowerMeColors.teal
+                    : PowerMeColors.text,
+                side: BorderSide(
+                  color: profile.language == language
+                      ? PowerMeColors.teal
+                      : PowerMeColors.outline,
+                ),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+              onPressed: state.busy
+                  ? null
+                  : () => ref
+                        .read(profileControllerProvider.notifier)
+                        .selectLanguage(language),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      language == AppLanguage.vietnamese
+                          ? 'Tiếng Việt'
+                          : 'English',
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Icon(
+                    profile.language == language
+                        ? Icons.check_circle_outline_rounded
+                        : Icons.circle_outlined,
+                    size: 22,
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 10),
+        ],
       ],
     );
   }

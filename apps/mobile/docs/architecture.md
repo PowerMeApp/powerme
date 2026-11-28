@@ -1,5 +1,12 @@
 # Coding reference 2 — class, package và ranh giới WP3
 
+## Local language trong ApiApp — 28/11/2026
+
+`ProfileRepository.selectLanguage(AppLanguage) → DriverProfile` giữ đồng bộ; API adapter cache theo account identity,
+map account mới với ngôn ngữ hiện tại; account null xóa identity/xe, giữ preference theo lifetime adapter.
+Language-only giữ instance Vehicle; refresh/add/default/remove dùng cùng preference, controller giữ failure/busy guard.
+Không đổi router/composition/HTTP/storage/deps; fresh ApiApp về VI, login/registration vẫn VI. Fixture: `driver_language_test.dart`, `driver_vehicle_api_test.dart`.
+
 ## T163 — outcome và refresh Stop, 28/11/2026
 
 PKG-3 Charging/CD-1/SD-1a/b: `ChargeStopOutcome.alreadyEnded` chỉ map cặp
