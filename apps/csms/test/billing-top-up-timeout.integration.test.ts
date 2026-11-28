@@ -13,7 +13,7 @@
  *
  * querydr giả: `fetch` inject vào `VnpayAdapter`, response ký bằng đúng `querydrResponseSignData` /
  * `vnpSecureHash` với cấu hình test (secret giả) — không gọi mạng thật. Mã TC theo Report 5 bản nộp
- * (TC-STM4-01…08): chỉ gắn TC-STM4-04 (bước querydr); ca khác đặt tên theo nội dung.
+ * (TC-STM4-01…08): gắn TC-STM4-04 (hết hạn) và TC-STM4-08 (bước querydr); ca khác đặt tên theo nội dung.
  *
  * Cần DATABASE_URL (DB test riêng — test DROP SCHEMA public); thiếu thì cả describe bị skip.
  */
@@ -96,7 +96,7 @@ describeDb('billing: quét top-up quá hạn + querydr (T32 Phần 8, SD-2d)', (
       undefined,
       WORK,
       // Phần 7: hoá đơn tạo trong transaction cộng tiền (không runner: không kick).
-      new EInvoiceService(d, { createInvoice: jest.fn() }),
+      new EInvoiceService(d, { createInvoice: jest.fn(), adjustInvoice: jest.fn() }),
     );
 
   /** Response querydr đã ký (mặc định: RC 00, TS 00, giao dịch thanh toán, đúng số tiền). */
@@ -305,7 +305,7 @@ describeDb('billing: quét top-up quá hạn + querydr (T32 Phần 8, SD-2d)', (
 
   // ---------------------------------------------------------------------------------------------
   describe('kết quả querydr dứt khoát (bảng 3.1)', () => {
-    it('TC-STM4-04 (bước querydr): pending quá expires_at, querydr đã trả → credited, số dư +amount, gateway_transaction_no = số querydr, completed_at, next_attempt_at NULL, afterPaymentCommitted', async () => {
+    it('TC-STM4-08 (bước querydr): pending quá expires_at, querydr đã trả → credited, số dư +amount, gateway_transaction_no = số querydr, completed_at, next_attempt_at NULL, afterPaymentCommitted', async () => {
       const t = await dueTopUp();
       script.set(t.ref, PAID);
       const after = jest.spyOn(
@@ -327,7 +327,7 @@ describeDb('billing: quét top-up quá hạn + querydr (T32 Phần 8, SD-2d)', (
       expect(after).toHaveBeenCalledWith({ topUpId: t.topUpId, outcome: 'credited' });
     });
 
-    it('TC-STM4-04 (bước querydr) có điểm → dòng redeem, cộng đủ amount_vnd', async () => {
+    it('TC-STM4-08 (bước querydr) có điểm → dòng redeem, cộng đủ amount_vnd', async () => {
       const d = await newDriver();
       await earn(d, 1000);
       const t = await dueTopUp(3, 100_000, 600, d);
@@ -378,7 +378,7 @@ describeDb('billing: quét top-up quá hạn + querydr (T32 Phần 8, SD-2d)', (
       expect(after).toHaveBeenCalledWith({ topUpId: t.topUpId, outcome: 'failed' });
     });
 
-    it('not_found (RC 91) → expired (#4), completed_at, next_attempt_at NULL, không exception_kind', async () => {
+    it('TC-STM4-04 not_found (RC 91) → expired (#4), completed_at, next_attempt_at NULL, không exception_kind', async () => {
       const t = await dueTopUp();
       script.set(t.ref, NOT_FOUND);
       const after = jest.spyOn(
@@ -1382,7 +1382,10 @@ describeDb('billing: quét top-up quá hạn + querydr (T32 Phần 8, SD-2d)', (
                gateway_transaction_no=$3, next_attempt_at=NULL, updated_at=now() WHERE id=$1`,
             [t.topUpId, completedAt, nextTxn()],
           );
-          await new EInvoiceService(db, { createInvoice: jest.fn() }).requestForTopUp(c, t.topUpId);
+          await new EInvoiceService(db, {
+            createInvoice: jest.fn(),
+            adjustInvoice: jest.fn(),
+          }).requestForTopUp(c, t.topUpId);
           await c.query('COMMIT');
         } finally {
           c.release();

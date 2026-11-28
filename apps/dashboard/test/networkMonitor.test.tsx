@@ -15,7 +15,7 @@ const cp = (id: string, over: Partial<NetworkChargePoint> = {}): NetworkChargePo
   connected: true,
   is_online: true,
   last_message_at: recent,
-  site: { id: '1', site_code: 'HCM-Q1', site_name: 'Trạm Quận 1' },
+  site: { id: '1', site_code: 'HCM-Q1', site_name: 'Trạm Quận 1', latitude: null, longitude: null },
   connectors: [
     {
       connector_id: `${id}1`,
@@ -52,7 +52,13 @@ const ROWS = [
   cp('1', { open_faults: { total: 2, top_severity: 'critical' } }),
   cp('2', {
     operator: { id: '2', legal_name: 'Bình Minh Charging' },
-    site: { id: '9', site_code: 'HN-01', site_name: 'Trạm Hà Nội' },
+    site: {
+      id: '9',
+      site_code: 'HN-01',
+      site_name: 'Trạm Hà Nội',
+      latitude: null,
+      longitude: null,
+    },
     is_online: false,
   }),
 ];

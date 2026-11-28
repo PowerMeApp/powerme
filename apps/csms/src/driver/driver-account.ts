@@ -13,10 +13,20 @@
  *   nên từ chối refresh token; `refresh()` đòi `typ: refresh+jwt` và `token_use: refresh` nên từ
  *   chối access token. Sống `DRIVER_API_REFRESH_TTL_S` (mặc định 30 ngày).
  *
- * Không có bảng refresh token: không thu hồi được từng token. Logout = app xoá token; khoá tài khoản
- * (account_status ≠ active) có hiệu lực ngay vì `refresh()` và mọi request kiểm lại DB. Refresh không
- * xoay vòng (không phát refresh token mới), nên hết 30 ngày phải đăng nhập lại — tránh phiên kéo dài
- * vô hạn khi chưa có cách thu hồi.
+ * BE-49 — đăng xuất, hai mức (migration 0033):
+ * - Mỗi lần đăng nhập là một "phiên thiết bị": jti (UUID) của refresh token, chép vào claim `sid`
+ *   của mọi access token phát từ nó. `logout()` (thiết bị này) ghi jti vào
+ *   `driver_refresh_revocations` → refresh token đó và access token mang `sid` đó bị từ chối; thiết
+ *   bị khác không ảnh hưởng.
+ * - Mọi token mang claim `ver` = `users.token_version` lúc phát. `logoutAll()` (Cài đặt → đăng xuất
+ *   mọi thiết bị) tăng số này → mọi token cũ bị từ chối.
+ * `authenticateDriver` và `refresh()` kiểm cả hai với DB mỗi lần. Token phát trước BE-49 không có
+ * `ver` (coi là 0) và không có `sid` (chỉ chết khi refresh token của nó bị thu hồi, hoặc khi đăng xuất
+ * mọi thiết bị, hoặc hết 15 phút). Khoá tài khoản (account_status ≠ active) cũng có hiệu lực ngay.
+ * Refresh không xoay vòng (không phát refresh token mới), nên hết 30 ngày phải đăng nhập lại.
+ *
+ * BE-49 — `updateProfile()` (UC-ACC-02, PATCH /me/profile): đổi họ tên và số điện thoại; email là
+ * định danh đăng nhập, chưa có luồng xác minh nên không đổi qua API này.
  *
  * Mật khẩu băm bằng scrypt dùng lại `charge-point-credential.ts` (định dạng `scrypt$N$r$p$salt$hash`,
  * ADR-0011). Không log mật khẩu, hash hay token; response không bao giờ chứa hash.
@@ -32,7 +42,13 @@ import {
   ChargePointLoginLimiter,
   type ChargePointLoginLimits,
 } from '../stations/charge-point-login-limiter.js';
-import { DEFAULT_DRIVER_REFRESH_TTL_S, DriverApiConfig, DriverApiError } from './driver-auth.js';
+import {
+  DEFAULT_DRIVER_REFRESH_TTL_S,
+  DriverApiConfig,
+  DriverApiError,
+  isSessionId,
+  tokenVersionClaim,
+} from './driver-auth.js';
 import { normalizePhoneNumber } from './phone-number.js';
 
 /** Bằng giới hạn trên của `authenticateDriver` (maxTokenAge 900). */
@@ -77,6 +93,7 @@ const REGISTER_KEYS = [
 ] as const;
 const CONTROL = /[\u0000-\u001f\u007f]/;
 const LOGIN_KEYS = ['email', 'phone_number', 'password'] as const;
+const PROFILE_KEYS = ['full_name', 'phone_number'] as const;
 /** Chuỗi số điện thoại dài hơn mức này không thể chuẩn hoá được (phone-number.ts: 32). */
 const MAX_PHONE_INPUT = 32;
 
@@ -99,6 +116,21 @@ export function normalizeEmail(raw: unknown): string {
   )
     throw new DriverApiError(400, 'invalid_email');
   return email;
+}
+
+/** Họ tên: trim, 1–100 ký tự (code point), không ký tự điều khiển. Sai → 400 `invalid_input`. */
+function checkFullName(raw: unknown): string {
+  const fullName = typeof raw === 'string' ? raw.trim() : '';
+  if (!fullName || [...fullName].length > 100 || CONTROL.test(fullName))
+    throw new DriverApiError(400, 'invalid_input');
+  return fullName;
+}
+
+/** BE-30: chuỗi số điện thoại → E.164 (phone-number.ts); không nhận ra → 400 `invalid_input`. */
+function checkPhone(raw: unknown): string {
+  const phone = typeof raw === 'string' ? normalizePhoneNumber(raw) : null;
+  if (!phone) throw new DriverApiError(400, 'invalid_input');
+  return phone;
 }
 
 /** 8–128 ký tự (đếm theo code point); không ép quy tắc chữ hoa / số / ký hiệu. */
@@ -141,17 +173,10 @@ export class DriverAccounts {
       throw new DriverApiError(400, 'consent_required');
     const email = normalizeEmail(body['email']);
     const password = checkPassword(body['password']);
-    const fullNameRaw = body['full_name'];
-    const fullName = typeof fullNameRaw === 'string' ? fullNameRaw.trim() : '';
-    if (!fullName || [...fullName].length > 100 || CONTROL.test(fullName))
-      throw new DriverApiError(400, 'invalid_input');
+    const fullName = checkFullName(body['full_name']);
     // BE-30: tuỳ chọn; có thì chuẩn hoá về E.164 (phone-number.ts), không nhận ra → 400.
     const phoneRaw = body['phone_number'];
-    let phone: string | null = null;
-    if (phoneRaw !== undefined && phoneRaw !== null) {
-      phone = typeof phoneRaw === 'string' ? normalizePhoneNumber(phoneRaw) : null;
-      if (!phone) throw new DriverApiError(400, 'invalid_input');
-    }
+    const phone = phoneRaw === undefined || phoneRaw === null ? null : checkPhone(phoneRaw);
 
     // Băm scrypt tốn CPU: dùng chung trần "đang xử lý" theo IP của limiter đăng nhập.
     const lock = this.limiter.check(email, ip);
@@ -206,7 +231,7 @@ export class DriverAccounts {
     } finally {
       client.release();
     }
-    return this.issue(userId);
+    return this.issue(userId, 0);
   }
 
   /**
@@ -258,8 +283,9 @@ export class DriverAccounts {
                 account_status: string;
                 password_hash: string | null;
                 is_driver: boolean;
+                token_version: number;
               }>(
-                `SELECT u.id::text AS id,u.role,u.account_status,u.password_hash,
+                `SELECT u.id::text AS id,u.role,u.account_status,u.password_hash,u.token_version,
                    (d.user_id IS NOT NULL) AS is_driver
                  FROM users u LEFT JOIN drivers d ON d.user_id=u.id
                  WHERE ${byEmail ? 'u.email' : 'u.phone_number'}=$1`,
@@ -273,7 +299,7 @@ export class DriverAccounts {
       }
       this.limiter.recordSuccess(identifier, ip);
       if (row.account_status !== 'active') throw new DriverApiError(403, 'account_locked');
-      return this.issue(row.id);
+      return this.issue(row.id, row.token_version);
     } finally {
       done();
     }
@@ -282,6 +308,109 @@ export class DriverAccounts {
   /** Refresh token → access token mới (không phát refresh mới). Kiểm lại DB mỗi lần. */
   async refresh(body: Record<string, unknown>): Promise<DriverTokens> {
     this.assertConfigured();
+    const { subject, version, sessionId } = await this.verifyRefresh(body);
+    const row = (
+      await this.db.$client.query<{
+        role: string;
+        account_status: string;
+        is_driver: boolean;
+        token_version: number;
+        revoked: boolean;
+      }>(
+        `SELECT u.role,u.account_status,u.token_version,(d.user_id IS NOT NULL) AS is_driver,
+           EXISTS(SELECT 1 FROM driver_refresh_revocations r WHERE r.jti=$2::uuid) AS revoked
+         FROM users u LEFT JOIN drivers d ON d.user_id=u.id WHERE u.id=$1`,
+        [subject, sessionId],
+      )
+    ).rows[0];
+    if (!row) throw new DriverApiError(401, 'invalid_refresh_token');
+    // BE-49: thiết bị này đã đăng xuất (jti bị thu hồi), hoặc đã "đăng xuất mọi thiết bị"
+    // (token_version tăng) → refresh token cũ chết như hết hạn.
+    if (row.revoked || row.token_version !== version)
+      throw new DriverApiError(401, 'invalid_refresh_token');
+    if (row.role !== 'driver' || !row.is_driver) throw new DriverApiError(403, 'forbidden');
+    if (row.account_status !== 'active') throw new DriverApiError(403, 'account_locked');
+    // Access token mới mang cùng `sid` = jti của refresh token → đăng xuất thiết bị này chặn được cả nó.
+    return this.issue(subject, row.token_version, sessionId);
+  }
+
+  /**
+   * BE-49 (UC-ACC-05) — đăng xuất **thiết bị này**. Body `{refresh_token}` (không dùng access token vì
+   * lúc đăng xuất nó thường đã hết hạn 15 phút). Ghi jti của refresh token vào
+   * `driver_refresh_revocations` (migration 0033): refresh token đó và mọi access token mang
+   * `sid` = jti đó bị từ chối từ request kế tiếp; thiết bị khác của tài xế không bị ảnh hưởng.
+   * Idempotent: gửi lại (kể cả token đã chết vì "đăng xuất mọi thiết bị") → vẫn thành công.
+   * Token sai chữ ký / sai dạng / hết hạn / thiếu jti → 401 `invalid_refresh_token` (app vẫn xoá token
+   * cục bộ). Không kiểm account_status: tài khoản bị khoá vẫn đăng xuất được.
+   */
+  async logout(body: Record<string, unknown>): Promise<void> {
+    this.assertConfigured();
+    const { subject, sessionId, expiresAt } = await this.verifyRefresh(body);
+    await this.db.$client.query(
+      `INSERT INTO driver_refresh_revocations(jti,user_id,expires_at) VALUES($1,$2,$3)
+       ON CONFLICT (jti) DO NOTHING`,
+      [sessionId, subject, expiresAt],
+    );
+  }
+
+  /**
+   * BE-49 — "đăng xuất mọi thiết bị" (Cài đặt → Bảo mật; vd mất điện thoại). Gọi với access token
+   * của tài xế đang đăng nhập (route `POST /me/logout-all`). Tăng `users.token_version` → mọi access
+   * và refresh token đã phát, trên mọi thiết bị kể cả thiết bị đang gọi, bị từ chối ngay.
+   */
+  async logoutAll(driverId: string): Promise<void> {
+    await this.db.$client.query(
+      'UPDATE users SET token_version=token_version+1,updated_at=now() WHERE id=$1',
+      [driverId],
+    );
+  }
+
+  /**
+   * BE-49 (UC-ACC-02). Body có ít nhất một trong `full_name`, `phone_number`; khoá khác → 400.
+   * `phone_number: null` gỡ số (vẫn đăng nhập được bằng email). Số trùng tài khoản khác → 409
+   * `phone_taken` (UNIQUE 0017 bắt cả ca hai request song song). Không đổi email.
+   * Trả false khi tài xế không còn active (route trả 403 như authenticateDriver).
+   */
+  async updateProfile(driverId: string, body: Record<string, unknown>): Promise<boolean> {
+    onlyKeys(body, PROFILE_KEYS);
+    if (Object.keys(body).length === 0) throw new DriverApiError(400, 'invalid_input');
+    const sets: string[] = [];
+    const params: unknown[] = [driverId];
+    if ('full_name' in body) {
+      params.push(checkFullName(body['full_name']));
+      sets.push(`full_name=$${params.length}`);
+    }
+    if ('phone_number' in body) {
+      const raw = body['phone_number'];
+      params.push(raw === null ? null : checkPhone(raw));
+      sets.push(`phone_number=$${params.length}`);
+    }
+    try {
+      const updated = await this.db.$client.query(
+        `UPDATE users SET ${sets.join(',')},updated_at=now()
+         WHERE id=$1 AND role='driver' AND account_status='active'
+           AND EXISTS(SELECT 1 FROM drivers d WHERE d.user_id=users.id)`,
+        params,
+      );
+      return updated.rowCount === 1;
+    } catch (error) {
+      const pg = error as { code?: string; constraint?: string };
+      if (pg.code === '23505' && pg.constraint === 'users_phone_number_key')
+        throw new DriverApiError(409, 'phone_taken');
+      throw error;
+    }
+  }
+
+  /**
+   * Kiểm chữ ký + claim của refresh token; trả `sub`, `ver`, `jti` (= mã phiên thiết bị, UUID) và
+   * `exp`. Sai bất cứ gì → 401. Mọi refresh token CSMS từng phát đều có jti UUID (BE-21).
+   */
+  private async verifyRefresh(body: Record<string, unknown>): Promise<{
+    subject: string;
+    version: number;
+    sessionId: string;
+    expiresAt: Date;
+  }> {
     onlyKeys(body, ['refresh_token']);
     const token = body['refresh_token'];
     if (
@@ -291,7 +420,6 @@ export class DriverAccounts {
     )
       throw new DriverApiError(401, 'invalid_refresh_token');
     const ttl = this.config.refreshTtlS ?? DEFAULT_DRIVER_REFRESH_TTL_S;
-    let subject: string;
     try {
       const { payload } = await jwtVerify(token, this.config.secret!, {
         algorithms: ['HS256'],
@@ -310,30 +438,30 @@ export class DriverAccounts {
         !/^[1-9][0-9]{0,18}$/.test(payload.sub) ||
         !Number.isSafeInteger(payload.exp) ||
         !Number.isSafeInteger(payload.iat) ||
-        payload.exp! - payload.iat! > ttl
+        payload.exp! - payload.iat! > ttl ||
+        !isSessionId(payload.jti)
       )
         throw new Error('claims');
-      subject = payload.sub;
+      return {
+        subject: payload.sub,
+        version: tokenVersionClaim(payload['ver']),
+        sessionId: payload.jti,
+        expiresAt: new Date(payload.exp! * 1000),
+      };
     } catch {
       throw new DriverApiError(401, 'invalid_refresh_token');
     }
-    const row = (
-      await this.db.$client.query<{ role: string; account_status: string; is_driver: boolean }>(
-        `SELECT u.role,u.account_status,(d.user_id IS NOT NULL) AS is_driver
-         FROM users u LEFT JOIN drivers d ON d.user_id=u.id WHERE u.id=$1`,
-        [subject],
-      )
-    ).rows[0];
-    if (!row) throw new DriverApiError(401, 'invalid_refresh_token');
-    if (row.role !== 'driver' || !row.is_driver) throw new DriverApiError(403, 'forbidden');
-    if (row.account_status !== 'active') throw new DriverApiError(403, 'account_locked');
-    return this.issue(subject, false);
   }
 
-  private async issue(subject: string, withRefresh = true): Promise<DriverTokens> {
+  /**
+   * `sessionId` có → chỉ phát access token (refresh) mang `sid` đó. Không có → đăng nhập mới: tạo mã
+   * phiên thiết bị mới, dùng làm jti của refresh token và `sid` của access token.
+   */
+  private async issue(subject: string, version: number, sessionId?: string): Promise<DriverTokens> {
     const secret = this.config.secret!;
     const now = Math.floor(this.now() / 1000);
-    const access = await new SignJWT({ role: 'driver' })
+    const sid = sessionId ?? randomUUID();
+    const access = await new SignJWT({ role: 'driver', ver: version, sid })
       .setProtectedHeader({ alg: 'HS256', typ: 'JWT' })
       .setSubject(subject)
       .setIssuer(this.config.issuer!)
@@ -347,16 +475,16 @@ export class DriverAccounts {
       token_type: 'Bearer',
       expires_in: DRIVER_ACCESS_TTL_S,
     };
-    if (!withRefresh) return tokens;
+    if (sessionId) return tokens;
     const ttl = this.config.refreshTtlS ?? DEFAULT_DRIVER_REFRESH_TTL_S;
-    tokens.refresh_token = await new SignJWT({ token_use: 'refresh' })
+    tokens.refresh_token = await new SignJWT({ token_use: 'refresh', ver: version })
       .setProtectedHeader({ alg: 'HS256', typ: REFRESH_TYP })
       .setSubject(subject)
       .setIssuer(this.config.issuer!)
       .setAudience(this.config.audience!)
       .setIssuedAt(now)
       .setExpirationTime(now + ttl)
-      .setJti(randomUUID())
+      .setJti(sid)
       .sign(secret);
     tokens.refresh_expires_in = ttl;
     return tokens;

@@ -5,7 +5,7 @@
 CSV — T108) · **sửa 20/11/2026** (T108a: 4 route doanh thu đã chạy, `unsettled`, K2 / K3 / K6, §4)
 **Task:** T98 — hợp đồng API Operator/Admin, cần có trước T97 (Nghĩa nối dashboard) và T108 (màn hình doanh thu)
 **Người chịu trách nhiệm:** Ngô Văn Minh Trí (WP2) — hợp đồng; route theo cột "Người làm" ở §3
-**File hợp đồng:** [`operator-admin-api.openapi.yaml`](operator-admin-api.openapi.yaml) (OpenAPI 3.1, v0.2.0)
+**File hợp đồng:** [`operator-admin-api.openapi.yaml`](operator-admin-api.openapi.yaml) (OpenAPI 3.1, v0.3.0)
 **Mẫu theo:** [`DRIVER-API-HOP-DONG.md`](DRIVER-API-HOP-DONG.md) và [`driver-api.openapi.yaml`](driver-api.openapi.yaml)
 — cùng quy ước JSON, lỗi, id chuỗi, phân trang.
 **Trạng thái trên `main` 9c90f34:** đăng nhập và RolesGuard **đã chạy** (FE-01a #118,
@@ -238,7 +238,10 @@ tại — cùng cách `GET /operator/v1/charge-points?site_id=` đang làm (T108
 - Ngoại lệ có chủ đích: `POST /faults/{id}/reset` **giữ đồng bộ** như console (WF-04) vì kết quả
   Accepted/Rejected quyết định trạng thái sự cố (STM-6 t4/t6) ngay trong response.
 - Header `Idempotency-Key` (8–64 ký tự; 64 vì cột `remote_commands.idempotency_key` là varchar(64))
-  bắt buộc ở: gửi lệnh, Reset sự cố, đặt biểu giá, các lệnh hoàn tiền / thử lại hoá đơn. Cùng key +
+  bắt buộc ở: gửi lệnh, Reset sự cố, đặt biểu giá, thử lại hoá đơn. ⊕ 27/11 (hoàn tiền thủ công): các lệnh
+  hoàn tiền (`top-ups/{id}/refund`, `late-refund`, `refunds/{id}/confirm|fail|redo`) **nhận key nhưng
+  không lưu** (như đặt biểu giá): gửi lại bị chặn bởi state machine (STM-4 / STM-10) và UNIQUE mã hoàn của
+  cổng, nên không có `idempotency_conflict`. Cùng key +
   cùng body trong 24 giờ → trả lại response cũ, không gửi lệnh lần hai; cùng key khác body → 409
   `idempotency_conflict`. Tình huống: nhân viên bấm "Dừng sạc", Wi-Fi rớt, dashboard gửi lại cùng key →
   CSMS không gửi RemoteStop thứ hai.
@@ -342,7 +345,7 @@ tách theo bề mặt — refresh token không mang `role`, role đọc lại t�
 | Endpoint | Role | UC / FR / BR | Trạng thái · người làm | Ghi chú |
 |---|---|---|---|---|
 | `GET /operator/v1/summary` | operator_staff | UC-OPS-02/03, Table 5 #17 | **done** FE-03 · `operator-monitoring.ts` · Nghĩa | số trụ theo trạng thái, súng theo nhóm BR-P38, sự cố mở theo mức, hàng việc review / unattributed (cùng luật `listPending`) / T72 (`driver_charge_intents.state='unknown'` chưa gắn phiên) |
-| `GET /operator/v1/charge-points` | operator_staff | UC-OPS-02, FR-10, BR-P10, BR-P38/39 | **done** FE-03 · `operator-monitoring.ts` · Nghĩa | lọc `site_id`, `lifecycle` (mặc định ẩn `decommissioned`), `online`, tìm riêng `charge_point_q` (mã / serial / ID trụ) và `site_q` (mã / tên / ID trạm) — FE-07, không phân biệt hoa thường và dấu, ≤ 100 ký tự, cả hai thì phải khớp cả hai; page/page_size; trạng thái OCPP nguyên văn từng súng + `status_quality` (offline 900 s / stale 2 × heartbeat, cùng ngưỡng Driver API) |
+| `GET /operator/v1/charge-points` | operator_staff | UC-OPS-02, FR-10, BR-P10, BR-P38/39 | **done** FE-03 · `operator-monitoring.ts` · Nghĩa | lọc `site_id`, `lifecycle` (mặc định ẩn `decommissioned`), `online`, tìm riêng `charge_point_q` (mã / serial / ID trụ) và `site_q` (mã / tên / ID trạm) — FE-07, không phân biệt hoa thường và dấu, ≤ 100 ký tự, cả hai thì phải khớp cả hai; page/page_size; trạng thái OCPP nguyên văn từng súng + `status_quality` (offline 900 s / stale 2 × heartbeat, cùng ngưỡng Driver API); `site.latitude` / `site.longitude` (null nếu trạm chưa có toạ độ) cho bản đồ màn 18 (FE-03c) |
 | `GET /operator/v1/charge-points/{id}` | operator_staff | UC-OPS-02/04, Table 5 #20 | **done** FE-05 · `operator-monitoring.ts` · Nghĩa | súng, sự cố mở (cùng DTO màn 21, có `allowed_actions`), 20 lệnh gần nhất; trụ của Operator khác hoặc không có → 404; trụ `decommissioned` vẫn xem được theo id |
 | `GET /operator/v1/charge-points/{id}/metrics` | operator_staff | UC-OPS-02, FR-10, BR-P43 | planned · Trí | `window=7d\|30d`; từ `connector_status_events` |
 | `POST /operator/v1/charge-points/{id}/commands` | operator_staff | UC-OPS-04, FR-11, BR-P01/P06/P07 | **console** (chỉ remote_stop) · Trí | `action` ∈ `remote_start`, `remote_stop`, `reset`; 202; Idempotency-Key |
@@ -522,7 +525,7 @@ Các route khác của §3.8 (tạo, sửa, đổi role, khoá / mở khoá) v�
 - Không lọc dữ liệu lab (NFR-03 / RQ1) như `GET /admin/v1/summary`; tìm theo `q` nên ít gặp.
 - Test: `test/t161-admin-users.integration.test.ts` (8 ca HTTP / Postgres).
 
-### 3.9 Tổng quan nền tảng (5) và ngoại lệ thanh toán (8)
+### 3.9 Tổng quan nền tảng (5) và ngoại lệ thanh toán (10)
 
 | Endpoint | Role | UC / FR / BR | Trạng thái · người làm | Ghi chú |
 |---|---|---|---|---|
@@ -532,12 +535,15 @@ Các route khác của §3.8 (tạo, sửa, đổi role, khoá / mở khoá) v�
 | `GET /admin/v1/reconciliation-records` | admin | UC-ADM-07, FR-16 | **console** · Trí | |
 | `GET /admin/v1/ocpp-messages` | admin | UC-ADM-07, FE-08 | **console** · Nghĩa | |
 | `GET /admin/v1/billing/top-ups?status=credited` | admin | UC-ADM-08, BR-P21 | planned · Khang | hình dạng phần tử: WF-02 D10 |
-| `POST /admin/v1/billing/top-ups/{id}/refund` | admin | SD-2e, BR-P21 | planned · Khang | 202 `{refund_id, status: requested}` |
+| `POST /admin/v1/billing/top-ups/{id}/refund` | admin | SD-2e, BR-P21, BR-P51 | **done** · Khang · `admin-billing.ts` | 202 `{refund_id, status: requested, amount_vnd}`; 404 `not_found`; 409 `not_refundable` / `account_closed`; 422 `insufficient_available_balance` (WF-02 D10) |
 | `GET /admin/v1/billing/top-ups/late-payments` | admin | BR-P13 | planned · Khang | |
-| `POST /admin/v1/billing/top-ups/{id}/late-refund` | admin | SD-2e, BR-P13 | planned · Khang | 202 |
+| `POST /admin/v1/billing/top-ups/{id}/late-refund` | admin | SD-2e, BR-P13, BR-P51 | **done** · Khang · `admin-billing.ts` | 202 như trên (`amount_vnd` = khoản trễ); 404; 409 `no_late_payment` / `already_requested` |
 | `GET /admin/v1/billing/e-invoices?status=needs_review` | admin | BR-P44 | planned · Khang | |
 | `POST /admin/v1/billing/e-invoices/{id}/retry` | admin | SD-2c, BR-P44 | planned · Khang | `last_error_kind` ∈ `transient`, `data` (theo DB) |
-| `GET /admin/v1/billing/refunds?status=failed` | admin | STM-10, WF-02 D1 | planned · Khang | định nghĩa lại ở PR ghi nhận hoàn thủ công (requested + failed, chờ CSKH) |
+| `GET /admin/v1/billing/refunds?status=requested\|failed` | admin | STM-10, BR-P51, WF-02 D1 | **done** · Khang · `admin-billing.ts` | danh sách chờ CSKH: mặc định `requested` + `failed` (gồm `account_closure`), cũ nhất trước, `{generated_at, limit, total, items}`; item đủ để tra giao dịch trên cổng (WF-02 D10) |
+| `POST /admin/v1/billing/refunds/{id}/confirm` | admin | SD-2e, STM-10 #2, BR-P51 | **done** · Khang · `admin-billing.ts` | body `{gateway_refund_no}` → 200 `{refund_id, status: done, gateway_refund_no, completed_at, already_done}`; 409 `refund_no_used` / `invalid_transition` |
+| `POST /admin/v1/billing/refunds/{id}/fail` | admin | SD-2e, STM-10 #3, BR-P51 | **done** · Khang · `admin-billing.ts` | body `{reason}` → 200 `{refund_id, status: failed, failure_reason}`; 409 `invalid_transition` |
+| `POST /admin/v1/billing/refunds/{id}/redo` | admin | SD-2e, STM-10 #4, BR-P51 | **done** · Khang · `admin-billing.ts` | 200 `{refund_id, status: requested}`; 409 `invalid_transition` |
 
 Không còn route Admin "hoàn tiền tài khoản đóng": hệ thống tự hoàn khi tài xế đóng (WF-02 D6, 09/11),
 nên `credit-accounts/{id}/closure-refund` trong mock dashboard bỏ.
@@ -548,9 +554,11 @@ Cập nhật 23/11/2026 theo x-status của YAML sau T108b (#200) và FE-07: đ�
 BE-44 (25/11): 13 → 16 (onboard, đăng ký serial, sổ trụ — `GET` mới làm một phần bộ lọc).
 27/11 (T32 Phần 10a, review Ân #212): bỏ `POST /admin/v1/billing/refunds/{id}/retry` vì hoàn tiền làm
 thủ công (WF-02 D1, D-AC / SRS BR-P51), 76 → 75.
+27/11 (PR ghi nhận hoàn thủ công): `top-ups/{id}/refund`, `late-refund`, `GET refunds` → done; thêm
+`refunds/{id}/confirm`, `fail`, `redo`; 75 → 78, đã chạy 19 → 25, planned 31 → 28.
 
-**75 endpoint** (bản 10/11: 76; bản BE-31 12/11: 73): 2 dưới `/api/auth/v1` (đăng nhập và refresh,
-công khai — hai route công khai duy nhất), 39 dưới `/api/operator/v1`, 34 dưới `/api/admin/v1`. So
+**78 endpoint** (bản 27/11 trước hoàn thủ công: 75; bản 10/11: 76; bản BE-31 12/11: 73): 2 dưới `/api/auth/v1` (đăng nhập và refresh,
+công khai — hai route công khai duy nhất), 39 dưới `/api/operator/v1`, 37 dưới `/api/admin/v1`. So
 với BE-31: +1 refresh (T125), +2 giao dịch Admin (T108).
 
 | Nhóm | Tổng | đã chạy | console | service | in progress | planned |
@@ -565,8 +573,8 @@ với BE-31: +1 refresh (T125), +2 giao dịch Admin (T108).
 | Tài khoản & role | 8 | 0 | 0 | 0 | 0 | 8 |
 | Thẻ RFID | 3 | 3 | 0 | 0 | 0 | 0 |
 | Tổng quan nền tảng | 5 | 0 | 5 | 0 | 0 | 0 |
-| Ngoại lệ thanh toán | 7 | 0 | 0 | 0 | 0 | 7 |
-| **Cộng** | **75** | **19** | **14** | **9** | **2** | **31** |
+| Ngoại lệ thanh toán | 10 | 6 | 0 | 0 | 0 | 4 |
+| **Cộng** | **78** | **25** | **14** | **9** | **2** | **28** |
 
 ## 4. Doanh thu theo BR-P46
 
@@ -946,12 +954,15 @@ trạng thái (2xx/4xx nghiệp vụ khác với 401/403). Ba điều kiện c�
 | 67 | `GET /api/admin/v1/reconciliation-records` | 401 | 403 | 403 | ✓ | console |
 | 68 | `GET /api/admin/v1/ocpp-messages` | 401 | 403 | 403 | ✓ | console |
 | 69 | `GET /api/admin/v1/billing/top-ups` | 401 | 403 | 403 | ✓ | planned |
-| 70 | `POST /api/admin/v1/billing/top-ups/{topUpId}/refund` | 401 | 403 | 403 | ✓ | planned |
+| 70 | `POST /api/admin/v1/billing/top-ups/{topUpId}/refund` | 401 | 403 | 403 | ✓ | implemented (hoàn thủ công) |
 | 71 | `GET /api/admin/v1/billing/top-ups/late-payments` | 401 | 403 | 403 | ✓ | planned |
-| 72 | `POST /api/admin/v1/billing/top-ups/{topUpId}/late-refund` | 401 | 403 | 403 | ✓ | planned |
+| 72 | `POST /api/admin/v1/billing/top-ups/{topUpId}/late-refund` | 401 | 403 | 403 | ✓ | implemented (hoàn thủ công) |
 | 73 | `GET /api/admin/v1/billing/e-invoices` | 401 | 403 | 403 | ✓ | planned |
 | 74 | `POST /api/admin/v1/billing/e-invoices/{invoiceId}/retry` | 401 | 403 | 403 | ✓ | planned |
-| 75 | `GET /api/admin/v1/billing/refunds` | 401 | 403 | 403 | ✓ | planned |
+| 75 | `GET /api/admin/v1/billing/refunds` | 401 | 403 | 403 | ✓ | implemented (hoàn thủ công) |
+| 76 | `POST /api/admin/v1/billing/refunds/{refundId}/confirm` | 401 | 403 | 403 | ✓ | implemented (hoàn thủ công) |
+| 77 | `POST /api/admin/v1/billing/refunds/{refundId}/fail` | 401 | 403 | 403 | ✓ | implemented (hoàn thủ công) |
+| 78 | `POST /api/admin/v1/billing/refunds/{refundId}/redo` | 401 | 403 | 403 | ✓ | implemented (hoàn thủ công) |
 
 ## RFID credit protection — 27/11/2026
 

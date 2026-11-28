@@ -27,11 +27,13 @@
     "infra:down": "docker compose -f infra/docker-compose.yml down",
     "infra:logs": "docker compose -f infra/docker-compose.yml logs -f",
     "infra:reset": "docker compose -f infra/docker-compose.yml down -v",
-    "sim:tru3d:build": "vite build --config simulator/d1-hmi/tru3d/vite.config.mjs"
+    "sim:tru3d:build": "vite build --config simulator/d1-hmi/tru3d/vite.config.mjs",
+    "tc:coverage": "node scripts/tc-coverage.mjs"
   },
   "devDependencies": {
     "@react-three/fiber": "9.8.2",
     "prettier": "^3.4.2",
+    "qrcode-generator": "2.0.4",
     "react": "19.3.1",
     "react-dom": "19.3.1",
     "three": "0.187.0",

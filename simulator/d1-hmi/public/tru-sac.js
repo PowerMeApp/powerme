@@ -171,7 +171,7 @@
           { t: `${c.kw.toFixed(1)} kW`, s: 24, c: 'ok' },
           { t: `SoC ${soc} %`, s: 17 },
           { t: mmss(c.elapsed), s: 16 },
-          { t: `${c.cost.toLocaleString('vi-VN')} đ`, s: 16, c: 'info' },
+          { t: `${c.kwh.toFixed(2)} kWh`, s: 16, c: 'info' },
         ];
       case 'SuspendedEV':
       case 'SuspendedEVSE':
@@ -256,7 +256,12 @@
   window.renderTru = function renderTru(s) {
     const n = s.net;
     root.dataset.net = n.state;
-    $('trSerial').textContent = `120 kW DC · ${s.cpId}`;
+    // QA-11: nhãn và số súng theo phần cứng thật (snapshot.spec); trụ một súng ẩn súng B + nửa LCD B.
+    const hw = s.spec ? `${s.spec.ratedKw} kW ${s.spec.kind.toUpperCase()}` : '120 kW DC';
+    $('trSerial').textContent = `${hw} · ${s.cpId}`;
+    const two = s.connectors.some((c) => c.id === 2);
+    $('trg2').style.display = two ? '' : 'none';
+    $('lcd2').style.display = two ? '' : 'none';
     $('trNetTxt').textContent =
       { online: 'Mạng: online', offline: 'Mạng: MẤT KẾT NỐI', connecting: 'Mạng: đang nối...' }[
         n.state

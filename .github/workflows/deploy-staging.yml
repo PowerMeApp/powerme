@@ -94,6 +94,10 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          # FE-03c: khoá Tile Vietmap cho bản đồ dashboard (chỉ image dashboard dùng; trống thì màn 18
+          # chỉ có danh sách). Secret repo VIETMAP_TILE_KEY — khoá Tile-only, không phải khoá CSMS.
+          build-args: |
+            VITE_VIETMAP_TILE_KEY=${{ matrix.name == 'powerme-dashboard' && secrets.VIETMAP_TILE_KEY || '' }}
           cache-from: type=gha,scope=${{ matrix.name }}
           cache-to: type=gha,mode=max,scope=${{ matrix.name }}
 

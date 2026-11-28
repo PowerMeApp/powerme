@@ -56,6 +56,7 @@ describeDb('billing: việc nền e-invoice-issue + Admin retry (T32 Phần 7, S
   let steps: Step[] = [];
   let calls: EInvoiceInput[] = [];
   const provider: EInvoiceProviderAdapter = {
+    adjustInvoice: jest.fn(),
     createInvoice: (input, signal) => {
       calls.push(input);
       return (steps.shift() ?? ISSUED)(input, signal);

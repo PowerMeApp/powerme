@@ -22,8 +22,8 @@ import { HorizontalBlurShader } from 'three/examples/jsm/shaders/HorizontalBlurS
 import { VerticalBlurShader } from 'three/examples/jsm/shaders/VerticalBlurShader.js';
 
 export const BG = '#040506';
-// Màu fog của cảnh sáng: gần màu giữa gradient Hero Sky (#d2e5ff → #fff9ee) để xe ở xa nhạt dần
-export const LIGHT_FOG = '#eef1f6';
+// Màu fog của cảnh sáng (?theme=light, QA-10): gần nền thẻ hero sáng (trắng ngà) để xe ở xa nhạt dần
+export const LIGHT_FOG = '#f6f6f3';
 
 const floorVert = /* glsl */ `
   uniform mat4 textureMatrix;

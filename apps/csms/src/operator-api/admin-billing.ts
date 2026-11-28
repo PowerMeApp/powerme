@@ -6,18 +6,41 @@
  *   POST /billing/top-ups/{id}/recheck              → TopUpService.recheckTopUp (200)
  *   POST /billing/top-ups/{id}/exception-reviewed   → TopUpService.markExceptionReviewed (200)
  *   POST /billing/payment-conflicts/{id}/review     { note } → TopUpService.markConflictReviewed (200)
- * Refunds are manual (WF-02 D1, D-AC / SRS BR-P51): customer care refunds on the VNPay merchant
- * portal and the Admin records the result; those routes come in a later PR. The repo has no audit
- * table: every Admin action is a structured log line with `admin_id` (as `e_invoice_admin_retry`).
+ * Manual refunds (WF-02 D1, D-AC / SRS BR-P51; SD-2e v3.0): customer care refunds on the VNPay
+ * merchant portal, the Admin records the result here:
+ *   POST /billing/top-ups/{id}/refund               → TopUpService.refund (202)
+ *   POST /billing/top-ups/{id}/late-refund          → TopUpService.refundLatePayment (202)
+ *   GET  /billing/refunds[?status=requested|failed] → BillingExceptionsQuery.listRefunds (200)
+ *   POST /billing/refunds/{id}/confirm  { gateway_refund_no } → RefundService.confirmDone (200)
+ *   POST /billing/refunds/{id}/fail     { reason }            → RefundService.markFailed (200)
+ *   POST /billing/refunds/{id}/redo                           → RefundService.redo (200)
+ * `Idempotency-Key` on the refund commands is accepted and not stored (as operator-pricing): a
+ * repeat is caught by STM-4 / STM-10 and the UNIQUE refund number. The repo has no audit table:
+ * every Admin action is a structured log line with `admin_id` (as `e_invoice_admin_retry`).
  * Domain errors → `{ error, detail }` here;
  * 401 / 403 / 405 / 415 / 413 come from the router (operator-api.http.ts), like the other routes.
  */
 import { Logger } from '@nestjs/common';
-import { BillingExceptionsQuery } from '../billing/billing-exceptions.query.js';
-import { AdminReviewRejected, EInvoiceNotFound, TopUpRejected } from '../billing/billing-errors.js';
+import {
+  BillingExceptionsQuery,
+  type RefundQueueStatus,
+} from '../billing/billing-exceptions.query.js';
+import {
+  AdminReviewRejected,
+  EInvoiceNotFound,
+  RefundNotAllowed,
+  RefundNotFound,
+  RefundNoUsed,
+  TopUpRejected,
+} from '../billing/billing-errors.js';
 import type { EInvoiceService } from '../billing/e-invoice.service.js';
 import { InvalidTransition } from '../billing/invalid-transition.js';
-import type { RecheckResult, TopUpService } from '../billing/top-up.service.js';
+import {
+  parseFailureReason,
+  parseGatewayRefundNo,
+  type RefundService,
+} from '../billing/refund.service.js';
+import type { RecheckResult, RefundDecision, TopUpService } from '../billing/top-up.service.js';
 import { AuthError } from '../users/auth.js';
 import type { Principal } from '../users/roles-guard.js';
 
@@ -25,6 +48,7 @@ import type { Principal } from '../users/roles-guard.js';
 export interface AdminBillingDeps {
   topUps: TopUpService;
   eInvoices: EInvoiceService;
+  refunds: RefundService;
 }
 
 export type BillingRoute =
@@ -32,16 +56,28 @@ export type BillingRoute =
   | { kind: 'invoice_retry'; id: number }
   | { kind: 'recheck'; id: number }
   | { kind: 'exception_reviewed'; id: number }
-  | { kind: 'conflict_review'; id: number };
+  | { kind: 'conflict_review'; id: number }
+  | { kind: 'refund_top_up'; id: number }
+  | { kind: 'refund_late'; id: number }
+  | { kind: 'refunds'; statuses: RefundQueueStatus[] }
+  | { kind: 'refund_confirm'; id: number }
+  | { kind: 'refund_fail'; id: number }
+  | { kind: 'refund_redo'; id: number };
 
-type ActionKind = Exclude<BillingRoute['kind'], 'exceptions'>;
+type ActionKind = Exclude<BillingRoute['kind'], 'exceptions' | 'refunds'>;
 
 const ACTIONS: Record<string, ActionKind> = {
   'e-invoices/retry': 'invoice_retry',
   'top-ups/recheck': 'recheck',
   'top-ups/exception-reviewed': 'exception_reviewed',
   'payment-conflicts/review': 'conflict_review',
+  'top-ups/refund': 'refund_top_up',
+  'top-ups/late-refund': 'refund_late',
+  'refunds/confirm': 'refund_confirm',
+  'refunds/fail': 'refund_fail',
+  'refunds/redo': 'refund_redo',
 };
+const REFUND_QUEUE_STATUSES: readonly RefundQueueStatus[] = ['requested', 'failed'];
 const ACTION_PATH = /^\/billing\/([a-z-]+)\/([^/]+)\/([a-z-]+)$/;
 /** Safe integer, no sign or leading zero (as the fault routes). */
 const ID = /^[1-9][0-9]{0,14}$/;
@@ -49,9 +85,16 @@ export const REVIEW_NOTE_MAX = 1000;
 /** VNPay blocks a repeated querydr (RC 94) for a few minutes (sandbox 16/11, D4). */
 const RECHECK_RETRY_AFTER_MINUTES = 15;
 
-/** Matches `rest` (path after /api/admin/v1); null if it is not a billing route. */
-export function matchBillingRoute(rest: string): BillingRoute | null {
+/**
+ * Matches `rest` (path after /api/admin/v1); null if it is not a billing route. Only
+ * `/billing/refunds` takes a query (`status`, at most once); the router rejects it elsewhere.
+ */
+export function matchBillingRoute(
+  rest: string,
+  query: URLSearchParams = new URLSearchParams(),
+): BillingRoute | null {
   if (rest === '/billing/exceptions') return { kind: 'exceptions' };
+  if (rest === '/billing/refunds') return { kind: 'refunds', statuses: refundStatuses(query) };
   const m = ACTION_PATH.exec(rest);
   if (!m) return null;
   const kind = ACTIONS[`${m[1]}/${m[3]}`];
@@ -60,9 +103,20 @@ export function matchBillingRoute(rest: string): BillingRoute | null {
   return { kind, id: Number(m[2]) };
 }
 
-export const billingRouteMethod = (r: BillingRoute) => (r.kind === 'exceptions' ? 'GET' : 'POST');
+function refundStatuses(query: URLSearchParams): RefundQueueStatus[] {
+  const keys = [...query.keys()];
+  if (keys.length === 0) return [...REFUND_QUEUE_STATUSES];
+  const status = query.get('status') as RefundQueueStatus;
+  if (keys.length !== 1 || keys[0] !== 'status' || !REFUND_QUEUE_STATUSES.includes(status))
+    throw new AuthError(400, 'invalid_input');
+  return [status];
+}
+
+export const billingRouteMethod = (r: BillingRoute) =>
+  r.kind === 'exceptions' || r.kind === 'refunds' ? 'GET' : 'POST';
 /** Routes with a JSON body (the others take none and do not read it). */
-export const billingRouteHasBody = (r: BillingRoute) => r.kind === 'conflict_review';
+export const billingRouteHasBody = (r: BillingRoute) =>
+  r.kind === 'conflict_review' || r.kind === 'refund_confirm' || r.kind === 'refund_fail';
 
 export interface RouteReply {
   status: number;
@@ -168,6 +222,90 @@ export async function runBillingRoute(
         throw error;
       }
     }
+    case 'refund_top_up':
+    case 'refund_late':
+      return createRefund(route.kind, route.id, adminId, deps.topUps);
+    case 'refunds':
+      return { status: 200, body: await exceptions.listRefunds(route.statuses) };
+    case 'refund_confirm': {
+      const refundNo = parseGatewayRefundNo(onlyString(body, 'gateway_refund_no'));
+      if (refundNo === null) throw new AuthError(400, 'invalid_input');
+      return refundAction(async () => {
+        const r = await deps.refunds.confirmDone(route.id, refundNo, adminId);
+        return {
+          refund_id: String(r.refundId),
+          status: r.status,
+          gateway_refund_no: r.gatewayRefundNo,
+          completed_at: r.completedAt.toISOString(),
+          already_done: r.alreadyDone,
+        };
+      });
+    }
+    case 'refund_fail': {
+      const reason = parseFailureReason(onlyString(body, 'reason'));
+      if (reason === null) throw new AuthError(400, 'invalid_input');
+      return refundAction(async () => {
+        const r = await deps.refunds.markFailed(route.id, reason, adminId);
+        return { refund_id: String(r.refundId), status: r.status, failure_reason: r.failureReason };
+      });
+    }
+    case 'refund_redo':
+      return refundAction(async () => {
+        const r = await deps.refunds.redo(route.id, adminId);
+        return { refund_id: String(r.refundId), status: r.status };
+      });
+  }
+}
+
+/** RefundNotAllowed → HTTP (D1, SD-2e "409 / 422"): balance rule 422, state conflicts 409. */
+const REFUND_REJECT: Record<string, { status: number; detail: string }> = {
+  not_found: { status: 404, detail: 'Không có top-up này' },
+  not_refundable: { status: 409, detail: 'Chỉ hoàn top-up đang credited' },
+  account_closed: { status: 409, detail: 'Tài khoản đã đóng' },
+  insufficient_available_balance: {
+    status: 422,
+    detail: 'Số dư khả dụng không đủ để trừ số đã nạp',
+  },
+  no_late_payment: { status: 409, detail: 'Top-up không có khoản thanh toán trễ' },
+  already_requested: { status: 409, detail: 'Khoản trễ này đã có yêu cầu hoàn' },
+};
+
+async function createRefund(
+  kind: 'refund_top_up' | 'refund_late',
+  topUpId: number,
+  adminId: number,
+  topUps: TopUpService,
+): Promise<RouteReply> {
+  let r: RefundDecision;
+  try {
+    r =
+      kind === 'refund_top_up'
+        ? await topUps.refund(topUpId, adminId)
+        : await topUps.refundLatePayment(topUpId, adminId);
+  } catch (error) {
+    const m = error instanceof RefundNotAllowed ? REFUND_REJECT[error.reason] : undefined;
+    if (m) return err(m.status, (error as RefundNotAllowed).reason, m.detail);
+    throw error;
+  }
+  return {
+    status: 202,
+    body: { refund_id: String(r.refundId), status: r.status, amount_vnd: r.amountVnd },
+  };
+}
+
+/** Shared errors of confirm / fail / redo (STM-10). */
+async function refundAction(run: () => Promise<Record<string, unknown>>): Promise<RouteReply> {
+  try {
+    return { status: 200, body: await run() };
+  } catch (error) {
+    if (error instanceof RefundNotFound) return err(404, 'not_found', 'Không có refund này');
+    if (error instanceof RefundNoUsed)
+      return err(409, 'refund_no_used', 'Mã hoàn này đã được ghi cho một refund khác');
+    if (error instanceof InvalidTransition)
+      return err(409, 'invalid_transition', 'Refund không ở trạng thái cho phép thao tác này', {
+        from: error.from,
+      });
+    throw error;
   }
 }
 

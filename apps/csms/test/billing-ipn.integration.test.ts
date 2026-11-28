@@ -213,7 +213,7 @@ describeDb('billing: IPN VNPay — TopUpService.applyPaymentResult (T32 Phần 6
     await resetAndMigrate(db.$client);
     const ledger = new CreditLedgerService(db);
     loyalty = new LoyaltyService({ pointsExpiryMonths: 12 });
-    eInvoices = new EInvoiceService(db, { createInvoice: jest.fn() }, {
+    eInvoices = new EInvoiceService(db, { createInvoice: jest.fn(), adjustInvoice: jest.fn() }, {
       register: jest.fn(),
       kick,
     } as unknown as BackgroundWorkRunner);
@@ -248,7 +248,7 @@ describeDb('billing: IPN VNPay — TopUpService.applyPaymentResult (T32 Phần 6
 
   // ---------------------------------------------------------------------------------------------
   describe('TC-STM4-02: thanh toán thành công cộng tiền đúng một lần', () => {
-    it('IPN thành công → credited, số dư + amount, gateway_transaction_no, next_attempt_at NULL, completed_at; lặp → 02; lần trả thứ hai → khoản trễ; khoản thứ ba → 02 + log error', async () => {
+    it('TC-F06-01 TC-F06-02 IPN thành công → credited, số dư + amount, gateway_transaction_no, next_attempt_at NULL, completed_at; lặp → 02; lần trả thứ hai → khoản trễ; khoản thứ ba → 02 + log error', async () => {
       const t = await pendingTopUp(200_000);
       const first = ipn(t);
       expect(await service.applyPaymentResult(first)).toEqual({
@@ -464,7 +464,7 @@ describeDb('billing: IPN VNPay — TopUpService.applyPaymentResult (T32 Phần 6
 
   // ---------------------------------------------------------------------------------------------
   describe('thành công tới khi top-up đã quá hạn / đã có kết quả', () => {
-    it('TC-STM4-04 (bước IPN): pending đã quá expires_at, IPN thành công → credited (#2)', async () => {
+    it('(bước IPN): pending đã quá expires_at, IPN thành công → credited (#2)', async () => {
       const t = await pendingTopUp(150_000);
       await q(
         `UPDATE top_ups SET created_at = now() - interval '30 minutes',
@@ -481,7 +481,7 @@ describeDb('billing: IPN VNPay — TopUpService.applyPaymentResult (T32 Phần 6
     });
 
     it.each(['failed', 'expired'] as const)(
-      '%s: thành công → khoản trễ, giữ trạng thái, không cộng; lặp → 02 (TC-STM4-05 cho failed, #6 cho expired)',
+      '%s: thành công → khoản trễ, giữ trạng thái, không cộng; lặp → 02 (TC-STM4-05 cho failed, TC-STM4-06 cho expired)',
       async (status) => {
         const t = await pendingTopUp(120_000);
         await setStatus(t.topUpId, status);
@@ -938,7 +938,7 @@ describeDb('billing: IPN VNPay — TopUpService.applyPaymentResult (T32 Phần 6
 
   // ---------------------------------------------------------------------------------------------
   describe('trừ điểm khi cộng tiền (D3 ⊕, chốt Ân 13/11)', () => {
-    it('dùng điểm → dòng redeem đúng, cộng đủ amount_vnd', async () => {
+    it('TC-F08-02 dùng điểm → dòng redeem đúng, cộng đủ amount_vnd', async () => {
       const d = await newDriver();
       await earn(d, 1000, '6 months');
       const t = await pendingTopUp(100_000, 600, d);
@@ -1208,7 +1208,7 @@ describeDb('billing: IPN VNPay — TopUpService.applyPaymentResult (T32 Phần 6
       }
     }
 
-    it('cộng đúng một lần: một 00, một 02', async () => {
+    it('TC-F06-02 cộng đúng một lần: một 00, một 02', async () => {
       const t = await pendingTopUp(100_000);
       const p = ipn(t);
       const holder = await db.$client.connect();

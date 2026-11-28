@@ -1,0 +1,170 @@
+{
+  "task": "T153",
+  "scope": "current pre-NEXT-tag inventory on pre-reset clone; not original pre-0029 impact",
+  "metadata": {
+    "database": "powerme_t153",
+    "role": "app_ro",
+    "server_version": "16.4",
+    "read_only": "on",
+    "isolation": "repeatable read",
+    "snapshot_at": "2026-11-27T09:54:35.317Z",
+    "database_matches_target": true
+  },
+  "provenance": {
+    "snapshot_bytes": 81441,
+    "snapshot_sha256": "6ad03679df9c7aedd6200505a03c540720061748e88ec561e5eb173e7849e51f",
+    "executed_inventory_sql_sha256": "71c3c924b600441b429b2d16c1f0ebd236bd024aa728c5dd9fe52c13accac11c",
+    "published_inventory_sql_sha256": "6aa7382608afddb6b5f6416589f80ed3f047d89d72e6e32285647c3fbfe21346",
+    "historical_manual_qa_json_sha256": "587311f520329ab0b37400930f502a51744f2db32d1e57a91961b73cd5975e28"
+  },
+  "execution": {
+    "readOnly": true,
+    "rowLocks": false,
+    "writeStatements": false,
+    "completedWith": "ROLLBACK",
+    "querySource": "inventory.sql plus SELECT-only queue/age/pair summaries",
+    "inventorySqlSha256": "71c3c924b600441b429b2d16c1f0ebd236bd024aa728c5dd9fe52c13accac11c"
+  },
+  "migration": {
+    "name": "0029_t148-rfid-settlement-recovery",
+    "applied_at": "2026-11-25T10:06:28.595Z",
+    "source_sha256": "87bbb864d3332e2db81df6ef0447676d865cdc7475f28e0058559cc1f678f9bd",
+    "source_unchanged": true,
+    "original_impact": null
+  },
+  "R1": {
+    "candidates": {
+      "sessions": "0",
+      "credit_accounts": "0",
+      "known_recorded_subtotal_vnd": "0",
+      "unknown_amount_sessions": "0",
+      "candidate_ids": []
+    },
+    "financial_exclusions": {
+      "owned_billed_stopped_rfid_sessions": "448",
+      "with_statement": "2",
+      "with_session_debit": "2",
+      "with_both": "2",
+      "statement_only": "0",
+      "debit_only": "0",
+      "excluded_by_any_financial_evidence": "2",
+      "job_state_outside_selector": "448"
+    },
+    "existing_unpaid": {
+      "sessions": "446",
+      "credit_accounts": "236",
+      "missing_accounts": "0",
+      "closed_accounts": "0",
+      "job_state": "pending",
+      "known_amount_sessions": "0",
+      "unknown_amount_sessions": "446",
+      "known_recorded_subtotal_vnd": "0",
+      "unpaid_total_vnd": null,
+      "recorded_energy_wh": "1098699",
+      "groups": [
+        {
+          "session_status": "review",
+          "job_state": "pending",
+          "job_reason": "awaiting_reconciliation",
+          "sessions": "65",
+          "drivers": "64",
+          "known_amount_sessions": "0",
+          "unknown_amount_sessions": "65",
+          "recorded_subtotal_vnd": "0",
+          "recorded_energy_wh": "41823",
+          "oldest_start": "2026-11-09T14:10:54.259Z",
+          "newest_stop": "2026-11-25T18:02:23.776Z"
+        },
+        {
+          "session_status": "reconciled",
+          "job_state": "pending",
+          "job_reason": "tariff_coverage_or_boundary_meter_required",
+          "sessions": "381",
+          "drivers": "172",
+          "known_amount_sessions": "0",
+          "unknown_amount_sessions": "381",
+          "recorded_subtotal_vnd": "0",
+          "recorded_energy_wh": "1056876",
+          "oldest_start": "2026-11-13T08:30:15.586Z",
+          "newest_stop": "2026-11-14T07:41:11.729Z"
+        }
+      ]
+    },
+    "posted_rfid": {
+      "paired_sessions": "2",
+      "statement_total_vnd": "4488",
+      "debit_signed_total_vnd": "-4488",
+      "all_amounts_and_pairs_match": true
+    },
+    "whole_database_context": {
+      "all_sessions": "459",
+      "rfid_sessions": "448",
+      "credit_accounts": "241",
+      "closed_accounts": "0",
+      "credit_balance_total_vnd": "344185706",
+      "posted_debit_signed_total_vnd": "-294294",
+      "statement_total_vnd": "294294"
+    }
+  },
+  "R3": {
+    "oldest_start": "2026-11-09T14:07:38.240Z",
+    "newest_stop": "2026-11-25T18:02:23.776Z",
+    "sessions": "448",
+    "older_than_7_days": "446",
+    "older_than_30_days": "0",
+    "older_than_1_year": "0",
+    "scope": "all RFID sessions, not migration candidates",
+    "age_cap": false,
+    "decision": "Keep 0029 unchanged for current test data; future age policy requires an additive migration."
+  },
+  "R5": {
+    "source_pr": 237,
+    "source_merge_commit": "051498788a5701545b960af05c75debc328dc6e7",
+    "source_merged_at": "2026-11-27T08:26:40Z",
+    "closed_account_jobs": {
+      "all_jobs_on_closed_accounts": "0",
+      "pending_on_closed_accounts": "0",
+      "pending_account_closed_jobs": "0",
+      "pending_account_closed_attempts_total": "0",
+      "pending_account_closed_attempts_max": null
+    },
+    "deployment_verified": false,
+    "deployed_sha": null,
+    "runtime_fix_verified": false,
+    "limitation": "account_closed terminal handling does not resolve review, missing meter or pricing evidence."
+  },
+  "R7": {
+    "owner": "Sơn",
+    "histories": [
+      {
+        "database": "powerme_rfid_local",
+        "port": 5546,
+        "legacy_t148_migration": "0028",
+        "historical_evidence_date": "2026-11-24",
+        "paid_sessions": "1",
+        "paid_amount_vnd": "2276",
+        "points": "2"
+      },
+      {
+        "database": "powerme_rfid_credit_manual_20261127",
+        "port": 5547,
+        "legacy_migration": "0030_rfid-credit-protection",
+        "snapshot_at": "2026-11-27T08:31:43.906Z",
+        "sessions": "2",
+        "debits": "2",
+        "statements": "2"
+      }
+    ],
+    "other_owners_local_scope": null,
+    "recommendation": "Back up and create a fresh database if drift cleanup is required.",
+    "reset_performed": false,
+    "history_or_ledger_patched": false
+  },
+  "limitations": [
+    "Zero new candidates does not mean zero historical impact or zero outstanding money.",
+    "Unpaid NULL amounts remain unknown; recorded subtotal zero is not an unpaid total.",
+    "Migration rollback cannot undo posted ledger entries.",
+    "Source merge is not deployment evidence; a single snapshot does not prove retry/churn.",
+    "Detailed snapshot, account lists and session IDs remain local."
+  ]
+}

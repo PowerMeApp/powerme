@@ -91,6 +91,9 @@ export const REGISTRY_PAGE_SIZE = 20;
 /** Matches shown by the driver picker of screen 30. */
 export const DRIVER_SEARCH_SIZE = 10;
 
+/** Screen 18 map (FE-03c): one request of up to the contract maximum, no pager. */
+export const CHARGE_POINT_MAP_SIZE = 100;
+
 /** Screen 18 filters; omitted = all (decommissioned hidden by the server, D24). */
 export interface ChargePointFilter {
   lifecycle?: ChargePointLifecycle;
@@ -98,7 +101,7 @@ export interface ChargePointFilter {
   page: number;
   /** Station page (FE-07): only this Charging Station's charge points. */
   siteId?: string;
-  /** Default CHARGE_POINT_PAGE_SIZE; the station page asks for up to 100. */
+  /** Default CHARGE_POINT_PAGE_SIZE; the station page and the map ask for up to 100. */
   pageSize?: number;
   /** FE-07 searches: charge point code / serial / id, and station code / name / id, separately. */
   chargePointQ?: string;

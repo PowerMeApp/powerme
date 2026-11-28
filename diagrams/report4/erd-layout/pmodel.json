@@ -34,7 +34,8 @@
     "Refund": "refunds",
     "LoyaltyAccount": "loyalty_accounts",
     "LoyaltyTransaction": "loyalty_transactions",
-    "TopUpPaymentConflict": "top_up_payment_conflicts"
+    "TopUpPaymentConflict": "top_up_payment_conflicts",
+    "RfidCreditHold": "rfid_credit_holds"
   },
   "TECH": [
     "charge_point_connections",
@@ -46,7 +47,9 @@
     "driver_start_recoveries",
     "charge_settlement_jobs",
     "charge_tariff_boundary_evidence",
-    "charging_statements"
+    "charging_statements",
+    "charge_point_offline_auth_checks",
+    "rfid_stop_jobs"
   ],
   "ROWS": {
     "users": [
@@ -4413,6 +4416,282 @@
         "default": "now()",
         "raw_default": "`now()`"
       }
+    ],
+    "charge_point_offline_auth_checks": [
+      {
+        "key": "PK",
+        "planned": false,
+        "name": "id",
+        "type": "bigint",
+        "nn": true,
+        "default": "identity",
+        "raw_default": ""
+      },
+      {
+        "key": "FK",
+        "planned": false,
+        "name": "charge_point_id",
+        "type": "bigint",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "epoch",
+        "type": "integer",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "started_at",
+        "type": "timestamptz",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "completed_at",
+        "type": "timestamptz",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "config_values",
+        "type": "jsonb",
+        "nn": false,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "change_results",
+        "type": "jsonb",
+        "nn": true,
+        "default": "'{}'::jsonb",
+        "raw_default": "`'{}'::jsonb`"
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "supported_feature_profiles",
+        "type": "text",
+        "nn": false,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "offline_card_risk",
+        "type": "boolean",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "risk_reason",
+        "type": "varchar(40)",
+        "nn": false,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "fallback_profile_status",
+        "type": "varchar(20)",
+        "nn": false,
+        "default": "",
+        "raw_default": ""
+      }
+    ],
+    "rfid_credit_holds": [
+      {
+        "key": "PK,FK",
+        "planned": false,
+        "name": "session_id",
+        "type": "bigint",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "FK",
+        "planned": false,
+        "name": "credit_account_id",
+        "type": "bigint",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "amount_vnd",
+        "type": "bigint",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "state",
+        "type": "varchar(16)",
+        "nn": true,
+        "default": "'held'",
+        "raw_default": "'held'"
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "reason",
+        "type": "varchar(64)",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "created_at",
+        "type": "timestamptz",
+        "nn": true,
+        "default": "now()",
+        "raw_default": "`now()`"
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "updated_at",
+        "type": "timestamptz",
+        "nn": true,
+        "default": "now()",
+        "raw_default": "`now()`"
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "released_at",
+        "type": "timestamptz",
+        "nn": false,
+        "default": "",
+        "raw_default": ""
+      }
+    ],
+    "rfid_stop_jobs": [
+      {
+        "key": "PK,FK",
+        "planned": false,
+        "name": "session_id",
+        "type": "bigint",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "reason",
+        "type": "varchar(64)",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "state",
+        "type": "varchar(20)",
+        "nn": true,
+        "default": "'pending'",
+        "raw_default": "'pending'"
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "attempts",
+        "type": "integer",
+        "nn": true,
+        "default": "0",
+        "raw_default": "0"
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "attempt_limit",
+        "type": "integer",
+        "nn": true,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "FK",
+        "planned": false,
+        "name": "current_command_id",
+        "type": "bigint",
+        "nn": false,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "next_attempt_at",
+        "type": "timestamptz",
+        "nn": true,
+        "default": "now()",
+        "raw_default": "`now()`"
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "exhausted_at",
+        "type": "timestamptz",
+        "nn": false,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "last_error",
+        "type": "varchar(64)",
+        "nn": false,
+        "default": "",
+        "raw_default": ""
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "created_at",
+        "type": "timestamptz",
+        "nn": true,
+        "default": "now()",
+        "raw_default": "`now()`"
+      },
+      {
+        "key": "",
+        "planned": false,
+        "name": "updated_at",
+        "type": "timestamptz",
+        "nn": true,
+        "default": "now()",
+        "raw_default": "`now()`"
+      }
     ]
   },
   "CONS": {
@@ -6107,6 +6386,120 @@
         "defn": "FOREIGN KEY (session_id) REFERENCES sessions(id)",
         "cols": ["session_id"]
       }
+    ],
+    "charge_point_offline_auth_checks": [
+      {
+        "type": "p",
+        "name": "charge_point_offline_auth_checks_pkey",
+        "defn": "PRIMARY KEY (id)",
+        "cols": ["id"]
+      },
+      {
+        "type": "c",
+        "name": "charge_point_offline_auth_checks_reason_check",
+        "defn": "CHECK (((offline_card_risk AND (risk_reason IS NOT NULL)) OR ((NOT offline_card_risk) AND (risk_reason IS NULL))))",
+        "cols": []
+      },
+      {
+        "type": "c",
+        "name": "charge_point_offline_auth_checks_time_check",
+        "defn": "CHECK ((completed_at >= started_at))",
+        "cols": []
+      },
+      {
+        "type": "f",
+        "name": "charge_point_offline_auth_checks_charge_point_id_fkey",
+        "defn": "FOREIGN KEY (charge_point_id) REFERENCES charge_points(id)",
+        "cols": ["charge_point_id"]
+      }
+    ],
+    "rfid_credit_holds": [
+      {
+        "type": "p",
+        "name": "rfid_credit_holds_pkey",
+        "defn": "PRIMARY KEY (session_id)",
+        "cols": ["session_id"]
+      },
+      {
+        "type": "c",
+        "name": "rfid_credit_holds_amount_vnd_check",
+        "defn": "CHECK ((amount_vnd >= 0))",
+        "cols": []
+      },
+      {
+        "type": "c",
+        "name": "rfid_credit_holds_state_check",
+        "defn": "CHECK (((state) = ANY (ARRAY['held', 'released'])))",
+        "cols": []
+      },
+      {
+        "type": "c",
+        "name": "rfid_credit_holds_check",
+        "defn": "CHECK (((state = 'released') = (released_at IS NOT NULL)))",
+        "cols": []
+      },
+      {
+        "type": "f",
+        "name": "rfid_credit_holds_credit_account_id_fkey",
+        "defn": "FOREIGN KEY (credit_account_id) REFERENCES credit_accounts(id)",
+        "cols": ["credit_account_id"]
+      },
+      {
+        "type": "f",
+        "name": "rfid_credit_holds_session_id_fkey",
+        "defn": "FOREIGN KEY (session_id) REFERENCES sessions(id)",
+        "cols": ["session_id"]
+      }
+    ],
+    "rfid_stop_jobs": [
+      {
+        "type": "p",
+        "name": "rfid_stop_jobs_pkey",
+        "defn": "PRIMARY KEY (session_id)",
+        "cols": ["session_id"]
+      },
+      {
+        "type": "c",
+        "name": "rfid_stop_jobs_state_check",
+        "defn": "CHECK (((state) = ANY (ARRAY['pending', 'inflight', 'awaiting_stop', 'retry', 'exhausted', 'completed'])))",
+        "cols": []
+      },
+      {
+        "type": "c",
+        "name": "rfid_stop_jobs_attempts_check",
+        "defn": "CHECK ((attempts >= 0))",
+        "cols": []
+      },
+      {
+        "type": "c",
+        "name": "rfid_stop_jobs_attempt_limit_check",
+        "defn": "CHECK ((attempt_limit > 0))",
+        "cols": []
+      },
+      {
+        "type": "c",
+        "name": "rfid_stop_jobs_check",
+        "defn": "CHECK ((attempts <= attempt_limit))",
+        "cols": []
+      },
+      {
+        "type": "c",
+        "name": "rfid_stop_jobs_check1",
+        "defn": "CHECK (((state <> 'exhausted') OR (exhausted_at IS NOT NULL)))",
+        "cols": []
+      },
+      {
+        "type": "f",
+        "name": "rfid_stop_jobs_current_command_id_fkey",
+        "defn": "FOREIGN KEY (current_command_id) REFERENCES remote_commands(id)",
+        "cols": ["current_command_id"]
+      },
+      {
+        "type": "f",
+        "name": "rfid_stop_jobs_session_id_fkey",
+        "defn": "FOREIGN KEY (session_id) REFERENCES sessions(id)",
+        "cols": ["session_id"]
+      }
     ]
   },
   "IDX": {
@@ -6434,7 +6827,28 @@
         "unique": false
       }
     ],
-    "charging_statements": []
+    "charging_statements": [],
+    "charge_point_offline_auth_checks": [
+      {
+        "name": "charge_point_offline_auth_checks_cp_idx",
+        "defn": "(charge_point_id, id)",
+        "unique": false
+      }
+    ],
+    "rfid_credit_holds": [
+      {
+        "name": "rfid_credit_holds_account_idx",
+        "defn": "(credit_account_id)",
+        "unique": false
+      }
+    ],
+    "rfid_stop_jobs": [
+      {
+        "name": "rfid_stop_jobs_command_idx",
+        "defn": "(current_command_id)",
+        "unique": false
+      }
+    ]
   },
   "PART": {
     "meter_values": "RANGE (received_at)",
@@ -6551,6 +6965,14 @@
     {
       "table": "charge_point_connections",
       "name": "charge_point_connections_charge_point_id_fkey",
+      "cols": ["charge_point_id"],
+      "ref": "charge_points",
+      "ref_cols": ["id"],
+      "on_delete": "NO ACTION"
+    },
+    {
+      "table": "charge_point_offline_auth_checks",
+      "name": "charge_point_offline_auth_checks_charge_point_id_fkey",
       "cols": ["charge_point_id"],
       "ref": "charge_points",
       "ref_cols": ["id"],
@@ -7093,6 +7515,38 @@
       "on_delete": "NO ACTION"
     },
     {
+      "table": "rfid_credit_holds",
+      "name": "rfid_credit_holds_credit_account_id_fkey",
+      "cols": ["credit_account_id"],
+      "ref": "credit_accounts",
+      "ref_cols": ["id"],
+      "on_delete": "NO ACTION"
+    },
+    {
+      "table": "rfid_credit_holds",
+      "name": "rfid_credit_holds_session_id_fkey",
+      "cols": ["session_id"],
+      "ref": "sessions",
+      "ref_cols": ["id"],
+      "on_delete": "NO ACTION"
+    },
+    {
+      "table": "rfid_stop_jobs",
+      "name": "rfid_stop_jobs_current_command_id_fkey",
+      "cols": ["current_command_id"],
+      "ref": "remote_commands",
+      "ref_cols": ["id"],
+      "on_delete": "NO ACTION"
+    },
+    {
+      "table": "rfid_stop_jobs",
+      "name": "rfid_stop_jobs_session_id_fkey",
+      "cols": ["session_id"],
+      "ref": "sessions",
+      "ref_cols": ["id"],
+      "on_delete": "NO ACTION"
+    },
+    {
       "table": "session_pauses",
       "name": "session_pauses_session_id_fkey",
       "cols": ["session_id"],
@@ -7274,6 +7728,9 @@
     "driver_start_recoveries",
     "charge_settlement_jobs",
     "charge_tariff_boundary_evidence",
-    "charging_statements"
+    "charging_statements",
+    "charge_point_offline_auth_checks",
+    "rfid_credit_holds",
+    "rfid_stop_jobs"
   ]
 }
