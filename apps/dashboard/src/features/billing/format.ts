@@ -1,5 +1,5 @@
 /** Screens 32 / 33: labels and error text (FE-09, WF-02 D10). */
-import type { RecheckResult, TopUpExceptionKind } from '@powerme/shared';
+import type { RecheckResult, RefundKind, TopUpExceptionKind } from '@powerme/shared';
 import { errorMessage, type ApiError } from '../../core/api/api';
 
 export const vnd = (n: number) => `${n.toLocaleString('vi-VN')} ₫`;
@@ -10,6 +10,12 @@ export const EXCEPTION_KIND: Record<TopUpExceptionKind, string> = {
   unresolved_04: 'VNPay mã 04: chưa rõ kết quả',
   unresolved_07: 'VNPay mã 07: giao dịch bị nghi ngờ',
   loyalty_error: 'Lỗi trừ điểm thưởng',
+};
+
+export const REFUND_KIND: Record<RefundKind, string> = {
+  top_up: 'Hoàn lần nạp',
+  late_payment: 'Hoàn khoản trả muộn',
+  account_closure: 'Hoàn khi đóng tài khoản',
 };
 
 export const ERROR_KIND = { transient: 'Lỗi tạm thời', data: 'Dữ liệu bị từ chối' } as const;
@@ -46,6 +52,21 @@ export function billingError(err: unknown): string {
       return 'Không tìm thấy mục này, danh sách đã được làm mới';
     case 'invalid_input':
       return 'Dữ liệu không hợp lệ';
+    // Manual refunds (#257, BR-P51, BR-P21).
+    case 'insufficient_available_balance':
+      return 'Không thể hoàn: số dư khả dụng của tài xế không đủ cho lần nạp này (có thể đã dùng để sạc hoặc đang giữ cho phiên sạc).';
+    case 'not_refundable':
+      return 'Lần nạp này không hoàn được (chưa được cộng vào ví hoặc đã hoàn rồi)';
+    case 'account_closed':
+      return 'Tài khoản của tài xế đã đóng: tiền được hoàn theo yêu cầu đóng tài khoản';
+    case 'no_late_payment':
+      return 'Lần nạp này không có khoản trả muộn cần hoàn';
+    case 'already_requested':
+      return 'Khoản trả muộn này đã có yêu cầu hoàn, danh sách đã được làm mới';
+    case 'refund_no_used':
+      return 'Mã hoàn này đã được ghi cho một yêu cầu hoàn khác, hãy kiểm tra lại trên cổng VNPay';
+    case 'invalid_transition':
+      return 'Yêu cầu hoàn đã đổi trạng thái, danh sách đã được làm mới';
   }
   return errorMessage(err);
 }

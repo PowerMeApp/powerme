@@ -1,7 +1,8 @@
 /**
  * Billing Exceptions (UC-ADM-08, screens 32 / 33, FE-09) — types only, snake_case as on the wire.
  * Source: Khang's PR #212 (T32 Phần 10a, WF-02 D10): apps/csms/src/billing/billing-exceptions.query.ts
- * and apps/csms/src/operator-api/admin-billing.ts. Refund routes come with T152 (manual refunds).
+ * and apps/csms/src/operator-api/admin-billing.ts. Manual refund routes (D-AC, BR-P51): Khang's #257
+ * (OpenAPI 0.3.0 `RefundRequested`, `RefundQueue`, `RefundConfirmed`, `RefundFailed`, `RefundRedone`).
  */
 
 export interface ExceptionDriver {
@@ -90,4 +91,65 @@ export interface RecheckResult {
   reason?: string;
   retry_after_minutes?: number;
   hint?: string;
+}
+
+export type RefundKind = 'top_up' | 'late_payment' | 'account_closure';
+export type RefundQueueStatus = 'requested' | 'failed';
+
+/** POST /billing/top-ups/{id}/refund and …/late-refund → 202 */
+export interface RefundRequested {
+  refund_id: string;
+  status: 'requested';
+  /** What customer service refunds in the VNPay merchant portal. */
+  amount_vnd: number;
+}
+
+export interface RefundQueueItem {
+  refund_id: string;
+  kind: RefundKind;
+  top_up_id: string;
+  amount_vnd: number;
+  status: RefundQueueStatus;
+  /** Admin who asked; null = the system (account closure). */
+  requested_by: string | null;
+  created_at: string;
+  updated_at: string;
+  /** Reason of the last failure (kept after a redo). */
+  failure_reason: string | null;
+  /** `vnp_TxnRef` of the original top-up. */
+  gateway_reference: string;
+  /** VNPay transaction to refund (original, or the late payment's). */
+  gateway_transaction_no: string | null;
+  paid_at: string | null;
+  driver: ExceptionDriver;
+}
+
+/** GET /billing/refunds — customer-service work list, oldest first, ≤ `limit` rows. */
+export interface RefundQueue {
+  generated_at: string;
+  limit: number;
+  total: number;
+  items: RefundQueueItem[];
+}
+
+/** POST /billing/refunds/{id}/confirm → 200 */
+export interface RefundConfirmed {
+  refund_id: string;
+  status: 'done';
+  gateway_refund_no: string;
+  completed_at: string;
+  already_done: boolean;
+}
+
+/** POST /billing/refunds/{id}/fail → 200 */
+export interface RefundFailed {
+  refund_id: string;
+  status: 'failed';
+  failure_reason: string;
+}
+
+/** POST /billing/refunds/{id}/redo → 200 */
+export interface RefundRedone {
+  refund_id: string;
+  status: 'requested';
 }

@@ -144,7 +144,11 @@ export function AdminHomePage() {
                   label="Ngoại lệ thanh toán"
                   tone={s.billing_exceptions.failed_refunds > 0 ? 'critical' : 'major'}
                   urgent
-                  to="/admin/billing"
+                  to={
+                    s.billing_exceptions.failed_refunds > 0
+                      ? '/admin/billing?tab=refunds'
+                      : '/admin/billing'
+                  }
                 >
                   <Figure value={formatCount(billing)} />
                   <CountList rows={BILLING_GROUPS} values={s.billing_exceptions} />
