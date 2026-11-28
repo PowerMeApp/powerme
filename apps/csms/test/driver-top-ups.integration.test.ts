@@ -520,12 +520,13 @@ describeDb('T32 Phần 5: route top-up tài xế qua HTTP', () => {
     const addRefund = (topUpId: string, kind: string, status: string) =>
       q(
         `INSERT INTO refunds (top_up_id, kind, amount_vnd, status, requested_by, next_attempt_at,
-           completed_at, confirmed_via_query, last_error_kind, last_attempt_at)
+           completed_at, confirmed_via_query, last_error_kind, last_attempt_at, failure_reason)
          VALUES ($1, $2::refund_kind, 100000, $3::refund_status, $4,
            CASE WHEN $3 = 'requested' THEN now() END,
            CASE WHEN $3 = 'done' THEN now() END, $3 = 'done',
            CASE WHEN $3 = 'failed' THEN 'data'::e_invoice_error_kind END,
-           CASE WHEN $3 = 'failed' THEN now() END)`,
+           CASE WHEN $3 = 'failed' THEN now() END,
+           CASE WHEN $3 = 'failed' THEN 'cổng từ chối' END)`,
         [topUpId, kind, status, adminId],
       );
     const refundStatus = async (id: string) => {
