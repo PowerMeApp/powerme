@@ -8,15 +8,28 @@ import type { Db } from '../db/db.module.js';
 import type { BackgroundWorkRunner } from './background-work.js';
 import type { BackgroundWorkConfig } from './background-work.config.js';
 import {
+  callAdjustProvider,
   callProvider,
   EINVOICE_PROVIDER_TIMEOUT_MS,
+  EInvoiceAdjustmentInput,
   EInvoiceInput,
   EInvoiceProviderAdapter,
   loadEInvoiceStubConfig,
   StubEInvoiceProvider,
 } from './e-invoice-provider.js';
+import { INVOICE_ADJUSTMENT_ISSUE_WORK } from './e-invoice-rows.js';
 import { E_INVOICE_ISSUE_WORK, EInvoiceService } from './e-invoice.service.js';
-import { splitVat, stubInvoiceNo, VAT_RATE_CHANGE_AT, vatRateAt } from './e-invoice.js';
+import {
+  adjustmentVat,
+  checkAdjustmentSendable,
+  splitVat,
+  STUB_ADJUSTMENT_KEY_MAX,
+  stubAdjustmentNo,
+  stubInvoiceNo,
+  VAT_RATE_CHANGE_AT,
+  vatRateAt,
+} from './e-invoice.js';
+import { InvoiceAdjustmentService } from './invoice-adjustment.service.js';
 
 const INPUT: EInvoiceInput = {
   idempotencyKey: '42',
@@ -157,6 +170,7 @@ describe('callProvider — timeout 10 s bọc ngoài nhà cung cấp', () => {
     jest.useFakeTimers();
     let seen: AbortSignal | undefined;
     const hang: EInvoiceProviderAdapter = {
+      adjustInvoice: jest.fn(),
       createInvoice: (_i, s) => {
         seen = s;
         return new Promise(() => undefined);
@@ -179,6 +193,7 @@ describe('callProvider — timeout 10 s bọc ngoài nhà cung cấp', () => {
 
   it('trả kịp trước 10 s → kết quả của nhà cung cấp', async () => {
     const ok: EInvoiceProviderAdapter = {
+      adjustInvoice: jest.fn(),
       createInvoice: async () => ({ kind: 'issued', invoiceNo: ' INV-1 ' }),
     };
     await expect(callProvider(ok, INPUT)).resolves.toEqual({ kind: 'issued', invoiceNo: 'INV-1' });
@@ -186,6 +201,7 @@ describe('callProvider — timeout 10 s bọc ngoài nhà cung cấp', () => {
 
   it('nhà cung cấp ném → transient kèm message', async () => {
     const boom: EInvoiceProviderAdapter = {
+      adjustInvoice: jest.fn(),
       createInvoice: async () => {
         throw new Error('ECONNRESET');
       },
@@ -200,6 +216,7 @@ describe('callProvider — timeout 10 s bọc ngoài nhà cung cấp', () => {
     'số hoá đơn %p không ghi được vào varchar(20) → data invalid_invoice_no',
     async (no) => {
       const bad: EInvoiceProviderAdapter = {
+        adjustInvoice: jest.fn(),
         createInvoice: async () => ({ kind: 'issued', invoiceNo: no }),
       };
       const r = await callProvider(bad, INPUT);
@@ -232,7 +249,7 @@ describe('EInvoiceService — việc nền e-invoice-issue (đăng ký, cấu h�
     const register = jest.fn();
     const kick = jest.fn();
     const runner = { register, kick } as unknown as BackgroundWorkRunner;
-    const provider = { createInvoice: jest.fn() };
+    const provider = { createInvoice: jest.fn(), adjustInvoice: jest.fn() };
     const service = new EInvoiceService(db, provider, runner, withConfig ? WORK : undefined);
     return { service, register, kick, connect, query, provider };
   }
@@ -261,5 +278,258 @@ describe('EInvoiceService — việc nền e-invoice-issue (đăng ký, cấu h�
     expect(connect).not.toHaveBeenCalled();
     expect(query).not.toHaveBeenCalled();
     expect(provider.createInvoice).not.toHaveBeenCalled();
+  });
+});
+
+// -------------------------------------------------------------------------------------------------
+// T32 Phần 9b: hoá đơn điều chỉnh khi hoàn tiền (D5)
+// -------------------------------------------------------------------------------------------------
+
+const ADJ_INPUT: EInvoiceAdjustmentInput = {
+  idempotencyKey: '42',
+  originalInvoiceNo: 'STUB-1',
+  adjustmentNo: 1,
+  reason: 'Điều chỉnh giảm do hoàn tiền (refund 7)',
+  amountVnd: -100_000,
+  vatRate: 8,
+  vatAmountVnd: -7_407,
+  refundedAt: new Date('2026-11-25T08:00:00+07:00'),
+};
+
+describe('adjustmentVat — thuế của điều chỉnh giảm theo thuế suất hoá đơn gốc', () => {
+  it.each([
+    [-100_000, 8, -7_407],
+    [-100_000, 10, -9_091],
+    [-25_000, 8, -1_852],
+    [-2_000_000, 10, -181_818],
+  ])('%i @ %i%% → %i', (amount, rate, vat) => {
+    expect(adjustmentVat(amount, rate)).toBe(vat);
+  });
+
+  it('0 → 0 (không phải −0)', () => {
+    expect(Object.is(adjustmentVat(0, 8), 0)).toBe(true);
+  });
+
+  it('số dương / không nguyên / thuế suất sai → RangeError', () => {
+    expect(() => adjustmentVat(1, 8)).toThrow(RangeError);
+    expect(() => adjustmentVat(-1.5, 8)).toThrow(RangeError);
+    expect(() => adjustmentVat(-100, 7)).toThrow(RangeError);
+  });
+});
+
+describe('checkAdjustmentSendable — trần theo hoá đơn gốc và chờ gốc issued', () => {
+  const base = {
+    originalStatus: 'issued' as const,
+    originalAmountVnd: 100_000,
+    otherAdjustmentsAbsVnd: 0,
+    amountVnd: -100_000,
+  };
+
+  it('gốc issued, đúng bằng số gốc → gửi được', () => {
+    expect(checkAdjustmentSendable(base)).toBeNull();
+  });
+
+  it('cộng các điều chỉnh khác đúng bằng số gốc → gửi được', () => {
+    expect(
+      checkAdjustmentSendable({ ...base, otherAdjustmentsAbsVnd: 60_000, amountVnd: -40_000 }),
+    ).toBeNull();
+  });
+
+  it('vượt 1 đồng → data adjustment_exceeds_original', () => {
+    expect(checkAdjustmentSendable({ ...base, amountVnd: -100_001 })).toEqual({
+      kind: 'data',
+      message: 'adjustment_exceeds_original',
+    });
+    expect(
+      checkAdjustmentSendable({ ...base, otherAdjustmentsAbsVnd: 60_001, amountVnd: -40_000 }),
+    ).toEqual({ kind: 'data', message: 'adjustment_exceeds_original' });
+  });
+
+  it.each(['requested', 'failed', 'needs_review'] as const)(
+    'gốc %s → transient original_not_issued',
+    (originalStatus) => {
+      expect(checkAdjustmentSendable({ ...base, originalStatus })).toEqual({
+        kind: 'transient',
+        message: 'original_not_issued',
+      });
+    },
+  );
+
+  it('vượt trần và gốc chưa issued → báo vượt trần (lỗi vĩnh viễn trước)', () => {
+    expect(
+      checkAdjustmentSendable({ ...base, originalStatus: 'failed', amountVnd: -100_001 }),
+    ).toEqual({ kind: 'data', message: 'adjustment_exceeds_original' });
+  });
+
+  it.each([0, 1])('amount %i (không phải giảm) → data adjustment_not_decrease', (amountVnd) => {
+    expect(checkAdjustmentSendable({ ...base, amountVnd })).toEqual({
+      kind: 'data',
+      message: 'adjustment_not_decrease',
+    });
+  });
+});
+
+describe('stubAdjustmentNo — số điều chỉnh giả của stub', () => {
+  it('STUBADJ- + base36 chữ hoa, ổn định theo khoá', () => {
+    expect(stubAdjustmentNo('42')).toBe('STUBADJ-16');
+    expect(stubAdjustmentNo('42')).toBe(stubAdjustmentNo('42'));
+    expect(stubAdjustmentNo('43')).not.toBe(stubAdjustmentNo('42'));
+  });
+
+  it('khoá lớn nhất cho phép (36^12 − 1) → đúng 20 ký tự', () => {
+    expect(STUB_ADJUSTMENT_KEY_MAX).toBe(36n ** 12n - 1n);
+    const no = stubAdjustmentNo(String(STUB_ADJUSTMENT_KEY_MAX));
+    expect(no).toBe('STUBADJ-ZZZZZZZZZZZZ');
+    expect(no.length).toBe(20);
+  });
+
+  it.each(['0', '-1', 'abc', '', String(36n ** 12n)])('khoá %p → RangeError', (key) => {
+    expect(() => stubAdjustmentNo(key)).toThrow(RangeError);
+  });
+});
+
+describe('StubEInvoiceProvider.adjustInvoice', () => {
+  const signal = new AbortController().signal;
+
+  it('success: idempotent theo khoá', async () => {
+    const stub = new StubEInvoiceProvider({ mode: 'success', delayMs: 0 });
+    const a = await stub.adjustInvoice(ADJ_INPUT, signal);
+    expect(a).toEqual({ kind: 'issued', adjustmentNo: 'STUBADJ-16' });
+    expect(await stub.adjustInvoice(ADJ_INPUT, signal)).toEqual(a);
+  });
+
+  it.each(['transient', 'data'] as const)('mode %s → lỗi cùng loại', async (mode) => {
+    const r = await new StubEInvoiceProvider({ mode, delayMs: 0 }).adjustInvoice(ADJ_INPUT, signal);
+    expect(r.kind).toBe(mode);
+  });
+
+  it('độ trễ dài → callAdjustProvider trả transient sau 10 s', async () => {
+    jest.useFakeTimers();
+    try {
+      const p = callAdjustProvider(
+        new StubEInvoiceProvider({ mode: 'success', delayMs: 60_000 }),
+        ADJ_INPUT,
+      );
+      await jest.advanceTimersByTimeAsync(EINVOICE_PROVIDER_TIMEOUT_MS);
+      await expect(p).resolves.toEqual({ kind: 'transient', message: 'provider_timeout' });
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+});
+
+describe('callAdjustProvider — timeout 10 s và chuẩn hoá kết quả', () => {
+  const adapter = (adjustInvoice: EInvoiceProviderAdapter['adjustInvoice']) =>
+    ({ createInvoice: jest.fn(), adjustInvoice }) as EInvoiceProviderAdapter;
+
+  afterEach(() => jest.useRealTimers());
+
+  it('treo quá 10 s → transient provider_timeout, signal bị huỷ', async () => {
+    jest.useFakeTimers();
+    let seen: AbortSignal | undefined;
+    const p = callAdjustProvider(
+      adapter((_i, s) => {
+        seen = s;
+        return new Promise(() => undefined);
+      }),
+      ADJ_INPUT,
+    );
+    await jest.advanceTimersByTimeAsync(EINVOICE_PROVIDER_TIMEOUT_MS - 1);
+    expect(seen!.aborted).toBe(false);
+    await jest.advanceTimersByTimeAsync(1);
+    await expect(p).resolves.toEqual({ kind: 'transient', message: 'provider_timeout' });
+    expect(seen!.aborted).toBe(true);
+  });
+
+  it('trả kịp → số đã trim', async () => {
+    await expect(
+      callAdjustProvider(
+        adapter(async () => ({ kind: 'issued', adjustmentNo: ' ADJ-1 ' })),
+        ADJ_INPUT,
+      ),
+    ).resolves.toEqual({ kind: 'issued', adjustmentNo: 'ADJ-1' });
+  });
+
+  it('adapter ném → transient kèm message', async () => {
+    await expect(
+      callAdjustProvider(
+        adapter(async () => {
+          throw new Error('ECONNRESET');
+        }),
+        ADJ_INPUT,
+      ),
+    ).resolves.toEqual({ kind: 'transient', message: 'ECONNRESET' });
+  });
+
+  it.each(['', '   ', 'X'.repeat(21)])(
+    'số điều chỉnh %p không ghi được vào varchar(20) → data invalid_adjustment_no',
+    async (no) => {
+      const r = await callAdjustProvider(
+        adapter(async () => ({ kind: 'issued', adjustmentNo: no })),
+        ADJ_INPUT,
+      );
+      expect(r.kind).toBe('data');
+      expect(r.kind === 'data' && r.message).toMatch(/^invalid_adjustment_no/);
+    },
+  );
+
+  it('không gọi createInvoice', async () => {
+    const a = adapter(async () => ({ kind: 'issued', adjustmentNo: 'ADJ-1' }));
+    await callAdjustProvider(a, ADJ_INPUT);
+    expect(a.createInvoice).not.toHaveBeenCalled();
+  });
+});
+
+describe('InvoiceAdjustmentService — việc nền invoice-adjustment-issue (đăng ký, cấu hình)', () => {
+  const WORK: BackgroundWorkConfig = {
+    enabled: true,
+    intervalMs: 30_000,
+    batchSize: 20,
+    leaseMs: 120_000,
+  };
+
+  function make(withConfig: boolean) {
+    const connect = jest.fn();
+    const query = jest.fn();
+    const db = { $client: { connect, query } } as unknown as Db;
+    const register = jest.fn();
+    const kick = jest.fn();
+    const runner = { register, kick } as unknown as BackgroundWorkRunner;
+    const provider = { createInvoice: jest.fn(), adjustInvoice: jest.fn() };
+    const service = new InvoiceAdjustmentService(
+      db,
+      provider,
+      runner,
+      withConfig ? WORK : undefined,
+    );
+    return { service, register, kick, connect, query, provider };
+  }
+
+  it('onModuleInit đăng ký chính service với tên invoice-adjustment-issue', () => {
+    const { service, register } = make(true);
+    service.onModuleInit();
+    expect(register).toHaveBeenCalledTimes(1);
+    expect(register).toHaveBeenCalledWith(service);
+    expect(service.name).toBe(INVOICE_ADJUSTMENT_ISSUE_WORK);
+    expect(INVOICE_ADJUSTMENT_ISSUE_WORK).toBe('invoice-adjustment-issue');
+  });
+
+  it('thiếu workConfig → runDue ném, không giữ chỗ, không gọi nhà cung cấp', async () => {
+    const { service, connect, query, provider } = make(false);
+    await expect(service.runDue(10, new AbortController().signal)).rejects.toThrow(
+      'invoice_adjustment_issue_missing_config',
+    );
+    expect(connect).not.toHaveBeenCalled();
+    expect(query).not.toHaveBeenCalled();
+    expect(provider.adjustInvoice).not.toHaveBeenCalled();
+  });
+
+  it('EInvoiceService.kickAdjust → runner.kick(invoice-adjustment-issue)', () => {
+    const kick = jest.fn();
+    const runner = { register: jest.fn(), kick } as unknown as BackgroundWorkRunner;
+    const db = { $client: { connect: jest.fn(), query: jest.fn() } } as unknown as Db;
+    const provider = { createInvoice: jest.fn(), adjustInvoice: jest.fn() };
+    new EInvoiceService(db, provider, runner).kickAdjust();
+    expect(kick).toHaveBeenCalledWith('invoice-adjustment-issue');
   });
 });
