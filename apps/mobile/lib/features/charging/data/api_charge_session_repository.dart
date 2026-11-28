@@ -53,7 +53,7 @@ class ApiChargeSessionRepository implements ChargeSessionRepository {
     } on DriverApiException catch (error) {
       return switch ((error.status, error.code)) {
         (404, _) => ChargeStopOutcome.unavailable,
-        (409, 'session_not_stoppable') => ChargeStopOutcome.notStoppable,
+        (409, 'session_not_stoppable') => ChargeStopOutcome.alreadyEnded,
         (409, 'stop_pending_or_unknown') => ChargeStopOutcome.pendingOrUnknown,
         (409, 'idempotency_conflict') => ChargeStopOutcome.keyConflict,
         (400, 'invalid_idempotency_key' || 'reserved_idempotency_key') =>

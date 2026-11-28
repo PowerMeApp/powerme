@@ -206,6 +206,12 @@ class _ChargeSessionViewState extends ConsumerState<_ChargeSessionView>
     await ref
         .read(chargeStopProvider.notifier)
         .send(widget.target, retry: retry, progress: _controller.progress!);
+    if (!mounted || !_visible) return;
+    final stop = ref.read(currentChargeStopProvider);
+    if (stop?.target == widget.target &&
+        stop?.outcome == ChargeStopOutcome.alreadyEnded) {
+      _controller.refreshProgress();
+    }
   }
 
   @override
@@ -232,8 +238,12 @@ class _ChargeSessionViewState extends ConsumerState<_ChargeSessionView>
             progress?.closed == true &&
             progress?.settlement == SettlementState.posted &&
             progress?.meterStopWh == null;
+        final showAlreadyEnded =
+            stop?.outcome == ChargeStopOutcome.alreadyEnded &&
+            _controller.statement == null;
         final showStopStatus =
             stop != null &&
+            stop.outcome != ChargeStopOutcome.alreadyEnded &&
             progress != null &&
             !progress.closed &&
             progress.meterStopWh == null &&
@@ -287,6 +297,14 @@ class _ChargeSessionViewState extends ConsumerState<_ChargeSessionView>
                 )
               : null,
           children: [
+            if (showAlreadyEnded)
+              Semantics(
+                liveRegion: true,
+                child: Text(
+                  chargeStopMessage(stop!.outcome, copy),
+                  key: const Key('charge-session-msg30'),
+                ),
+              ),
             if (attempt == null && summary != null)
               InfoCard(
                 children: [
@@ -389,7 +407,8 @@ class _ChargeSessionViewState extends ConsumerState<_ChargeSessionView>
                   vehicle: attempt.vehicleLabel,
                 ),
             ],
-            if (progress?.awaitingRfidSettlement == true ||
+            if (showAlreadyEnded ||
+                progress?.awaitingRfidSettlement == true ||
                 issue != null ||
                 progress?.inReview == true ||
                 awaitingStopMeter ||

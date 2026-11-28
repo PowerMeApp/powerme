@@ -132,6 +132,7 @@ class ChargeStopAttempt {
           !{
             ChargeStopOutcome.rejected,
             ChargeStopOutcome.notStoppable,
+            ChargeStopOutcome.alreadyEnded,
             ChargeStopOutcome.unavailable,
             ChargeStopOutcome.keyConflict,
             ChargeStopOutcome.invalidRequest,
@@ -216,6 +217,7 @@ class ChargeSessionController extends ChangeNotifier {
   void Function()? _cancel;
   bool _visible = false;
   bool _refreshOnIdle = false;
+  bool _progressRefreshOnIdle = false;
   int _visibilityGeneration = 0;
 
   ChargeProgress? _progress;
@@ -244,6 +246,7 @@ class ChargeSessionController extends ChangeNotifier {
     _visibilityGeneration++;
     if (!visible) {
       _refreshOnIdle = false;
+      _progressRefreshOnIdle = false;
       _poll?.cancel();
       _poll = null;
       _cancel?.call();
@@ -274,7 +277,15 @@ class ChargeSessionController extends ChangeNotifier {
     return _progressIssue == null && progress.canStop;
   }
 
-  void refreshProgress() => unawaited(_readProgress());
+  void refreshProgress() {
+    if (!_visible) return;
+    if (_cancel != null) {
+      _progressRefreshOnIdle = true;
+      return;
+    }
+    _progressRefreshOnIdle = false;
+    unawaited(_readProgress());
+  }
 
   void retryStatement() {
     if (completionOnly ||
@@ -379,7 +390,12 @@ class ChargeSessionController extends ChangeNotifier {
       } else if (generation == _visibilityGeneration) {
         _syncPolling();
         notifyListeners();
-        if (succeeded) afterSuccess?.call();
+        if (_progressRefreshOnIdle) {
+          _progressRefreshOnIdle = false;
+          refreshProgress();
+        } else if (succeeded) {
+          afterSuccess?.call();
+        }
       }
     }
   }
