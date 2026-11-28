@@ -30,7 +30,8 @@
 //   PMAPP-Q1-01A súng 2 Faulted (ConnectorLockFailure) · PMAPP-TD-02A súng 1 Faulted (GroundFailure)
 //   PMAPP-Q7-01A súng 2 đang sạc bằng thẻ DEMO · PMAPP-TD-01B súng 1 đã cắm (Preparing)
 //   PMAPP-TB-01A offline (không bật)
-//   PMAPP-PN-01A, PMAPP-Q1-01B chỉ có 1 súng trong DB: simulator giả 2 súng, CSMS bỏ qua súng 2.
+//   Mỗi trụ chạy đúng số súng, kW và AC/DC như trong DB (bảng SPECS, QA-11): PMAPP-PN-01A và
+//   PMAPP-Q1-01B chỉ có 1 súng; trụ AC không gửi SoC.
 //
 // Mật khẩu trụ chỉ đi qua biến môi trường CP_PASSWORD (không lên argv, không in ra). Một mật khẩu
 // chung cho cả 13 trụ — đặt trong DB của CSMS đích (staging: Trí đặt, gửi riêng; local: seed).
@@ -104,7 +105,25 @@ const ADDRESSES = {
   'PMAPP-TB-01A': 'Cong Hoa, Phuong 4, Tan Binh, TP.HCM',
   'PMAPP-TD-03A': 'Khu do thi DHQG-HCM, Phuong Dong Hoa, Di An, Binh Duong',
 };
-const ONE_GUN = new Set(['PMAPP-PN-01A', 'PMAPP-Q1-01B']);
+// QA-11: phần cứng thật trong DB (seed-app.sql: charge_points.rated_power_kw, connectors.max_power_kw,
+// type2 = AC) — "<ac|dc><kW trụ>:<kW súng 1>[/<kW súng 2>]". Trụ AC không gửi SoC (reports_soc=false).
+// Sửa seed-app.sql thì sửa bảng này. D1 gốc để trống = DC 120 kW hai súng như trước.
+const SPECS = {
+  [D1]: '',
+  'PMAPP-BT-01A': 'dc120:60/60',
+  'PMAPP-PN-01A': 'dc30:30',
+  'PMAPP-Q1-01A': 'dc120:120/60',
+  'PMAPP-Q1-01B': 'ac22:22',
+  'PMAPP-Q10-01A': 'ac7:7/7',
+  'PMAPP-Q3-01A': 'dc60:60/50',
+  'PMAPP-Q7-01A': 'dc150:150/75',
+  'PMAPP-TB-01A': 'dc60:60/60',
+  'PMAPP-TD-01A': 'dc50:50/50',
+  'PMAPP-TD-01B': 'ac22:22/22',
+  'PMAPP-TD-02A': 'dc60:60/60',
+  'PMAPP-TD-02B': 'ac11:11/11',
+  'PMAPP-TD-03A': 'dc60:60/60',
+};
 const EXCEPTIONS = [
   ['PMAPP-Q1-01A', 'fault', { connector: 2, errorCode: 'ConnectorLockFailure' }],
   ['PMAPP-TD-02A', 'fault', { connector: 1, errorCode: 'GroundFailure' }],
@@ -151,7 +170,7 @@ const child = spawn(process.execPath, [server], {
     CP_NAMES: ids.map((id) => NAMES[id] ?? '').join(','),
     CP_CODES: ids.map((id) => CODES[id] ?? '').join(','),
     CP_ADDRESSES: ids.map((id) => ADDRESSES[id] ?? '').join('|'),
-    CP_GUNS: ids.map((id) => (ONE_GUN.has(id) ? 1 : 2)).join(','),
+    CP_SPECS: ids.map((id) => SPECS[id] ?? '').join(','),
   },
 });
 const stop = () => child.kill('SIGINT');
