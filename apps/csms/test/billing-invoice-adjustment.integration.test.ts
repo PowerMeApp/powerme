@@ -1,6 +1,7 @@
 /**
  * Test tích hợp hoá đơn điều chỉnh khi hoàn tiền (T32 Phần 9b; SD-2e, STM-7, decisions D1 / D5 / D7)
- * trên Postgres thật: VNPay giả tiêm qua `fetch`, nhà cung cấp hoá đơn giả.
+ * trên Postgres thật, nhà cung cấp hoá đơn giả. Refund `done` qua `RefundService.confirmDone` (Admin
+ * ghi nhận hoàn thủ công, D1).
  *
  * Vì sao tồn tại: hỏng ở đây là sổ thuế lệch tiền thật. Hỏng âm thầm có thể là: refund đã done mà
  * không có điều chỉnh (sập sau commit, thiếu service), điều chỉnh hai lần cho một refund, hai refund
@@ -9,7 +10,6 @@
  *
  * Cần DATABASE_URL (DB test riêng — test DROP SCHEMA public); thiếu thì cả describe bị skip.
  */
-import { createHmac } from 'node:crypto';
 import { Logger, Module } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { BackgroundWorkRunner } from '../src/billing/background-work.js';
@@ -26,8 +26,6 @@ import { EInvoiceService } from '../src/billing/e-invoice.service.js';
 import { InvalidTransition } from '../src/billing/invalid-transition.js';
 import { InvoiceAdjustmentService } from '../src/billing/invoice-adjustment.service.js';
 import { RefundService } from '../src/billing/refund.service.js';
-import { VnpayAdapter } from '../src/billing/vnpay.adapter.js';
-import type { VnpayApiConfig, VnpayConfig } from '../src/billing/vnpay.config.js';
 import { ConfigModule } from '../src/config.js';
 import { createDb, Db } from '../src/db/db.module.js';
 import { resetAndMigrate } from './helpers/apply-migrations.js';
@@ -35,97 +33,12 @@ import { resetAndMigrate } from './helpers/apply-migrations.js';
 const DATABASE_URL = process.env['DATABASE_URL'];
 const describeDb = DATABASE_URL ? describe : describe.skip;
 
-const SECRET = 'TESTSECRETNOTREAL';
-const VNPAY: VnpayConfig = {
-  configured: true,
-  tmnCode: 'TESTTMN1',
-  hashSecret: SECRET,
-  payUrl: 'https://sandbox.vnpayment.vn/paymentv2/vpcpay.html',
-  returnUrl: 'http://localhost:3000/billing/vnpay/return',
-};
-const API: VnpayApiConfig = { apiUrl: 'https://vnpay.test/api', serverIp: '127.0.0.1' };
 const WORK: BackgroundWorkConfig = {
   enabled: true,
   intervalMs: 30_000,
   batchSize: 20,
   leaseMs: 120_000,
 };
-
-const RESPONSE_ORDER = [
-  'vnp_ResponseId',
-  'vnp_Command',
-  'vnp_ResponseCode',
-  'vnp_Message',
-  'vnp_TmnCode',
-  'vnp_TxnRef',
-  'vnp_Amount',
-  'vnp_BankCode',
-  'vnp_PayDate',
-  'vnp_TransactionNo',
-  'vnp_TransactionType',
-  'vnp_TransactionStatus',
-  'vnp_OrderInfo',
-];
-const QUERY_ORDER = [...RESPONSE_ORDER, 'vnp_PromotionCode', 'vnp_PromotionAmount'];
-
-type Req = Record<string, string>;
-type VnpayStep = (req: Req) => Response | Promise<Response>;
-const json = (b: unknown, status = 200) => new Response(JSON.stringify(b), { status });
-
-function sign(order: string[], r: Record<string, string>): Record<string, string> {
-  const data = order.map((k) => r[k] ?? '').join('|');
-  return {
-    ...r,
-    vnp_SecureHash: createHmac('sha512', SECRET).update(data, 'utf8').digest('hex'),
-  };
-}
-
-let refundNoSeq = 0;
-/** Response lệnh refund, mặc định RC 00 + TS 00. */
-const refundOk =
-  (over: Record<string, string> = {}): VnpayStep =>
-  (req) => {
-    refundNoSeq += 1;
-    return json(
-      sign(RESPONSE_ORDER, {
-        vnp_ResponseId: 'R',
-        vnp_Command: 'refund',
-        vnp_ResponseCode: '00',
-        vnp_Message: 'ok',
-        vnp_TmnCode: req['vnp_TmnCode']!,
-        vnp_TxnRef: req['vnp_TxnRef']!,
-        vnp_Amount: req['vnp_Amount']!,
-        vnp_BankCode: 'NCB',
-        vnp_PayDate: '20261125100000',
-        vnp_TransactionNo: String(90_000_000 + refundNoSeq),
-        vnp_TransactionType: req['vnp_TransactionType']!,
-        vnp_TransactionStatus: '00',
-        vnp_OrderInfo: req['vnp_OrderInfo']!,
-        ...over,
-      }),
-    );
-  };
-const HTTP_500: VnpayStep = () => json({}, 500);
-const queryReply =
-  (type: string, ts: string, transactionNo: string, amountVnd: number): VnpayStep =>
-  (req) =>
-    json(
-      sign(QUERY_ORDER, {
-        vnp_ResponseId: 'Q',
-        vnp_Command: 'querydr',
-        vnp_ResponseCode: '00',
-        vnp_Message: 'ok',
-        vnp_TmnCode: req['vnp_TmnCode']!,
-        vnp_TxnRef: req['vnp_TxnRef']!,
-        vnp_Amount: String(amountVnd * 100),
-        vnp_BankCode: 'NCB',
-        vnp_PayDate: '20261125100000',
-        vnp_TransactionNo: transactionNo,
-        vnp_TransactionType: type,
-        vnp_TransactionStatus: ts,
-        vnp_OrderInfo: 'x',
-      }),
-    );
 
 type AdjStep = (
   input: EInvoiceAdjustmentInput,
@@ -160,15 +73,6 @@ const FAKE_DATE_ONLY = [
 describeDb('billing: hoá đơn điều chỉnh khi hoàn tiền (T32 Phần 9b, D5, STM-7)', () => {
   let db: Db;
   let seq = 0;
-  let refundSteps: VnpayStep[] = [];
-  let querySteps: VnpayStep[] = [];
-
-  const fakeFetch = (async (_url: string, init: RequestInit) => {
-    const req = JSON.parse(String(init.body)) as Req;
-    if (req['vnp_Command'] === 'refund') return (refundSteps.shift() ?? refundOk())(req);
-    return (querySteps.shift() ?? HTTP_500)(req);
-  }) as unknown as typeof fetch;
-
   let adjSteps: AdjStep[] = [];
   let adjCalls: EInvoiceAdjustmentInput[] = [];
   const provider: EInvoiceProviderAdapter = {
@@ -181,7 +85,6 @@ describeDb('billing: hoá đơn điều chỉnh khi hoàn tiền (T32 Phần 9b,
 
   const kick = jest.fn();
   const runner = { register: jest.fn(), kick } as unknown as BackgroundWorkRunner;
-  let vnpay: VnpayAdapter;
   let eInvoices: EInvoiceService;
   let adjustments: InvoiceAdjustmentService;
   let refunds: RefundService;
@@ -190,7 +93,6 @@ describeDb('billing: hoá đơn điều chỉnh khi hoàn tiền (T32 Phần 9b,
   const q = async (sql: string, params: unknown[] = []) =>
     (await db.$client.query(sql, params)).rows as Record<string, unknown>[];
   const one = async (sql: string, params: unknown[] = []) => (await q(sql, params))[0]!;
-  const runRefunds = (s: RefundService = refunds) => s.runDue(20, new AbortController().signal);
   const runAdj = (s: InvoiceAdjustmentService = adjustments) =>
     s.runDue(20, new AbortController().signal);
 
@@ -298,7 +200,7 @@ describeDb('billing: hoá đơn điều chỉnh khi hoàn tiền (T32 Phần 9b,
     return { id, txn, invoiceId };
   }
 
-  /** Refund `requested` ghi thẳng (đường tạo thật đã có test ở Phần 9a). */
+  /** Refund `requested` ghi thẳng (đường tạo thật: billing-refund.integration.test.ts). */
   async function mkRefund(
     topUpId: number,
     kind: 'top_up' | 'late_payment' | 'account_closure' = 'top_up',
@@ -315,13 +217,19 @@ describeDb('billing: hoá đơn điều chỉnh khi hoàn tiền (T32 Phần 9b,
     );
   }
 
-  /** Đặt refund `done` bằng SQL trong transaction `c` (như tx2 vừa ghi). */
+  let refundNoSeq = 0;
+  /** Mã hoàn của cổng chưa dùng. */
+  const refundNo = () => String(95_000_000 + (refundNoSeq += 1));
+  /** Admin ghi nhận done (đường thật). */
+  const confirm = (refundId: number, s: RefundService = refunds) =>
+    s.confirmDone(refundId, refundNo(), admin);
+
+  /** Đặt refund `done` bằng SQL trong transaction `c` (như confirmDone vừa ghi). */
   async function markDone(c: { query: Db['$client']['query'] }, refundId: number) {
-    refundNoSeq += 1;
     await c.query(
       `UPDATE refunds SET status = 'done', completed_at = now(), gateway_refund_no = $2,
-         next_attempt_at = NULL, updated_at = now() WHERE id = $1`,
-      [refundId, String(95_000_000 + refundNoSeq)],
+         updated_at = now() WHERE id = $1`,
+      [refundId, refundNo()],
     );
   }
 
@@ -375,10 +283,9 @@ describeDb('billing: hoá đơn điều chỉnh khi hoàn tiền (T32 Phần 9b,
   beforeAll(async () => {
     db = createDb(DATABASE_URL as string);
     await resetAndMigrate(db.$client);
-    vnpay = new VnpayAdapter(VNPAY, API, fakeFetch);
     eInvoices = new EInvoiceService(db, provider, runner, WORK);
     adjustments = new InvoiceAdjustmentService(db, provider, runner, WORK);
-    refunds = new RefundService(db, vnpay, runner, WORK, eInvoices);
+    refunds = new RefundService(db, eInvoices);
     seq += 1;
     admin = Number(
       (
@@ -396,14 +303,9 @@ describeDb('billing: hoá đơn điều chỉnh khi hoàn tiền (T32 Phần 9b,
     logSpy = jest.spyOn(Logger.prototype, 'log').mockImplementation(() => undefined);
     // Cô lập: việc còn chờ của ca trước không tới hạn trong ca sau.
     await q(
-      `UPDATE refunds SET next_attempt_at = now() + interval '1 day' WHERE status = 'requested'`,
-    );
-    await q(
       `UPDATE invoice_adjustments SET next_attempt_at = now() + interval '1 day'
        WHERE status IN ('requested', 'failed')`,
     );
-    refundSteps = [];
-    querySteps = [];
     adjSteps = [];
     adjCalls = [];
     kick.mockClear();
@@ -417,11 +319,11 @@ describeDb('billing: hoá đơn điều chỉnh khi hoàn tiền (T32 Phần 9b,
   });
 
   // ---------------------------------------------------------------------------------------------
-  describe('tạo điều chỉnh trong tx2 khi refund done', () => {
-    it('top_up gửi thành công → đúng 1 dòng requested, amount = −refund, adjustment_no 1, kick sau commit', async () => {
+  describe('tạo điều chỉnh trong transaction confirmDone', () => {
+    it('top_up ghi nhận done → đúng 1 dòng requested, amount = −refund, adjustment_no 1, kick sau commit', async () => {
       const t = await topUp();
       const refundId = await mkRefund(t.id);
-      await runRefunds();
+      await confirm(refundId);
       expect(await refundStatus(refundId)).toBe('done');
       const rows = await adjOf(refundId);
       expect(rows).toEqual([
@@ -438,29 +340,10 @@ describeDb('billing: hoá đơn điều chỉnh khi hoàn tiền (T32 Phần 9b,
       expect(kick).toHaveBeenCalledWith(INVOICE_ADJUSTMENT_ISSUE_WORK);
     });
 
-    it('top_up done nhờ querydr → có dòng', async () => {
-      const t = await topUp({ amount: 80_000 });
-      const refundId = await mkRefund(t.id, 'top_up', 80_000);
-      // Lượt sau lỗi tạm thời: chỉ truy vấn.
-      await q(
-        `UPDATE refunds SET attempt_count = 1, last_error_kind = 'transient',
-           last_attempt_at = now(), next_attempt_at = now() - interval '1 second' WHERE id=$1`,
-        [refundId],
-      );
-      querySteps = [queryReply('02', '00', t.txn, 80_000)];
-      await runRefunds();
-      expect(
-        await one('SELECT status::text, confirmed_via_query FROM refunds WHERE id=$1', [refundId]),
-      ).toEqual({ status: 'done', confirmed_via_query: true });
-      expect(await adjOf(refundId)).toEqual([
-        expect.objectContaining({ adjustment_no: 1, amount_vnd: -80_000, status: 'requested' }),
-      ]);
-    });
-
     it('late_payment → không có dòng (không có hoá đơn gốc cho khoản trễ)', async () => {
       const t = await topUp({ late: 30_000 });
       const refundId = await mkRefund(t.id, 'late_payment', 30_000);
-      await runRefunds();
+      await confirm(refundId);
       expect(await refundStatus(refundId)).toBe('done');
       expect(await adjOf(refundId)).toEqual([]);
       expect(kick).not.toHaveBeenCalledWith(INVOICE_ADJUSTMENT_ISSUE_WORK);
@@ -469,7 +352,7 @@ describeDb('billing: hoá đơn điều chỉnh khi hoàn tiền (T32 Phần 9b,
     it('account_closure → có dòng', async () => {
       const t = await topUp();
       const refundId = await mkRefund(t.id, 'account_closure', 40_000);
-      await runRefunds();
+      await confirm(refundId);
       expect(await refundStatus(refundId)).toBe('done');
       expect(await adjOf(refundId)).toEqual([
         expect.objectContaining({ e_invoice_id: t.invoiceId, amount_vnd: -40_000 }),
@@ -479,7 +362,7 @@ describeDb('billing: hoá đơn điều chỉnh khi hoàn tiền (T32 Phần 9b,
     it('không có hoá đơn gốc → 0 dòng, refund vẫn done, warn invoice_adjustment_no_original', async () => {
       const t = await topUp({ invoice: null });
       const refundId = await mkRefund(t.id);
-      await runRefunds();
+      await confirm(refundId);
       expect(await refundStatus(refundId)).toBe('done');
       expect(await adjOf(refundId)).toEqual([]);
       expect(logged(warnSpy, 'invoice_adjustment_no_original')).toEqual([
@@ -487,31 +370,31 @@ describeDb('billing: hoá đơn điều chỉnh khi hoàn tiền (T32 Phần 9b,
       ]);
     });
 
-    it('refund bị từ chối (failed) hoặc còn requested → 0 dòng', async () => {
+    it('refund đánh dấu thất bại (failed), làm lại hoặc còn requested → 0 dòng', async () => {
       const a = await topUp();
       const ra = await mkRefund(a.id);
-      refundSteps = [refundOk({ vnp_ResponseCode: '95' })];
-      await runRefunds();
+      await refunds.markFailed(ra, 'cổng từ chối', admin);
       expect(await refundStatus(ra)).toBe('failed');
+      expect(await adjOf(ra)).toEqual([]);
+      await refunds.redo(ra, admin);
+      expect(await refundStatus(ra)).toBe('requested');
       expect(await adjOf(ra)).toEqual([]);
 
       const b = await topUp();
       const rb = await mkRefund(b.id);
-      refundSteps = [HTTP_500];
-      await runRefunds();
       expect(await refundStatus(rb)).toBe('requested');
       expect(await adjOf(rb)).toEqual([]);
     });
 
-    it('tx2 rollback sau khi đã tạo điều chỉnh → 0 dòng, refund vẫn requested', async () => {
+    it('transaction confirmDone rollback sau khi đã tạo điều chỉnh → 0 dòng, refund vẫn requested', async () => {
       const t = await topUp();
       const refundId = await mkRefund(t.id);
       const real = EInvoiceService.prototype.adjustForRefund.bind(eInvoices);
       jest.spyOn(eInvoices, 'adjustForRefund').mockImplementationOnce(async (c, id) => {
         await real(c, id);
-        throw new Error('crash_before_tx2_commit');
+        throw new Error('crash_before_commit');
       });
-      await runRefunds();
+      await expect(confirm(refundId)).rejects.toThrow('crash_before_commit');
       expect(await refundStatus(refundId)).toBe('requested');
       expect(await adjOf(refundId)).toEqual([]);
     });
@@ -536,8 +419,7 @@ describeDb('billing: hoá đơn điều chỉnh khi hoàn tiền (T32 Phần 9b,
     it('RefundService thiếu EInvoiceService → refund vẫn done, 0 dòng, log error invoice_adjustment_service_missing', async () => {
       const t = await topUp();
       const refundId = await mkRefund(t.id);
-      const bare = new RefundService(db, vnpay, runner, WORK);
-      await runRefunds(bare);
+      await confirm(refundId, new RefundService(db));
       expect(await refundStatus(refundId)).toBe('done');
       expect(await adjOf(refundId)).toEqual([]);
       expect(logged(errorSpy, 'invoice_adjustment_service_missing')).toEqual([
@@ -547,8 +429,8 @@ describeDb('billing: hoá đơn điều chỉnh khi hoàn tiền (T32 Phần 9b,
 
     it('RefundService thiếu EInvoiceService, refund late_payment → không log thiếu service', async () => {
       const t = await topUp({ late: 20_000 });
-      await mkRefund(t.id, 'late_payment', 20_000);
-      await runRefunds(new RefundService(db, vnpay, runner, WORK));
+      const refundId = await mkRefund(t.id, 'late_payment', 20_000);
+      await confirm(refundId, new RefundService(db));
       expect(logged(errorSpy, 'invoice_adjustment_service_missing')).toEqual([]);
     });
 
@@ -579,6 +461,16 @@ describeDb('billing: hoá đơn điều chỉnh khi hoàn tiền (T32 Phần 9b,
       }
       expect(await adjOf(rNo)).toEqual([]);
       expect(await adjOf(rLate)).toEqual([]);
+    });
+
+    it('confirmDone hai refund đồng thời trên cùng hoá đơn → adjustment_no 1 và 2, không lỗi UNIQUE', async () => {
+      const t = await topUp();
+      const r1 = await mkRefund(t.id, 'top_up', 60_000);
+      const r2 = await mkRefund(t.id, 'account_closure', 40_000);
+      await Promise.all([confirm(r1), confirm(r2)]);
+      expect(
+        [...(await adjOf(r1)), ...(await adjOf(r2))].map((r) => r['adjustment_no']).sort(),
+      ).toEqual([1, 2]);
     });
 
     it('hai refund done đồng thời trên cùng hoá đơn (hai connection) → adjustment_no 1 và 2, không lỗi UNIQUE', async () => {

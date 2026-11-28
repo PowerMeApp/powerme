@@ -2,13 +2,14 @@
  * InvoiceAdjustmentService — gửi hoá đơn điều chỉnh giảm khi hoàn tiền (T32 Phần 9b; SD-2e, STM-7,
  * decisions D5 / D7).
  *
- * Dòng `invoice_adjustments` được `EInvoiceService.adjustForRefund` tạo trong tx2 của refund `done`.
+ * Dòng `invoice_adjustments` được `EInvoiceService.adjustForRefund` tạo trong transaction Admin ghi nhận refund `done`
+ * (`RefundService.confirmDone`, hoàn tiền thủ công D1).
  * Service này lo phần còn lại:
  *   1. Việc nền `invoice-adjustment-issue` (`BackgroundWork`, lease D7), cùng mẫu `e-invoice-issue`:
  *      tx1 giữ chỗ một dòng `requested` / `failed` đến hạn → kiểm trước khi gửi → gọi nhà cung cấp
  *      NGOÀI transaction (timeout 10 s) → tx2 `lockLeased` (`null` = mất lease, bỏ kết quả) → STM-7
  *      (hàm dùng chung `e-invoice-rows.ts`) → ghi.
- *   2. `adminRetryAdjustment(adjustmentId, adminId)`: `needs_review → requested` (#7). Route ở 10b.
+ *   2. `adminRetryAdjustment(adjustmentId, adminId)`: `needs_review → requested` (#7). Route ở PR sau.
  *
  * Kiểm trước khi gửi (`checkAdjustmentSendable`, không gọi nhà cung cấp nếu lỗi; lỗi tính là một
  * lượt như lỗi của nhà cung cấp):
@@ -197,7 +198,7 @@ export class InvoiceAdjustmentService implements BackgroundWork, OnModuleInit {
   }
 
   /**
-   * Admin retry (STM-7 #7; route, phân quyền ở 10b): chỉ `needs_review` → `requested`, đến hạn ngay,
+   * Admin retry (STM-7 #7; route, phân quyền ở PR sau): chỉ `needs_review` → `requested`, đến hạn ngay,
    * GIỮ `attempt_count`, `unfinished_claims = 0`. Chưa có bảng audit: `adminId` ghi vào log
    * `invoice_adjustment_admin_retry`. Điều chỉnh chờ hoá đơn gốc thì Admin xử lý hoá đơn gốc trước.
    *

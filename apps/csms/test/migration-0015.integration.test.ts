@@ -250,13 +250,15 @@ describeDb('migration 0015 — refunds và lịch quét billing (nâng cấp DB 
         'refunds.attempt_count int4 NO 0',
         'refunds.completed_at timestamptz YES -',
         'refunds.created_at timestamptz NO now()',
+        // 0032 (hoàn tiền thủ công): thêm failure_reason, bỏ DEFAULT của next_attempt_at.
+        'refunds.failure_reason text YES -',
         'refunds.gateway_refund_no varchar YES -',
         'refunds.id int8 NO -',
         'refunds.kind refund_kind NO -',
         'refunds.last_attempt_at timestamptz YES -',
         'refunds.last_error_kind e_invoice_error_kind YES -',
         'refunds.last_error_message text YES -',
-        'refunds.next_attempt_at timestamptz YES now()',
+        'refunds.next_attempt_at timestamptz YES -',
         'refunds.requested_by int8 YES -',
         "refunds.status refund_status NO 'requested'::refund_status",
         'refunds.top_up_id int8 NO -',
@@ -358,11 +360,11 @@ describeDb('migration 0015 — refunds và lịch quét billing (nâng cấp DB 
     const refund = (cols: Record<string, unknown>) =>
       insertRow('refunds', { kind: 'top_up', amount_vnd: 50000, requested_by: adminId, ...cols });
 
-    it('refund top_up do Admin tạo: mặc định requested, attempt 0, next_attempt_at đến hạn ngay', async () => {
+    it('refund top_up do Admin tạo: mặc định requested, attempt 0, next_attempt_at NULL (0032 bỏ DEFAULT)', async () => {
       const r = await refund({ top_up_id: await newTopUp() });
       expect(r['status']).toBe('requested');
       expect(r['attempt_count']).toBe(0);
-      expect(r['next_attempt_at']).not.toBeNull();
+      expect(r['next_attempt_at']).toBeNull();
       expect(r['completed_at']).toBeNull();
     });
 
@@ -454,13 +456,15 @@ describeDb('migration 0015 — refunds và lịch quét billing (nâng cấp DB 
       expect(ok['last_error_kind']).toBe('transient');
     });
 
-    it('requested phải có next_attempt_at (worker D7 mới thấy); failed được để NULL', async () => {
-      const e = await rejection(refund({ top_up_id: await newTopUp(), next_attempt_at: null }));
-      expect(e.constraint).toBe('refunds_next_attempt_check');
+    // 0032 (hoàn tiền thủ công) bỏ refunds_next_attempt_check và thêm failure_reason bắt buộc khi failed.
+    it('sau 0032: requested được để next_attempt_at NULL; failed cần failure_reason', async () => {
+      const requested = await refund({ top_up_id: await newTopUp(), next_attempt_at: null });
+      expect(requested['status']).toBe('requested');
       const failed = await refund({
         top_up_id: await newTopUp(),
         status: 'failed',
         next_attempt_at: null,
+        failure_reason: 'cổng từ chối',
       });
       expect(failed['status']).toBe('failed');
     });

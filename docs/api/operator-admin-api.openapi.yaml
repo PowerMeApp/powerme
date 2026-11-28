@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: PowerMe CSMS — Operator & Admin API
-  version: 0.2.0
+  version: 0.3.0
   summary: Hợp đồng REST cho Operator Dashboard và Admin Console (T98)
   description: |
     Hợp đồng giữa CSMS (WP2) và dashboard React (WP4) cho hai bề mặt:
@@ -2505,24 +2505,35 @@ paths:
       tags: [billing-exceptions]
       operationId: refundTopUp
       x-roles: [admin]
-      x-status: planned
+      x-status: implemented
       x-owner: Khang
-      x-refs: [UC-ADM-08, SD-2e, BR-P21, BR-P14]
-      summary: Hoàn toàn bộ một top-up về nguồn (202, refund chạy nền)
+      x-refs: [UC-ADM-08, SD-2e, BR-P21, BR-P51, BR-P14, WF-02 D1, WF-02 D10]
+      summary: Tạo yêu cầu hoàn một top-up (trừ ví, trả điểm; CSKH hoàn trên cổng merchant)
+      description: |
+        Hoàn tiền thủ công (D-AC / BR-P51): ghi quyết định hoàn (`credited → refunded`, sổ cái −số đã
+        nạp, trả điểm đã dùng) và tạo refund `requested` trong một transaction. PowerMe không gọi
+        VNPay refund; CSKH hoàn `amount_vnd` trên cổng merchant rồi Admin ghi nhận qua
+        `…/refunds/{refundId}/confirm`. Không có body. Gọi lại → 409 `not_refundable`.
       parameters:
         - $ref: '#/components/parameters/topUpId'
-        - $ref: '#/components/parameters/idempotencyKey'
+        - $ref: '#/components/parameters/idempotencyKeyAccepted'
       responses:
         '202':
           description: Refund đã ghi `requested`
           content:
             application/json:
               schema: { $ref: '#/components/schemas/RefundRequested' }
+        '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409':
-          description: '`invalid_transition`, `insufficient_available_balance`, `account_closed`, `idempotency_conflict`'
+          description: '`not_refundable` (top-up không ở `credited`), `account_closed`'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '422':
+          description: '`insufficient_available_balance` (số dư khả dụng < số đã nạp)'
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
@@ -2554,24 +2565,28 @@ paths:
       tags: [billing-exceptions]
       operationId: refundLatePayment
       x-roles: [admin]
-      x-status: planned
+      x-status: implemented
       x-owner: Khang
-      x-refs: [UC-ADM-08, SD-2e, BR-P13]
-      summary: Hoàn khoản thanh toán trễ về nguồn
+      x-refs: [UC-ADM-08, SD-2e, BR-P13, BR-P51, WF-02 D1, WF-02 D10]
+      summary: Tạo yêu cầu hoàn khoản thanh toán trễ (không ghi sổ cái)
+      description: |
+        Refund `late_payment` `requested`, `amount_vnd` = `late_amount_vnd`. Cho phép cả tài khoản
+        `closed`. Không có body.
       parameters:
         - $ref: '#/components/parameters/topUpId'
-        - $ref: '#/components/parameters/idempotencyKey'
+        - $ref: '#/components/parameters/idempotencyKeyAccepted'
       responses:
         '202':
           description: Refund đã ghi `requested`
           content:
             application/json:
               schema: { $ref: '#/components/schemas/RefundRequested' }
+        '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409':
-          description: '`late_refund_not_allowed`, `idempotency_conflict`'
+          description: '`no_late_payment`, `already_requested`'
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
@@ -2630,27 +2645,121 @@ paths:
   /admin/v1/billing/refunds:
     get:
       tags: [billing-exceptions]
-      operationId: listFailedRefunds
+      operationId: listRefundQueue
       x-roles: [admin]
-      x-status: planned
+      x-status: implemented
       x-owner: Khang
-      x-refs: [UC-ADM-08, STM-10, WF-02 D1, WF-02 D10]
-      summary: Refund thất bại (gồm cả account_closure) chờ thử lại
+      x-refs: [UC-ADM-08, STM-10, BR-P51, WF-02 D1, WF-02 D10]
+      summary: Refund chờ CSKH (`requested` + `failed`, gồm `account_closure`)
+      description: |
+        Cũ nhất trước (CSKH hoàn trong 7 ngày làm việc), tối đa `limit` dòng, `total` là số dòng
+        thật. Không có `status` → cả hai trạng thái. Tham số khác, `status` lạ hoặc lặp → 400.
       parameters:
         - name: status
           in: query
-          schema: { type: string, enum: [failed], default: failed }
-        - $ref: '#/components/parameters/page'
-        - $ref: '#/components/parameters/pageSize'
+          schema: { type: string, enum: [requested, failed] }
       responses:
         '200':
-          description: Trang refund
+          description: Danh sách chờ CSKH
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/BillingItemPage' }
+              schema: { $ref: '#/components/schemas/RefundQueue' }
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
+
+  /admin/v1/billing/refunds/{refundId}/confirm:
+    post:
+      tags: [billing-exceptions]
+      operationId: confirmRefund
+      x-roles: [admin]
+      x-status: implemented
+      x-owner: Khang
+      x-refs: [SD-2e, STM-10, BR-P51, WF-02 D1, WF-02 D10]
+      summary: Ghi nhận CSKH đã hoàn trên cổng (nhập mã hoàn của cổng → `done`)
+      description: |
+        STM-10 `requested → done`, `completed_at = now()`, tạo hoá đơn điều chỉnh (top_up /
+        account_closure). Gọi lại với đúng mã trên refund đã `done` bằng mã đó → 200
+        `already_done: true`, không ghi gì. Mã đã ghi cho refund khác → 409 `refund_no_used`.
+      parameters:
+        - $ref: '#/components/parameters/refundId'
+        - $ref: '#/components/parameters/idempotencyKeyAccepted'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ConfirmRefundRequest' }
+      responses:
+        '200':
+          description: Refund `done`
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RefundConfirmed' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: '`refund_no_used`; `invalid_transition` (refund `failed`, hoặc `done` bằng mã khác), kèm `from`'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '415': { $ref: '#/components/responses/UnsupportedMediaType' }
+
+  /admin/v1/billing/refunds/{refundId}/fail:
+    post:
+      tags: [billing-exceptions]
+      operationId: markRefundFailed
+      x-roles: [admin]
+      x-status: implemented
+      x-owner: Khang
+      x-refs: [SD-2e, STM-10, BR-P51, WF-02 D1, WF-02 D10]
+      summary: Đánh dấu cổng từ chối hoàn (`requested → failed`, kèm lý do)
+      parameters:
+        - $ref: '#/components/parameters/refundId'
+        - $ref: '#/components/parameters/idempotencyKeyAccepted'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/FailRefundRequest' }
+      responses:
+        '200':
+          description: Refund `failed`
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RefundFailed' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/InvalidTransition' }
+        '415': { $ref: '#/components/responses/UnsupportedMediaType' }
+
+  /admin/v1/billing/refunds/{refundId}/redo:
+    post:
+      tags: [billing-exceptions]
+      operationId: redoRefund
+      x-roles: [admin]
+      x-status: implemented
+      x-owner: Khang
+      x-refs: [SD-2e, STM-10, BR-P51, WF-02 D1, WF-02 D10]
+      summary: Làm lại refund `failed` (`failed → requested`, giữ lý do cũ)
+      description: Không có body.
+      parameters:
+        - $ref: '#/components/parameters/refundId'
+        - $ref: '#/components/parameters/idempotencyKeyAccepted'
+      responses:
+        '200':
+          description: Refund `requested`
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RefundRedone' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/InvalidTransition' }
 
 components:
   securitySchemes:
@@ -2793,6 +2902,19 @@ components:
       in: path
       required: true
       schema: { $ref: '#/components/schemas/Id' }
+    refundId:
+      name: refundId
+      in: path
+      required: true
+      schema: { $ref: '#/components/schemas/Id' }
+    idempotencyKeyAccepted:
+      name: Idempotency-Key
+      in: header
+      required: false
+      description: |
+        Nhận nhưng không lưu (như đặt biểu giá): gửi lại bị chặn bởi state machine (STM-4 / STM-10)
+        và UNIQUE mã hoàn của cổng, không có `idempotency_conflict` (WF-02 D10, 27/11).
+      schema: { $ref: '#/components/schemas/IdempotencyKey' }
     idempotencyKey:
       name: Idempotency-Key
       in: header
@@ -4240,6 +4362,101 @@ components:
                 type: object
                 description: Hình dạng phần tử do WF-02 D10 chốt (Khang); hợp đồng này chỉ chốt phong bì
     RefundRequested:
+      type: object
+      required: [refund_id, status, amount_vnd]
+      properties:
+        refund_id: { $ref: '#/components/schemas/Id' }
+        status: { type: string, const: requested }
+        amount_vnd:
+          type: integer
+          minimum: 1
+          description: Số CSKH hoàn trên cổng (`amount_paid_vnd` của top-up, hoặc khoản trễ)
+    RefundQueue:
+      type: object
+      required: [generated_at, limit, total, items]
+      properties:
+        generated_at: { type: string, format: date-time }
+        limit: { type: integer, const: 200 }
+        total: { type: integer, minimum: 0 }
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/RefundQueueItem' }
+    RefundQueueItem:
+      type: object
+      required:
+        [
+          refund_id,
+          kind,
+          top_up_id,
+          amount_vnd,
+          status,
+          requested_by,
+          created_at,
+          updated_at,
+          failure_reason,
+          gateway_reference,
+          gateway_transaction_no,
+          paid_at,
+          driver,
+        ]
+      properties:
+        refund_id: { $ref: '#/components/schemas/Id' }
+        kind: { type: string, enum: [top_up, late_payment, account_closure] }
+        top_up_id: { $ref: '#/components/schemas/Id' }
+        amount_vnd: { type: integer, minimum: 1 }
+        status: { type: string, enum: [requested, failed] }
+        requested_by:
+          type: [string, 'null']
+          description: Admin tạo yêu cầu; null = hệ thống (account_closure)
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        failure_reason:
+          type: [string, 'null']
+          description: Lý do lần thất bại gần nhất (còn giữ sau khi làm lại)
+        gateway_reference: { type: string, description: '`vnp_TxnRef` của top-up gốc' }
+        gateway_transaction_no:
+          type: [string, 'null']
+          description: Mã giao dịch VNPay cần hoàn (gốc, hoặc của khoản trễ với `late_payment`)
+        paid_at: { type: [string, 'null'], format: date-time }
+        driver:
+          type: object
+          required: [driver_id, full_name, phone_number]
+          properties:
+            driver_id: { $ref: '#/components/schemas/Id' }
+            full_name: { type: string }
+            phone_number: { type: [string, 'null'] }
+    ConfirmRefundRequest:
+      type: object
+      additionalProperties: false
+      required: [gateway_refund_no]
+      properties:
+        gateway_refund_no:
+          type: string
+          description: Mã giao dịch hoàn trên cổng merchant; trim, 1–20 ký tự `[A-Za-z0-9._/-]`
+          pattern: '^\s*[A-Za-z0-9._/-]{1,20}\s*$'
+    FailRefundRequest:
+      type: object
+      additionalProperties: false
+      required: [reason]
+      properties:
+        reason: { type: string, minLength: 1, maxLength: 1000, description: 'trim, 1–1000 ký tự' }
+    RefundConfirmed:
+      type: object
+      required: [refund_id, status, gateway_refund_no, completed_at, already_done]
+      properties:
+        refund_id: { $ref: '#/components/schemas/Id' }
+        status: { type: string, const: done }
+        gateway_refund_no: { type: string }
+        completed_at: { type: string, format: date-time }
+        already_done: { type: boolean }
+    RefundFailed:
+      type: object
+      required: [refund_id, status, failure_reason]
+      properties:
+        refund_id: { $ref: '#/components/schemas/Id' }
+        status: { type: string, const: failed }
+        failure_reason: { type: string }
+    RefundRedone:
       type: object
       required: [refund_id, status]
       properties:

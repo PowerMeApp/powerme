@@ -13,7 +13,7 @@ import {
   EInvoiceStateMachine,
 } from './e-invoice-state-machine.js';
 import { InvalidTransition, MissingGuard } from './invalid-transition.js';
-import { RETRY_LIMIT } from './refund-state-machine.js';
+import { RETRY_LIMIT } from './retry-schedule.js';
 
 const sm = new EInvoiceStateMachine();
 
@@ -69,7 +69,7 @@ describe('EInvoiceStateMachine — các mũi tên của STM-7', () => {
   });
 });
 
-describe('EInvoiceStateMachine — biên bộ đếm lượt (RETRY_LIMIT dùng chung với STM-10)', () => {
+describe('EInvoiceStateMachine — biên bộ đếm lượt (RETRY_LIMIT của retry-schedule)', () => {
   it('RETRY_LIMIT = 4 lượt tổng (BR-P44)', () => {
     expect(RETRY_LIMIT).toBe(4);
   });

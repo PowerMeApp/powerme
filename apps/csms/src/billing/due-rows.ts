@@ -1,7 +1,7 @@
 /**
  * Lấy dòng đến hạn bằng "giữ chỗ có hạn" (lease) cho bảng có `next_attempt_at` (decisions D7, T32 Phần 12).
  *
- * Vì sao tồn tại: D7 muốn mỗi dòng xử lý dưới `FOR UPDATE SKIP LOCKED`, nhưng VNPay refund, querydr và
+ * Vì sao tồn tại: D7 muốn mỗi dòng xử lý dưới `FOR UPDATE SKIP LOCKED`, nhưng querydr và
  * e-invoice là HTTP ~10 s và không được gọi trong DB transaction (billing/CLAUDE.md). Nên một dòng đi qua:
  *
  *   tx1 (ngắn, `claimDue`): SELECT … FOR UPDATE SKIP LOCKED, đẩy `next_attempt_at = now() + lease`, COMMIT.
@@ -26,11 +26,11 @@ import { Logger } from '@nestjs/common';
 import type { PoolClient } from 'pg';
 import type { LedgerClient } from './credit-ledger.service.js';
 
-export type LeasedTable = 'refunds' | 'e_invoices' | 'invoice_adjustments' | 'top_ups';
+/** Không có `refunds`: hoàn tiền thủ công, không có worker refund (D1). */
+export type LeasedTable = 'e_invoices' | 'invoice_adjustments' | 'top_ups';
 
 /** Enum của cột `status` (cast tham số để dùng được index `(status, next_attempt_at)`). */
 const STATUS_ENUM: Record<LeasedTable, string> = {
-  refunds: 'refund_status',
   e_invoices: 'e_invoice_status',
   invoice_adjustments: 'e_invoice_status',
   top_ups: 'top_up_status',
@@ -66,12 +66,12 @@ export type ExhaustedHandler = (
 
 export interface LeaseSpec {
   table: LeasedTable;
-  /** Trạng thái được coi là còn việc, vd. `['requested']` cho refund, `['requested','failed']` cho hoá đơn. */
+  /** Trạng thái được coi là còn việc, vd. `['pending']` cho top-up, `['requested','failed']` cho hoá đơn. */
   statuses: readonly string[];
   leaseMs: number;
   /**
-   * Xử lý khi hết lượt giữ chỗ (`unfinished_claims > UNFINISHED_CLAIM_LIMIT`). Cả bốn bảng của
-   * `LeasedTable` đã có (refund: Phần 9a, điều chỉnh hoá đơn: Phần 9b); bảng mới thiếu thì log error
+   * Xử lý khi hết lượt giữ chỗ (`unfinished_claims > UNFINISHED_CLAIM_LIMIT`). Cả ba bảng của
+   * `LeasedTable` đã có (điều chỉnh hoá đơn: Phần 9b); bảng mới thiếu thì log error
    * rồi vẫn gọi `handle` như trước 8c.
    */
   onExhausted?: ExhaustedHandler;
