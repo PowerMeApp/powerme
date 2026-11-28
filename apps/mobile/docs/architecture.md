@@ -1,5 +1,17 @@
 # Coding reference 2 — class, package và ranh giới WP3
 
+## T163 — outcome và refresh Stop, 28/11/2026
+
+PKG-3 Charging/CD-1/SD-1a/b: `ChargeStopOutcome.alreadyEnded` chỉ map cặp
+HTTP 409 + `session_not_stoppable`; `notStoppable` vẫn dành cho 202 rejected
+với status không cho Stop. Outcome mới không là ACK hoặc bằng chứng chốt meter.
+`ChargeSessionScreen._requestStop` refresh sau await khi còn mounted/visible và
+đúng target/outcome. `ChargeSessionController.refreshProgress()` gộp yêu cầu khi
+đang đọc thành một progress read sau idle, kể cả progress vừa ngừng polling;
+ẩn/dispose xóa yêu cầu chờ, giữ cancellation/visibility generation guards.
+MSG30 inline còn đến khi bảng kê thực đã tải; statement eligibility/capability,
+auth/target/attempt identity và khóa gửi lặp giữ nguyên. Không đổi interface/deps.
+
 ## T96 — shared starting-point guard, 26/11/2026
 
 `DiscoveryOriginSelector` and `DiscoveryVinFastOverride` render the existing shared
