@@ -38,7 +38,7 @@ import {
 import { saveCsv } from './saveCsv';
 import { DataTable, EmptyState } from '../../ui/DataTable';
 import { Notice } from '../../ui/Notice';
-import { Pager } from '../../ui/Pager';
+import { Pager, useClientPage } from '../../ui/Pager';
 import { Figure, StatCard } from '../../ui/StatCard';
 
 export const REVENUE_PAGE_SIZE = 20;
@@ -187,12 +187,11 @@ export function RevenueReportView({
   };
   const { data, error, isFetching } = useRevenueQuery({ scope, ...query }, { skip: !valid });
   const report = valid ? data : undefined;
-  const [page, setPage] = useState(1);
   const [csv, csvState] = useRevenueCsvMutation();
   const [exportError, setExportError] = useState<string | null>(null);
 
   const update = (changes: Record<string, string>) => {
-    setPage(1);
+    resetPage(); // called on input, after render: `resetPage` is set by then
     setParams(
       (p) => {
         for (const [k, v] of Object.entries(changes)) {
@@ -222,10 +221,7 @@ export function RevenueReportView({
   const rows = allRows.filter((r) =>
     fields.every((f) => matchesSearch(params.get(f.param) ?? '', f.values(r))),
   );
-  const pages = Math.max(1, Math.ceil(rows.length / REVENUE_PAGE_SIZE));
-  const shownPage = Math.min(page, pages);
-  const first = (shownPage - 1) * REVENUE_PAGE_SIZE;
-  const pageRows = rows.slice(first, first + REVENUE_PAGE_SIZE);
+  const { pageRows, pagerProps, reset: resetPage } = useClientPage(rows, REVENUE_PAGE_SIZE);
 
   return (
     <>
@@ -301,13 +297,8 @@ export function RevenueReportView({
               minWidth={860}
               footer={
                 <Pager
-                  first={first + 1}
-                  last={first + pageRows.length}
-                  total={rows.length}
+                  {...pagerProps}
                   note={rows.length < allRows.length ? `(lọc từ ${allRows.length})` : undefined}
-                  page={shownPage}
-                  pages={pages}
-                  onPage={setPage}
                 />
               }
             >

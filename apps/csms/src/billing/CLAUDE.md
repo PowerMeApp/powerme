@@ -69,7 +69,7 @@ Decisions khác diagram thì theo diagram và sửa decisions. Diagram mâu thu�
 | `TopUpService` | `top_ups` (trừ `late_refunded_at`; `exception_reviewed_at` qua `markExceptionReviewed` / `recheckTopUp`); `top_up_payment_conflicts` (INSERT, Phần 8b; `reviewed_*` qua `markConflictReviewed`, Phần 10a) |
 | `CreditLedgerService` | `credit_transactions` (INSERT), `credit_accounts.balance_vnd`, `credit_accounts.status`: `active ↔ in_shortfall` |
 | `AccountClosureService` | `credit_accounts.status`: `active → closed`, `closed_at`, `closure_refunded_at` (khi không tạo refund nào) |
-| `LoyaltyService` | `loyalty_accounts`, `loyalty_transactions` |
+| `LoyaltyService` | `loyalty_accounts`, `loyalty_transactions`; dòng `expire` của lô hết hạn qua việc nền `loyalty-expire` (`expireDue`, Phần 13) |
 | `EInvoiceService` | `e_invoices`; `invoice_adjustments` (INSERT, `adjustForRefund` trong transaction `confirmDone`, Phần 9b) |
 | `InvoiceAdjustmentService` | `invoice_adjustments`: trạng thái, kết quả gửi, bộ đếm, Admin retry (worker `invoice-adjustment-issue`, Phần 9b) |
 | `RefundService` | `refunds` (`create`, `confirmDone`, `markFailed`, `redo`); `top_ups.late_refunded_at` và `credit_accounts.closure_refunded_at` khi Admin ghi nhận `done` (cùng transaction `confirmDone`) |
@@ -93,7 +93,7 @@ Decisions khác diagram thì theo diagram và sửa decisions. Diagram mâu thu�
 | Billing Exceptions, route Admin (T32 Phần 10a) | UC-ADM-08 | D10 | STM-7 #7 | `test/admin-billing-route.integration.test.ts`, `test/billing-exceptions.integration.test.ts`; `refund_status` cho app: `test/driver-top-ups.integration.test.ts`. Code: `billing-exceptions.query.ts`, `operator-api/admin-billing.ts` |
 | Đóng tài khoản (tài xế đóng, hệ thống tự hoàn) | SD-2f | D6 | STM-5, STM-10 | (theo test case của nhóm) |
 | Worker quét DB | (không vẽ) | D7 | | |
-| Hết hạn điểm | (không vẽ) | D11 | | |
+| Hết hạn điểm (việc nền `loyalty-expire`, mỗi vòng quét) | (không vẽ) | D11 | | TC-F08-03 + test theo nội dung (T32 Phần 13): chỉ trừ phần còn sống, lô chưa hết hạn không đụng, chạy lại / tài khoản bị khoá (SKIP LOCKED) / hai lượt song song không trừ hai lần, tài khoản `closed` bỏ qua, restore vào lô hết hạn không trừ thêm, sổ hỏng → `failed` rồi chạy tiếp, đăng ký với BillingModule thật: `test/billing-loyalty-expire.integration.test.ts`; `expireDueForAccount`: `test/billing-loyalty.integration.test.ts`. Code: `loyalty.service.ts` (`expireDue`, `runDue`), `loyalty-lots.ts` (`planExpiry`) |
 
 Diagram: `diagrams/report4/class/CD-2/` + `diagrams/report4/sequence/SD-2a…2f/` (CD-2, SD-2a…2f v2.0, 01/11/2026; CD-2 / SD-2e v3.0 26/11 hoàn thủ công) và `diagrams/report4/erd-logical/erd-logical-clean.svg`. STM-10 Refund: `diagrams/report4/state/STM-10/STM-10.puml` (v2.0 26/11; STM-8 là RfidCard). State machine trong code: `top-up-state-machine.ts`, `e-invoice-state-machine.ts` (STM-7, T32 Phần 7), `refund-state-machine.ts`, lỗi chung `invalid-transition.ts`. Tên class/method theo CD-2; nguồn sự thật cho tên cột là `src/db/schema/billing.ts` (vd. cột là `status`, không phải `topUpStatus`).
 

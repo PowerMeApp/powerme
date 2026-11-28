@@ -28,6 +28,9 @@
 //        = trụ đó không gửi Basic Auth). Có CP_IDS thì CP_ID/CP_PASSWORD bị bỏ qua.
 //      Cho kiểm thử (áp cho mọi trụ): RETRY_MS, REPLAY_LOSS, METER_INTERVAL, PING_SEC, REBOOT_MS,
 //      SPEED; STALE_METERSTOP=1: StopTransaction sau một lần rớt mạng mang meterStop cũ (EXP-01).
+//      Cấu hình phần cứng (QA-11, khớp CSMS): CP_SPEC (một trụ) / CP_SPECS=dc120:120/60,ac22:22,...
+//        (cùng thứ tự CP_IDS) — "<ac|dc><kW trụ>:<kW súng 1>[/<kW súng 2>]". Trống = D1 gốc DC 120 kW
+//        hai súng. Trụ AC không gửi SoC. CP_GUNS (cũ) chỉ còn dùng khi không có spec.
 //      OFFLINE_AUTH=normal|rejected|notsupported (T150): trụ cho CSMS tắt authorize offline, hay
 //        "cứng đầu" (key readonly → Rejected, hoặc không có key → NotSupported) và nhận mọi thẻ offline.
 
@@ -37,6 +40,7 @@ import { readFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { createStation } from './station.mjs';
+import { parseSpec } from './model.mjs';
 
 const num = (v, d) => (v === undefined || v === '' ? d : Number(v));
 const env = process.env;
@@ -55,13 +59,14 @@ function stationList() {
     // QA-09: địa chỉ trạm (ngăn bằng "|" vì địa chỉ có dấu phẩy) và số súng thật trong DB (1 hoặc 2).
     const addrs = (env.CP_ADDRESSES ?? '').split('|').map((s) => s.trim());
     const guns = (env.CP_GUNS ?? '').split(',').map((s) => Number(s.trim()));
+    const specs = (env.CP_SPECS ?? '').split(',').map((s) => s.trim());
     return ids.map((id, i) => ({
       id,
       password: pws[i] || undefined,
       name: names[i] || null,
       code: codes[i] || null,
       address: addrs[i] || null,
-      guns: guns[i] === 1 ? 1 : 2,
+      ...withSpec(specs[i], guns[i] === 1 ? 1 : 2),
     }));
   }
   return [
@@ -71,9 +76,23 @@ function stationList() {
       name: env.CP_NAME?.trim() || null,
       code: env.CP_CODE?.trim() || null,
       address: env.CP_ADDRESS?.trim() || null,
-      guns: env.CP_GUNS?.trim() === '1' ? 1 : 2,
+      ...withSpec(env.CP_SPEC, env.CP_GUNS?.trim() === '1' ? 1 : 2),
     },
   ];
+}
+/**
+ * QA-11: spec → số súng thật. Không có spec mà CP_GUNS=1 (cách cũ) → D1 gốc nhưng một súng, để
+ * trụ 1 súng không còn "giả 2 súng" như trước.
+ */
+function withSpec(raw, legacyGuns) {
+  try {
+    const spec = raw ? parseSpec(raw) : parseSpec('');
+    if (!raw && legacyGuns === 1) spec.guns = spec.guns.slice(0, 1);
+    return { spec, guns: spec.guns.length };
+  } catch (e) {
+    console.error(e.message);
+    process.exit(2);
+  }
 }
 const list = stationList();
 for (const { id } of list) {
@@ -104,10 +123,11 @@ const tongClients = new Set();
 
 // Mỗi trụ: station + tập client SSE riêng. Trang một trụ chỉ nhận dữ liệu của trụ đó.
 const stations = new Map();
-for (const { id, password, name, code, address, guns } of list) {
+for (const { id, password, name, code, address, guns, spec } of list) {
   const station = createStation({
     ...common,
     cpId: id,
+    spec,
     ...(password ? { authPassword: password } : {}),
   });
   const entry = { id, name, code, address, guns, station, clients: new Set() };

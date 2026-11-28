@@ -20,6 +20,7 @@ enum ChargeStopOutcome {
   responseUnknown,
   pendingOrUnknown,
   notStoppable,
+  alreadyEnded,
   unavailable,
   keyConflict,
   invalidRequest,

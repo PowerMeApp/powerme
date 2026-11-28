@@ -31,7 +31,8 @@ bool isChargeStopUnconfirmed(ChargeStopOutcome? outcome) => switch (outcome) {
   ChargeStopOutcome.failed ||
   ChargeStopOutcome.pendingOrUnknown ||
   ChargeStopOutcome.responseUnknown ||
-  ChargeStopOutcome.notStoppable => true,
+  ChargeStopOutcome.notStoppable ||
+  ChargeStopOutcome.alreadyEnded => true,
   _ => false,
 };
 
@@ -249,6 +250,11 @@ String chargeStopMessage(ChargeStopOutcome? outcome, AppCopy copy) =>
       ChargeStopOutcome.notStoppable => copy.text(
         'Hiện chưa thể yêu cầu dừng phiên. Đang cập nhật tiến độ.',
         'A stop request is currently unavailable. Checking progress.',
+      ),
+      ChargeStopOutcome.alreadyEnded => copy.text(
+        'Phiên sạc đã kết thúc tại trụ. Bảng kê của bạn sẽ sớm được hiển thị.',
+        'This session has already ended at the charge point. '
+            'Your charging statement will appear shortly.',
       ),
       ChargeStopOutcome.unavailable => copy.text(
         'Không tìm thấy phiên có thể dừng từ ứng dụng.',

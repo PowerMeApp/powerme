@@ -10,12 +10,12 @@
   VÌ SAO KHÔNG BUILD: demo chạy `node server.mjs` là đủ — không CDN; three.js lấy từ node_modules
     qua /vendor/three/ (xem server.mjs). Mọi chữ đến từ OCPP/CSMS đều qua esc() trước khi vào HTML.
   GIẢ ĐỊNH: số tiền trên màn hình chỉ là tạm tính từ đơn giá cấu hình; CSMS mới là nguồn sự thật.
-    Wh được gửi dưới dạng số nguyên (chưa xác nhận firmware Ruihua). Màu: biến CSS, sáng/tối theo
-    prefers-color-scheme (hoặc ?theme=dark|light). Nút "Chữ lớn" phóng chữ cho máy chiếu.
+    Wh được gửi dưới dạng số nguyên (chưa xác nhận firmware Ruihua). Màu: biến CSS, TỐI mặc định
+    (như dashboard), ?theme=light cho bản sáng. Nút "Chữ lớn" phóng chữ cho máy chiếu.
     Hình trụ sạc minh hoạ (SVG + CSS + JS nhỏ) ở public/tru-sac.{css,js}, phục vụ qua /static/.
-  GIAO DIỆN (QA-06): style "Bevel" — token chung /static/bevel-tokens.css (nền trắng, capsule nav nổi,
-    thẻ Cloud #ebf0f8, nút pill Charcoal, màu dữ liệu chỉ cho chấm/biểu đồ). Viên trạng thái nhận màu
-    qua biến --c (chấm màu, chữ Ink), không tô cả nền.
+  GIAO DIỆN (QA-10): bộ màu PowerMe như dashboard/app — token chung /static/bevel-tokens.css (nền
+    #0A0A0A, thẻ Graphite hai lớp + hairline, capsule nav nổi, nút pill teal, ô nhập bo 14). Viên
+    trạng thái nhận màu qua biến --c (chấm màu, chữ --ink), không tô cả nền.
 -->
 <html lang="vi">
   <head>
@@ -25,8 +25,8 @@
     <link rel="stylesheet" href="/static/bevel-tokens.css" />
     <link rel="stylesheet" href="/static/tru-sac.css" />
     <style>
-      /* QA-06: giao diện theo style "Bevel" — token ở /static/bevel-tokens.css. Ở đây chỉ bố cục và
-         thành phần riêng của trang trụ. Không đổi id/class/data-f mà JS và test dùng. */
+      /* QA-10: bộ màu PowerMe tối như dashboard — token ở /static/bevel-tokens.css. Ở đây chỉ bố cục
+         và thành phần riêng của trang trụ. Không đổi id/class/data-f mà JS và test dùng. */
       :root.big {
         font-size: 19px;
       }
@@ -38,9 +38,9 @@
         margin: 0 auto;
       }
       h2 {
-        font-size: 1.5rem;
-        line-height: 1.05;
-        letter-spacing: -0.24px;
+        font-size: 1.25rem;
+        line-height: 1.2;
+        letter-spacing: -0.02em;
         margin: 0 0 var(--s2);
       }
 
@@ -51,6 +51,7 @@
         gap: 6px;
         color: var(--gray);
         font-weight: 500;
+        font-size: 0.9375rem;
         text-decoration: none;
         white-space: nowrap;
       }
@@ -59,63 +60,71 @@
       }
       .bv-nav .bv-brand {
         padding-left: var(--s2);
-        border-left: 1px solid var(--hair);
+        border-left: 1px solid var(--hairline);
       }
       .seg-lbl {
-        font-size: 0.875rem;
+        font-size: 0.8125rem;
         color: var(--gray);
         font-weight: 500;
       }
       .seg {
         display: inline-flex;
         gap: 2px;
-        padding: 4px;
+        padding: 3px;
         border-radius: var(--r-pill);
-        background: var(--cloud);
+        background: var(--pm-well);
+        box-shadow: inset 0 0 0 1px var(--hairline);
       }
       .seg button {
         border: 0;
         background: transparent;
-        padding: 6px 14px;
+        box-shadow: none;
+        padding: 5px 13px;
         min-height: 0;
+        color: var(--gray);
         font-variant-numeric: tabular-nums;
       }
-      .seg button[aria-pressed='true'] {
-        background: var(--charcoal);
-        color: var(--on-charcoal);
+      .seg button:hover:not(:disabled) {
+        background: var(--pm-raised);
+        color: var(--ink);
       }
-      .bv-nav > button {
-        background: var(--cloud);
+      .seg button[aria-pressed='true'] {
+        background: var(--pm-teal);
+        color: var(--pm-on-teal);
+        font-weight: 600;
       }
 
-      /* ── Viên trạng thái (chip): nền trắng, chấm màu, chữ Ink ─────────────── */
+      /* ── Viên trạng thái (chip): nền nổi nhẹ + hairline, chấm màu, chữ --ink ── */
       .chip {
         display: inline-flex;
         align-items: center;
         gap: 8px;
-        padding: 5px 14px 5px 11px;
+        padding: 4px 12px 4px 10px;
         border-radius: var(--r-pill);
-        background: var(--paper);
+        background: var(--pm-raised);
+        box-shadow: inset 0 0 0 1px var(--hairline);
         color: var(--ink);
-        font-weight: 500;
-        font-size: 0.875rem;
-        line-height: 1.25;
+        font-weight: 550;
+        font-size: 0.8125rem;
+        line-height: 1.35;
         white-space: nowrap;
         font-variant-numeric: tabular-nums;
       }
       .chip::before {
         content: '';
-        width: 8px;
-        height: 8px;
+        width: 7px;
+        height: 7px;
         border-radius: 50%;
         flex: none;
-        background: var(--c, var(--gray));
-        box-shadow: 0 0 0 3px color-mix(in srgb, var(--c, var(--gray)) 24%, transparent);
+        background: var(--c, var(--pm-gray));
+        box-shadow: 0 0 0 3px color-mix(in srgb, var(--c, var(--pm-gray)) 22%, transparent);
       }
       .chip.sm {
-        font-size: 0.8125rem;
-        padding: 4px 12px;
+        padding: 4px 11px;
         color: var(--gray);
+        font-family: var(--mono);
+        font-size: 0.75rem;
+        font-weight: 500;
       }
       .chip.sm::before {
         display: none;
@@ -123,11 +132,9 @@
       .chip[hidden] {
         display: none;
       }
-      .bv-nav .chip {
-        background: var(--cloud);
-      }
 
-      /* ── Nút: pill. Chính = Charcoal; phụ = nền trắng trên thẻ Cloud; nguy hiểm = viền đỏ nhạt ── */
+      /* ── Nút: pill. Mặc định = nền nổi + hairline; chính = teal chữ đen; nguy hiểm = chữ đỏ ──
+         Chỉ transform có chuyển động (cubic-bezier .32,.72,0,1); đổi nền khi hover là tức thì. */
       button,
       select,
       input {
@@ -137,69 +144,85 @@
       }
       button {
         cursor: pointer;
-        font-weight: 500;
+        font-weight: 550;
         white-space: nowrap;
-        min-height: 40px;
-        padding: 8px 18px;
+        min-height: 38px;
+        padding: 7px 18px;
         border-radius: var(--r-btn);
-        border: 1px solid transparent;
-        background: var(--paper);
-        transition:
-          background-color 0.15s ease,
-          transform 0.15s ease;
+        border: 0;
+        background: var(--pm-raised);
+        box-shadow:
+          inset 0 0 0 1px var(--hairline),
+          var(--inset-hi);
+        transition: transform var(--dur) var(--ease);
       }
       button:hover:not(:disabled) {
-        background: color-mix(in srgb, var(--paper) 88%, var(--ink));
+        background: var(--pm-raised-hi);
       }
       button:active:not(:disabled) {
-        transform: translateY(1px);
+        transform: scale(0.97);
       }
       button:disabled {
-        opacity: 0.38;
+        opacity: 0.4;
         cursor: not-allowed;
       }
       button.primary {
-        background: var(--charcoal);
-        color: var(--on-charcoal);
+        background: var(--pm-teal);
+        color: var(--pm-on-teal);
+        font-weight: 600;
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.25);
       }
       button.primary:hover:not(:disabled) {
-        background: color-mix(in srgb, var(--charcoal) 86%, var(--paper));
+        background: color-mix(in srgb, var(--pm-teal) 88%, #ffffff);
       }
       button.danger {
         background: transparent;
-        color: var(--alert);
-        border-color: var(--alert-line);
+        color: var(--pm-danger);
+        box-shadow: inset 0 0 0 1px var(--alert-line);
       }
       button.danger:hover:not(:disabled) {
         background: var(--alert-soft);
       }
+      /* Ô nhập/chọn: bo 14 như dashboard, nền lõm + hairline, viền teal khi focus */
       select,
       input {
-        min-height: 40px;
-        padding: 8px 16px;
-        border-radius: var(--r-pill);
-        border: 1px solid transparent;
-        background: var(--paper);
+        min-height: 38px;
+        padding: 7px 14px;
+        border-radius: var(--r-input);
+        border: 1px solid var(--hairline-strong);
+        background: var(--pm-well);
         min-width: 0;
         flex: 1;
       }
       select {
-        padding-right: 12px;
+        padding-right: 10px;
+      }
+      select option {
+        background: var(--pm-graphite);
+        color: var(--ink);
       }
       input.num {
         flex: 0 0 5.5rem;
         font-variant-numeric: tabular-nums;
       }
       input::placeholder {
-        color: var(--gray);
-        opacity: 0.7;
+        color: var(--pm-faint);
+        opacity: 1;
+      }
+      input:disabled,
+      select:disabled {
+        opacity: 0.5;
       }
       button:focus-visible,
-      input:focus-visible,
-      select:focus-visible,
       a:focus-visible {
-        outline: 3px solid color-mix(in srgb, var(--blue) 55%, transparent);
+        outline: 2px solid var(--pm-teal);
         outline-offset: 2px;
+      }
+      input:focus-visible,
+      select:focus-visible {
+        outline: none;
+        border-color: var(--pm-teal);
+        box-shadow: var(--focus-ring);
       }
 
       /* ── Cảnh báo đồng hồ + banner trong thẻ ───────────────────────────── */
@@ -207,39 +230,49 @@
         display: flex;
         gap: 12px;
         align-items: baseline;
-        background: var(--paper);
-        padding: 12px 16px;
+        background: var(--pm-well);
+        box-shadow: inset 0 0 0 1px var(--hairline);
+        padding: 11px 16px;
         margin-bottom: 8px;
         font-size: 0.875rem;
-        line-height: 1.4;
+        line-height: 1.45;
         border-radius: var(--r-img);
         color: var(--ink);
       }
       .banner::before {
         content: '';
-        width: 8px;
-        height: 8px;
+        width: 7px;
+        height: 7px;
         border-radius: 50%;
-        background: var(--gold);
+        background: var(--pm-warning);
         flex: none;
         transform: translateY(-1px);
       }
+      .banner.err {
+        background: var(--alert-soft);
+        box-shadow: inset 0 0 0 1px var(--alert-line);
+      }
       .banner.err::before {
-        background: var(--alert);
+        background: var(--pm-danger);
       }
       .banner[hidden] {
         display: none;
       }
       #clockWarn {
         margin: var(--s3) 0 0;
-        padding: 16px 20px;
-        background: var(--cloud);
+        padding: 14px 20px;
+        background: var(--warn-soft);
+        box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--pm-warning) 35%, transparent);
         color: var(--gray);
-        font-size: 0.9375rem;
+        font-size: 0.875rem;
       }
       #clockWarn.err {
         background: var(--alert-soft);
+        box-shadow: inset 0 0 0 1px var(--alert-line);
         color: var(--ink);
+      }
+      #clockWarn.err::before {
+        background: var(--pm-danger);
       }
 
       /* ── Hero: tiêu đề trụ + hình 3D (khung #tru, kiểu ở tru-sac.css) ───── */
@@ -251,23 +284,28 @@
         display: inline-flex;
         align-items: center;
         gap: 8px;
-        font-size: 0.9375rem;
-        font-weight: 500;
-        color: var(--gray);
+        font-size: 0.8125rem;
+        font-weight: 550;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        color: var(--pm-gold);
         margin-bottom: 12px;
+      }
+      :root[data-theme='light'] .eyebrow {
+        color: #7a6418;
       }
       .hero-title h1 {
         margin: 0;
-        font-size: clamp(2.25rem, 4.2vw, 4rem);
-        line-height: 1;
+        font-size: clamp(1.875rem, 3.2vw, 2.75rem);
+        line-height: 1.08;
         letter-spacing: -0.03em;
         overflow-wrap: anywhere;
       }
       .hero-title .sub {
-        margin-top: 14px;
+        margin-top: 12px;
         color: var(--gray);
-        font-size: 0.9375rem;
-        line-height: 1.45;
+        font-size: 0.875rem;
+        line-height: 1.5;
         overflow-wrap: anywhere;
       }
       .hero-title .sub span {
@@ -275,90 +313,102 @@
         font-variant-numeric: tabular-nums;
       }
 
-      /* ── Phiên sạc trên trụ này (QA-03): hai thẻ Cloud ─────────────────── */
+      /* ── Phiên sạc trên trụ này (QA-03): hai thẻ hai lớp ───────────────── */
       .sec-head {
         display: flex;
         align-items: baseline;
         flex-wrap: wrap;
-        gap: 4px 16px;
-        margin: var(--s10) 0 var(--s3);
+        gap: 4px 14px;
+        margin: var(--s6) 0 var(--s3);
       }
       .sec-head h2 {
         margin: 0;
-        font-size: 2.5rem;
-        line-height: 1;
-        letter-spacing: -0.03em;
+        font-size: 1.5rem;
+        line-height: 1.15;
+        letter-spacing: -0.025em;
       }
       .sec-head p {
         margin: 0;
         color: var(--gray);
-        font-size: 1.0625rem;
+        font-size: 0.9375rem;
       }
       #phien .grid {
         display: grid;
         grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-        gap: var(--s3);
+        gap: var(--s4);
+        padding: 0 7px;
       }
+      /* Thẻ chính: vỏ 6px nền trắng ~3 % + hairline ngoài; lõi Graphite có highlight inset 1px */
       .jr {
-        background: var(--cloud);
+        background: var(--pm-graphite);
         border-radius: var(--r-card);
         padding: var(--s4);
         min-width: 0;
+        box-shadow:
+          var(--inset-hi),
+          0 0 0 1px var(--hairline),
+          0 0 0 6px var(--shell),
+          0 0 0 7px var(--hairline),
+          var(--shadow-soft);
       }
       .gun-head {
         display: flex;
         align-items: center;
         flex-wrap: wrap;
-        gap: 10px;
+        gap: 8px;
         margin-bottom: var(--s3);
       }
       .gun-head .name {
-        font-size: 2rem;
-        font-weight: 600;
-        letter-spacing: -0.03em;
+        font-size: 1.5rem;
+        font-weight: 650;
+        letter-spacing: -0.025em;
         line-height: 1;
         margin-right: 6px;
       }
       .jr .now {
         position: relative;
-        font-size: 1.0625rem;
-        font-weight: 500;
-        line-height: 1.35;
-        padding: 16px 20px 16px 42px;
+        font-size: 1rem;
+        font-weight: 550;
+        line-height: 1.4;
+        padding: 14px 18px 14px 40px;
         border-radius: var(--r-img);
-        background: var(--paper);
+        background: var(--pm-well);
+        box-shadow: inset 0 0 0 1px var(--hairline);
         margin-bottom: var(--s4);
       }
       .jr .now::before {
         content: '';
         position: absolute;
-        left: 20px;
-        top: 23px;
-        width: 10px;
-        height: 10px;
+        left: 19px;
+        top: 21px;
+        width: 8px;
+        height: 8px;
         border-radius: 50%;
         background: var(--st-Unavailable);
       }
       .jr .now.ok::before {
-        background: var(--green);
-        box-shadow: 0 0 0 4px color-mix(in srgb, var(--green) 22%, transparent);
+        background: var(--pm-teal);
+        box-shadow: 0 0 0 4px var(--teal-soft);
       }
       .jr .now.wait::before {
-        background: var(--gold);
-        box-shadow: 0 0 0 4px color-mix(in srgb, var(--gold) 24%, transparent);
+        background: var(--pm-warning);
+        box-shadow: 0 0 0 4px var(--warn-soft);
+      }
+      .jr .now.bad {
+        box-shadow: inset 0 0 0 1px var(--alert-line);
       }
       .jr .now.bad::before {
-        background: var(--alert);
-        box-shadow: 0 0 0 4px color-mix(in srgb, var(--alert) 20%, transparent);
+        background: var(--pm-danger);
+        box-shadow: 0 0 0 4px var(--alert-soft);
       }
       .jr .now small {
         display: block;
         font-weight: 400;
-        font-size: 0.875rem;
+        font-size: 0.8125rem;
         color: var(--gray);
         margin-top: 4px;
       }
-      /* Số liệu lớn: 600, tracking âm; nhãn Body Gray */
+      /* Số liệu lớn: tracking âm, số tabular; nhãn chữ phụ */
       .metrics {
         display: grid;
         grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -372,7 +422,7 @@
         min-width: 0;
       }
       .metric .k {
-        font-size: 0.8125rem;
+        font-size: 0.75rem;
         color: var(--gray);
         margin-bottom: 6px;
         white-space: nowrap;
@@ -380,8 +430,8 @@
         text-overflow: ellipsis;
       }
       .metric .v {
-        font-size: 2rem;
-        font-weight: 600;
+        font-size: 1.75rem;
+        font-weight: 650;
         letter-spacing: -0.03em;
         line-height: 1;
         font-variant-numeric: tabular-nums;
@@ -390,39 +440,43 @@
       .metric .u {
         display: block;
         margin-top: 4px;
-        font-size: 0.8125rem;
-        color: var(--gray);
+        font-size: 0.75rem;
+        color: var(--pm-faint);
         font-weight: 400;
       }
       .jr .metric .v {
-        font-size: clamp(1.5rem, 2.2vw, 2.25rem);
+        font-size: clamp(1.375rem, 2vw, 2rem);
       }
-      /* Biểu đồ: nền trắng, lưới rất nhạt, kWh Metric Blue, kW Recovery Green */
+      /* Biểu đồ: nền lõm, lưới hairline, kWh teal (nét liền), kW gold (nét đứt) */
       .jr .chart {
         display: block;
         width: 100%;
         height: 10rem;
-        background: var(--paper);
+        background: var(--pm-well);
         border-radius: var(--r-img);
+        box-shadow: inset 0 0 0 1px var(--hairline);
       }
       .jr .chart .ax,
       .jr .chart .gl {
-        stroke: var(--hair);
+        stroke: var(--hairline-strong);
         stroke-width: 1;
         vector-effect: non-scaling-stroke;
       }
+      .jr .chart .gl {
+        stroke: var(--hairline);
+      }
       .jr .chart .l-kwh {
         fill: none;
-        stroke: var(--blue);
-        stroke-width: 2.5;
+        stroke: var(--pm-teal);
+        stroke-width: 2.25;
         stroke-linejoin: round;
         stroke-linecap: round;
         vector-effect: non-scaling-stroke;
       }
       .jr .chart .l-kw {
         fill: none;
-        stroke: var(--green);
-        stroke-width: 2;
+        stroke: var(--pm-gold);
+        stroke-width: 1.75;
         stroke-dasharray: 6 4;
         vector-effect: non-scaling-stroke;
       }
@@ -435,21 +489,21 @@
         display: flex;
         flex-wrap: wrap;
         gap: 6px 20px;
-        font-size: 0.8125rem;
+        font-size: 0.75rem;
         color: var(--gray);
         margin: 12px 0 var(--s4);
       }
       .jr .legend b {
         display: inline-block;
-        width: 18px;
+        width: 16px;
         height: 3px;
         border-radius: 3px;
         vertical-align: middle;
         margin-right: 8px;
       }
       .jr h3 {
-        font-size: 0.9375rem;
-        margin: 0 0 12px;
+        font-size: 0.875rem;
+        margin: 0 0 10px;
         color: var(--ink);
         font-weight: 600;
         letter-spacing: -0.01em;
@@ -457,43 +511,49 @@
       .jr ol {
         list-style: none;
         margin: 0;
-        padding: 8px 0;
-        font-size: 0.875rem;
-        line-height: 1.45;
+        padding: 6px 0;
+        font-size: 0.8125rem;
+        line-height: 1.5;
         max-height: 15rem;
         overflow: auto;
-        background: var(--paper);
+        background: var(--pm-well);
         border-radius: var(--r-img);
+        box-shadow: inset 0 0 0 1px var(--hairline);
       }
       .jr ol li {
         position: relative;
         padding: 6px 16px 6px 34px;
+      }
+      .jr ol li + li {
+        border-top: 1px solid var(--hairline);
       }
       .jr ol li::before {
         content: '';
         position: absolute;
         left: 16px;
         top: 13px;
-        width: 7px;
-        height: 7px;
+        width: 6px;
+        height: 6px;
         border-radius: 50%;
         background: var(--st-Unavailable);
       }
       .jr ol li.ok::before {
-        background: var(--green);
+        background: var(--pm-teal);
       }
       .jr ol li.bad::before {
-        background: var(--alert);
+        background: var(--pm-danger);
       }
       .jr ol li.wait::before {
-        background: var(--gold);
+        background: var(--pm-warning);
       }
       .jr ol b {
         font-weight: 600;
       }
       .jr ol .t,
       #timeline .t {
-        color: var(--gray);
+        color: var(--pm-faint);
+        font-family: var(--mono);
+        font-size: 0.75rem;
         font-variant-numeric: tabular-nums;
         margin-right: 8px;
       }
@@ -515,14 +575,19 @@
         align-items: start;
       }
       section.card {
-        background: var(--cloud);
+        background: var(--pm-graphite);
         border-radius: var(--r-card);
         padding: var(--s4);
         min-width: 0;
+        box-shadow:
+          var(--inset-hi),
+          0 0 0 1px var(--hairline),
+          var(--shadow-soft);
       }
       .soc {
-        height: 36px;
-        background: var(--paper);
+        height: 34px;
+        background: var(--pm-well);
+        box-shadow: inset 0 0 0 1px var(--hairline);
         border-radius: var(--r-pill);
         overflow: hidden;
         position: relative;
@@ -532,7 +597,8 @@
         height: 100%;
         width: 0;
         border-radius: inherit;
-        background: color-mix(in srgb, var(--green) 42%, var(--paper));
+        background: color-mix(in srgb, var(--pm-teal) 30%, transparent);
+        box-shadow: inset -2px 0 0 var(--pm-teal);
         /* không transition: SSE cập nhật 4 lần/giây, transition 0,4 s bị khởi động lại liên tục */
       }
       .soc .lbl {
@@ -540,22 +606,24 @@
         inset: 0;
         display: flex;
         align-items: center;
-        padding-left: 18px;
-        font-weight: 500;
-        font-size: 0.875rem;
+        padding-left: 16px;
+        font-weight: 550;
+        font-size: 0.8125rem;
         font-variant-numeric: tabular-nums;
       }
       .note {
-        font-size: 0.8125rem;
+        font-size: 0.75rem;
         color: var(--gray);
         margin: 0 0 12px;
-        line-height: 1.45;
+        line-height: 1.5;
       }
       .controls {
         display: grid;
         grid-template-columns: minmax(0, 1fr);
         gap: 12px;
         margin-top: var(--s3);
+        padding-top: var(--s3);
+        border-top: 1px solid var(--hairline);
       }
       /* Bảng HMI của súng: nhãn nằm trên ô, ô + nút chia hàng → không tràn thẻ ở mọi bề rộng */
       .controls .row {
@@ -564,7 +632,7 @@
       .controls .row label {
         flex: 1 1 100%;
         min-width: 0;
-        margin: 4px 0 -4px 4px;
+        margin: 4px 0 -4px 2px;
       }
       .controls .row > select,
       .controls .row > input:not(.num) {
@@ -579,22 +647,24 @@
         align-items: center;
       }
       .row label {
-        font-size: 0.8125rem;
+        font-size: 0.75rem;
+        font-weight: 500;
         color: var(--gray);
         min-width: 6.5rem;
         line-height: 1.3;
       }
       .msg {
-        font-size: 0.875rem;
+        font-size: 0.8125rem;
         min-height: 1.2rem;
         color: var(--gray);
       }
       .msg.bad {
-        color: var(--alert);
+        color: var(--pm-danger);
       }
       .reader-input:focus {
-        outline: 3px solid color-mix(in srgb, var(--blue) 55%, transparent);
-        outline-offset: 2px;
+        outline: none;
+        border-color: var(--pm-teal);
+        box-shadow: var(--focus-ring);
       }
       .side {
         min-width: 0;
@@ -606,7 +676,7 @@
         display: grid;
         grid-template-columns: auto 1fr;
         gap: 10px 20px;
-        font-size: 0.9375rem;
+        font-size: 0.875rem;
         margin-bottom: var(--s3);
         font-variant-numeric: tabular-nums;
       }
@@ -614,7 +684,7 @@
         color: var(--gray);
       }
       .kv span:nth-child(even) {
-        font-weight: 500;
+        font-weight: 550;
         overflow-wrap: anywhere;
       }
       #timeline {
@@ -622,29 +692,30 @@
         margin: var(--s2) 0 0;
         padding: 0;
         font-size: 0.8125rem;
-        line-height: 1.4;
+        line-height: 1.45;
         max-height: 11rem;
         overflow: auto;
         color: var(--ink);
       }
       #timeline li {
-        padding: 5px 0;
+        padding: 6px 0;
       }
       #timeline li + li {
-        border-top: 1px solid var(--hair);
+        border-top: 1px solid var(--hairline);
       }
       #timeline .warn {
-        color: var(--alert);
+        color: var(--pm-danger);
       }
-      /* Nhật ký OCPP: thẻ trắng trong thẻ Cloud, mono nhỏ, chữ Body Gray; chấm phân biệt chiều */
+      /* Nhật ký OCPP: ô lõm, mono nhỏ; chấm phân biệt chiều (teal = trụ gửi, gold = CSMS gửi) */
       #log {
         height: 26rem;
         overflow: auto;
         font-family: var(--mono);
         font-size: 0.75rem;
-        line-height: 1.6;
+        line-height: 1.65;
         color: var(--gray);
-        background: var(--paper);
+        background: var(--pm-well);
+        box-shadow: inset 0 0 0 1px var(--hairline);
         border-radius: var(--r-img);
         padding: 12px 14px;
       }
@@ -661,7 +732,7 @@
         border-radius: 50%;
         margin-right: 8px;
         vertical-align: 1px;
-        background: var(--gray);
+        background: var(--pm-gray);
       }
       #log div.out::before {
         background: var(--log-out);
@@ -670,7 +741,7 @@
         background: var(--log-in);
       }
       #log div.ERROR {
-        color: var(--alert);
+        color: var(--pm-danger);
       }
       #log div.ERROR::before {
         background: var(--log-err);
@@ -684,7 +755,7 @@
         flex-wrap: wrap;
         align-items: center;
         gap: 8px 18px;
-        font-size: 0.8125rem;
+        font-size: 0.75rem;
         color: var(--gray);
         margin-bottom: 12px;
       }
@@ -714,7 +785,49 @@
         width: 16px;
         height: 16px;
         padding: 0;
-        accent-color: var(--charcoal);
+        accent-color: var(--pm-teal);
+      }
+
+      /* ── QA-11: trụ một súng — ẩn súng B, panel súng A rộng ra ──────────── */
+      .one-gun #gun2,
+      .one-gun #jr2 {
+        display: none;
+      }
+      @media (min-width: 1280px) {
+        .one-gun main {
+          grid-template-columns: minmax(0, 2fr) minmax(0, 27rem);
+        }
+      }
+      @media (min-width: 768px) {
+        .one-gun #phien .grid {
+          grid-template-columns: minmax(0, 1fr);
+        }
+      }
+      @media (min-width: 768px) and (max-width: 1279px) {
+        .one-gun main {
+          grid-template-columns: minmax(0, 1fr);
+        }
+      }
+
+      /* ── QA-11: trụ một súng — ẩn súng B, panel súng A rộng ra ──────────── */
+      .one-gun #gun2,
+      .one-gun #jr2 {
+        display: none;
+      }
+      @media (min-width: 1280px) {
+        .one-gun main {
+          grid-template-columns: minmax(0, 2fr) minmax(0, 27rem);
+        }
+      }
+      @media (min-width: 768px) {
+        .one-gun #phien .grid {
+          grid-template-columns: minmax(0, 1fr);
+        }
+      }
+      @media (min-width: 768px) and (max-width: 1279px) {
+        .one-gun main {
+          grid-template-columns: minmax(0, 1fr);
+        }
       }
 
       /* ── Màn vừa: hai cột, khối mạng/nhật ký xuống dưới ─────────────────── */
@@ -739,7 +852,7 @@
         }
         .bv-nav {
           position: static;
-          padding: 10px 12px 10px 18px;
+          padding: 8px 8px 8px 16px;
           gap: 8px 10px;
         }
         .bv-nav .bv-brand,
@@ -752,15 +865,18 @@
         .side {
           grid-template-columns: minmax(0, 1fr);
         }
+        #phien .grid {
+          gap: var(--s3);
+        }
         .sec-head {
-          margin-top: var(--s6);
+          margin-top: var(--s5);
         }
         .sec-head h2 {
-          font-size: 2rem;
+          font-size: 1.375rem;
         }
         .jr,
         section.card {
-          padding: var(--s3) 20px;
+          padding: 20px;
         }
         .jr .metrics,
         .metrics {
@@ -811,7 +927,7 @@
     <div class="wrap">
       <div class="banner" id="clockWarn" hidden></div>
 
-      <!-- Khối "Trụ sạc" (QA-02 → QA-06): Cloudlight Hero — tiêu đề trụ ở trên, hình ở giữa. SVG tự
+      <!-- Khối "Trụ sạc" (QA-02 → QA-10): thẻ hero — tiêu đề trụ ở trên, hình ở giữa. SVG tự
            vẽ, kiểu ở /static/tru-sac.css, logic ở /static/tru-sac.js; 3D do tru-3d.js nạp. Dùng chung
            snapshot SSE với hai panel súng bên dưới. -->
       <section class="card" id="tru" aria-label="Hình minh hoạ trụ sạc">
@@ -1027,9 +1143,9 @@
         full: 'Sạc đầy tự động',
         time: 'Theo thời gian',
         kwh: 'Theo kWh',
-        money: 'Theo số tiền (đơn giá giả định của trụ)',
       };
-      const MODE_UNIT = { full: '', time: 'phút', kwh: 'kWh', money: 'đ' };
+      // QA-11: không có "Theo số tiền" — trụ OCPP 1.6 không biết giá; tài xế xem giá trên app (BE-50).
+      const MODE_UNIT = { full: '', time: 'phút', kwh: 'kWh' };
       let state = null;
       let hmiConnected = false;
       const readers = {};
@@ -1045,7 +1161,7 @@
             <div class="metric"><div class="k">Dòng điện</div><div class="v" data-f="a">0</div><span class="u">A</span></div>
             <div class="metric"><div class="k">Công suất</div><div class="v" data-f="kw">0</div><span class="u">kW</span></div>
             <div class="metric"><div class="k">Năng lượng</div><div class="v" data-f="kwh">0</div><span class="u">kWh</span></div>
-            <div class="metric"><div class="k">Tiền</div><div class="v v-note">CSMS tính</div><span class="u">xem bảng kê trên app</span></div>
+            <div class="metric"><div class="k">Giá · tiền</div><div class="v v-note">Theo app PowerMe</div><span class="u">CSMS tính, trụ không biết giá</span></div>
             <div class="metric"><div class="k">Thời gian</div><div class="v" data-f="time">00:00</div><span class="u" data-f="timeU">mm:ss mô phỏng</span></div>
           </div>
           <div class="note" data-f="meta">Tiền do CSMS tính theo biểu giá từng khung giờ khi quyết toán — xem bảng kê trên app.</div>
@@ -1101,7 +1217,8 @@
           f('msg').textContent = j.message;
           f('msg').classList.toggle('bad', !j.ok);
         };
-        f('plugBtn').onclick = () => call(state.connectors[id - 1].plugged ? 'unplug' : 'plug');
+        f('plugBtn').onclick = () =>
+          call(state.connectors.find((c) => c.id === id)?.plugged ? 'unplug' : 'plug');
         f('stopBtn').onclick = () => call('stop');
         f('swipeBtn').onclick = () => call('swipe', { card: f('card').value });
         f('pwBtn').onclick = () => {
@@ -1161,8 +1278,8 @@
             <div class="metric"><div class="k">Thời gian thật</div><div class="v" data-f="real">00:00</div><span class="u">đã trôi qua</span></div>
           </div>
           <svg class="chart" data-f="chart" viewBox="0 0 400 120" preserveAspectRatio="none" role="img" aria-label="Biểu đồ kWh và kW theo thời gian"></svg>
-          <div class="legend"><span><b style="background:var(--blue)"></b>kWh đã sạc</span>
-            <span><b style="background:var(--green)"></b>kW (nét đứt)</span>
+          <div class="legend"><span><b style="background:var(--pm-teal)"></b>kWh đã sạc</span>
+            <span><b style="background:var(--pm-gold)"></b>kW (nét đứt)</span>
             <span data-f="chartNote"></span></div>
           <h3>Dòng thời gian OCPP của phiên (giờ thật)</h3>
           <ol data-f="steps"></ol>
@@ -1414,7 +1531,9 @@
           // QA-08: có tên trạm → tên làm tiêu đề, identity OCPP thành dòng nhỏ.
           $('cpTitle').innerHTML = `${esc(s.name)} <span class="cp-serial">${
             s.displayCode
-              ? `Mã trên trụ (nhập/quét trên app): <b>${esc(s.displayCode)}</b>/1, /2 · `
+              ? `Mã trên trụ (nhập/quét trên app): <b>${esc(s.displayCode)}</b>${s.connectors
+                  .map((c) => '/' + c.id)
+                  .join(', ')} · `
               : ''
           }OCPP ${esc(s.cpId)}</span>`;
           document.title = `${s.name} · ${s.cpId}`;
@@ -1424,8 +1543,15 @@
               `<span class="cp-address">${esc(s.address)}</span>`,
             );
           renderQr(s);
-          $('cpEyebrow').textContent = 'Trụ sạc giả lập (mô hình D1, hai súng)';
         } else $('cpId').textContent = s.cpId;
+        // QA-11: nhãn theo phần cứng thật của trụ (spec), không cố định "DC 120 kW, hai súng".
+        if (s.spec) {
+          const hw = `${s.spec.kind.toUpperCase()} ${s.spec.ratedKw} kW, ${s.spec.guns === 1 ? 'một súng' : 'hai súng'}`;
+          $('cpEyebrow').textContent = s.name
+            ? `Trụ sạc giả lập · ${s.spec.model} · ${hw}`
+            : `Trụ sạc PowerMe · ${hw}`;
+          document.documentElement.classList.toggle('one-gun', s.spec.guns === 1);
+        }
         $('csms').textContent = s.csmsUrl;
         $('simTime').textContent = s.simTime.replace('T', ' ').slice(0, 19) + ' UTC';
         $('clockAhead').textContent = ahead(s.clockAheadSec);
@@ -1472,7 +1598,7 @@
             ? `sau ${n.nextRetrySec}s (cố định mỗi ${n.retrySec}s), đã mất ${n.offlineSec}s`
             : '—';
         if (!errFilled) {
-          for (const k of [1, 2])
+          for (const k of Object.keys(gunF))
             gunF[k]('err').innerHTML = s.errorCodes.map((e) => `<option>${e}</option>`).join('');
           errFilled = true;
         }
@@ -1500,7 +1626,14 @@
           tag.textContent = `tx ${c.txId ?? 'chờ CSMS cấp'} · ${{ rfid: 'thẻ RFID', password: 'mật khẩu HMI', remote: 'lệnh từ CSMS' }[c.source]}`;
         }
         f('socFill').style.width = (c.soc ?? 0) + '%';
-        f('socLbl').textContent = c.soc == null ? 'Chưa cắm súng' : `SoC ${c.soc.toFixed(1)} %`;
+        f('socLbl').textContent =
+          c.soc != null
+            ? `SoC ${c.soc.toFixed(1)} %`
+            : !c.plugged
+              ? 'Chưa cắm súng'
+              : state?.spec?.reportsSoc === false
+                ? 'Trụ AC không đọc được SoC của xe'
+                : 'Đã cắm súng';
         f('v').textContent = c.voltage;
         f('a').textContent = c.current.toFixed(1);
         f('kw').textContent = c.kw.toFixed(1);

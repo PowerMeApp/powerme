@@ -69,7 +69,7 @@ const txPage = (over: Partial<TransactionPage> = {}): TransactionPage => ({
   unsettled: { session_count: 1, by_reason: { ineligible: 1 } },
   generated_at: '2026-11-20T02:15:00Z',
   page: 1,
-  page_size: 50,
+  page_size: 20,
   ...over,
 });
 const revenue: RevenueReport = {
@@ -125,7 +125,7 @@ describe('Danh sách giao dịch (màn 35, Admin)', () => {
     expect(screen.queryByText(/bản cập nhật sau/)).toBeNull();
 
     expect(screen.getByLabelText('Tổng giao dịch')).toHaveTextContent('120.000 ₫');
-    expect(txCalls(seen)).toEqual([`${PERIOD}&page=1&page_size=50`]);
+    expect(txCalls(seen)).toEqual([`${PERIOD}&page=1&page_size=20`]);
   });
 
   it('T158 labels a closed account as stopped automatic settlement', async () => {
@@ -148,20 +148,20 @@ describe('Danh sách giao dịch (màn 35, Admin)', () => {
     const seen = fakeCsms({ [REV]: ok(revenue), [TX]: ok(txPage({ total: 120 })) });
     const { user } = renderApp(`/admin/revenue${PERIOD}`, session(ADMIN));
     await screen.findByRole('row', { name: 'Phiên #101' });
-    expect(screen.getByText(/Trang 1 \/ 3/)).toBeInTheDocument();
+    expect(screen.getByText(/Trang 1 \/ 6/)).toBeInTheDocument();
 
     const pager = within(screen.getByRole('navigation', { name: 'Phân trang giao dịch' }));
     await user.click(pager.getByRole('button', { name: 'Sau ›' }));
-    await waitFor(() => expect(txCalls(seen)).toContain(`${PERIOD}&page=2&page_size=50`));
+    await waitFor(() => expect(txCalls(seen)).toContain(`${PERIOD}&page=2&page_size=20`));
 
     await user.selectOptions(screen.getByRole('combobox', { name: 'Loại' }), 'unattributed');
     await waitFor(() =>
-      expect(txCalls(seen)).toContain(`${PERIOD}&kind=unattributed&page=1&page_size=50`),
+      expect(txCalls(seen)).toContain(`${PERIOD}&kind=unattributed&page=1&page_size=20`),
     );
     await user.selectOptions(screen.getByRole('combobox', { name: 'Đơn vị vận hành' }), '3');
     await waitFor(() =>
       expect(txCalls(seen)).toContain(
-        `${PERIOD}&operator_id=3&kind=unattributed&page=1&page_size=50`,
+        `${PERIOD}&operator_id=3&kind=unattributed&page=1&page_size=20`,
       ),
     );
   });

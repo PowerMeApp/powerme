@@ -104,6 +104,9 @@ describe('Ngoại lệ thanh toán (màn 32 / 33)', () => {
     expect(tabs.getAllByLabelText('1 mục')).toHaveLength(3);
     expect(await tabs.findByLabelText('2 mục')).toBeInTheDocument();
     expect(late.getByRole('button', { name: 'Hoàn' })).toBeInTheDocument();
+    expect(screen.getByText(/không cộng vào tín dụng sạc/)).toBeInTheDocument();
+    // No internal task / rule codes on screen.
+    expect(document.body.textContent).not.toMatch(/BR-P\d|T1\d\d/);
     expect(screen.getByRole('link', { name: 'Ngoại lệ thanh toán' })).toHaveAttribute(
       'href',
       '/admin/billing',

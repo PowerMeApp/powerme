@@ -1,4 +1,6 @@
 import 'dart:async';
+import 'dart:io';
+import 'dart:ui' as ui;
 
 import 'package:dio/dio.dart';
 import 'package:driver_app/app/composition/api_app.dart';
@@ -8,7 +10,10 @@ import 'package:driver_app/core/api/driver_api_session.dart';
 import 'package:driver_app/core/widgets/flow_page.dart' show ValueLine;
 import 'package:driver_app/features/auth/application/auth_controller.dart';
 import 'package:driver_app/features/charging/presentation/charge_flow_visuals.dart';
+import 'package:driver_app/features/charging/application/charge_session_controller.dart';
+import 'package:driver_app/features/profile/domain/driver_profile.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
@@ -17,12 +22,18 @@ import 'driver_api_fixture.dart';
 import 'driver_api_widget_test.dart' show enterAccount;
 import 'driver_discovery_fixture.dart' show page;
 import 'scanner_platform_fake.dart';
+import 't146_session_widget_test.dart' as journey;
+import '../tool/capture_t146_sessions_test.dart' show loadFonts;
 
 const _connectorPath = 'connectors/by-code/PM-T96/2';
 const _progressPath = 'sessions/78/progress';
 const _stopPath = 'sessions/78/stop';
 const _statementPath = 'sessions/78/statement';
 const _driver = '7';
+const _msg30Vi =
+    'Phiên sạc đã kết thúc tại trụ. Bảng kê của bạn sẽ sớm được hiển thị.';
+const _msg30En =
+    'This session has already ended at the charge point. Your charging statement will appear shortly.';
 const _timestamp = '2026-11-16T01:02:00.000Z';
 
 void main() {
@@ -663,11 +674,7 @@ void main() {
   });
 
   for (final (status, code, message) in [
-    (
-      409,
-      'session_not_stoppable',
-      'Hiện chưa thể yêu cầu dừng phiên. Đang cập nhật tiến độ.',
-    ),
+    (409, 'session_not_stoppable', _msg30Vi),
     (404, 'not_found', 'Không tìm thấy phiên có thể dừng từ ứng dụng.'),
   ]) {
     testWidgets('stop HTTP $status leaves progress authoritative', (
@@ -696,6 +703,252 @@ void main() {
       await _tick(tester);
       await _findText(tester, 'Đang chờ quyết toán.');
       expect(_count(fixture, _stopPath), 1);
+    });
+  }
+
+  for (final english in [false, true]) {
+    testWidgets('T163 MSG30 inline and immediate refresh English=$english', (
+      tester,
+    ) async {
+      await journey.viewport(tester, english);
+      const captureDir = String.fromEnvironment('T163_CAPTURE_DIR');
+      final boundary = GlobalKey();
+      if (captureDir.isNotEmpty) await tester.runAsync(loadFonts);
+      var progress = _progress();
+      final fixture = _fixture(
+        (r) async => switch (r.path) {
+          _progressPath => reply(200, progress),
+          _stopPath => reply(409, {'error': 'session_not_stoppable'}),
+          _statementPath => reply(200, _statement()),
+          _ => throw StateError('Unexpected ${r.path}'),
+        },
+      );
+      await _openProgress(tester, fixture, boundaryKey: boundary);
+      journey.localize(
+        _container(tester),
+        english ? AppLanguage.english : AppLanguage.vietnamese,
+      );
+      await tester.pumpAndSettle();
+      final reads = _count(fixture, _progressPath);
+      final before = tester.binding.clock.now();
+      await _tap(tester, _byKey('request-stop-charging'));
+      await _tap(tester, _byKey('confirm-stop-charging'));
+      expect(
+        tester.binding.clock.now().difference(before),
+        lessThan(const Duration(seconds: 5)),
+      );
+      expect(_count(fixture, _progressPath), reads + 1);
+      await _findText(tester, english ? _msg30En : _msg30Vi);
+      expect(find.byType(SnackBar), findsNothing);
+      expect(_byKey('request-stop-charging'), findsNothing);
+      expect(_byKey('retry-stop-charging'), findsNothing);
+      final scope = _container(tester);
+      final target = scope.read(confirmedChargeSessionProvider)!;
+      final staleRead = scope
+          .read(chargeSessionRepositoryProvider)
+          .progress(target)
+          .result;
+      await tester.pumpAndSettle();
+      final stale = await staleRead;
+      for (final retry in [false, true]) {
+        await scope
+            .read(chargeStopProvider.notifier)
+            .send(target, retry: retry, progress: stale);
+      }
+      expect(_count(fixture, _stopPath), 1);
+      expect(_count(fixture, _statementPath), 0);
+      progress = _progress(
+        status: 'closed',
+        meterStop: 10400,
+        energy: 10000,
+        settlement: 'pending',
+      );
+      await _tick(tester);
+      await _findText(tester, english ? _msg30En : _msg30Vi);
+      expect(_count(fixture, _statementPath), 0);
+      if (captureDir.isNotEmpty) {
+        await tester.runAsync(() async {
+          final frame =
+              await (boundary.currentContext!.findRenderObject()!
+                      as RenderRepaintBoundary)
+                  .toImage();
+          final bytes = await frame.toByteData(format: ui.ImageByteFormat.png);
+          final file = File(
+            '$captureDir/${english ? '320-2x-en' : '390-1x-vi'}-msg30.png',
+          );
+          await file.parent.create(recursive: true);
+          await file.writeAsBytes(bytes!.buffer.asUint8List());
+          frame.dispose();
+        });
+      }
+      progress = {
+        ...progress,
+        'settlement_state': 'posted',
+        'statement_available': false,
+        'origin': 'app_qr',
+        'payment_mode': 'csms_billed',
+        'can_stop': false,
+      };
+      await _tick(tester);
+      expect(_count(fixture, _statementPath), 0);
+      progress = {...progress, 'statement_available': true};
+      await _tap(
+        tester,
+        find.text(english ? 'Refresh progress' : 'Thử cập nhật'),
+      );
+      expect(_count(fixture, _statementPath), 1);
+      expect(_count(fixture, _stopPath), 1);
+      expect(tester.takeException(), isNull);
+    });
+  }
+
+  testWidgets(
+    'T163 immediate refresh failure retains MSG30 without statement',
+    (tester) async {
+      var reads = 0;
+      final fixture = _fixture(
+        (r) async => switch (r.path) {
+          _progressPath =>
+            ++reads == 1
+                ? reply(200, _progress())
+                : reply(503, {'error': 'unavailable'}),
+          _stopPath => reply(409, {'error': 'session_not_stoppable'}),
+          _ => throw StateError('Unexpected ${r.path}'),
+        },
+      );
+      await _openProgress(tester, fixture);
+      await _tap(tester, _byKey('request-stop-charging'));
+      await _tap(tester, _byKey('confirm-stop-charging'));
+      expect(reads, 2);
+      await _findText(tester, _msg30Vi);
+      expect(_count(fixture, _statementPath), 0);
+      expect(_byKey('retry-stop-charging'), findsNothing);
+    },
+  );
+
+  for (final resume in [false, true]) {
+    testWidgets(
+      'T163 refresh coalesces behind an inflight read without overlap resume=$resume',
+      (tester) async {
+        final blocked = Completer<ResponseBody>();
+        var reads = 0;
+        var active = 0;
+        var peak = 0;
+        final fixture = _fixture((r) async {
+          if (r.path == _stopPath) {
+            return reply(409, {'error': 'session_not_stoppable'});
+          }
+          expect(r.path, _progressPath);
+          active++;
+          var counted = true;
+          r.cancelToken?.whenCancel.then((_) {
+            if (counted) active--;
+            counted = false;
+          });
+          if (active > peak) peak = active;
+          try {
+            return ++reads == 2
+                ? await blocked.future
+                : reply(200, _progress());
+          } finally {
+            if (counted) active--;
+            counted = false;
+          }
+        });
+        await _openProgress(tester, fixture);
+        await _tap(tester, _byKey('request-stop-charging'));
+        await _tick(tester);
+        expect(reads, 2);
+        await _tap(tester, _byKey('confirm-stop-charging'));
+        expect(reads, 2);
+        if (resume) {
+          final view = tester.widget<ListenableBuilder>(
+            find
+                .byWidgetPredicate(
+                  (w) =>
+                      w is ListenableBuilder &&
+                      w.listenable is ChargeSessionController,
+                )
+                .first,
+          );
+          final controller = view.listenable as ChargeSessionController;
+          controller.setVisible(false);
+          controller.setVisible(true);
+          controller.refreshProgress();
+          await tester.pumpAndSettle();
+          expect(reads, 3);
+        }
+        blocked.complete(reply(200, _progress()));
+        await tester.pumpAndSettle();
+        expect(reads, 3);
+        expect(peak, 1);
+        expect(_count(fixture, _stopPath), 1);
+        expect(_count(fixture, _statementPath), 0);
+        await _findText(tester, _msg30Vi);
+      },
+    );
+  }
+
+  for (final (status, code) in [
+    (202, 'rejected'),
+    (409, 'idempotency_conflict'),
+    (409, 'other_conflict'),
+  ]) {
+    testWidgets('T163 excludes MSG30 for $status $code', (tester) async {
+      final fixture = _fixture(
+        (r) async => r.path == _progressPath
+            ? reply(200, _progress())
+            : reply(
+                status,
+                status == 202 ? _stopSnapshot(code, 'closed') : {'error': code},
+              ),
+      );
+      await _openProgress(tester, fixture);
+      final reads = _count(fixture, _progressPath);
+      await _tap(tester, _byKey('request-stop-charging'));
+      await _tap(tester, _byKey('confirm-stop-charging'));
+      expect(_count(fixture, _progressPath), reads);
+      expect(find.text(_msg30Vi), findsNothing);
+      expect(find.text(_msg30En), findsNothing);
+      if (status == 202) {
+        await _findText(
+          tester,
+          'Hiện chưa thể yêu cầu dừng phiên. Đang cập nhật tiến độ.',
+        );
+      }
+      expect(_count(fixture, _statementPath), 0);
+    });
+  }
+
+  for (final logout in [false, true]) {
+    testWidgets('T163 late stop guards logout=$logout', (tester) async {
+      final delayed = Completer<ResponseBody>();
+      final fixture = _fixture(
+        (r) async =>
+            r.path == _progressPath ? reply(200, _progress()) : delayed.future,
+      );
+      await _openProgress(tester, fixture);
+      await _tap(tester, _byKey('request-stop-charging'));
+      await _tap(tester, _byKey('confirm-stop-charging'));
+      final reads = _count(fixture, _progressPath);
+      if (logout) {
+        _container(tester).read(authControllerProvider.notifier).signOut();
+      } else {
+        tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+      }
+      await tester.pumpAndSettle();
+      delayed.complete(reply(409, {'error': 'session_not_stoppable'}));
+      await tester.pumpAndSettle();
+      expect(_count(fixture, _progressPath), reads);
+      expect(_count(fixture, _statementPath), 0);
+      if (!logout) {
+        tester.binding.handleAppLifecycleStateChanged(
+          AppLifecycleState.resumed,
+        );
+        await tester.pumpAndSettle();
+        expect(_count(fixture, _progressPath), reads + 1);
+      }
+      expect(tester.takeException(), isNull);
     });
   }
 
@@ -856,13 +1109,17 @@ Future<void> _tap(WidgetTester tester, Finder finder) async {
 
 Future<ScannerPlatformFake> _signIn(
   WidgetTester tester,
-  DriverApiFixture fixture,
-) async {
+  DriverApiFixture fixture, {
+  GlobalKey? boundaryKey,
+}) async {
   final camera = ScannerPlatformFake();
   final previous = MobileScannerPlatform.instance;
   MobileScannerPlatform.instance = camera;
   addTearDown(() => MobileScannerPlatform.instance = previous);
-  await tester.pumpWidget(ApiApp(config: _config, httpAdapter: fixture));
+  final app = ApiApp(config: _config, httpAdapter: fixture);
+  await tester.pumpWidget(
+    boundaryKey == null ? app : RepaintBoundary(key: boundaryKey, child: app),
+  );
   await tester.pumpAndSettle();
   await enterAccount(tester);
   return camera;
@@ -885,9 +1142,13 @@ Future<void> _submitStart(WidgetTester tester) async {
 
 Future<void> _openProgress(
   WidgetTester tester,
-  DriverApiFixture fixture,
-) async {
-  await _start(tester, await _signIn(tester, fixture));
+  DriverApiFixture fixture, {
+  GlobalKey? boundaryKey,
+}) async {
+  await _start(
+    tester,
+    await _signIn(tester, fixture, boundaryKey: boundaryKey),
+  );
   expect(
     _container(
       tester,

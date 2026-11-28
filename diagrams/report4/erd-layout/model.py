@@ -1,4 +1,5 @@
-# Single source for the PowerMe ERD (v1.2, 10/11: synced with the DB of migrations 0000-0015, audit A5 / D20:
+# Single source for the PowerMe ERD (v1.3, 27/11: + TopUpPaymentConflict (0024) and RfidCreditHold (0031) -> 36 entities / 58 relationships;
+# v1.2, 10/11: synced with the DB of migrations 0000-0015, audit A5 / D20:
 # + Connector is reported in ConnectorStatusEvent; RemoteCommand linked to User as in the DB (PolicyTemplate stays Admin, SRS Table 9) -> 54 relationships;
 # v1.1, 01/11: + Refund, R8) (conceptual + logical): entities, weak entities, relationships.
 # (A, verb, B, ca, cb, identifying)   "A : B" = ca : cb  (ca = how many A per B, cb = how many B per A)
@@ -6,9 +7,9 @@ ENTITIES = ["User","Admin","OperatorStaff","Driver","Operator","Site","ChargePoi
  "RemoteCommand","FaultEvent","FaultReport","MaintenanceTicket","PolicyTemplate","TariffPeriod","Promotion",
  "Reservation","ChargingSession","SessionPause","SessionStatusChange","MeterReading","SessionTariffSegment",
  "ReconciliationRecord","Vehicle","VehicleModel","RfidCard","CreditAccount","CreditTransaction","TopUp","EInvoice",
- "InvoiceAdjustment","Refund","LoyaltyAccount","LoyaltyTransaction"]
+ "InvoiceAdjustment","Refund","LoyaltyAccount","LoyaltyTransaction","TopUpPaymentConflict","RfidCreditHold"]
 WEAK = {"Connector","ConnectorStatusEvent","TariffPeriod","CreditTransaction","ReconciliationRecord","MeterReading",
-        "InvoiceAdjustment","LoyaltyTransaction","SessionPause","SessionStatusChange"}
+        "InvoiceAdjustment","LoyaltyTransaction","SessionPause","SessionStatusChange","RfidCreditHold"}
 ASSOC = {"SessionTariffSegment"}
 SHOULD = {"PolicyTemplate","Reservation","MaintenanceTicket"}
 SUBTYPES = ["Admin","OperatorStaff","Driver"]
@@ -68,4 +69,9 @@ REL = [
  ("TopUp","is refunded by","Refund","1","0..N",0),
  ("Admin","requests","Refund","0..1","0..N",0),   # NULL = created by the system at account closure (R8 Q1)
  ("Refund","is invoiced as","InvoiceAdjustment","1","0..1",0),
+ # 27/11: payment conflicts (0024, BR-P13) and the RFID credit hold (0031, ADR-0020, BR-P19); technical rfid_stop_jobs / charge_point_offline_auth_checks stay out
+ ("TopUp","has payment conflicts","TopUpPaymentConflict","1","0..N",0),
+ ("Admin","reviews","TopUpPaymentConflict","0..1","0..N",0),
+ ("ChargingSession","is protected by","RfidCreditHold","1","0..1",1),   # session_id = PK and FK of rfid_credit_holds
+ ("CreditAccount","reserves credit in","RfidCreditHold","1","0..N",0),
 ]

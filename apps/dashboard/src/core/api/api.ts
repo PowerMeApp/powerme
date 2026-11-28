@@ -73,6 +73,7 @@ import type {
   TransactionQuery,
   UpdateRfidCardRequest,
   UserAccountPage,
+  FaultStats,
 } from '@powerme/shared';
 import { loggedOut, tokenRefreshed, type AuthState } from '../auth/authSlice';
 import { env } from '../config/env';
@@ -83,8 +84,8 @@ export const FAULT_PAGE_SIZE = 20;
 export const SESSION_PAGE_SIZE = 20;
 /** Rows per page on screen 18. */
 export const CHARGE_POINT_PAGE_SIZE = 20;
-/** Rows per page of the transaction list on screen 35 (the API default). */
-export const TRANSACTION_PAGE_SIZE = 50;
+/** Rows per page of the transaction list on screen 35. */
+export const TRANSACTION_PAGE_SIZE = 20;
 /** Rows per page on screen 30. */
 export const RFID_PAGE_SIZE = 20;
 /** Rows per page on screen 28. */
@@ -345,6 +346,12 @@ export const api = createApi({
       query: ({ scope, ...q }) => `${scope}/v1/revenue?${revenueSearch(q)}`,
       providesTags: ['Revenue'],
     }),
+    // Home pages (screens 17 / 27): faults raised per day, by severity and kind, in a period.
+    faultStats: b.query<FaultStats, { scope: RevenueScope; from: string; to: string }>({
+      query: ({ scope, from, to }) =>
+        `${scope}/v1/faults/stats?${new URLSearchParams({ from, to }).toString()}`,
+      providesTags: ['Fault'],
+    }),
     // Same parameters and query as the JSON (contract: "CSV khớp màn hình"). A mutation so it goes
     // through baseQuery (Bearer + refresh on 401) and is never cached; the body is the CSV text.
     revenueCsv: b.mutation<string, { scope: RevenueScope } & RevenueQuery>({
@@ -556,6 +563,7 @@ export const {
   useResolveSessionMutation,
   useRevenueQuery,
   useRevenueCsvMutation,
+  useFaultStatsQuery,
   useAdminTransactionsQuery,
   useAdminTransactionsCsvMutation,
   useAdminRfidCardsQuery,
