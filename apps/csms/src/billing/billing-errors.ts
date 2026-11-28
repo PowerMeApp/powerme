@@ -156,8 +156,6 @@ export class LedgerEntryExists extends Error {
 export type RefundRejectReason =
   /** Không có top-up. */
   | 'not_found'
-  /** Thiếu VNPAY_TMN_CODE / VNPAY_HASH_SECRET: từ chối trước khi đổi bất cứ gì. */
-  | 'payment_unconfigured'
   /** Tài khoản đã đóng (D1). Hoàn khoản trễ vẫn được. */
   | 'account_closed'
   /** Top-up không ở `credited`. */
@@ -176,11 +174,25 @@ export class RefundNotAllowed extends Error {
   }
 }
 
-/** Admin retry một refund không có (T32 Phần 9a). Sai trạng thái thì STM-10 ném `InvalidTransition`. */
+/**
+ * Admin ghi nhận / đánh dấu thất bại / làm lại một refund không có (hoàn tiền thủ công, D1). Sai
+ * trạng thái thì STM-10 ném `InvalidTransition`.
+ */
 export class RefundNotFound extends Error {
   constructor(readonly refundId: number) {
     super(`refund_not_found: ${refundId}`);
     this.name = 'RefundNotFound';
+  }
+}
+
+/**
+ * Mã hoàn của cổng đã được ghi cho một refund khác (STM-10 #2 guard, UNIQUE `gateway_refund_no`;
+ * SD-2e `RefundNoUsed`). Route → 409 `refund_no_used`.
+ */
+export class RefundNoUsed extends Error {
+  constructor(readonly gatewayRefundNo: string) {
+    super(`refund_no_used: ${gatewayRefundNo}`);
+    this.name = 'RefundNoUsed';
   }
 }
 
@@ -211,5 +223,17 @@ export class EInvoiceNotFound extends Error {
   constructor(readonly eInvoiceId: number) {
     super(`e_invoice_not_found: ${eInvoiceId}`);
     this.name = 'EInvoiceNotFound';
+  }
+}
+
+/**
+ * Admin retry một điều chỉnh hoá đơn không có (T32 Phần 9b,
+ * `InvoiceAdjustmentService.adminRetryAdjustment`). Route (PR sau) map sang 404; sai trạng thái thì STM-7
+ * ném `InvalidTransition` (→ 409).
+ */
+export class InvoiceAdjustmentNotFound extends Error {
+  constructor(readonly invoiceAdjustmentId: number) {
+    super(`invoice_adjustment_not_found: ${invoiceAdjustmentId}`);
+    this.name = 'InvoiceAdjustmentNotFound';
   }
 }

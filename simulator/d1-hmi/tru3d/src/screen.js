@@ -109,13 +109,14 @@ export function drawScreen(ctx, s, lt, prevKey) {
   ctx.fillStyle = MUTED;
   ctx.font = `600 34px ${MONO}`;
   ctx.fillText(s.speed > 1 ? `×${s.speed}  ${clock}` : clock, W - 30, 46);
-  // Vạch chia
+  // Vạch chia (QA-11: trụ một súng dùng cả màn hình, không có vạch)
+  const one = halves.length === 1;
   ctx.fillStyle = 'rgba(255,255,255,0.1)';
-  ctx.fillRect(W / 2 - 1, 116, 2, H - 140);
+  if (!one) ctx.fillRect(W / 2 - 1, 116, 2, H - 140);
 
   halves.forEach((h, i) => {
     const x0 = i === 0 ? 30 : W / 2 + 30;
-    const w = W / 2 - 60;
+    const w = one ? W - 60 : W / 2 - 60;
     ctx.textAlign = 'left';
     ctx.font = `800 34px ${FONT}`;
     ctx.fillStyle = INK;
