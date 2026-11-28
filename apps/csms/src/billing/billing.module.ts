@@ -9,7 +9,8 @@
  * `RefundService`: hoàn tiền thủ công (D1, D-AC), Admin ghi nhận confirm / fail / redo; không có việc
  * nền refund. Phần 9b: `InvoiceAdjustmentService` (việc nền `invoice-adjustment-issue`, gửi điều chỉnh
  * hoá đơn khi hoàn tiền); `RefundService` được tiêm `EInvoiceService` để tạo điều chỉnh trong
- * transaction ghi nhận `done`.
+ * transaction ghi nhận `done`. Phần 13: `LoyaltyService` tự đăng ký việc nền `loyalty-expire` (hết
+ * hạn điểm, D11).
  *
  * DbModule không @Global nên phải import (giống SessionsModule, StationsModule).
  */

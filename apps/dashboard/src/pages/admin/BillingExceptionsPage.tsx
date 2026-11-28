@@ -8,7 +8,7 @@
  * list come with T152 (manual refunds, D-AC).
  */
 import { Button, Group, Loader, Table } from '@mantine/core';
-import { useState, type ReactNode } from 'react';
+import { Children, useState, type ReactNode } from 'react';
 import { useSearchParams } from 'react-router';
 import type {
   InvoiceNeedsReviewItem,
@@ -31,6 +31,7 @@ import {
 } from '../../features/billing/format';
 import { DataTable, EmptyState } from '../../ui/DataTable';
 import { Notice, type Note } from '../../ui/Notice';
+import { Pager, useClientPage } from '../../ui/Pager';
 import { PageHeader } from '../../ui/PageHeader';
 import { QueueSwitch } from '../../ui/QueueSwitch';
 
@@ -55,9 +56,11 @@ function Driver({ d }: { d: { full_name: string; phone_number: string | null } }
   );
 }
 
+/** One list, 20 rows a page (the API returns each list whole). */
 function ListTable({ head, children }: { head: string[]; children: ReactNode }) {
+  const { pageRows, paged, pagerProps } = useClientPage(Children.toArray(children));
   return (
-    <DataTable minWidth={820}>
+    <DataTable minWidth={820} footer={paged ? <Pager {...pagerProps} /> : undefined}>
       <Table.Thead>
         <Table.Tr>
           {head.map((h) => (
@@ -67,7 +70,7 @@ function ListTable({ head, children }: { head: string[]; children: ReactNode }) 
           ))}
         </Table.Tr>
       </Table.Thead>
-      <Table.Tbody>{children}</Table.Tbody>
+      <Table.Tbody>{pageRows}</Table.Tbody>
     </DataTable>
   );
 }
@@ -131,13 +134,16 @@ export function BillingExceptionsPage() {
       ) : !data ? null : tab === 'late' ? (
         <>
           <p className="muted small">
-            Khoản trả sau khi lần nạp đã hết hạn hoặc thất bại: không cộng vào ví, Admin hoàn lại số
-            đã trả (BR-P13). Nút hoàn tiền có khi luồng hoàn tiền thủ công (T152) xong.
+            Khoản trả sau khi lần nạp đã hết hạn hoặc thất bại: không cộng vào tín dụng sạc, quản
+            trị viên hoàn lại số đã trả.
           </p>
           {data.late_payments.items.length === 0 ? (
             empty
           ) : (
-            <ListTable head={['Lần nạp', 'Tài xế', 'Số tiền trả muộn', 'Mã giao dịch', 'Lúc trả']}>
+            <ListTable
+              key={tab}
+              head={['Lần nạp', 'Tài xế', 'Số tiền trả muộn', 'Mã giao dịch', 'Lúc trả']}
+            >
               {data.late_payments.items.map((l) => (
                 <Table.Tr
                   data-tone="major"
@@ -163,7 +169,10 @@ export function BillingExceptionsPage() {
         data.invoices_needs_review.items.length === 0 ? (
           empty
         ) : (
-          <ListTable head={['Lần nạp', 'Tài xế', 'Số tiền', 'Lỗi nhà cung cấp', 'Số lần', 'Xử lý']}>
+          <ListTable
+            key={tab}
+            head={['Lần nạp', 'Tài xế', 'Số tiền', 'Lỗi nhà cung cấp', 'Số lần', 'Xử lý']}
+          >
             {data.invoices_needs_review.items.map((i) => (
               <Table.Tr
                 data-tone="major"
@@ -198,7 +207,7 @@ export function BillingExceptionsPage() {
         data.top_up_exceptions.items.length === 0 ? (
           empty
         ) : (
-          <ListTable head={['Lần nạp', 'Tài xế', 'Ngoại lệ', 'Số tiền', 'Xử lý']}>
+          <ListTable key={tab} head={['Lần nạp', 'Tài xế', 'Ngoại lệ', 'Số tiền', 'Xử lý']}>
             {data.top_up_exceptions.items.map((x) => (
               <Table.Tr
                 data-tone="major"
@@ -242,7 +251,7 @@ export function BillingExceptionsPage() {
       ) : data.payment_conflicts.items.length === 0 ? (
         empty
       ) : (
-        <ListTable head={['Lần nạp', 'Tài xế', 'Số tiền', 'Lý do', 'Lúc trả', 'Xử lý']}>
+        <ListTable key={tab} head={['Lần nạp', 'Tài xế', 'Số tiền', 'Lý do', 'Lúc trả', 'Xử lý']}>
           {data.payment_conflicts.items.map((c) => (
             <Table.Tr
               data-tone="critical"

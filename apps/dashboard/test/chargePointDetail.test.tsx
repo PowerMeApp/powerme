@@ -130,7 +130,8 @@ describe('Chi tiết trụ sạc (màn 20)', () => {
       '?status=all&page=1&page_size=20&charge_point_id=5',
     );
     const cmds = within(screen.getByRole('table', { name: 'Lệnh gần đây' }));
-    expect(cmds.getByText('Reset')).toBeInTheDocument();
+    expect(cmds.getByText('Khởi động lại')).toHaveAttribute('title', 'Reset');
+    expect(document.body.textContent).not.toMatch(/BR-P\d/);
     expect(cmds.getByText('Cả trụ')).toBeInTheDocument();
     expect(cmds.getByText('Trụ từ chối')).toBeInTheDocument();
   });
