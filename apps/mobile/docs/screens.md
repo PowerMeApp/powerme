@@ -7,6 +7,17 @@ Selector VI/EN dùng chung API/legacy, giữ keys/semantics/≥48dp, route/auth/
 Navigation/refresh/thao tác xe/logout-login giữ lựa chọn; app mới về VI. Sáu ca ngôn ngữ trong 65 focused pass;
 [README](../README.md) ghi lệnh/evidence/giới hạn; chưa nghiệm thu native/staging, English còn từng phần.
 
+## T163 — Stop sau khi trụ kết thúc, 28/11/2026
+
+Views 6/7 → FR-05/08, UC-CHG-03/04, MSG30, BR-P01/34/45,
+NFR-SEC-01 → PKG-3 Charging, CD-1/SD-1a/b và Driver API §5/§12.
+HTTP 409 `session_not_stoppable` hiện MSG30 inline đúng VI/EN và đọc lại progress
+ngay; GET đang chạy gộp một refresh sau idle. Giữ thông báo qua closed/pending,
+khóa Stop/retry; không suy stop proof, posted hoặc số tiền từ lỗi này.
+202 rejected và các 409 khác giữ nghĩa riêng. Nguồn MSG30 là UC-CHG-03/§5.3 tại
+`origin/wp1/r3-10-srs-sync-27-11` (PR #260 chưa merge), theo yêu cầu trực tiếp user;
+main contract/diagrams không bị sửa. Local fixture đã kiểm; pending staging/device.
+
 ## T96 — điểm đi Discover → gợi ý, 26/11/2026
 
 Views 3/4/15 → FR-03/21, UC-CHG-01/07, SRS §3.3.1/BR-P03, BR-P33/41,

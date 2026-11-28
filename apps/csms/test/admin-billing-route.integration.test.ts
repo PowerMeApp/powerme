@@ -5,8 +5,12 @@
  *   POST /api/admin/v1/billing/top-ups/{id}/recheck
  *   POST /api/admin/v1/billing/top-ups/{id}/exception-reviewed
  *   POST /api/admin/v1/billing/payment-conflicts/{id}/review   body {note}
- * Phân quyền (RolesGuard admin), mã HTTP từng nhánh. Không có route retry refund: hoàn tiền thủ
- * công (WF-02 D1, D-AC / BR-P51), `…/refunds/{id}/retry` → 404 như đường lạ.
+ * Hoàn tiền thủ công (WF-02 D1, D-AC / BR-P51):
+ *   POST /api/admin/v1/billing/top-ups/{id}/refund | late-refund
+ *   GET  /api/admin/v1/billing/refunds[?status=requested|failed]
+ *   POST /api/admin/v1/billing/refunds/{id}/confirm {gateway_refund_no} | fail {reason} | redo
+ * Phân quyền (RolesGuard admin), mã HTTP từng nhánh. Không có route retry refund:
+ * `…/refunds/{id}/retry` → 404 như đường lạ.
  * Điều kiện lọc của danh sách: `billing-exceptions.integration.test.ts`. Cần DATABASE_URL.
  */
 import { randomBytes } from 'node:crypto';
@@ -65,6 +69,7 @@ describeDb('T32 Phần 10a: route Admin billing qua HTTP', () => {
   const tokens: Record<string, string> = {};
   let vnpay: VnpayAdapter;
   let topUps: TopUpService;
+  let ledger: CreditLedgerService;
   const runner = { register: jest.fn(), kick: jest.fn() } as unknown as BackgroundWorkRunner;
 
   const q = async (sql: string, params: unknown[] = []) =>
@@ -75,10 +80,15 @@ describeDb('T32 Phần 10a: route Admin billing qua HTTP', () => {
   async function call(
     method: string,
     path: string,
-    opts: { token?: string | null; body?: unknown; contentType?: string } = {},
+    opts: {
+      token?: string | null;
+      body?: unknown;
+      contentType?: string;
+      headers?: Record<string, string>;
+    } = {},
   ) {
     const token = opts.token === undefined ? tokens['admin'] : opts.token;
-    const headers: Record<string, string> = {};
+    const headers: Record<string, string> = { ...opts.headers };
     if (token) headers['Authorization'] = `Bearer ${token}`;
     if (opts.body !== undefined) headers['Content-Type'] = opts.contentType ?? 'application/json';
     const r = await fetch(`${base}/api${path}`, {
@@ -120,7 +130,7 @@ describeDb('T32 Phần 10a: route Admin billing qua HTTP', () => {
 
   async function topUp(
     opts: { status?: string; late?: string | null; exception?: string | null } = {},
-  ): Promise<{ id: number; ref: string }> {
+  ): Promise<{ id: number; ref: string; account: number }> {
     const { status = 'refunded', late = null, exception = null } = opts;
     const owner = await newAccount();
     seq += 1;
@@ -146,7 +156,14 @@ describeDb('T32 Phần 10a: route Admin billing qua HTTP', () => {
         exception,
       ],
     );
-    return { id: topUpId, ref };
+    return { id: topUpId, ref, account: owner.account };
+  }
+
+  /** Top-up `credited` đã cộng tiền thật vào ví (đủ để hoàn). */
+  async function creditedTopUp(late: string | null = null) {
+    const t = await topUp({ status: 'credited', late });
+    await ledger.post(db.$client, t.account, 'top_up', 100_000, { topUpId: t.id });
+    return t;
   }
 
   async function failedRefund(
@@ -157,12 +174,13 @@ describeDb('T32 Phần 10a: route Admin billing qua HTTP', () => {
     const refundId = await id(
       `INSERT INTO refunds (top_up_id, kind, amount_vnd, status, requested_by, next_attempt_at,
          completed_at, confirmed_via_query, attempt_count, unfinished_claims, last_error_kind,
-         last_error_message, last_attempt_at)
+         last_error_message, last_attempt_at, failure_reason)
        VALUES ($1, $2::refund_kind, 100000, $3::refund_status,
          CASE WHEN $2 = 'account_closure' THEN NULL ELSE $4::bigint END,
          CASE WHEN $3 = 'requested' THEN now() + interval '1 day' END,
          CASE WHEN $3 = 'done' THEN now() END, $3 = 'done', 4, 3,
-         'transient', 'retry_exhausted', now())
+         'transient', 'retry_exhausted', now(),
+         CASE WHEN $3 = 'failed' THEN 'cổng từ chối' END)
        RETURNING id`,
       [t.id, kind, status, admin],
     );
@@ -191,6 +209,7 @@ describeDb('T32 Phần 10a: route Admin billing qua HTTP', () => {
     Logger.overrideLogger(['error']);
     db = createDb(DATABASE_URL!);
     await resetAndMigrate(db.$client);
+    ledger = new CreditLedgerService(db);
     fx = (await buildRevenueFixture(db, await hashChargePointPassword(PASSWORD))).ids;
     admin = Number(fx['admin']);
     const config: CsmsConfig = {
@@ -202,11 +221,11 @@ describeDb('T32 Phần 10a: route Admin billing qua HTTP', () => {
     vnpay = new VnpayAdapter(VNPAY, API, (async () => {
       throw new Error('no network in this test');
     }) as unknown as typeof fetch);
-    const refunds = new RefundService(db, vnpay, runner, WORK);
     const eInvoices = new EInvoiceService(db, {} as EInvoiceProviderAdapter, runner, WORK);
+    const refunds = new RefundService(db, eInvoices);
     topUps = new TopUpService(
       db,
-      new CreditLedgerService(db),
+      ledger,
       new LoyaltyService({ pointsExpiryMonths: 12 }),
       vnpay,
       runner,
@@ -226,6 +245,7 @@ describeDb('T32 Phần 10a: route Admin billing qua HTTP', () => {
       undefined,
       undefined,
       eInvoices,
+      refunds,
     );
     await server.start();
     base = `http://127.0.0.1:${server.port}`;
@@ -254,6 +274,12 @@ describeDb('T32 Phần 10a: route Admin billing qua HTTP', () => {
     ['POST', `${B}/top-ups/1/recheck`, undefined],
     ['POST', `${B}/top-ups/1/exception-reviewed`, undefined],
     ['POST', `${B}/payment-conflicts/1/review`, { note: 'x' }],
+    ['POST', `${B}/top-ups/1/refund`, undefined],
+    ['POST', `${B}/top-ups/1/late-refund`, undefined],
+    ['GET', `${B}/refunds`, undefined],
+    ['POST', `${B}/refunds/1/confirm`, { gateway_refund_no: 'RF1' }],
+    ['POST', `${B}/refunds/1/fail`, { reason: 'x' }],
+    ['POST', `${B}/refunds/1/redo`, undefined],
   ];
 
   describe('phân quyền và dạng request', () => {
@@ -289,7 +315,8 @@ describeDb('T32 Phần 10a: route Admin billing qua HTTP', () => {
           error: 'invalid_input',
         });
       expect((await call('GET', `${B}/exceptions?limit=5`)).status).toBe(400);
-      expect((await post(`${B}/top-ups/1/refund`)).status).toBe(404);
+      expect((await post(`${B}/top-ups/1/refund?x=1`)).status).toBe(400);
+      expect((await post(`${B}/refunds/1/cancel`)).status).toBe(404);
       expect((await call('GET', `${B}/nothing`)).status).toBe(404);
     });
 
@@ -519,6 +546,227 @@ describeDb('T32 Phần 10a: route Admin billing qua HTTP', () => {
       expect((await post(`${B}/payment-conflicts/999999999/review`, { note: 'x' })).status).toBe(
         404,
       );
+    });
+  });
+
+  // ---------------------------------------------------------------------------------------------
+  // Hoàn tiền thủ công (D1, D-AC / BR-P51, SD-2e v3.0)
+  let rfSeq = 0;
+  const refundNo = () => `RT${Date.now() % 1_000_000}N${(rfSeq += 1)}`;
+
+  describe('POST /top-ups/{id}/refund và /late-refund', () => {
+    it('refund credited → 202 {refund_id, status, amount_vnd}; Idempotency-Key được nhận; lần hai → 409 not_refundable', async () => {
+      const t = await creditedTopUp();
+      const r = await call('POST', `${B}/top-ups/${t.id}/refund`, {
+        headers: { 'Idempotency-Key': 'rf-key-00000001' },
+      });
+      expect(r.status).toBe(202);
+      expect(r.body).toEqual({
+        refund_id: expect.stringMatching(/^\d+$/),
+        status: 'requested',
+        amount_vnd: 100_000,
+      });
+      expect(
+        await one('SELECT kind::text, requested_by::int FROM refunds WHERE id=$1', [
+          r.body!['refund_id'],
+        ]),
+      ).toEqual({ kind: 'top_up', requested_by: admin });
+      const again = await post(`${B}/top-ups/${t.id}/refund`);
+      expect(again.status).toBe(409);
+      expect(again.body).toMatchObject({ error: 'not_refundable' });
+    });
+
+    it('không có → 404; tài khoản closed → 409; số dư khả dụng thiếu → 422', async () => {
+      expect((await post(`${B}/top-ups/999999999/refund`)).body).toMatchObject({
+        error: 'not_found',
+      });
+      const closed = await creditedTopUp();
+      await q(`UPDATE credit_accounts SET status='closed', closed_at=now() WHERE id=$1`, [
+        closed.account,
+      ]);
+      const c = await post(`${B}/top-ups/${closed.id}/refund`);
+      expect([c.status, c.body!['error']]).toEqual([409, 'account_closed']);
+      const poor = await creditedTopUp();
+      await ledger.post(db.$client, poor.account, 'adjustment', -1);
+      const p = await post(`${B}/top-ups/${poor.id}/refund`);
+      expect([p.status, p.body!['error']]).toEqual([422, 'insufficient_available_balance']);
+    });
+
+    it('late-refund → 202 với late_amount_vnd; lần hai 409 already_requested; không có khoản trễ 409; không có 404', async () => {
+      const t = await topUp({ late: String(67_000_000 + seq) });
+      const r = await post(`${B}/top-ups/${t.id}/late-refund`);
+      expect(r.status).toBe(202);
+      expect(r.body).toMatchObject({ status: 'requested', amount_vnd: 100_000 });
+      const again = await post(`${B}/top-ups/${t.id}/late-refund`);
+      expect([again.status, again.body!['error']]).toEqual([409, 'already_requested']);
+      const none = await creditedTopUp();
+      const n = await post(`${B}/top-ups/${none.id}/late-refund`);
+      expect([n.status, n.body!['error']]).toEqual([409, 'no_late_payment']);
+      expect((await post(`${B}/top-ups/999999999/late-refund`)).status).toBe(404);
+    });
+
+    it('CORS preflight cho phép header Idempotency-Key', async () => {
+      const r = await fetch(`${base}/api${B}/top-ups/1/refund`, {
+        method: 'OPTIONS',
+        headers: { Origin: 'http://localhost:5173' },
+      });
+      expect(r.status).toBe(204);
+      expect(r.headers.get('access-control-allow-headers')).toContain('Idempotency-Key');
+    });
+  });
+
+  describe('GET /refunds (danh sách chờ CSKH)', () => {
+    it('mặc định requested + failed (gồm account_closure), cũ nhất trước, đủ thông tin tra cổng; không có done', async () => {
+      const a = await failedRefund('top_up', 'requested');
+      const b = await failedRefund('late_payment', 'failed');
+      const c = await failedRefund('account_closure', 'requested');
+      const d = await failedRefund('top_up', 'done');
+      const r = await call('GET', `${B}/refunds`);
+      expect(r.status).toBe(200);
+      expect(r.body).toMatchObject({ limit: 200, total: expect.any(Number) });
+      const items = r.body!['items'] as Record<string, any>[];
+      expect(r.body!['total']).toBe(items.length);
+      const ids = items.map((i) => Number(i['refund_id']));
+      expect(ids).toEqual(expect.arrayContaining([a.refundId, b.refundId, c.refundId]));
+      expect(ids).not.toContain(d.refundId);
+      expect(ids.indexOf(a.refundId)).toBeLessThan(ids.indexOf(c.refundId));
+      expect(new Set(items.map((i) => i['status']))).toEqual(new Set(['requested', 'failed']));
+      const late = items.find((i) => Number(i['refund_id']) === b.refundId)!;
+      const lateTop = await one(
+        `SELECT gateway_reference, late_gateway_ref, late_paid_at FROM top_ups WHERE id=$1`,
+        [b.topUpId],
+      );
+      expect(late).toMatchObject({
+        kind: 'late_payment',
+        top_up_id: String(b.topUpId),
+        amount_vnd: 100_000,
+        status: 'failed',
+        requested_by: String(admin),
+        failure_reason: 'cổng từ chối',
+        gateway_reference: b.ref,
+        gateway_transaction_no: lateTop['late_gateway_ref'],
+        paid_at: (lateTop['late_paid_at'] as Date).toISOString(),
+        driver: { driver_id: expect.any(String), full_name: 'X', phone_number: null },
+      });
+      const closure = items.find((i) => Number(i['refund_id']) === c.refundId)!;
+      expect(closure).toMatchObject({ kind: 'account_closure', requested_by: null });
+    });
+
+    it('?status=failed / requested lọc đúng; status lạ, tham số khác, lặp → 400', async () => {
+      const f = await failedRefund('top_up', 'failed');
+      const q1 = await call('GET', `${B}/refunds?status=failed`);
+      const items = q1.body!['items'] as Record<string, any>[];
+      expect(items.every((i) => i['status'] === 'failed')).toBe(true);
+      expect(items.map((i) => Number(i['refund_id']))).toContain(f.refundId);
+      const q2 = await call('GET', `${B}/refunds?status=requested`);
+      expect(
+        (q2.body!['items'] as Record<string, any>[]).every((i) => i['status'] === 'requested'),
+      ).toBe(true);
+      for (const bad of ['status=done', 'status=', 'limit=5', 'status=failed&status=requested'])
+        expect((await call('GET', `${B}/refunds?${bad}`)).status).toBe(400);
+    });
+  });
+
+  describe('POST /refunds/{id}/confirm | fail | redo', () => {
+    async function requestedRefund() {
+      const t = await creditedTopUp();
+      const r = await post(`${B}/top-ups/${t.id}/refund`);
+      return Number(r.body!['refund_id']);
+    }
+
+    it('confirm → 200 done (mã trim); lặp cùng mã → 200 already_done; mã khác → 409 invalid_transition', async () => {
+      const id = await requestedRefund();
+      const no = refundNo();
+      const r = await post(`${B}/refunds/${id}/confirm`, { gateway_refund_no: ` ${no} ` });
+      expect(r.status).toBe(200);
+      expect(r.body).toEqual({
+        refund_id: String(id),
+        status: 'done',
+        gateway_refund_no: no,
+        completed_at: expect.any(String),
+        already_done: false,
+      });
+      const again = await post(`${B}/refunds/${id}/confirm`, { gateway_refund_no: no });
+      expect(again.status).toBe(200);
+      expect(again.body).toMatchObject({
+        already_done: true,
+        completed_at: r.body!['completed_at'],
+      });
+      const other = await post(`${B}/refunds/${id}/confirm`, { gateway_refund_no: refundNo() });
+      expect([other.status, other.body!['error']]).toEqual([409, 'invalid_transition']);
+    });
+
+    it('mã đã ghi cho refund khác → 409 refund_no_used; không có → 404', async () => {
+      const a = await requestedRefund();
+      const b = await requestedRefund();
+      const no = refundNo();
+      expect((await post(`${B}/refunds/${a}/confirm`, { gateway_refund_no: no })).status).toBe(200);
+      const r = await post(`${B}/refunds/${b}/confirm`, { gateway_refund_no: no });
+      expect([r.status, r.body!['error']]).toEqual([409, 'refund_no_used']);
+      expect(
+        (await post(`${B}/refunds/999999999/confirm`, { gateway_refund_no: refundNo() })).status,
+      ).toBe(404);
+    });
+
+    it('body sai dạng → 400 invalid_input (thiếu, key lạ, không phải chuỗi, rỗng, quá dài, ký tự lạ)', async () => {
+      const id = await requestedRefund();
+      for (const body of [
+        {},
+        { gateway_refund_no: 'RF1', note: 'x' },
+        { gateway_refund_no: 123 },
+        { gateway_refund_no: '   ' },
+        { gateway_refund_no: 'x'.repeat(21) },
+        { gateway_refund_no: 'RF 1' },
+        { refund_no: 'RF1' },
+      ])
+        expect((await post(`${B}/refunds/${id}/confirm`, body)).body).toMatchObject({
+          error: 'invalid_input',
+        });
+      for (const body of [{}, { reason: '' }, { reason: 'x'.repeat(1001) }, { reason: 1 }])
+        expect((await post(`${B}/refunds/${id}/fail`, body)).body).toMatchObject({
+          error: 'invalid_input',
+        });
+      const c = await call('POST', `${B}/refunds/${id}/fail`, {
+        body: 'reason=x',
+        contentType: 'text/plain',
+      });
+      expect(c.status).toBe(415);
+      expect(await one('SELECT status::text FROM refunds WHERE id=$1', [id])).toEqual({
+        status: 'requested',
+      });
+    });
+
+    it('fail → 200 failed kèm lý do, log admin_id; fail lần hai → 409; redo → 200 requested; redo lần hai → 409', async () => {
+      const id = await requestedRefund();
+      const f = await post(`${B}/refunds/${id}/fail`, { reason: '  Cổng từ chối  ' });
+      expect(f.status).toBe(200);
+      expect(f.body).toEqual({
+        refund_id: String(id),
+        status: 'failed',
+        failure_reason: 'Cổng từ chối',
+      });
+      expect(logged(logSpy, 'refund_marked_failed')[0]).toMatchObject({
+        refund_id: id,
+        admin_id: admin,
+      });
+      const f2 = await post(`${B}/refunds/${id}/fail`, { reason: 'x' });
+      expect([f2.status, f2.body!['error']]).toEqual([409, 'invalid_transition']);
+      const c = await post(`${B}/refunds/${id}/confirm`, { gateway_refund_no: refundNo() });
+      expect([c.status, c.body!['error']]).toEqual([409, 'invalid_transition']);
+      const r = await post(`${B}/refunds/${id}/redo`);
+      expect(r.status).toBe(200);
+      expect(r.body).toEqual({ refund_id: String(id), status: 'requested' });
+      const r2 = await post(`${B}/refunds/${id}/redo`);
+      expect([r2.status, r2.body!['error']]).toEqual([409, 'invalid_transition']);
+      expect((await post(`${B}/refunds/999999999/redo`)).status).toBe(404);
+      expect((await post(`${B}/refunds/999999999/fail`, { reason: 'x' })).status).toBe(404);
+    });
+
+    it('sai method → 405 kèm Allow', async () => {
+      const a = await call('GET', `${B}/refunds/1/confirm`);
+      expect([a.status, a.headers.get('allow')]).toEqual([405, 'POST, OPTIONS']);
+      const b = await call('POST', `${B}/refunds`, { body: {} });
+      expect([b.status, b.headers.get('allow')]).toEqual([405, 'GET, OPTIONS']);
     });
   });
 });

@@ -29,6 +29,7 @@ import { PromotionDialog } from '../../features/pricing/PromotionDialog';
 import { TariffEditor } from '../../features/pricing/TariffEditor';
 import { Notice, type Note } from '../../ui/Notice';
 import { PageHeader } from '../../ui/PageHeader';
+import { Pager, useClientPage } from '../../ui/Pager';
 import { QueueSwitch } from '../../ui/QueueSwitch';
 import { StatusBadge } from '../../ui/StatusBadge';
 import { DataTable, EmptyState } from '../../ui/DataTable';
@@ -125,6 +126,7 @@ function PromotionTab({ onNote }: { onNote: (n: Note) => void }) {
   const [dialog, setDialog] = useState<{ promotion?: Promotion } | null>(null);
   const [ending, setEnding] = useState<Promotion | null>(null);
   const [endError, setEndError] = useState<string | null>(null);
+  const { pageRows, paged, pagerProps } = useClientPage(data?.items ?? []);
 
   async function end(p: Promotion) {
     const res = await deactivate(p.id);
@@ -160,7 +162,10 @@ function PromotionTab({ onNote }: { onNote: (n: Note) => void }) {
       ) : !data || data.items.length === 0 ? (
         <EmptyState>Chưa có khuyến mãi nào.</EmptyState>
       ) : (
-        <DataTable minWidth={720}>
+        <DataTable
+          minWidth={720}
+          footer={paged ? <Pager label="Phân trang khuyến mãi" {...pagerProps} /> : undefined}
+        >
           <Table.Thead>
             <Table.Tr>
               <Table.Th scope="col">Mã</Table.Th>
@@ -171,7 +176,7 @@ function PromotionTab({ onNote }: { onNote: (n: Note) => void }) {
             </Table.Tr>
           </Table.Thead>
           <Table.Tbody>
-            {data.items.map((p) => {
+            {pageRows.map((p) => {
               const [label, tone] = promotionStatus(p);
               return (
                 <Table.Tr key={p.id} aria-label={`Khuyến mãi ${p.promotion_code}`}>

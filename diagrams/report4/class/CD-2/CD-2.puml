@@ -3,7 +3,7 @@
 skinparam nodesep 35
 skinparam ranksep 50
 title CD-2 (Software level, CSMS billing) — Class diagram of WF-02: top-up, payment, e-invoice, refunds\nbilling partly in code (CreditLedgerService, LoyaltyService, TopUp / Refund state machines; other classes «planned»), tables in migrations 0003 / 0015 · Behaviour: SD-2a…2f · State: STM-4, 5, 7, 10
-footer Owner: Lê Bảo Khang (WP5) · v3.0 · 26/11/2026 · manual refund (decision D-AC): refund sending, retries and VnpayAdapter.refund removed, Admin refund operations added · v2.2 (23/11) + livePoints, expireDueForAccount, claim counter (T124, T129) · v0.3 (28/10) + RefundService, Refund, InvoiceAdjustment, EInvoiceProviderAdapter (ERD v1.1, R8) · main members only
+footer Owner: Lê Bảo Khang (WP5) · v3.1 · 27/11/2026 (+ RfidCreditHold) · manual refund (decision D-AC): refund sending, retries and VnpayAdapter.refund removed, Admin refund operations added · v2.2 (23/11) + livePoints, expireDueForAccount, claim counter (T124, T129) · v0.3 (28/10) + RefundService, Refund, InvoiceAdjustment, EInvoiceProviderAdapter (ERD v1.1, R8) · main members only
 
 package "controllers" {
   class TopUpController <<controller>> {
@@ -99,6 +99,11 @@ package "entities (tables)" {
     + gatewayRefundNo : string [0..1] {unique}
     + failureReason : string [0..1]
   }
+  class RfidCreditHold <<entity>> {
+    + amountVnd : number
+    + state : held | released
+    + releasedAt : Date [0..1]
+  }
   class EInvoice <<entity>> {
     + status : requested | issued | failed | needs_review
     + attemptCount : number
@@ -128,6 +133,7 @@ EInvoiceService --> EInvoiceProviderAdapter
 
 CreditAccount "1" *-- "0..*" CreditTransaction
 CreditAccount "1" -- "0..*" TopUp : funded by >
+CreditAccount "1" -- "0..*" RfidCreditHold : reserves credit in >
 TopUp "1" -- "0..*" Refund : refunded by >
 TopUp "1" -- "0..1" EInvoice : invoiced as >
 EInvoice "1" -- "0..*" InvoiceAdjustment

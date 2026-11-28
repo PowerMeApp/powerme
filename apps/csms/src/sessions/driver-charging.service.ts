@@ -23,6 +23,7 @@ import { chargeTransaction } from './charge-sql.js';
 import { SessionStateMachine, SessionStatus } from './session-state-machine.js';
 
 import { ChargingError } from './charging-error.js';
+import { CURRENT_TARIFF_WHERE, driverTariffPreviews } from './tariff-preview.js';
 import {
   type EstimateStationRoads,
   rankStationResults,
@@ -259,8 +260,9 @@ export class DriverChargingService {
       if (Number(held.unresolved) > 0) throw new ChargingError('credit_unavailable');
       const price = (
         await c.query<{ price: string | null }>(
-          `SELECT max(price_per_kwh_vnd) AS price FROM tariff_periods
-        WHERE operator_id=$1 AND effective_from<=(now() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date AND (effective_to IS NULL OR effective_to >= (now() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date)`,
+          // BE-50: cùng điều kiện với max_price_per_kwh_vnd của preview → giá hiện = giá giữ tiền.
+          `SELECT max(t.price_per_kwh_vnd) AS price FROM tariff_periods t
+        WHERE t.operator_id=$1 AND ${CURRENT_TARIFF_WHERE}`,
           [connector.operator_id],
         )
       ).rows[0]?.price;
@@ -1392,6 +1394,7 @@ export class DriverChargingService {
         await c.query(
           `SELECT c.id AS connector_id,c.connector_no,c.status,cp.display_code,
         cp.serial_number,cp.lifecycle,cp.is_online,cp.online_changed_at,cp.last_message_at,st.site_name,st.vinfast_only,
+        st.operator_id::text AS operator_id,
         EXISTS(SELECT 1 FROM fault_reports r JOIN fault_events f ON f.id=r.fault_event_id
           WHERE r.connector_id=c.id AND r.cleared_at IS NULL AND f.status<>'resolved') AS reported_issue
         FROM connectors c JOIN charge_points cp ON cp.id=c.charge_point_id
@@ -1403,7 +1406,10 @@ export class DriverChargingService {
         )
       ).rows[0];
       if (!row) throw new ChargingError('not_found');
-      return row;
+      const { operator_id: operatorId, ...connector } = row;
+      // BE-50: biểu giá hôm nay của Operator sở hữu trụ, để sheet Start hiện giá trước khi bấm.
+      const tariff = (await driverTariffPreviews(c, [String(operatorId)])).get(String(operatorId));
+      return { ...connector, tariff: tariff ?? null };
     });
   }
 

@@ -6,7 +6,8 @@
  *
  * Layout (redesign): what needs someone comes first and looks like an alert — the work queues and
  * the open faults are red / amber alert cards at the start of the grid; when there is nothing to
- * do, a teal "all clear" line says so. The status cards follow.
+ * do, a teal "all clear" line says so. The status cards follow, then the Operator's revenue and
+ * fault statistics (features/insights: today / 7 days / months, trends, top stations).
  */
 import { Alert, Loader } from '@mantine/core';
 import { IconCircleCheck, IconPlug, IconBolt } from '@tabler/icons-react';
@@ -14,6 +15,7 @@ import { Link } from 'react-router';
 import type { OperatorSummary } from '@powerme/shared';
 import { CountBadge } from '../../components/CountBadge';
 import { errorMessage, useOperatorMeQuery, useOperatorSummaryQuery } from '../../core/api/api';
+import { HomeInsights } from '../../features/insights/HomeInsights';
 import { CountList } from '../../ui/CountList';
 import { Notice } from '../../ui/Notice';
 import { PageHeader } from '../../ui/PageHeader';
@@ -143,6 +145,7 @@ export function OperatorHomePage() {
           )}
         </div>
       )}
+      {s && <HomeInsights scope="operator" />}
     </>
   );
 }

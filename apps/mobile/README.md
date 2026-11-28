@@ -15,6 +15,33 @@ flutter test --no-pub --concurrency=1 --reporter expanded test/driver_language_t
 Ảnh [VI](docs/assets/mb-01-language/390-1x-vi-selector.png)/[EN](docs/assets/mb-01-language/390-1x-en-selector.png): offscreen API fixtures, SDK fonts, 390px/100%; chưa native/staging/TalkBack/VoiceOver.
 Evidence cũ có 320px/200%: nhãn tab chồng và account-top EN cắt header; không thay UX trong packaging.
 
+## T163 — thông báo phiên đã kết thúc, 28/11/2026
+
+Khi Stop trả HTTP 409 `session_not_stoppable`, app hiện MSG30 inline đúng VI/EN
+và đọc lại progress ngay, hoặc gộp một lần sau GET đang chạy. Thông báo còn khi
+closed/pending; Stop/retry bị khóa. Bảng kê chỉ đọc khi progress có bằng chứng
+chốt meter, closed/reconciled, posted và capability phù hợp. 202 rejected và 409
+khác giữ nghĩa riêng. Nguồn: yêu cầu trực tiếp user theo UC-CHG-03/MSG30 tại
+[PR #260](https://github.com/PowerMeApp/powerme/pull/260) (chưa merge),
+[Driver API §5/§12](../../docs/api/DRIVER-API-HOP-DONG.md).
+
+Local đã kiểm: 77/77 ca của năm file dưới và 16/16 ca owned-session pass;
+analyzer sạch, format 6 file/0 thay đổi. Capture 2/2 pass; hai ảnh offscreen
+API fixture dùng SDK fonts:
+[390px VI](docs/assets/t163/390-1x-vi-msg30.png),
+[320px/200% EN](docs/assets/t163/320-2x-en-msg30.png).
+Chưa nghiệm thu native/device/staging, sạc/thanh toán thật hoặc full suite.
+Ảnh hẹp còn lỗi nhãn tab chồng nhau đã biết, ngoài phạm vi T163.
+Không thay backend, dependencies, runtime hoặc cấu hình staging.
+
+Chạy từ `apps/mobile`, dùng SDK và cache có sẵn:
+
+```sh
+flutter test --no-pub --concurrency=1 test/driver_charge_session_widget_test.dart test/t146_session_widget_test.dart test/t148_rfid_settlement_test.dart test/driver_charge_modes_test.dart test/charge_session_cost_readout_test.dart
+flutter test --no-pub --concurrency=1 test/t146_owned_sessions_test.dart
+flutter analyze --no-pub
+```
+
 ## T96 — điểm đi Discover → gợi ý, 26/11/2026
 
 Local bounded bugfix in the user-run checkout, branch `wp3/t96-diem-di-goi-y`,

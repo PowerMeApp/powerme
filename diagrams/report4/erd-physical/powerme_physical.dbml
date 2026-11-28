@@ -1,14 +1,15 @@
-// PowerMe — Physical ERD (PostgreSQL 16), 26/11/2026 (v1.4: synced with the DB of migrations 0000-0029 on main 20fa134:
-// + top_up_payment_conflicts (0024), new columns of 0018-0028, 3 enums and 3 enum values; 0029 is data only;
+// PowerMe — Physical ERD (PostgreSQL 16), 27/11/2026 (v1.5: synced with the DB of migrations 0000-0031:
+// + charge_point_offline_auth_checks (0030, T150 / BR-P52), rfid_credit_holds and rfid_stop_jobs (0031, T148); 0030 and 0031 alter no existing table;
+// v1.4 26/11: synced with the DB of migrations 0000-0029 on main 20fa134:
 // v1.3 10/11: migration 0016 / T110 drops the RFID wallet card — rfid_card_kind 'wallet' and payment_mode 'station_wallet';
 // v1.2: synced with the DB of migrations 0000-0015, audit A5 / D20; v1.1 01/11: + refunds, R8).
-// 45 tables (+10 partitions; the migration runner's own _migrations table is not drawn), 475 columns, 35 enums,
-// 86 foreign keys. Paste into dbdiagram.io.
+// 48 tables (+10 partitions; the migration runner's own _migrations table is not drawn), 505 columns, 35 enums,
+// 91 foreign keys. Paste into dbdiagram.io.
 // Not expressible in DBML (see the migrations): sequences, partitions, partial / expression indexes, triggers.
 
 Project powerme {
   database_type: 'PostgreSQL'
-  Note: 'Physical ERD of the PowerMe EV-charging platform: 34 business tables (Logical ERD v1.1) + 10 technical tables + top_up_payment_conflicts (0024, not in the Logical ERD yet).'
+  Note: 'Physical ERD of the PowerMe EV-charging platform: 36 business tables (34 in Logical ERD v1.1 + top_up_payment_conflicts (0024) and rfid_credit_holds (0031), the last two not in the Logical ERD yet) + 12 technical tables (the 10 earlier ones + charge_point_offline_auth_checks (0030) + rfid_stop_jobs (0031)).'
 }
 
 // ---------- Enums (values from the State Diagrams) ----------
@@ -616,7 +617,7 @@ Table sessions {
     `((meter_stop_wh IS NULL) OR (meter_stop_wh >= meter_start_wh))` [name: 'sessions_meter_check']
     `(((priced_clock IS NULL) AND (priced_ended_at IS NULL)) OR ((priced_clock IS NOT NULL) AND (priced_clock = ANY (ARRAY['cp', 'cp_offset', 'csms'])) AND (priced_ended_at IS NOT NULL)))` [name: 'sessions_priced_clock_check']
   }
-  Note: 'Charging session (OCPP transaction). Central table: who, where, how paid, meter, status (STM-1).'
+  Note: 'Charging session (OCPP transaction). Central table: who, where, how paid, meter, status (STM-1). Partial / expression indexes: sessions_unpaid_rfid_driver_idx (driver_id, id) WHERE origin = rfid AND payment_mode = csms_billed AND driver_id IS NOT NULL (0031) (in the migrations).'
 }
 
 Table session_pauses {
@@ -1164,8 +1165,76 @@ Table charging_statements {
   Note: 'Derived read model: one statement per settled session (debit + earned points). Drop proposed.'
 }
 
+Table charge_point_offline_auth_checks {
+  id bigint [pk, increment]
+  charge_point_id bigint [not null]
+  epoch integer [not null, note: 'charge_point_connections.epoch at the time of the check']
+  started_at timestamptz [not null]
+  completed_at timestamptz [not null]
+  config_values jsonb [note: '{key: {value, readonly} | null}; null = key in unknownKey or not returned']
+  change_results jsonb [not null, default: `'{}'::jsonb`, note: '{key: Accepted / Rejected / RebootRequired / NotSupported / timeout / error / skipped}']
+  supported_feature_profiles text [note: 'SupportedFeatureProfiles verbatim (CSL), NULL if the charge point does not report it']
+  offline_card_risk boolean [not null]
+  risk_reason "varchar(40)" [note: 'short reason code when there is a risk']
+  fallback_profile_status "varchar(20)" [note: 'SetChargingProfile TxDefaultProfile result; unsupported = no SmartCharging; NULL = off or no risk']
+  indexes {
+    (charge_point_id, id) [name: 'charge_point_offline_auth_checks_cp_idx', note: 'created as (charge_point_id, id DESC)']
+  }
+  checks {
+    `((offline_card_risk AND (risk_reason IS NOT NULL)) OR ((NOT offline_card_risk) AND (risk_reason IS NULL)))` [name: 'charge_point_offline_auth_checks_reason_check']
+    `(completed_at >= started_at)` [name: 'charge_point_offline_auth_checks_time_check']
+  }
+  Note: 'Technical (T150 / BR-P52): result of the offline-authorize configuration check after each BootNotification; append-only, the latest row of a charge point is its offline_card_risk flag (0030).'
+}
+
+Table rfid_credit_holds {
+  session_id bigint [pk]
+  credit_account_id bigint [not null]
+  amount_vnd bigint [not null]
+  state "varchar(16)" [not null, default: 'held']
+  reason "varchar(64)" [not null]
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+  released_at timestamptz
+  indexes {
+    credit_account_id [name: 'rfid_credit_holds_account_idx']
+  }
+  checks {
+    `(amount_vnd >= 0)` [name: 'rfid_credit_holds_amount_vnd_check']
+    `((state) = ANY (ARRAY['held', 'released']))` [name: 'rfid_credit_holds_state_check']
+    `((state = 'released') = (released_at IS NOT NULL))` [name: 'rfid_credit_holds_check']
+  }
+  Note: 'Billing (T148): credit hold of an RFID session paid from the driver credit; held -> released (0031). Partial / expression indexes: rfid_credit_holds_outstanding_account_idx (credit_account_id, session_id) WHERE state = held (in the migrations).'
+}
+
+Table rfid_stop_jobs {
+  session_id bigint [pk]
+  reason "varchar(64)" [not null]
+  state "varchar(20)" [not null, default: 'pending']
+  attempts integer [not null, default: 0]
+  attempt_limit integer [not null]
+  current_command_id bigint
+  next_attempt_at timestamptz [not null, default: `now()`]
+  exhausted_at timestamptz
+  last_error "varchar(64)"
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+  indexes {
+    current_command_id [name: 'rfid_stop_jobs_command_idx']
+  }
+  checks {
+    `((state) = ANY (ARRAY['pending', 'inflight', 'awaiting_stop', 'retry', 'exhausted', 'completed']))` [name: 'rfid_stop_jobs_state_check']
+    `(attempts >= 0)` [name: 'rfid_stop_jobs_attempts_check']
+    `(attempt_limit > 0)` [name: 'rfid_stop_jobs_attempt_limit_check']
+    `(attempts <= attempt_limit)` [name: 'rfid_stop_jobs_check']
+    `((state <> 'exhausted') OR (exhausted_at IS NOT NULL))` [name: 'rfid_stop_jobs_check1']
+  }
+  Note: 'Technical (T148): outbox job that sends RemoteStop for an RFID session whose credit ran out; retried until completed or exhausted (0031). Partial / expression indexes: rfid_stop_jobs_due_idx (next_attempt_at, session_id) WHERE state NOT IN (completed, exhausted) (in the migrations).'
+}
+
 // ---------- References: child.fk > parent.pk = many-to-one; parent.pk - child.fk = one-to-one ----------
 Ref admins_user_id_fkey: users.id - admins.user_id [delete: cascade]
+Ref charge_point_offline_auth_checks_charge_point_id_fkey: charge_point_offline_auth_checks.charge_point_id > charge_points.id
 Ref charge_point_connections_charge_point_id_fkey: charge_point_connections.charge_point_id > charge_points.id
 Ref charge_points_site_id_fkey: charge_points.site_id > sites.id
 Ref charge_settlement_jobs_session_id_fkey: sessions.id - charge_settlement_jobs.session_id
@@ -1234,6 +1303,10 @@ Ref remote_commands_requested_by_fkey: remote_commands.requested_by > users.id
 Ref reservations_connector_id_fkey: reservations.connector_id > connectors.id
 Ref reservations_driver_id_fkey: reservations.driver_id > drivers.user_id
 Ref rfid_cards_driver_id_fkey: rfid_cards.driver_id > drivers.user_id
+Ref rfid_credit_holds_credit_account_id_fkey: rfid_credit_holds.credit_account_id > credit_accounts.id
+Ref rfid_credit_holds_session_id_fkey: sessions.id - rfid_credit_holds.session_id
+Ref rfid_stop_jobs_current_command_id_fkey: rfid_stop_jobs.current_command_id > remote_commands.id
+Ref rfid_stop_jobs_session_id_fkey: sessions.id - rfid_stop_jobs.session_id
 Ref session_pauses_session_id_fkey: session_pauses.session_id > sessions.id [delete: cascade]
 Ref session_status_history_session_id_fkey: session_status_history.session_id > sessions.id [delete: restrict]
 Ref session_tariff_segments_session_id_fkey: session_tariff_segments.session_id > sessions.id [delete: restrict]
@@ -1291,6 +1364,7 @@ TableGroup billing [color: #8E44AD] {
   credit_transactions
   top_ups
   top_up_payment_conflicts
+  rfid_credit_holds
   e_invoices
   invoice_adjustments
   refunds
@@ -1308,4 +1382,6 @@ TableGroup technical [color: #7F8C8D] {
   charge_settlement_jobs
   charge_tariff_boundary_evidence
   charging_statements
+  charge_point_offline_auth_checks
+  rfid_stop_jobs
 }

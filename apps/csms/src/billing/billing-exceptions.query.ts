@@ -10,8 +10,9 @@
  * - `invoices_needs_review`: `e_invoices.status = 'needs_review'`.
  * - `top_up_exceptions`: `exception_kind IS NOT NULL AND exception_reviewed_at IS NULL`.
  * - `payment_conflicts`: `top_up_payment_conflicts.reviewed_at IS NULL` (partial index 0024).
- * Tên lỗi giữ đúng DB (`transient | data`, D10). Không có mục refund: hoàn tiền làm thủ công (D1,
- * D-AC / SRS BR-P51); danh sách refund chờ CSKH thuộc PR ghi nhận hoàn thủ công.
+ * Tên lỗi giữ đúng DB (`transient | data`, D10). Không có mục refund trong `list`: hoàn tiền làm thủ
+ * công (D1, D-AC / SRS BR-P51), danh sách refund chờ CSKH là `listRefunds` (route
+ * `GET /api/admin/v1/billing/refunds`).
  */
 import type { PoolClient } from 'pg';
 import type { Db } from '../db/db.module.js';
@@ -72,6 +73,37 @@ export interface PaymentConflictItem {
   reason: string;
   created_at: string;
   driver: ExceptionDriver;
+}
+
+/** Refund chờ CSKH (`requested` / `failed`): đủ để tìm giao dịch gốc trên cổng merchant VNPay. */
+export interface RefundQueueItem {
+  refund_id: string;
+  kind: string;
+  top_up_id: string;
+  amount_vnd: number;
+  status: string;
+  /** Admin tạo yêu cầu; null = hệ thống (account_closure). */
+  requested_by: string | null;
+  created_at: string;
+  updated_at: string;
+  /** Lý do lần thất bại gần nhất (còn giữ sau khi làm lại). */
+  failure_reason: string | null;
+  /** `vnp_TxnRef` của top-up gốc. */
+  gateway_reference: string;
+  /** Mã giao dịch VNPay cần hoàn: gốc (`top_up` / `account_closure`) hoặc của khoản trễ. */
+  gateway_transaction_no: string | null;
+  /** Lúc trả của giao dịch đó (`completed_at` / `late_paid_at`). */
+  paid_at: string | null;
+  driver: ExceptionDriver;
+}
+
+export type RefundQueueStatus = 'requested' | 'failed';
+
+export interface RefundQueue {
+  generated_at: string;
+  limit: number;
+  total: number;
+  items: RefundQueueItem[];
 }
 
 export interface BillingExceptions {
@@ -188,6 +220,53 @@ export class BillingExceptionsQuery {
             driver: driver(r),
           }),
         ),
+      };
+    });
+  }
+
+  /**
+   * Danh sách refund chờ CSKH (D1, BR-P51): `status IN (statuses)`, gồm `account_closure`. Cũ nhất
+   * trước (CSKH hoàn trong 7 ngày làm việc), tối đa `limit` dòng, `total` là số dòng thật.
+   */
+  async listRefunds(
+    statuses: readonly RefundQueueStatus[],
+    limit = BILLING_EXCEPTIONS_LIMIT,
+  ): Promise<RefundQueue> {
+    return this.snapshot(async (c) => {
+      const generatedAt = (await c.query<{ now: Date }>('SELECT now() AS now')).rows[0]!.now;
+      const { rows } = await c.query<Row>(
+        `SELECT f.id::text AS refund_id, f.kind::text AS kind, f.top_up_id::text AS top_up_id,
+           f.amount_vnd::text AS amount_vnd, f.status::text AS status,
+           f.requested_by::text AS requested_by, f.created_at, f.updated_at, f.failure_reason,
+           t.gateway_reference,
+           CASE WHEN f.kind = 'late_payment' THEN t.late_gateway_ref
+                ELSE t.gateway_transaction_no END AS gateway_transaction_no,
+           CASE WHEN f.kind = 'late_payment' THEN t.late_paid_at ELSE t.completed_at END AS paid_at,
+           ${DRIVER_COLS}, count(*) OVER()::int AS total
+         FROM refunds f JOIN top_ups t ON t.id = f.top_up_id ${DRIVER_JOIN}
+         WHERE f.status = ANY($1::refund_status[])
+         ORDER BY f.created_at, f.id LIMIT $2`,
+        [statuses, limit],
+      );
+      return {
+        generated_at: generatedAt.toISOString(),
+        limit,
+        total: rows[0]?.total ?? 0,
+        items: rows.map((r) => ({
+          refund_id: r['refund_id'] as string,
+          kind: r['kind'] as string,
+          top_up_id: r['top_up_id'] as string,
+          amount_vnd: Number(r['amount_vnd']),
+          status: r['status'] as string,
+          requested_by: (r['requested_by'] as string | null) ?? null,
+          created_at: iso(r['created_at'])!,
+          updated_at: iso(r['updated_at'])!,
+          failure_reason: (r['failure_reason'] as string | null) ?? null,
+          gateway_reference: r['gateway_reference'] as string,
+          gateway_transaction_no: (r['gateway_transaction_no'] as string | null) ?? null,
+          paid_at: iso(r['paid_at']),
+          driver: driver(r),
+        })),
       };
     });
   }

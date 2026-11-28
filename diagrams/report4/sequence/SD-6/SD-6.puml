@@ -1,12 +1,13 @@
 @startuml SD-6
 !include ../_style.iuml
-title SD-6 (Software level, CSMS) — Session started at the Charge Point with an RFID card\nPrecondition: Charge Point in service · System view: AD-6 · State: STM-1, STM-8
-footer Owner: Ngô Văn Minh Trí (WP2) · v1.1 · 10/11/2026 · names = code (apps/csms/src) · left gate = Charge Point [OCPP 1.6J, WSS]
+title SD-6 (Software level, CSMS) — Session started at the Charge Point with an RFID card\nPrecondition: Charge Point in service · System view: AD-6 · State: STM-1, STM-8 · Rule: BR-P19, ADR-0020
+footer Owner: Ngô Văn Minh Trí (WP2) · v1.2 · 27/11/2026 · names = code (apps/csms/src) · left gate = Charge Point [OCPP 1.6J, WSS]
 
 participant "«component»\n<u>:OcppHandlers</u>" as H
 participant "«component»\n<u>:DriverChargingService</u>" as D
 participant "«component»\n<u>:SessionsService</u>" as S
 participant "«component»\n<u>:ReconciliationService</u>" as R
+participant "«component»\n<u>:RfidCreditProtection</u>" as P
 participant "«component»\n<u>:ChargeSettlementService</u>" as CS
 
 == Driver taps a card ==
@@ -14,7 +15,8 @@ participant "«component»\n<u>:ChargeSettlementService</u>" as CS
 H -> D ++ : authorizeAppTag(idTag, ctx)
 D --> H -- : null (not an app tag)
 H -> S ++ : authorize(idTag) : AuthorizeStatus
-S --> H -- : Accepted (active card; online card: linked active Driver\nand credit ≥ start minimum, BR-P23) | Blocked | Invalid
+note right of S : read-only: checks eligibility, reserves nothing
+S --> H -- : Accepted (active card; online card: linked active Driver,\naccount not in shortfall, available credit ≥ start minimum, BR-P23) | Blocked | Invalid
 [<-- H -- : Authorize.conf {idTagInfo.status}
 
 == Charge Point starts the transaction ==
@@ -28,7 +30,7 @@ alt online card linked to an active Driver (credit OK, or only below minimum / i
     R --> S --
   end
 else free-vend tag or free-vend card
-  S -> S : payment_mode = unattributed (origin free_vend), no record
+  S -> S : payment_mode = unattributed (origin free_vend), no record\nno hold, no debit, no cutoff
 else unknown tag, or card unlinked / blocked
   S -> S : payment_mode = unattributed
   S -> R ++ : recordUnknownIdTag(sessionId, idTag)
@@ -40,25 +42,60 @@ else online card denied (no active Driver or credit account)
 end
 S -> S : create session
 hnote over S : {session.status = active}
+opt payment_mode = csms_billed (same SQL transaction, account row locked)
+  alt live Start of the current connection epoch, card eligible,\navailable credit ≥ start minimum, no unresolved RFID session
+    S -> S : insert rfid_credit_holds {amount = ALL available credit\n(balance − open QR holds − RFID holds), state = held}
+    hnote over S : {RfidCreditHold.state = held}
+  else live Start but credit not covered
+    S -> S : insert rfid_credit_holds {amount = 0}\ninsert rfid_stop_jobs {reason = insufficient_credit, state = pending}
+    note right of S : the Start is still recorded against the card owner\nand the CSMS asks the Charge Point to stop it (below)
+  else replayed (offline) Start
+    S -> S : insert rfid_credit_holds {amount = 0, reason = offline_obligation}
+    note right of S : a fresh live meter reading of the current epoch\ncan fund it once; the funded amount never grows
+  end
+end
 S --> H -- : transactionId
 [<-- H -- : StartTransaction.conf {transactionId, Accepted}
 note right of H : always Accepted: the session\nhas already happened (ADR-0012)
 
+== Running session: credit cutoff ==
 ... MeterValues until the Driver stops at the Charge Point ...
+[-> H ++ : MeterValues {transactionId, meterValue}
+H -> D ++ : onMeter(transactionId)
+D -> P ++ : onSession(transactionNo)
+P -> P : running estimate = valid energy so far × highest tariff of the day
+alt estimate ≥ min(initial hold, available credit excluding this hold) − cutoff reserve,\nor safety reason (no tariff, invalid or conflicting meter, no live energy)
+  P -> P : insert rfid_stop_jobs {state = pending}\n(attempts = 1 + RemoteStop retry limit)
+end
+opt stop job due (also for a Start that was not covered)
+  loop until StopTransaction arrives, or attempts are used up
+    [<- P : RemoteStopTransaction {transactionId} via remote_commands\n(Accepted, Rejected, timeout: each uses one attempt)
+    note right of P : Accepted = awaiting_stop, not completed;\nmeters, reconnect and restart never reset the attempts
+  end
+  note right of P : attempts used up → state = exhausted,\nlisted on the Operator charge point detail\nand the Admin summary (rfid_credit_protection)
+end
+P --> D --
+D --> H --
+[<-- H -- : MeterValues.conf {}
+note over P : a periodic sweep re-checks open RFID sessions\nand due stop jobs after a crash or restart
 
+== Charge Point stops the transaction ==
 [-> H ++ : StopTransaction {transactionId, meterStop, timestamp}
 H -> S ++ : onStopTransaction(req, ctx)
 S -> S : Running → closed → reconciled | review\n(as in SD-1b)
 S --> H --
+note right of P : only a physical StopTransaction completes the stop job
 H -> D ++ : onStopped(transactionId)
 D -> CS ++ : settle(sessionId)
 alt payment_mode = csms_billed
-  CS --> D : posted (debit Driver credit, points, statement)
+  CS --> D : posted: debit Driver credit, points and charging statement,\nand the hold is released (state = released), all in one SQL transaction
+  hnote over CS : {RfidCreditHold.state = released}
+  note right of CS : review, orphaned, pending tariff or meter,\nand Accepted-without-Stop keep the hold;\na closed account is never retried or released (T158)
 else unattributed
   CS --> D : ineligible (listed for the Operator, UC-OPS-05)
 end
 deactivate CS
 D --> H --
 [<-- H -- : StopTransaction.conf {Accepted}
-note over H, CS : Code gap (Sơn with Trí, D9): settle() only posts sessions with origin = app_qr, so RFID-card sessions are not debited yet.
+note over H, CS : The Driver cannot stop a card session from the app (can_stop = false); only the system cutoff above stops it.
 @enduml
