@@ -36,7 +36,7 @@ const OK: TopUpGuards = {
 };
 
 describe('TopUpStateMachine — các chuyển của STM-4', () => {
-  it('#1: tạo top-up ở pending', () => {
+  it('TC-STM4-01 #1: tạo top-up ở pending', () => {
     expect(sm.initial()).toBe('pending');
   });
 
@@ -49,9 +49,9 @@ describe('TopUpStateMachine — các chuyển của STM-4', () => {
       'pending',
       'TIMEOUT_NOT_PAID',
       'expired',
-      'quá expires_at + 2 phút, querydr báo chưa trả dứt khoát',
+      'TC-STM4-04 quá expires_at + 2 phút, querydr báo chưa trả dứt khoát',
     ],
-    ['#7', 'credited', 'ADMIN_REFUND', 'refunded', 'Admin hoàn, số dư đủ (UC-ADM-08)'],
+    ['#7', 'credited', 'ADMIN_REFUND', 'refunded', 'TC-STM4-07 Admin hoàn, số dư đủ (UC-ADM-08)'],
   ];
 
   it.each(STM4)('STM-4 %s: %s --%s--> %s (%s)', (no, from, event, to) => {
@@ -66,7 +66,7 @@ describe('TopUpStateMachine — các chuyển của STM-4', () => {
 });
 
 describe('TopUpStateMachine — thanh toán thành công tới khi chưa / đã expired', () => {
-  it('TC-STM4-04 (bước IPN): pending đã quá expires_at, thành công → credited (#2)', () => {
+  it('(bước IPN): pending đã quá expires_at, thành công → credited (#2)', () => {
     // Máy không xét đồng hồ: top-up còn `pending` thì cộng, kể cả khi đã quá `expires_at` (đang
     // chờ querydr chốt, D4 ⊕). Test mức service (vòng quét + querydr) là việc của Phần 8.
     expect(sm.apply('pending', 'PAYMENT_SUCCEEDED', OK)).toEqual({
@@ -76,7 +76,7 @@ describe('TopUpStateMachine — thanh toán thành công tới khi chưa / đã 
     });
   });
 
-  it('#6: thành công khi đã expired → late_payment, giữ expired', () => {
+  it('TC-STM4-06 #6: thành công khi đã expired → late_payment, giữ expired', () => {
     expect(sm.apply('expired', 'PAYMENT_SUCCEEDED', OK)).toEqual({
       to: 'expired',
       outcome: 'late_payment',
@@ -353,7 +353,7 @@ describe('TopUpStateMachine — TIMEOUT_NOT_PAID đến muộn (đua với IPN q
 });
 
 describe('TopUpStateMachine — #7: guard số dư khi Admin hoàn', () => {
-  it('TC-STM4-12/13: số dư không đủ → rejected, giữ credited, không ném', () => {
+  it('số dư không đủ → rejected, giữ credited, không ném', () => {
     expect(sm.apply('credited', 'ADMIN_REFUND', { balanceCoversAmount: false })).toEqual({
       to: 'credited',
       outcome: 'rejected',
@@ -365,7 +365,7 @@ describe('TopUpStateMachine — #7: guard số dư khi Admin hoàn', () => {
 
 describe('TopUpStateMachine — chuyển không hợp lệ bị từ chối', () => {
   it.each([
-    ['refunded', 'ADMIN_REFUND', 'TC-STM4-14: hoàn hai lần'],
+    ['refunded', 'ADMIN_REFUND', 'hoàn hai lần'],
     ['pending', 'ADMIN_REFUND', 'chưa cộng tiền'],
     ['expired', 'ADMIN_REFUND', 'khoản trễ hoàn bằng refundLatePayment, không phải #7'],
     ['failed', 'ADMIN_REFUND', 'chưa cộng tiền'],

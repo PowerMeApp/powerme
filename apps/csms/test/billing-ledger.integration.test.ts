@@ -200,7 +200,7 @@ describeDb('billing: sổ cái credit và loyalty earn (T32 Phần 3)', () => {
   });
 
   describe('post: bất biến số dư', () => {
-    it('sau nhiều lần post: balance_vnd = Σ amount_vnd, dòng cuối = snapshot', async () => {
+    it('TC-F07-01 sau nhiều lần post: balance_vnd = Σ amount_vnd, dòng cuối = snapshot', async () => {
       const t1 = await newTopUp(accountA, 500000);
       const s1 = await newSession(driverA);
       await inTx(async (c) => {
@@ -476,7 +476,7 @@ describeDb('billing: sổ cái credit và loyalty earn (T32 Phần 3)', () => {
       });
     });
 
-    it('gọi lặp cùng phiên → một dòng earn, điểm không cộng hai lần', async () => {
+    it('TC-F08-01 gọi lặp cùng phiên → một dòng earn, điểm không cộng hai lần', async () => {
       const s = await newSession(driverA);
       const first = await inTx((c) => loyalty.earnForSession(c, driverA, s, 10));
       const again = await inTx((c) => loyalty.earnForSession(c, driverA, s, 10));
