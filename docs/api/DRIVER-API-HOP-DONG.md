@@ -633,3 +633,37 @@ Security giữ owner/vehicle/connector validation, khóa phiên, epoch fencing, 
 idempotency hiện có. Dữ liệu meter/clock không chắc chắn không được coi là tiền đã trả; cận trên
 chỉ bảo vệ credit. Hai dự án có scope/stack khác nên implementation giữ kiến trúc hiện tại,
 không port source; attribution bằng URL/commit/license trên, không phát sinh mã sao chép cần header.
+
+## 18. BE-50 — giá trước khi sạc (cho Sơn, Screen 5 và Screen 8)
+
+OpenAPI 0.18.0. Mỗi item của `GET /stations` và response `GET /connectors/by-code/{code}/{no}` có thêm
+trường `tariff` (schema `DriverTariffPreview`): biểu giá **hôm nay** của operator sở hữu trạm. Không có
+route mới; client cũ bỏ qua trường lạ nên không vỡ.
+
+```json
+"tariff": {
+  "currency": "VND", "unit": "kWh", "timezone": "Asia/Ho_Chi_Minh",
+  "effective_date": "2026-11-28",
+  "current": { "band": "normal", "time_start": "11:30", "time_end": "17:00", "price_per_kwh_vnd": 3800 },
+  "max_price_per_kwh_vnd": 5500,
+  "periods": [
+    { "band": "off_peak", "time_start": "00:00", "time_end": "04:00", "price_per_kwh_vnd": 2800 },
+    { "band": "normal", "time_start": "04:00", "time_end": "09:30", "price_per_kwh_vnd": 3800 }
+  ]
+}
+```
+
+- `periods` là danh sách khoảng giờ `[time_start, time_end)` theo giờ VN, phủ 00:00–24:00. Một band có
+  thể lặp lại (seed: `normal` ×3, `peak` ×2), nên app **không** gộp thành map band → giá khi hiển thị
+  lịch; gộp chỉ để in "Cao điểm 5.500 đ/kWh: 09:30–11:30, 17:00–20:00".
+- `current` là khung lúc CSMS trả lời. App không tự tính lại khung theo giờ điện thoại; khi qua
+  `current.time_end` thì gọi lại API (hoặc làm mới khi mở lại màn).
+- `max_price_per_kwh_vnd` dùng **cùng điều kiện SQL** với `POST /charges` khi giữ tạm credit
+  (BR-P18/P19), nên con số hiển thị luôn bằng con số giữ tiền. Câu gợi ý trên sheet Start: "Giữ tạm theo
+  giá cao nhất hôm nay X đ/kWh; tiền thực tế tính theo khung giờ lúc sạc, xem ở bảng kê."
+- `tariff: null` = operator chưa có biểu giá → `POST /charges` sẽ trả `tariff_unavailable`; app tắt nút
+  Start sớm và hiện câu chữ đã có cho mã đó.
+- Chỉ để hiển thị. Tiền thật do quyết toán tính theo khung giờ lúc sạc (đồng hồ trụ, dung sai 300 s,
+  `reconciliation/tariff-clock.ts`); khuyến mãi chưa áp vào quyết toán (K6) nên không hiện ở đây. Giá hiện
+  trên màn hình trụ (HMI) không có giá trị: OCPP 1.6 không gửi giá xuống trụ, CSMS là nguồn sự thật.
+- VAT: câu chữ "đã gồm VAT" chờ WP5 (Khang) chốt; trước đó app ghi "Giá do đơn vị vận hành niêm yết".
