@@ -1,7 +1,7 @@
 @startuml SD-5b
 !include ../_style.iuml
 title SD-5b (Software level, CSMS) — Charge Point connects for the first time and goes into service\nPrecondition: Charge Point is awaiting_connection · System view: AD-8 · State: STM-3, STM-2
-footer Owner: Trần Đức Ân (WP1) · v2.1 · 10/11/2026 · names = code after the Charge Point rename (T90) · left gate = Charge Point [OCPP 1.6J, WSS]
+footer Owner: Trần Đức Ân (WP1) · v2.2 · 27/11/2026 · names = code after the Charge Point rename (T90) · left gate = Charge Point [OCPP 1.6J, WSS]
 
 participant "«component»\n<u>:OcppServer</u>" as OS
 participant "«component»\n<u>:ChargePointAuthService</u>" as PA
@@ -9,6 +9,7 @@ participant "«component»\n<u>:ChargePointLifecyclePolicy</u>" as PLP
 participant "«component»\n<u>:ConnectionRegistry</u>" as REG
 participant "«component»\n<u>:OcppHandlers</u>" as H
 participant "«component»\n<u>:SessionsService</u>" as S
+participant "«component»\n<u>:OfflineAuthCheckService</u>" as OA
 
 [-> OS ++ : WebSocket upgrade /ocpp/{serial}, Basic auth [WSS, TLS]
 OS -> PA ++ : verify(identity, password, clientIp) : decision
@@ -29,8 +30,19 @@ hnote over REG : {chargePoint.lifecycle = in_service}
 
 [-> OS ++ : BootNotification {vendor, model, firmwareVersion}
 OS -> H ++ : dispatch(BootNotification, params, ctx)
+H -> OA : scheduleAfterBoot(identity, epoch)
+note right : not awaited, so the Boot reply is not delayed (BR-P52)
 H --> OS -- : {Accepted, currentTime, interval}
 [<-- OS -- : BootNotification.conf {Accepted, interval}
+
+group Offline card check, about 0.5 s after Boot (OFFLINE_AUTH_CHECK_ENABLED, default true)
+  [<- OA : GetConfiguration {LocalAuthorizeOffline, LocalPreAuthorize,\nAllowOfflineTxForUnknownId, AuthorizationCacheEnabled,\nLocalAuthListEnabled, SupportedFeatureProfiles}
+  loop for each of the first three keys not already false
+    [<- OA : ChangeConfiguration {key, "false"}
+  end
+  note right of OA : each command is logged in remote_commands;\nno answer to GetConfiguration or a ChangeConfiguration timeout = no_response,\nCALLERROR = change_failed
+  OA -> OA : insert one append-only row in charge_point_offline_auth_checks\n{config values, change results, offline_card_risk, risk_reason}
+end
 
 loop for each connector
   [-> OS ++ : StatusNotification {connectorId, Available}

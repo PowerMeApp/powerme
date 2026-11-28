@@ -1,6 +1,6 @@
 @startuml STM-5
 !include _style.iuml
-title STM-5 (System level) — Status of a CreditAccount\ncredit_accounts.status · v1.1 · 10/11/2026
+title STM-5 (System level) — Status of a CreditAccount\ncredit_accounts.status · v1.2 · 27/11/2026
 
 [*] --> active
 note left of active
@@ -11,13 +11,21 @@ end note
 active --> in_shortfall : session debited [balance < 0]\n/ block new app-billed sessions
 in_shortfall : top-up credited [balance < 0]\n/ reduce shortfall
 in_shortfall --> active : top-up credited\n[balance ≥ 0]
-active --> closed : Driver closes the account\n[no pending top-up, no unsettled session]\n/ refund unused credit (closure refunds,\nSTM-10), write off the non-refundable\nrest, forfeit points, disable login
+active -[dashed]-> closed : «planned» Driver closes the account (UC-ACC-02, T162)\n[no running or unsettled session (app or RFID),\nno open top-up, balance ≥ 0]\n/ refund unused credit (closure refunds, STM-10),\nwrite off the non-refundable rest, forfeit points,\nblock linked RFID cards (STM-8), disable login
 closed --> [*]
 note right of in_shortfall
-  Closing is refused
-  while in_shortfall.
+  Closing is refused while the balance
+  is negative (in_shortfall).
 end note
 note right of closed
+  Not in code yet: no operation sets
+  status = closed on main (27/11/2026);
+  the ledger already treats a closed
+  account as terminal (no debit, no
+  settlement: account_closed, T158).
+  "Unsettled" includes a stopped RFID
+  session that has no charging
+  statement yet (csms_billed).
   Refunds are created by the system
   at closure (requested_by empty);
   the Driver first sees a preview of the
