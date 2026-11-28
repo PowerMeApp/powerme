@@ -21,6 +21,10 @@
 //   --sach                   không cài ngoại lệ (mọi trụ bật, mọi súng Available)
 //   --off PMAPP-TB-01A       trụ cố ý KHÔNG bật (mặc định PMAPP-TB-01A; "--off none" để bật cả 13)
 //   --only A,B               chỉ bật các trụ này (vd. để thử nhanh một trụ)
+//   --them-d1                bật thêm trụ D1 gốc RH24D1-00001 (trạm "Tram sac demo Quan 1"). Trụ này
+//                            có mật khẩu RIÊNG: đặt CP_PASSWORD_D1. Chỉ dùng khi không có HMI/simulator
+//                            nào khác đang chạy RH24D1-00001 trên CSMS đó (staging: profile `sim` tắt;
+//                            local: HMI :8140 của run-demo đã dùng nó → đừng bật ở local).
 //
 // NGOẠI LỆ MẶC ĐỊNH (bỏ bằng --sach)
 //   PMAPP-Q1-01A súng 2 Faulted (ConnectorLockFailure) · PMAPP-TD-02A súng 1 Faulted (GroundFailure)
@@ -48,6 +52,59 @@ const ALL = [
   'PMAPP-TD-02B',
   'PMAPP-TD-03A',
 ];
+// QA-08: tên hiển thị = tên trạm + công suất trụ (theo apps/csms/demo/seed-app.sql).
+const D1 = 'RH24D1-00001';
+const NAMES = {
+  [D1]: 'Tram sac demo Quan 1 · DC 120 kW (D1)',
+  'PMAPP-BT-01A': 'PowerMe Landmark 81 · DC 120 kW',
+  'PMAPP-PN-01A': 'PowerMe Phan Xich Long · DC 30 kW',
+  'PMAPP-Q1-01A': 'PowerMe Ben Thanh · DC 120 kW',
+  'PMAPP-Q1-01B': 'PowerMe Ben Thanh · AC 22 kW',
+  'PMAPP-Q10-01A': 'PowerMe Van Hanh Mall · AC 7 kW',
+  'PMAPP-Q3-01A': 'PowerMe Ho Con Rua · DC 60 kW',
+  'PMAPP-Q7-01A': 'VinFast Crescent Mall · DC 150 kW',
+  'PMAPP-TB-01A': 'VinFast Cong Hoa · DC 60 kW',
+  'PMAPP-TD-01A': 'PowerMe Thao Dien · DC 50 kW',
+  'PMAPP-TD-01B': 'PowerMe Thao Dien · AC 22 kW',
+  'PMAPP-TD-02A': 'VinFast Vinhomes Grand Park · DC 60 kW',
+  'PMAPP-TD-02B': 'VinFast Vinhomes Grand Park · AC 11 kW',
+  'PMAPP-TD-03A': 'PowerMe Nha Van hoa Sinh vien · DC 60 kW',
+};
+// Mã in trên trụ (display_code, seed-app.sql / seed.sql) — tài xế nhập "<mã>/<súng>" trên app.
+const CODES = {
+  [D1]: 'PM-D1-HCM-0001',
+  'PMAPP-BT-01A': 'PM-DC120-HCM-0501',
+  'PMAPP-PN-01A': 'PM-DC30-HCM-0401',
+  'PMAPP-Q1-01A': 'PM-DC120-HCM-0101',
+  'PMAPP-Q1-01B': 'PM-AC22-HCM-0102',
+  'PMAPP-Q10-01A': 'PM-AC7-HCM-0301',
+  'PMAPP-Q3-01A': 'PM-DC60-HCM-0201',
+  'PMAPP-Q7-01A': 'PM-DC150-HCM-0701',
+  'PMAPP-TB-01A': 'PM-DC60-HCM-0901',
+  'PMAPP-TD-01A': 'PM-DC50-HCM-0601',
+  'PMAPP-TD-01B': 'PM-AC22-HCM-0602',
+  'PMAPP-TD-02A': 'PM-DC60-HCM-0801',
+  'PMAPP-TD-02B': 'PM-AC11-HCM-0802',
+  'PMAPP-TD-03A': 'PM-DC60-HCM-1001',
+};
+// QA-09: địa chỉ trạm (seed) và số súng thật trong DB — trụ 1 súng chỉ có một tem QR.
+const ADDRESSES = {
+  [D1]: '1 Nguyen Hue, Quan 1, TP.HCM',
+  'PMAPP-Q1-01A': 'Le Loi, Phuong Ben Thanh, Quan 1, TP.HCM',
+  'PMAPP-Q1-01B': 'Le Loi, Phuong Ben Thanh, Quan 1, TP.HCM',
+  'PMAPP-Q3-01A': 'Vo Van Tan, Phuong Vo Thi Sau, Quan 3, TP.HCM',
+  'PMAPP-Q10-01A': 'Su Van Hanh, Phuong 12, Quan 10, TP.HCM',
+  'PMAPP-PN-01A': 'Phan Xich Long, Phuong 2, Phu Nhuan, TP.HCM',
+  'PMAPP-BT-01A': 'Dien Bien Phu, Phuong 22, Binh Thanh, TP.HCM',
+  'PMAPP-TD-01A': 'Xuan Thuy, Phuong Thao Dien, TP Thu Duc, TP.HCM',
+  'PMAPP-TD-01B': 'Xuan Thuy, Phuong Thao Dien, TP Thu Duc, TP.HCM',
+  'PMAPP-Q7-01A': 'Ton Dat Tien, Phuong Tan Phu, Quan 7, TP.HCM',
+  'PMAPP-TD-02A': 'Nguyen Xien, Phuong Long Binh, TP Thu Duc, TP.HCM',
+  'PMAPP-TD-02B': 'Nguyen Xien, Phuong Long Binh, TP Thu Duc, TP.HCM',
+  'PMAPP-TB-01A': 'Cong Hoa, Phuong 4, Tan Binh, TP.HCM',
+  'PMAPP-TD-03A': 'Khu do thi DHQG-HCM, Phuong Dong Hoa, Di An, Binh Duong',
+};
+const ONE_GUN = new Set(['PMAPP-PN-01A', 'PMAPP-Q1-01B']);
 const EXCEPTIONS = [
   ['PMAPP-Q1-01A', 'fault', { connector: 2, errorCode: 'ConnectorLockFailure' }],
   ['PMAPP-TD-02A', 'fault', { connector: 1, errorCode: 'GroundFailure' }],
@@ -69,13 +126,17 @@ const only = opt('only', null)
   ?.split(',')
   .map((s) => s.trim());
 const password = process.env.CP_PASSWORD ?? '';
+const withD1 = argv.includes('--them-d1');
+const passwordD1 = process.env.CP_PASSWORD_D1 ?? '';
 
 if (!/^wss?:\/\/[^\s]+$/.test(url)) fail(`--url không hợp lệ: ${url}`);
 if (!(port > 0 && port < 65536)) fail(`--port không hợp lệ: ${port}`);
 if (!password) fail('thiếu CP_PASSWORD (mật khẩu trụ — nhận riêng, không dán chat)');
 if (only?.some((s) => !ALL.includes(s))) fail(`--only chỉ nhận: ${ALL.join(', ')}`);
+if (withD1 && !passwordD1)
+  fail('--them-d1 cần CP_PASSWORD_D1 (mật khẩu trụ RH24D1-00001, nhận riêng)');
 
-const ids = (only ?? ALL).filter((s) => s !== off);
+const ids = [...(withD1 ? [D1] : []), ...(only ?? ALL).filter((s) => s !== off)];
 if (!ids.length) fail('không còn trụ nào để bật');
 
 const server = fileURLToPath(new URL('./server.mjs', import.meta.url));
@@ -86,7 +147,11 @@ const child = spawn(process.execPath, [server], {
     CSMS_URL: url,
     HMI_PORT: String(port),
     CP_IDS: ids.join(','),
-    CP_PASSWORDS: ids.map(() => password).join(','),
+    CP_PASSWORDS: ids.map((id) => (id === D1 ? passwordD1 : password)).join(','),
+    CP_NAMES: ids.map((id) => NAMES[id] ?? '').join(','),
+    CP_CODES: ids.map((id) => CODES[id] ?? '').join(','),
+    CP_ADDRESSES: ids.map((id) => ADDRESSES[id] ?? '').join('|'),
+    CP_GUNS: ids.map((id) => (ONE_GUN.has(id) ? 1 : 2)).join(','),
   },
 });
 const stop = () => child.kill('SIGINT');

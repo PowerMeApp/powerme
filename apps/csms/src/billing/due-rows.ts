@@ -70,8 +70,9 @@ export interface LeaseSpec {
   statuses: readonly string[];
   leaseMs: number;
   /**
-   * Xử lý khi hết lượt giữ chỗ (`unfinished_claims > UNFINISHED_CLAIM_LIMIT`). Bảng chưa có (refund,
-   * điều chỉnh hoá đơn: Phần 9) → log error rồi vẫn gọi `handle` như trước 8c.
+   * Xử lý khi hết lượt giữ chỗ (`unfinished_claims > UNFINISHED_CLAIM_LIMIT`). Cả bốn bảng của
+   * `LeasedTable` đã có (refund: Phần 9a, điều chỉnh hoá đơn: Phần 9b); bảng mới thiếu thì log error
+   * rồi vẫn gọi `handle` như trước 8c.
    */
   onExhausted?: ExhaustedHandler;
 }

@@ -213,3 +213,15 @@ export class EInvoiceNotFound extends Error {
     this.name = 'EInvoiceNotFound';
   }
 }
+
+/**
+ * Admin retry một điều chỉnh hoá đơn không có (T32 Phần 9b,
+ * `InvoiceAdjustmentService.adminRetryAdjustment`). Route 10b map sang 404; sai trạng thái thì STM-7
+ * ném `InvalidTransition` (→ 409).
+ */
+export class InvoiceAdjustmentNotFound extends Error {
+  constructor(readonly invoiceAdjustmentId: number) {
+    super(`invoice_adjustment_not_found: ${invoiceAdjustmentId}`);
+    this.name = 'InvoiceAdjustmentNotFound';
+  }
+}

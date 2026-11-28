@@ -817,8 +817,8 @@
       <section class="card" id="tru" aria-label="Hình minh hoạ trụ sạc">
         <div class="tru-head">
           <div class="hero-title">
-            <div class="eyebrow">Trụ sạc PowerMe · DC 120 kW, hai súng</div>
-            <h1>Trụ <span id="cpId">...</span></h1>
+            <div class="eyebrow" id="cpEyebrow">Trụ sạc PowerMe · DC 120 kW, hai súng</div>
+            <h1 id="cpTitle">Trụ <span id="cpId">...</span></h1>
             <div class="sub">
               CSMS <span id="csms">...</span> · đồng hồ trụ (mô phỏng)
               <span id="simTime">...</span> · <span id="clockAhead">...</span>
@@ -905,6 +905,15 @@
         </div>
       </section>
 
+      <!-- QA-09: tem QR như dán trên trụ thật — app PowerMe quét "powerme:connector:<mã>/<súng>". -->
+      <section id="temqr" aria-label="Tem QR trên trụ" hidden>
+        <div class="sec-head">
+          <h2>Tem QR trên trụ</h2>
+          <p>mở app PowerMe → Sạc → quét mã của súng muốn dùng</p>
+        </div>
+        <div class="qr-grid" id="qrGrid"></div>
+      </section>
+
       <!-- QA-03: hành trình phiên cho người test app tài xế. Dựng bằng JS (buildJr). -->
       <section id="phien" aria-label="Phiên sạc trên trụ này">
         <div class="sec-head">
@@ -931,7 +940,6 @@
             <div class="kv">
               <span>Epoch kết nối</span><span id="epoch">0</span> <span>Hàng đợi buffer</span
               ><span id="queue">0</span> <span>Thử nối lại</span><span id="retry">—</span>
-              <span>Đơn giá hiển thị</span><span id="price">—</span>
             </div>
             <div class="row">
               <label for="dropSec">Rớt mạng (s)</label>
@@ -977,6 +985,36 @@
       const CP = decodeURIComponent(location.pathname.split('/')[2] ?? '');
       const API = '/api/' + encodeURIComponent(CP) + '/';
       document.title = 'Trụ ' + CP;
+      // QA-09: dựng tem QR một lần cho mỗi trụ (mã cố định). Thư viện thiếu → chỉ hiện mã chữ.
+      let qrDone = false;
+      async function renderQr(s) {
+        if (qrDone || !s.displayCode) return;
+        qrDone = true;
+        let qr = null;
+        try {
+          qr = (await import('/vendor/qrcode.mjs')).default;
+        } catch {
+          /* không có thư viện QR */
+        }
+        const guns = s.guns === 1 ? [1] : [1, 2];
+        $('qrGrid').innerHTML = guns
+          .map((n) => {
+            const text = `powerme:connector:${s.displayCode}/${n}`;
+            let svg = '';
+            if (qr) {
+              const q = qr(0, 'M');
+              q.addData(text);
+              q.make();
+              svg = q.createSvgTag({ cellSize: 6, margin: 2, scalable: true });
+            }
+            return `<figure class="qr-card">
+              <div class="qr-img" aria-label="Mã QR súng ${n}">${svg || '<span class="muted">(chưa có thư viện QR — nhập mã bên dưới)</span>'}</div>
+              <figcaption><b>Súng ${n === 1 ? 'A' : 'B'}</b><span>${esc(s.displayCode)}/${n}</span></figcaption>
+            </figure>`;
+          })
+          .join('');
+        $('temqr').hidden = false;
+      }
       const esc = (v) =>
         String(v ?? '').replace(
           /[&<>"']/g,
@@ -989,7 +1027,7 @@
         full: 'Sạc đầy tự động',
         time: 'Theo thời gian',
         kwh: 'Theo kWh',
-        money: 'Theo số tiền',
+        money: 'Theo số tiền (đơn giá giả định của trụ)',
       };
       const MODE_UNIT = { full: '', time: 'phút', kwh: 'kWh', money: 'đ' };
       let state = null;
@@ -1007,10 +1045,10 @@
             <div class="metric"><div class="k">Dòng điện</div><div class="v" data-f="a">0</div><span class="u">A</span></div>
             <div class="metric"><div class="k">Công suất</div><div class="v" data-f="kw">0</div><span class="u">kW</span></div>
             <div class="metric"><div class="k">Năng lượng</div><div class="v" data-f="kwh">0</div><span class="u">kWh</span></div>
-            <div class="metric"><div class="k">Tạm tính</div><div class="v" data-f="cost">0</div><span class="u">đ</span></div>
-            <div class="metric"><div class="k">Thời gian</div><div class="v" data-f="time">00:00</div><span class="u">mm:ss mô phỏng</span></div>
+            <div class="metric"><div class="k">Tiền</div><div class="v v-note">CSMS tính</div><span class="u">xem bảng kê trên app</span></div>
+            <div class="metric"><div class="k">Thời gian</div><div class="v" data-f="time">00:00</div><span class="u" data-f="timeU">mm:ss mô phỏng</span></div>
           </div>
-          <div class="note" data-f="meta">Tạm tính theo đơn giá cấu hình — CSMS mới là nguồn sự thật.</div>
+          <div class="note" data-f="meta">Tiền do CSMS tính theo biểu giá từng khung giờ khi quyết toán — xem bảng kê trên app.</div>
           <div class="banner" data-f="modeBanner" hidden></div>
           <div class="banner" data-f="remote" hidden></div>
           <div class="banner err" data-f="fault" hidden></div>
@@ -1372,7 +1410,22 @@
         } catch (e) {
           console.error(e);
         }
-        $('cpId').textContent = s.cpId;
+        if (s.name) {
+          // QA-08: có tên trạm → tên làm tiêu đề, identity OCPP thành dòng nhỏ.
+          $('cpTitle').innerHTML = `${esc(s.name)} <span class="cp-serial">${
+            s.displayCode
+              ? `Mã trên trụ (nhập/quét trên app): <b>${esc(s.displayCode)}</b>/1, /2 · `
+              : ''
+          }OCPP ${esc(s.cpId)}</span>`;
+          document.title = `${s.name} · ${s.cpId}`;
+          if (s.address)
+            $('cpTitle').insertAdjacentHTML(
+              'beforeend',
+              `<span class="cp-address">${esc(s.address)}</span>`,
+            );
+          renderQr(s);
+          $('cpEyebrow').textContent = 'Trụ sạc giả lập (mô hình D1, hai súng)';
+        } else $('cpId').textContent = s.cpId;
         $('csms').textContent = s.csmsUrl;
         $('simTime').textContent = s.simTime.replace('T', ' ').slice(0, 19) + ' UTC';
         $('clockAhead').textContent = ahead(s.clockAheadSec);
@@ -1418,7 +1471,6 @@
           n.state === 'offline' && n.nextRetrySec != null
             ? `sau ${n.nextRetrySec}s (cố định mỗi ${n.retrySec}s), đã mất ${n.offlineSec}s`
             : '—';
-        $('price').textContent = s.unitPrice.toLocaleString('vi-VN') + ' đ/kWh';
         if (!errFilled) {
           for (const k of [1, 2])
             gunF[k]('err').innerHTML = s.errorCodes.map((e) => `<option>${e}</option>`).join('');
@@ -1453,13 +1505,17 @@
         f('a').textContent = c.current.toFixed(1);
         f('kw').textContent = c.kw.toFixed(1);
         f('kwh').textContent = c.kwh.toFixed(2);
-        f('cost').textContent = c.cost.toLocaleString('vi-VN');
         f('time').textContent = mmss(c.elapsed);
-        f('meta').textContent = c.txActive
-          ? `Năng lượng ${c.wh} Wh (số nguyên, giả định) · tạm tính theo đơn giá cấu hình, CSMS mới là nguồn sự thật`
+        f('timeU').textContent = c.txActive
+          ? 'mm:ss mô phỏng'
           : c.lastReason
-            ? `Phiên trước kết thúc: ${c.lastReason} · ${c.wh} Wh · tạm tính, CSMS mới là nguồn sự thật`
-            : 'Tạm tính theo đơn giá cấu hình — CSMS mới là nguồn sự thật.';
+            ? 'phiên vừa xong'
+            : 'mm:ss mô phỏng';
+        f('meta').textContent = c.txActive
+          ? `Năng lượng ${c.wh} Wh (số nguyên, giả định) · tiền do CSMS tính khi quyết toán, xem bảng kê trên app`
+          : c.lastReason
+            ? `Phiên trước kết thúc: ${c.lastReason} · ${c.wh} Wh · tiền: xem bảng kê trên app (CSMS quyết toán)`
+            : 'Tiền do CSMS tính theo biểu giá từng khung giờ khi quyết toán — xem bảng kê trên app.';
         const key = JSON.stringify(c.mode);
         if (f('mode').dataset.seen !== key) {
           f('mode').dataset.seen = key;

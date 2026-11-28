@@ -11,7 +11,10 @@
  * Admin retry: tài liệu VNPay không ghi querydr có đổi sang 02 / 03 sau khi hoàn, nên 01 / 00 không
  * chứng minh là chưa hoàn. Thà hết lượt rồi `failed` để Admin xem, còn hơn hoàn hai lần.
  *
- * Điều chỉnh hoá đơn khi `done`: Phần 9b.
+ * Điều chỉnh hoá đơn khi `done` (Phần 9b, D5): cùng tx2, sau khi ghi `done`, gọi
+ * `EInvoiceService.adjustForRefund` cho `top_up` / `account_closure` (khoá `e_invoices` sau
+ * `refunds`); `late_payment` không có hoá đơn gốc. Sau commit chỉ `kickAdjust`. Thiếu hoá đơn gốc →
+ * warn, refund vẫn done; thiếu `EInvoiceService` (lắp ghép Nest sai) → log error.
  */
 import { Inject, Injectable, Logger, OnModuleInit, Optional } from '@nestjs/common';
 import type { PoolClient } from 'pg';
@@ -27,6 +30,7 @@ import {
   RefundStatus,
   RETRY_LIMIT,
 } from './refund-state-machine.js';
+import { EInvoiceService } from './e-invoice.service.js';
 import { nextRetry } from './retry-schedule.js';
 import { RefundInput, RefundResult, VnpayAdapter } from './vnpay.adapter.js';
 
@@ -116,6 +120,10 @@ type RefundLog = {
   level: 'log' | 'warn' | 'error';
   event: string;
   fields: Record<string, unknown>;
+  /** Log phụ ghi sau commit (điều chỉnh hoá đơn, Phần 9b). */
+  after?: RefundLog[];
+  /** Vừa tạo điều chỉnh hoá đơn: `kickAdjust` sau commit. */
+  kickAdjust?: boolean;
 };
 
 /** Tham số gửi VNPay theo kind (bảng 2.1); `null` + lý do khi dòng không gửi được. */
@@ -201,6 +209,9 @@ export class RefundService implements BackgroundWork, OnModuleInit {
     @Optional()
     @Inject(BACKGROUND_WORK_CONFIG)
     private readonly workConfig?: BackgroundWorkConfig,
+    // Phần 9b. Tuỳ chọn để test cũ dựng service như trước; BillingModule luôn tiêm (có test). Thiếu
+    // mà refund `top_up` / `account_closure` done → log error `invoice_adjustment_service_missing`.
+    @Optional() private readonly eInvoices?: EInvoiceService,
   ) {}
 
   /** Luôn đăng ký, kể cả khi `BILLING_WORKER_ENABLED=false` (billing/CLAUDE.md). */
@@ -297,6 +308,18 @@ export class RefundService implements BackgroundWork, OnModuleInit {
       return this.applyOutcome(c, locked, r, outcome);
     });
     this.log(log.level, log.event, log.fields);
+    for (const extra of log.after ?? []) this.log(extra.level, extra.event, extra.fields);
+    if (log.kickAdjust) {
+      try {
+        this.eInvoices?.kickAdjust();
+      } catch (error) {
+        // Đã commit: chạy sớm chỉ là tối ưu, vòng quét vẫn bắt điều chỉnh đến hạn.
+        this.log('error', 'invoice_adjustment_kick_failed', {
+          refund_id: row.id,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
   }
 
   /**
@@ -454,7 +477,8 @@ export class RefundService implements BackgroundWork, OnModuleInit {
                  AND f.status <> 'done')`,
           [r.credit_account_id],
         );
-      return outcome.viaQuery
+      const adjustment = await this.requestAdjustment(c, id, r);
+      const doneLog: RefundLog = outcome.viaQuery
         ? {
             level: 'log',
             event: 'refund_done_via_query',
@@ -473,6 +497,7 @@ export class RefundService implements BackgroundWork, OnModuleInit {
               vnp_TransactionStatus: outcome.transactionStatus,
             },
           };
+      return { ...doneLog, ...adjustment };
     }
 
     const step = this.stm.apply(locked.status, 'ATTEMPT_FAILED', {
@@ -512,6 +537,42 @@ export class RefundService implements BackgroundWork, OnModuleInit {
           event: 'refund_attempt_failed',
           fields: { ...fields, next_attempt_at: updated.next_attempt_at },
         };
+  }
+
+  /**
+   * Phần 9b, trong tx2 sau khi ghi `done`: điều chỉnh hoá đơn cho `top_up` / `account_closure`
+   * (`late_payment` không có hoá đơn gốc, D5). `adjustForRefund` chỉ ném cho lỗi lập trình; ca dữ liệu
+   * trả `skipped` nên refund luôn chuyển được sang `done`. Trả log phụ + cờ kick để ghi sau commit.
+   */
+  private async requestAdjustment(
+    c: PoolClient,
+    refundId: number,
+    r: SendRow,
+  ): Promise<Pick<RefundLog, 'after' | 'kickAdjust'>> {
+    if (r.kind !== 'top_up' && r.kind !== 'account_closure') return {};
+    const fields = { refund_id: refundId, top_up_id: Number(r.top_up_id), kind: r.kind };
+    if (!this.eInvoices) {
+      return {
+        after: [{ level: 'error', event: 'invoice_adjustment_service_missing', fields }],
+      };
+    }
+    const adj = await this.eInvoices.adjustForRefund(c, refundId);
+    if ('skipped' in adj) {
+      return {
+        after: [{ level: 'warn', event: `invoice_adjustment_${adj.skipped}`, fields }],
+      };
+    }
+    if (!adj.created) return {};
+    return {
+      after: [
+        {
+          level: 'log',
+          event: 'invoice_adjustment_requested',
+          fields: { ...fields, invoice_adjustment_id: adj.id },
+        },
+      ],
+      kickAdjust: true,
+    };
   }
 
   private log(level: 'log' | 'warn' | 'error', event: string, fields: Record<string, unknown>) {
