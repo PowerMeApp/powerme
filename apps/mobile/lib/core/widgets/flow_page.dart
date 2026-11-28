@@ -176,9 +176,9 @@ class FailureNotice extends StatelessWidget {
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
                 color: PowerMeColors.gold.withValues(alpha: .12),
-                borderRadius: BorderRadius.circular(12),
+                borderRadius: BorderRadius.circular(PowerMeRadii.tile),
                 border: Border.all(
-                  color: PowerMeColors.gold.withValues(alpha: .48),
+                  color: PowerMeColors.gold.withValues(alpha: .4),
                 ),
               ),
               child: Row(

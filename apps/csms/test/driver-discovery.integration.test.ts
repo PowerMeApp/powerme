@@ -233,6 +233,70 @@ describeDb('MB03 authenticated Driver discovery over HTTP and dedicated Postgres
     ).toBe(connectorId);
   });
 
+  it('BE-50: shows the tariff of today of the owning Operator on /stations and the QR lookup', async () => {
+    const byCode = () => get(`/connectors/by-code/PM-MB03-0/1?vehicle_id=${vehicle}`);
+    const stations = () => get(`/stations?vehicle_id=${vehicle}&page_size=100`);
+    // Chưa có biểu giá → null (POST /charges sẽ trả tariff_unavailable).
+    expect((await byCode()).body.tariff).toBeNull();
+    expect((await stations()).body.items.every((s: any) => s.tariff === null)).toBe(true);
+    const [{ id: operator }] = await q(
+      `SELECT st.operator_id::text AS id FROM charge_points cp JOIN sites st ON st.id=cp.site_id
+       WHERE cp.display_code='PM-MB03-0'`,
+    );
+    const rows = [
+      ['peak', '00:00', '06:00', 5000, 'today'],
+      ['normal', '06:00', '12:00', 3000, 'today'],
+      ['off_peak', '12:00', '18:00', 2000, 'today'],
+      ['normal', '18:00', '24:00', 3000, 'today'],
+      // Biểu bắt đầu ngày mai không được lộ ra hôm nay.
+      ['peak', '00:00', '24:00', 9999, 'tomorrow'],
+    ];
+    for (const [band, start, end, price, when] of rows)
+      await q(
+        `INSERT INTO tariff_periods(operator_id,band,time_start,time_end,price_per_kwh_vnd,effective_from)
+         VALUES($1,$2::tariff_band,$3::time,$4::time,$5,(now() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date
+           + CASE WHEN $6='tomorrow' THEN 1 ELSE 0 END)`,
+        [operator, band, start, end, price, when],
+      );
+    try {
+      const [{ today, now_time }] = await q(
+        `SELECT to_char((now() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date,'YYYY-MM-DD') AS today,
+          to_char(now() AT TIME ZONE 'Asia/Ho_Chi_Minh','HH24:MI') AS now_time`,
+      );
+      const tariff = (await byCode()).body.tariff;
+      expect(tariff).toMatchObject({
+        currency: 'VND',
+        unit: 'kWh',
+        timezone: 'Asia/Ho_Chi_Minh',
+        effective_date: today,
+        max_price_per_kwh_vnd: 5000,
+      });
+      expect(tariff.periods).toEqual([
+        { band: 'peak', time_start: '00:00', time_end: '06:00', price_per_kwh_vnd: 5000 },
+        { band: 'normal', time_start: '06:00', time_end: '12:00', price_per_kwh_vnd: 3000 },
+        { band: 'off_peak', time_start: '12:00', time_end: '18:00', price_per_kwh_vnd: 2000 },
+        { band: 'normal', time_start: '18:00', time_end: '24:00', price_per_kwh_vnd: 3000 },
+      ]);
+      const expected = tariff.periods.find(
+        (p: any) => p.time_start <= now_time && now_time < p.time_end,
+      );
+      // Giây chót của khung có thể trôi sang khung kế giữa hai truy vấn.
+      expect([expected?.time_start, expected?.time_end]).toContain(tariff.current.time_start);
+      // Station của cùng operator mang cùng biểu giá; con số giữ tiền khớp max_price.
+      const site = (await stations()).body.items.find((s: any) => s.operator_id === operator);
+      expect(site.tariff).toEqual(tariff);
+      const [{ held }] = await q(
+        `SELECT max(t.price_per_kwh_vnd)::int AS held FROM tariff_periods t WHERE t.operator_id=$1
+         AND t.effective_from<=(now() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date
+         AND (t.effective_to IS NULL OR t.effective_to>=(now() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date)`,
+        [operator],
+      );
+      expect(tariff.max_price_per_kwh_vnd).toBe(held);
+    } finally {
+      await q('DELETE FROM tariff_periods WHERE operator_id=$1', [operator]);
+    }
+  });
+
   it('paginates sites stably, preserves empty pages and uses straight-line distance', async () => {
     expect(
       (await get(`/stations?vehicle_id=${vehicle}&page=2&page_size=1`)).body.items[0].site_name,

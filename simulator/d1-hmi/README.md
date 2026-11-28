@@ -77,7 +77,7 @@ Dựng một CSMS ocpp-rpc tối thiểu trong chính script, chạy `server.mjs
 | `model.mjs` | Hằng số, 9 trạng thái OCPP, thẻ mẫu, đường công suất, rút gọn payload |
 | `server.mjs` | HTTP + SSE cho một hoặc nhiều trụ; bảng đường ở mục "Trang và API" |
 | `public/tong.html` | Trang tổng (danh sách trụ) |
-| `public/tru.html` | Trang từng trụ: hành trình phiên + biểu đồ, bộ chọn tốc độ, HMI (CSS/JS inline, sáng/tối theo hệ thống, nút "Chữ lớn" cho máy chiếu) + khung SVG của hình trụ. Trước QA-03 là `index.html` |
+| `public/tru.html` | Trang từng trụ: hành trình phiên + biểu đồ, bộ chọn tốc độ, HMI (CSS/JS inline, tối mặc định, `?theme=light` cho bản sáng, nút "Chữ lớn" cho máy chiếu) + khung SVG của hình trụ. Trước QA-03 là `index.html` |
 | `public/tru-3d.js` | Bộ nạp hình 3D: kiểm WebGL/giảm chuyển động/`?3d=off`, nạp `/tru3d/tru3d.js`, bật/tắt theo nút; mọi lỗi nạp → SVG 2D |
 | `tru3d/` | Mã nguồn hình 3D (QA-04): `src/Scene.jsx` (cảnh r3f), `src/Overlay.jsx` (nhãn HTML), `src/screen.js` (màn hình trụ), `src/motion.js` (bảng màu, kiểu nháy, spring), `src/tru3d.css`; `vite.config.mjs` build ra `tru3d/dist/tru3d.js` (không commit) |
 | `public/tru-sac.css`, `public/tru-sac.js` | Hình trụ sạc minh hoạ có hoạt ảnh (QA-02); phục vụ qua `GET /static/<tên>.css\|js` (chỉ tên file đơn trong `public/`, `..` và gạch chéo bị 404) |
@@ -103,6 +103,11 @@ Mở `http://127.0.0.1:8141/` (trang tổng) hoặc `/tru/<serial>` (từng tr�
 - **Vì sao chạy trên máy mình, không host:** đầu đọc RFID USB "gõ phím" vào trình duyệt của máy cắm nó, và `swipeReader` chỉ nhận yêu cầu loopback (#214).
 - **Mật khẩu:** một mật khẩu chung cho 13 trụ, đặt trong DB của CSMS đích (staging: Trí đặt 27/11, khác mật khẩu trụ demo, gốc ở `~/.powerme-app-stations-password` trên VM; local: `seed`). Chỉ đi qua biến môi trường, không dán chat/commit.
 - **Khi tắt:** các trụ mất kết nối; sau khoảng 15 phút CSMS mở cảnh báo Offline cho từng trụ (BR-P50) trên màn 21. Trước buổi demo hãy tắt sớm và đóng các cảnh báo đó.
+- **Thêm trụ D1 gốc (`--them-d1`):** bật cả `RH24D1-00001` (trạm "Tram sac demo Quan 1") cùng tiến trình. Trụ này có mật khẩu riêng → `CP_PASSWORD_D1=<mật khẩu trụ demo, nhận riêng>`. Chỉ dùng khi không có HMI nào khác đang chạy `RH24D1-00001` trên CSMS đó (staging: simulator profile `sim` đang tắt → dùng được; local: HMI `:8140` của `run-demo` đã giữ nó → đừng bật). `PMAPP-TD-04A` cố ý không có trong script vì `demo-station` luôn nối nó (hai bên sẽ giành kết nối).
+- **Tem QR và địa chỉ (QA-09):** trang trụ có mục "Tem QR trên trụ" — mỗi súng một mã QR `powerme:connector:<mã trên trụ>/<súng>`, đúng định dạng app PowerMe quét (`connector_lookup.dart`), kèm mã dạng chữ để nhập tay; trụ 1 súng chỉ có một tem. Địa chỉ trạm hiện dưới tên. Thư viện `qrcode-generator` (MIT, devDependency, phục vụ ở `/vendor/qrcode.mjs` từ node_modules, không CDN); thiếu gói (vd. image `--omit=dev`) thì chỉ hiện mã chữ. Env: `CP_ADDRESSES` (ngăn bằng `|`), `CP_GUNS` (1/2), `CP_CODES`.
+- **Phần cứng theo DB (QA-11):** mỗi trụ chạy đúng số súng, kW và AC/DC như `charge_points` / `connectors` ở CSMS. Env `CP_SPECS=dc120:120/60,ac22:22,…` (cùng thứ tự `CP_IDS`; một trụ: `CP_SPEC`) — dạng `<ac|dc><kW trụ>:<kW súng 1>[/<kW súng 2>]`. Ảnh hưởng: `NumberOfConnectors`, model trong BootNotification (`AC-22`, `DC-150`…), StatusNotification chỉ cho súng có thật, công suất = kW trụ chia đều cho súng đang sạc nhưng không vượt trần từng súng; **trụ AC không gửi SoC** (không đọc được BMS xe, khớp `reports_soc=false`) và không giảm công suất theo SoC. Trang trụ và hình 2D/3D ẩn súng B khi trụ một súng. Trống = D1 gốc DC 120 kW hai súng như trước (smoke, demo-station, staging không đổi). `app-stations.mjs` có bảng `SPECS` theo `seed-app.sql` — sửa seed thì sửa bảng. `CP_GUNS` (cũ) chỉ còn dùng khi không có spec.
+- **Không có giá trên trụ (QA-11):** OCPP 1.6 không gửi giá xuống trụ; tiền do CSMS tính khi quyết toán, tài xế xem giá trên app (`tariff`, BE-50). HMI vì vậy bỏ chế độ "Theo số tiền" và đơn giá giả định 3.500 đ/kWh; ô tiền ghi "Theo app PowerMe".
+- **Tên hiển thị (QA-08):** script truyền `CP_NAMES` (tên trạm + công suất, theo `seed-app.sql`), nên trang tổng và trang trụ hiện "PowerMe Ben Thanh · DC 120 kW" làm tiêu đề, identity OCPP (`PMAPP-Q1-01A`) là dòng nhỏ bên dưới để đối chiếu log/CSMS. `server.mjs` nhận `CP_NAMES=tên1,tên2,…` cùng thứ tự `CP_IDS` (hoặc `CP_NAME` khi một trụ); trống thì chỉ hiện identity như trước.
 - Hai trụ 1 súng (`PMAPP-PN-01A`, `PMAPP-Q1-01B`): simulator vẫn giả 2 súng; CSMS bỏ qua súng không có trong DB.
 
 ## Trang từng trụ — cho người test app tài xế (QA-03)
@@ -116,34 +121,43 @@ Khối đầu trang **"Phiên sạc trên trụ này"** có một thẻ cho mỗ
 
 Từ QA-06 khối này nằm ngay dưới hình trụ (hero); phía dưới nữa là HMI bấm được (hai súng, mạng/hàng đợi) và nhật ký OCPP của riêng trụ đó. Ảnh chụp QA-03/QA-04 (giao diện cũ; `tru-trang-tong.png` và `tru-3d-trang-rong.png` nay là ảnh QA-06, xem mục "Giao diện"): [`docs/tru-trang-2d.png`](docs/tru-trang-2d.png) (cùng trang với `?3d=off`, hình SVG 2D).
 
-## Giao diện (QA-06, style "Bevel")
+## Giao diện (QA-10: bộ màu PowerMe, tối mặc định)
 
-Trang tổng `/` và trang từng trụ `/tru/<cpId>` theo style tham chiếu "Bevel" ("morning metrics in cloudlight"): nền trắng, tiêu đề chữ đậm 600 tracking âm, thẻ xanh mây không viền không bóng, nhiều khoảng trắng. Chỉ đổi trình bày: không đổi id/class/`data-f` mà JS và test dùng, không đổi hành vi hay API.
+Từ QA-10 trang tổng `/` và trang từng trụ `/tru/<cpId>` dùng **cùng bộ màu với dashboard và app tài xế** (nguồn chuẩn: `apps/dashboard/src/styles/tokens.css`, `apps/dashboard/src/ui/theme.ts`, `apps/mobile/lib/core/theme/powerme_theme.dart`). **Tối là mặc định**; thêm `?theme=light` để xem bản sáng (không còn theo `prefers-color-scheme`). Chỉ đổi trình bày: không đổi id/class/`data-f` mà JS và test dùng, không đổi hành vi hay API. Trước QA-10 là style sáng "Bevel" (QA-06); ảnh QA-06 trong `docs/` là giao diện cũ.
 
-- **Token chung** ở [`public/bevel-tokens.css`](public/bevel-tokens.css) (phục vụ qua `/static/bevel-tokens.css`, route tĩnh sẵn có, không sửa `server.mjs`): màu (Paper White `#ffffff`, Charcoal `#1f2025`, Ink `#222326`, Cloud Card `#ebf0f8`, Body Gray `#747679`, Hero Sky `#d2e5ff → #fff9ee`), màu dữ liệu, chữ (chỉ font hệ thống `-apple-system, BlinkMacSystemFont, "Segoe UI", system-ui`, không tải font/CDN), khoảng cách 8 px, bo góc (thẻ 24/32 px, nút 128 px, nav 32 px), bóng. Biến cũ (`--bg`, `--panel`, `--ok`, `--st-*`, `--lt-*`…) vẫn còn, trỏ vào token mới.
-- **Thanh trên**: capsule trắng nổi (bo 32 px, `backdrop-filter: blur`) — về trang tổng, viên mạng, tốc độ ×1/×10/×20 dạng pill, "Về giờ thật", "Chữ lớn".
-- **Hero** (`#tru`): nền Hero Sky bo 32 px, tên trụ cỡ lớn ở trên, hình trụ ở giữa (xem "Hình trụ 3D" bên dưới về cảnh sáng).
-- **Thẻ Cloud** (`#ebf0f8`, bo 24 px, padding 32 px, không viền, không bóng): hai thẻ "Phiên sạc trên trụ này", hai bảng HMI súng A/B, mạng và hàng đợi, nhật ký OCPP. Số lớn (kWh, kW, SoC…) chữ 600 tracking âm; nhãn Body Gray.
-- **Nút**: chính = pill Charcoal (Cắm súng, Mở trang trụ); phụ = pill trắng trên thẻ Cloud; nguy hiểm (Dừng sạc, Gây lỗi, Rớt mạng) = pill viền/chữ đỏ nhạt, không nền đỏ đặc.
-- **Viên trạng thái**: nền trắng, **chấm màu** + chữ Ink (màu không mang chữ nên luôn đọc rõ). Dòng "đang làm gì", dòng thời gian OCPP và nhật ký dùng chấm màu thay viền màu.
-- **Biểu đồ**: kWh nét liền Metric Blue, kW nét đứt Recovery Green, lưới ngang rất nhạt, không viền. **Nhật ký OCPP**: thẻ trắng trong thẻ Cloud, mono nhỏ, chữ Body Gray; chấm xanh dương = trụ gửi CSMS, chấm xanh lá = CSMS gửi trụ, dòng lỗi chữ đỏ.
-- **Bố cục**: ≥ 1280 px ba cột (súng A, súng B, mạng + nhật ký); 768–1279 px hai cột; < 768 px một cột, capsule không dính, chân trang "Mô phỏng" nằm cuối trang thay vì nổi (đã đo: 390 px không cuộn ngang). `prefers-reduced-motion` tắt chuyển động. Giao diện tối tối giản (đảo token) theo `prefers-color-scheme` hoặc `?theme=dark`; sáng là mặc định.
+- **Token chung** ở [`public/bevel-tokens.css`](public/bevel-tokens.css) (giữ tên file và route `/static/bevel-tokens.css`): nền Rich Black `#0A0A0A`, thẻ Graphite `#141414` bo 20 px, ô nhập/chọn bo 14 px (viền teal + vòng focus khi được chọn), nút pill, nhấn teal `#00E0C2` (chữ đen trên nền teal như app), thương hiệu gold `#D4AF37`, danger `#FF6B6B`, warning `#FFC857`, chữ `#F5F3EC`, chữ phụ `#B9BCBA`, outline `#444845`. Biến cũ (`--bg`, `--panel`, `--text`, `--muted`, `--ok`, `--warn`, `--danger`, `--paper`, `--cloud`, `--ink`, `--gray`, `--st-*`, `--lt-*`…) vẫn còn, trỏ vào token mới, nên `tru-sac.css`, JS và bundle 3D chạy không đổi.
+- **Chữ**: Inter nếu máy đã cài (dashboard đóng gói Inter qua npm nhưng server này không phục vụ font), không thì font hệ thống. Không tải font/CDN.
+- **Viền và bóng**: viền hairline trắng ~8 % alpha thay viền xám đặc; bóng rất dịu, lan rộng. Thẻ chính (thẻ trụ ở trang tổng, hai thẻ "Phiên sạc trên trụ này", tem QR) là **thẻ hai lớp**: vỏ 6 px nền trắng ~3 % + hairline ngoài, lõi Graphite có highlight inset 1 px — vẽ hoàn toàn bằng `box-shadow`, không thêm phần tử. Thẻ HMI, mạng, nhật ký là thẻ một lớp. Ô số liệu, biểu đồ, dòng thời gian, nhật ký là ô "lõm" (nền tối hơn + hairline).
+- **Thanh trên**: capsule Graphite mờ (`backdrop-filter: blur`), hairline; tốc độ ×1/×10/×20 dạng pill, nút đang chọn nền teal.
+- **Hero** (`#tru`): thẻ Graphite có ánh teal/gold rất nhạt ở hai góc; dòng nhỏ chữ hoa màu gold phía trên tên trụ. Cảnh 3D tối nằm trong ô lõm hairline (xem "Hình trụ 3D").
+- **Nút**: chính = pill teal chữ đen (Cắm súng, Mở trang trụ); phụ = pill nền nổi + hairline; nguy hiểm (Dừng sạc, Gây lỗi, Rớt mạng) = pill viền/chữ đỏ, không nền đỏ đặc.
+- **Viên trạng thái**: nền nổi + hairline, **chấm màu** + chữ `--ink` (màu không mang chữ nên luôn đủ tương phản). Dòng "đang làm gì", dòng thời gian OCPP và nhật ký dùng chấm màu.
+- **Biểu đồ**: kWh nét liền teal, kW nét đứt gold, lưới hairline. **Nhật ký OCPP**: mono nhỏ trong ô lõm; chấm teal = trụ gửi CSMS, chấm gold = CSMS gửi trụ, dòng lỗi chữ đỏ.
+- **Chuyển động**: chỉ `transform`/`opacity`, `cubic-bezier(0.32, 0.72, 0, 1)`; đổi nền khi hover là tức thì. `prefers-reduced-motion` tắt chuyển động.
+- **Bố cục**: ≥ 1280 px ba cột (súng A, súng B, mạng + nhật ký); 768–1279 px hai cột; < 768 px một cột, capsule không dính, chân trang "Mô phỏng" nằm cuối trang thay vì nổi (đã chụp 420 px: không cuộn ngang).
+- **Tương phản**: chữ thường đạt WCAG AA ở cả hai bản (tối: chữ phụ `#B9BCBA` ≈ 9:1 trên Graphite, chữ phụ cấp 3 `#8D918F` ≈ 5,8:1; sáng: chữ phụ `#55595A` ≈ 7:1 trên trắng, teal làm chữ đậm lại `#00796A`). Tem QR luôn nền trắng để camera quét được.
 
-**Bảng màu trạng thái** (dùng chung cho chấm trạng thái, đèn hình 2D/3D, trang tổng; biến `--st-*` và `--lt-*`):
+**Bảng màu trạng thái** (dùng chung cho chấm trạng thái, đèn hình 2D/3D, trang tổng; biến `--st-*` và `--lt-*`). Theo dashboard (`ui/tones.ts`): sẵn sàng và đang sạc cùng teal, phân biệt bằng nhịp "thở" của đèn/chấm và nhãn.
 
-| Trạng thái | Token | Màu |
+| Trạng thái | Token | Tối / sáng |
 |---|---|---|
-| `Available` | Metric Blue | `#415eee` |
-| `Preparing` | Sleep Lilac | `#b9a6ff` (nhấp nháy chậm) |
-| `Charging` | Recovery Green | `#31ce01` ("thở") |
-| `SuspendedEV` / `SuspendedEVSE` | Signal Gold | `#ffca00` (phân biệt bằng kiểu nháy + nhãn) |
-| `Finishing` | Coral Signal | `#ffab94` |
-| `Faulted` | Đỏ cảnh báo (style không có token đỏ) | `#e5484d` (nháy nhanh) |
-| `Unavailable` | xám | `#a5a7ab` |
-| `Reserved` | lục lam | `#2cc3b8` |
-| Mạng online / đang nối / offline | Green / Gold / đỏ cảnh báo | `--net-online` / `--net-connecting` / `--net-offline` |
+| `Available` | teal | `#00e0c2` / `#00b89f` (tĩnh) |
+| `Preparing` | xanh trời | `#7db7ff` / `#3f86e0` (nhấp nháy chậm) |
+| `Charging` | teal | `#00e0c2` / `#00b89f` ("thở") |
+| `SuspendedEV` / `SuspendedEVSE` | warning | `#ffc857` / `#e0a21c` (phân biệt bằng kiểu nháy + nhãn) |
+| `Finishing` | gold | `#d4af37` / `#b8962b` |
+| `Faulted` | danger | `#ff6b6b` / `#d93f3f` (nháy nhanh) |
+| `Unavailable` | xám | `#7e8481` / `#9a9f9c` |
+| `Reserved` | tím nhạt | `#b39dff` / `#7d62e6` |
+| Mạng online / đang nối / offline | teal / warning / danger | `--net-online` / `--net-connecting` / `--net-offline` |
 
-Màu dữ liệu chỉ dùng cho chấm, vòng, thanh SoC, biểu đồ, huy hiệu nhỏ — không làm nền trang hay nút chính.
+Màu trạng thái chỉ dùng cho chấm, vòng, thanh SoC, biểu đồ, huy hiệu nhỏ — không làm nền trang. Teal còn là màu nút chính (như dashboard/app).
+
+<details><summary>Giao diện cũ QA-06 (style "Bevel", sáng) — để đối chiếu ảnh cũ trong docs/</summary>
+
+Nền trắng, thẻ Cloud `#ebf0f8` không viền không bóng, nút pill Charcoal, Hero Sky `#d2e5ff → #fff9ee`; trạng thái: Available `#415eee`, Preparing `#b9a6ff`, Charging `#31ce01`, Suspended `#ffca00`, Finishing `#ffab94`, Faulted `#e5484d`, Unavailable `#a5a7ab`, Reserved `#2cc3b8`. Tối chỉ khi `prefers-color-scheme: dark` hoặc `?theme=dark`.
+
+</details>
 
 Ảnh chụp thật QA-06 (Edge headless, bộ demo `run-demo.mjs --port-offset 90`, kịch bản `plug {"connector":2}` → `swipe {"connector":2,"card":"valid"}` → `speed {"value":10}` → `plug {"connector":1}`; ảnh lỗi: `fault {"connector":1,"errorCode":"GroundFailure"}` + `drop {"seconds":90}`): [`docs/tru-3d-trang-rong.png`](docs/tru-3d-trang-rong.png) (1600×1000, súng B đang sạc, cảnh 3D sáng), [`docs/tru-3d-loi-mat-mang.png`](docs/tru-3d-loi-mat-mang.png) (súng A lỗi + mất mạng, 14 bản tin chờ phát bù), [`docs/tru-phien-loi-mat-mang.png`](docs/tru-phien-loi-mat-mang.png) (khối "Phiên sạc trên trụ này" lúc OFFLINE), [`docs/tru-3d-di-dong.png`](docs/tru-3d-di-dong.png) (390 px), [`docs/tru-trang-tong.png`](docs/tru-trang-tong.png) (trang tổng 1600×1000), [`docs/tru-3d-off-2d.png`](docs/tru-3d-off-2d.png) (`?3d=off`, hình SVG 2D trên nền Hero Sky).
 
@@ -173,7 +187,7 @@ Trên trang trụ, khối "Trụ sạc PowerMe" là cảnh 3D dựng bằng Reac
 - **Ăng-ten** + ba vạch sóng: online = sóng toả đều; đang nối = vàng, quét từng vạch; half-open = vàng, chập chờn; offline = đỏ, tắt vạch.
 - **Đầu đọc RFID** (ký hiệu không tiếp xúc dưới màn hình) sáng nhịp khi một lần quẹt đang chờ CSMS (`readerPending`).
 - **Quầng sáng** mờ sau trụ và trên sàn: emerald khi có súng `Charging`, hổ phách khi `Preparing`/`SuspendedEV`/`SuspendedEVSE`, đỏ khi `Faulted`, xám rất mờ khi rảnh. Ánh sáng studio (RoomEnvironment + PMREMGenerator của three, sinh tại chỗ, không tải HDR), fog bám khoảng cách camera.
-- **Cảnh sáng (QA-06, mặc định):** canvas trong suốt (`alpha`) đặt thẳng trên gradient Hero Sky của khung CSS; đèn studio sáng hơn, sàn trắng phản chiếu nhạt (vật tối in bóng mờ lên sàn thay vì cộng sáng) rồi trong suốt dần theo bán kính, bóng tiếp xúc nhẹ hơn, mép canvas tan vào nền bằng `mask-image`. Quầng màu trạng thái (xanh lá khi sạc, đỏ khi lỗi, vàng khi chờ) vẽ bằng trộn alpha thường thay vì cộng sáng (cộng sáng không thấy trên nền sáng). Bloom nâng ngưỡng lên 1,15 và giảm cường độ để chỉ vật phát sáng HDR loé. Nhãn quanh canvas là capsule trắng mờ, chữ Ink, chấm màu. **Giao diện tối** (`prefers-color-scheme: dark` hoặc `?theme=dark`): giữ cảnh tối cũ (nền gần OLED `#040506`) trong một thẻ Charcoal nổi. Chọn một lần lúc nạp theo biến CSS `--t3-scene`.
+- **Cảnh tối (mặc định từ QA-10) và cảnh sáng (`?theme=light`):** cảnh tối (nền gần OLED `#040506`) nằm trong ô lõm hairline của thẻ hero Graphite. Cảnh sáng (QA-06): canvas trong suốt (`alpha`) đặt thẳng trên nền thẻ hero sáng; đèn studio sáng hơn, sàn trắng phản chiếu nhạt (vật tối in bóng mờ lên sàn thay vì cộng sáng) rồi trong suốt dần theo bán kính, bóng tiếp xúc nhẹ hơn, mép canvas tan vào nền bằng `mask-image`. Quầng màu trạng thái (xanh lá khi sạc, đỏ khi lỗi, vàng khi chờ) vẽ bằng trộn alpha thường thay vì cộng sáng (cộng sáng không thấy trên nền sáng). Bloom nâng ngưỡng lên 1,15 và giảm cường độ để chỉ vật phát sáng HDR loé. Nhãn quanh canvas là capsule mờ có hairline, chữ `--ink`, chấm màu. Chọn một lần lúc nạp theo biến CSS `--t3-scene`.
 - **Hậu kỳ (QA-05):** EffectComposer → UnrealBloomPass → OutputPass (ACES, sRGB), render target half float MSAA 4. Bloom theo **ngưỡng luminance** (0,62, đầu gối mềm 0,45): vật phát sáng có màu HDR ×3 (LED, vòng khay, hạt năng lượng, đèn xe, ăng-ten) vượt ngưỡng; màn hình giữ dưới ngưỡng để chữ không nhoè.
 - **Sàn (QA-05):** Reflector (three/examples) phản chiếu mờ ở ~1/3 độ phân giải, lấy mẫu mipmap 9 điểm, tắt dần theo bán kính + fog. **Bóng tiếp xúc** thật: camera trực giao ở mặt sàn nhìn lên vẽ độ sâu vào texture rồi làm nhoè ngang/dọc hai lượt (bánh xe, đế trụ, cáp đổ bóng theo hình học).
 - **Lớp chữ HTML** quanh canvas: viên nhãn súng A/B (trạng thái, nguồn phiên *Từ app / Thẻ RFID / Đầu đọc RFID / Mật khẩu HMI*, kW · kWh · SoC bằng `tabular-nums`, "Lệnh từ app đã tới trụ · chờ cắm súng N s", "Đầu đọc RFID · đang chờ CSMS"), viên mạng (trạng thái, số bản tin chờ phát bù, ×N). Font hệ thống có sẵn, không tải font.
@@ -202,7 +216,7 @@ Không cần khởi động lại server sau khi build (file đọc lúc có yê
 
 Hình có: thân trụ + màn hình LCD (mỗi súng một nửa: kW, SoC, thời gian, tiền tạm tính khi sạc; "Sẵn sàng — quẹt thẻ hoặc quét QR"; "Cắm súng vào xe"; "Rút súng"; mã lỗi; dải trên cùng báo "Mất kết nối — thử lại sau N s"), hai khay súng A/B có **đèn viền**, dây cáp, xe điện trượt vào khi súng được cắm với **thanh pin đổ theo SoC thật**, ăng-ten (xanh = online, vàng = đang nối, xám gạch chéo đỏ = mất kết nối), bong bóng số bản tin chờ phát bù khi hàng đợi buffer > 0, và nhịp "Phát bù N bản tin → CSMS" (gói nhỏ bay đi) khi hàng đợi về 0 sau khi nối lại.
 
-Màu đèn từ QA-06 theo bảng ở mục "Giao diện" (trước QA-06: Available xanh lá, Preparing xanh dương, Finishing tím).
+Màu đèn theo bảng ở mục "Giao diện" (QA-10: bộ màu PowerMe; cột "Đèn viền" dưới đây là bảng QA-06 cũ — nay Available/Charging teal, Preparing xanh trời, Suspended warning, Finishing gold, Faulted danger, Reserved tím nhạt).
 
 | Trạng thái OCPP | Đèn viền | Kiểu | Nhãn trên hình |
 |---|---|---|---|
@@ -247,7 +261,7 @@ Thời gian mô phỏng (bộ chọn ×1/×10/×20, mục "Tốc độ mô phỏ
 | 5 | Wh số nguyên hay thập phân | Số nguyên Wh cho `meterStart`, `meterStop`, Energy.Active.Import.Register (SAP gửi thập phân, ví dụ 48.46) | Firmware thật |
 | 6 | Hành vi retry buffer | Mô hình EXP-01 như trên, gồm cả StatusNotification vào buffer (EXP-01 không quan sát) | Firmware thật; số mẫu mất, thứ tự, giới hạn buffer |
 | 7 | Reason khi pin đầy | `Other` (`EVDisconnected` dành cho rút súng giữa phiên; `Local` cho nút Dừng tại trụ) | Reason firmware thật gửi |
-| 8 | Chia công suất hai súng | Chia đều 120 kW cho súng đang sạc; đường công suất giữ 100 % tới SoC 80 % rồi giảm tuyến tính còn 5 % ở 100 %; pin 75 kWh | Cách chia thật, đường cong thật |
+| 8 | Chia công suất hai súng | Chia đều kW trụ (mặc định 120, QA-11: theo `CP_SPECS`) cho súng đang sạc, không vượt trần từng súng; đường công suất giữ 100 % tới SoC 80 % rồi giảm tuyến tính còn 5 % ở 100 %; pin 75 kWh | Cách chia thật, đường cong thật |
 | 9 | RemoteStart khi chưa cắm súng | `Accepted`, chờ `ConnectionTimeOut` (120 s) rồi mới `StartTransaction` khi cắm | Trụ thật có Accepted không hay Rejected |
 | 10 | Chế độ sạc theo thời gian/kWh/tiền | Trụ không tự dừng, chỉ hiển thị "đã đạt hạn mức" và chờ RemoteStop (ràng buộc phần cứng #5) | Giới hạn thật nằm ở đâu |
 | 11 | Sau dừng sạc | `Finishing` cho tới khi rút súng rồi mới `Available` | Trình tự trạng thái thật |

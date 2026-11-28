@@ -5,6 +5,7 @@
 //   - GET  /tru/<cpId>            → public/tru.html: trang từng trụ (HMI bấm được + hành trình phiên)
 //   - GET  /static/<tên>.css|js   → file tĩnh trong public/, tên đơn, chống ".."
 //   - GET  /vendor/three/<file>   → đúng hai file build của three.js trong node_modules (hình 3D)
+//   - GET  /vendor/qrcode.mjs     → qrcode-generator (QA-09, tem QR trên trang trụ); thiếu gói → 404
 //   - GET  /tru3d/tru3d.js        → bundle hình 3D (React + r3f) đã build ở tru3d/dist/; chưa build → 404
 //   - GET  /tong/events           → SSE trang tổng: "tong" (tóm tắt mọi trụ, tối đa ~2 lần/giây)
 //   - GET  /events/<cpId>         → SSE của MỘT trụ: "hello" (snapshot + nhật ký + điểm biểu đồ),
@@ -27,6 +28,9 @@
 //        = trụ đó không gửi Basic Auth). Có CP_IDS thì CP_ID/CP_PASSWORD bị bỏ qua.
 //      Cho kiểm thử (áp cho mọi trụ): RETRY_MS, REPLAY_LOSS, METER_INTERVAL, PING_SEC, REBOOT_MS,
 //      SPEED; STALE_METERSTOP=1: StopTransaction sau một lần rớt mạng mang meterStop cũ (EXP-01).
+//      Cấu hình phần cứng (QA-11, khớp CSMS): CP_SPEC (một trụ) / CP_SPECS=dc120:120/60,ac22:22,...
+//        (cùng thứ tự CP_IDS) — "<ac|dc><kW trụ>:<kW súng 1>[/<kW súng 2>]". Trống = D1 gốc DC 120 kW
+//        hai súng. Trụ AC không gửi SoC. CP_GUNS (cũ) chỉ còn dùng khi không có spec.
 //      OFFLINE_AUTH=normal|rejected|notsupported (T150): trụ cho CSMS tắt authorize offline, hay
 //        "cứng đầu" (key readonly → Rejected, hoặc không có key → NotSupported) và nhận mọi thẻ offline.
 
@@ -36,6 +40,7 @@ import { readFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { createStation } from './station.mjs';
+import { parseSpec } from './model.mjs';
 
 const num = (v, d) => (v === undefined || v === '' ? d : Number(v));
 const env = process.env;
@@ -47,9 +52,47 @@ function stationList() {
   if (env.CP_IDS) {
     const ids = env.CP_IDS.split(',').map((s) => s.trim());
     const pws = (env.CP_PASSWORDS ?? '').split(',').map((s) => s.trim());
-    return ids.map((id, i) => ({ id, password: pws[i] || undefined }));
+    // QA-08: tên hiển thị (vd. tên trạm) cùng thứ tự CP_IDS; trống → chỉ hiện identity.
+    const names = (env.CP_NAMES ?? '').split(',').map((s) => s.trim());
+    // Mã in trên trụ (display_code) — mã tài xế nhập/quét trên app, khác identity OCPP.
+    const codes = (env.CP_CODES ?? '').split(',').map((s) => s.trim());
+    // QA-09: địa chỉ trạm (ngăn bằng "|" vì địa chỉ có dấu phẩy) và số súng thật trong DB (1 hoặc 2).
+    const addrs = (env.CP_ADDRESSES ?? '').split('|').map((s) => s.trim());
+    const guns = (env.CP_GUNS ?? '').split(',').map((s) => Number(s.trim()));
+    const specs = (env.CP_SPECS ?? '').split(',').map((s) => s.trim());
+    return ids.map((id, i) => ({
+      id,
+      password: pws[i] || undefined,
+      name: names[i] || null,
+      code: codes[i] || null,
+      address: addrs[i] || null,
+      ...withSpec(specs[i], guns[i] === 1 ? 1 : 2),
+    }));
   }
-  return [{ id: env.CP_ID ?? 'RH24D1-00001', password: env.CP_PASSWORD || undefined }];
+  return [
+    {
+      id: env.CP_ID ?? 'RH24D1-00001',
+      password: env.CP_PASSWORD || undefined,
+      name: env.CP_NAME?.trim() || null,
+      code: env.CP_CODE?.trim() || null,
+      address: env.CP_ADDRESS?.trim() || null,
+      ...withSpec(env.CP_SPEC, env.CP_GUNS?.trim() === '1' ? 1 : 2),
+    },
+  ];
+}
+/**
+ * QA-11: spec → số súng thật. Không có spec mà CP_GUNS=1 (cách cũ) → D1 gốc nhưng một súng, để
+ * trụ 1 súng không còn "giả 2 súng" như trước.
+ */
+function withSpec(raw, legacyGuns) {
+  try {
+    const spec = raw ? parseSpec(raw) : parseSpec('');
+    if (!raw && legacyGuns === 1) spec.guns = spec.guns.slice(0, 1);
+    return { spec, guns: spec.guns.length };
+  } catch (e) {
+    console.error(e.message);
+    process.exit(2);
+  }
 }
 const list = stationList();
 for (const { id } of list) {
@@ -80,13 +123,14 @@ const tongClients = new Set();
 
 // Mỗi trụ: station + tập client SSE riêng. Trang một trụ chỉ nhận dữ liệu của trụ đó.
 const stations = new Map();
-for (const { id, password } of list) {
+for (const { id, password, name, code, address, guns, spec } of list) {
   const station = createStation({
     ...common,
     cpId: id,
+    spec,
     ...(password ? { authPassword: password } : {}),
   });
-  const entry = { id, station, clients: new Set() };
+  const entry = { id, name, code, address, guns, station, clients: new Set() };
   // Đẩy snapshot khi có thay đổi nhưng không quá ~7 lần/giây.
   let pending = false;
   station.events.on('change', () => {
@@ -96,7 +140,7 @@ for (const { id, password } of list) {
     setTimeout(() => {
       pending = false;
       if (!entry.clients.size) return;
-      const snap = station.snapshot();
+      const snap = snapOf(entry);
       for (const r of entry.clients) send(r, 'state', snap);
     }, 150);
   });
@@ -111,10 +155,24 @@ for (const { id, password } of list) {
 const first = stations.values().next().value;
 
 // ── Trang tổng: tóm tắt nhỏ, không có nhật ký/hành trình ───────────────────
-function summary(st) {
-  const s = st.snapshot();
+/** Snapshot của một trụ kèm tên hiển thị (QA-08). */
+function snapOf(entry) {
+  return {
+    ...entry.station.snapshot(),
+    name: entry.name,
+    displayCode: entry.code,
+    address: entry.address,
+    guns: entry.guns,
+  };
+}
+
+function summary(entry) {
+  const s = snapOf(entry);
   return {
     cpId: s.cpId,
+    name: s.name,
+    displayCode: s.displayCode,
+    address: s.address,
     net: { state: s.net.state, halfOpen: s.net.halfOpen, nextRetrySec: s.net.nextRetrySec },
     speed: s.speed,
     clockAheadSec: s.clockAheadSec,
@@ -137,7 +195,7 @@ function summary(st) {
 }
 const tong = () => ({
   csmsUrl: common.csmsUrl,
-  stations: [...stations.values()].map((e) => summary(e.station)),
+  stations: [...stations.values()].map((e) => summary(e)),
 });
 let tongPending = false;
 function scheduleTong() {
@@ -163,6 +221,14 @@ try {
 } catch {
   /* không có three → không có route vendor */
 }
+// QA-09: thư viện tạo tem QR (MIT, một file ESM, không phụ thuộc). Thiếu → trang chỉ hiện mã chữ.
+let QRCODE_FILE = null;
+try {
+  const p = createRequire(import.meta.url).resolve('qrcode-generator');
+  QRCODE_FILE = path.join(path.dirname(p), 'qrcode.mjs');
+} catch {
+  /* không có qrcode-generator */
+}
 
 // Bundle hình 3D (QA-04): ĐÚNG một file tên cố định do `npm run sim:tru3d:build` sinh ra trong
 // tru3d/dist/ (không commit). Đọc lúc có yêu cầu nên build xong không cần khởi động lại server;
@@ -177,7 +243,7 @@ const sseHead = {
 function openStationSse(entry, req, res) {
   res.writeHead(200, sseHead);
   const st = entry.station;
-  send(res, 'hello', { state: st.snapshot(), log: st.logHistory(), series: st.series() });
+  send(res, 'hello', { state: snapOf(entry), log: st.logHistory(), series: st.series() });
   entry.clients.add(res);
   req.on('close', () => entry.clients.delete(res));
 }
@@ -269,6 +335,17 @@ const server = http.createServer(async (req, res) => {
         return notFound(res);
       }
     }
+    if (get && parts[0] === 'vendor' && parts[1] === 'qrcode.mjs' && parts.length === 2) {
+      if (!QRCODE_FILE) return notFound(res);
+      let body;
+      try {
+        body = await readFile(QRCODE_FILE);
+      } catch {
+        return notFound(res);
+      }
+      res.writeHead(200, { 'content-type': STATIC_TYPES['.js'], 'cache-control': 'max-age=86400' });
+      return res.end(body);
+    }
     if (get && parts[0] === 'vendor' && parts[1] === 'three' && parts.length === 3) {
       const file = VENDOR.get(parts[2]);
       if (!file) return notFound(res);
@@ -315,13 +392,13 @@ const server = http.createServer(async (req, res) => {
       return notFound(res);
     }
     if (parts[0] === 'api' && parts.length === 2) {
-      if (get && parts[1] === 'state') return json(res, 200, first.station.snapshot());
+      if (get && parts[1] === 'state') return json(res, 200, snapOf(first));
       if (req.method === 'POST') return act(first, parts[1], req, res);
     }
     if (parts[0] === 'api' && parts.length === 3) {
       const entry = stations.get(parts[1]);
       if (!entry) return notFound(res);
-      if (get && parts[2] === 'state') return json(res, 200, entry.station.snapshot());
+      if (get && parts[2] === 'state') return json(res, 200, snapOf(entry));
       if (req.method === 'POST') return act(entry, parts[2], req, res);
     }
     notFound(res);

@@ -1,6 +1,6 @@
 # WF-02 – Quyết định thiết kế
 
-> Đặt tại `docs/spec/WF-02_decisions.md`. Cập nhật: 27/11/2026 (D1, D10, "Còn mở" theo hoàn thủ công D-AC, review #212 của Ân); 25/11/2026 (D5, "Còn mở" theo T144: nhà cung cấp SePay eInvoice; D1 thứ tự kiểm, D10 hợp đồng thật, "Còn mở" theo T32 Phần 10a); 24/11/2026 (D1 nghĩa `done`; "Còn mở": điều kiện của Ân, kết quả querydr sandbox, Phần 10 dự kiến 25/11); 23/11/2026 (D1, D7, "Còn mở" theo T32 Phần 9a; "Còn mở": VNPay trả lời 18/11, giả định vnp_Amount khi khuyến mãi); 17/11/2026 (D3, D5, D7, "Còn mở" theo T32 Phần 7); 14/11/2026 (D2, D3, D4, D7, "Còn mở" theo T32 Phần 8; D3, D4, D7, D8 theo T32 Phần 6 13/11; D2 theo T32 Phần 5, 12/11).
+> Đặt tại `docs/spec/WF-02_decisions.md`. Cập nhật: 27/11/2026 (D1, D10, "Còn mở" theo hoàn thủ công D-AC, review #212 của Ân; D1, D5, "Còn mở": điều chỉnh hoá đơn theo hoàn thủ công, SePay chưa điều chỉnh (#213)); 25/11/2026 (D5, "Còn mở" theo T144: nhà cung cấp SePay eInvoice; D1 thứ tự kiểm, D10 hợp đồng thật, "Còn mở" theo T32 Phần 10a; D1, D5, D7, "Còn mở" theo T32 Phần 9b: hoá đơn điều chỉnh khi hoàn tiền); 24/11/2026 (D1 nghĩa `done`; "Còn mở": điều kiện của Ân, kết quả querydr sandbox, Phần 10 dự kiến 25/11); 23/11/2026 (D1, D7, "Còn mở" theo T32 Phần 9a; "Còn mở": VNPay trả lời 18/11, giả định vnp_Amount khi khuyến mãi); 17/11/2026 (D3, D5, D7, "Còn mở" theo T32 Phần 7); 14/11/2026 (D2, D3, D4, D7, "Còn mở" theo T32 Phần 8; D3, D4, D7, D8 theo T32 Phần 6 13/11; D2 theo T32 Phần 5, 12/11).
 > **Nguồn chính là diagram trong `diagrams/report4/class/CD-2/` + `diagrams/report4/sequence/SD-2a…2f/`** (CD-2, SD-2a…2f v2.0, 01/11/2026, bản đã chia sẻ vào tài liệu chung của nhóm). File này chỉ ghi lại:
 > (1) những điểm trong diagram mà code phải bám, viết ra cho dễ tra;
 > (2) cách khớp diagram với repo hiện tại;
@@ -23,7 +23,7 @@ STM-4 TopUp, STM-5 CreditAccount, STM-7 EInvoice (cũng dùng cho InvoiceAdjustm
 
 ## D1. Hoàn tiền: ghi quyết định trước, chuyển tiền sau (SD-2e, STM-10)
 
-⊕ **Từ 26/11 hoàn tiền làm thủ công** (quyết định D-AC, SRS BR-P51 ở PR #228). Chăm sóc khách hàng hoàn trên cổng merchant VNPay; Admin ghi nhận kết quả trong PowerMe: `requested` → `done` khi nhập mã hoàn của cổng, `failed` kèm lý do, làm lại `failed` → `requested`. **PowerMe không gửi lệnh refund sang VNPay.** Phần 1 bên dưới (quyết định hoàn: trừ ví, trả điểm, tạo refund `requested`) vẫn giữ. Phần 2 (gửi refund qua VNPay), worker `refund-send`, `RefundService.send` / `retry` và `VnpayAdapter.refund` đang có trên main là luồng cũ của #208, sẽ gỡ ở PR "ghi nhận hoàn thủ công" (xem "Còn mở").
+⊕ **Từ 26/11 hoàn tiền làm thủ công** (quyết định D-AC, SRS BR-P51 ở PR #228). Chăm sóc khách hàng hoàn trên cổng merchant VNPay; Admin ghi nhận kết quả trong PowerMe: `requested` → `done` khi nhập mã hoàn của cổng, `failed` kèm lý do, làm lại `failed` → `requested`. **PowerMe không gửi lệnh refund sang VNPay.** Phần 1 bên dưới (quyết định hoàn: trừ ví, trả điểm, tạo refund `requested`) vẫn giữ. ~~Phần 2 (gửi refund qua VNPay), worker `refund-send`, `RefundService.send` / `retry` và `VnpayAdapter.refund` đang có trên main là luồng cũ của #208, sẽ gỡ ở PR "ghi nhận hoàn thủ công" (xem "Còn mở").~~ → thay bởi PR ghi nhận hoàn thủ công (27/11): luồng cũ đã gỡ; Phần 2 bên dưới là luồng ghi nhận (SD-2e v3.0, STM-10 v2.0, CD-2 v3.0).
 
 **Phần 1: Admin ghi nhận hoàn**, một DB transaction trong `TopUpService.refund(topUpId, adminId)`:
 - Kiểm tra top-up `credited` và **số dư khả dụng** ≥ số tiền; sai thì `RefundNotAllowed(reason)` → 409 / 422 `{reason}`.
@@ -32,20 +32,32 @@ STM-4 TopUp, STM-5 CreditAccount, STM-7 EInvoice (cũng dùng cho InvoiceAdjustm
 - `credited → refunded`; `CreditLedgerService.post(accountId, refund, −amountVnd, topUpId)`.
 - Nếu top-up có dùng điểm: `LoyaltyService.restoreForTopUp(topUp)`.
 - `RefundService.create(topUpId, kind = top_up, amountPaidVnd, adminId)` → refund `requested`.
-- Trả **202 `{refundId, status: 'requested'}`**.
+- Trả **202 `{refundId, status: 'requested'}`** ⊕ kèm `amountVnd` (= `refunds.amount_vnd`, số CSKH hoàn trên cổng; route `amount_vnd`, D10).
 
-**Phần 2: gửi refund về nguồn thanh toán**, chạy nền theo từng lượt: `RefundService.send(refundId)` → `VnpayAdapter.refund(ref, amountVnd)` (timeout 10 s):
-- Kết quả không rõ → **truy vấn trạng thái trước khi gửi lại** (tránh hoàn hai lần).
-- VNPay xác nhận → `requested → done`; sau đó `EInvoiceService.adjustForRefund(refund)` chạy bất đồng bộ (tạo InvoiceAdjustment `requested → issued`, STM-7); báo tài xế (MSG25).
-- Lỗi tạm thời và chưa hết 4 lượt → ghi lỗi, vẫn `requested`, hẹn lại sau 5 phút / 30 phút / 2 giờ.
-- Bị từ chối, hoặc lượt thứ 4 lỗi → `requested → failed`, đưa lên Billing Exceptions, báo Admin.
+~~**Phần 2: gửi refund về nguồn thanh toán**, chạy nền theo từng lượt~~ → thay bởi **Phần 2: CSKH hoàn trên cổng, Admin ghi nhận** (27/11, SD-2e v3.0 phần 2–3, STM-10 v2.0):
+- CSKH hoàn `refunds.amount_vnd` về nguồn thanh toán trên cổng merchant VNPay (ngoài PowerMe), ghi lại mã giao dịch hoàn của cổng. Danh sách chờ: `GET /billing/refunds` (D10), gồm cả `account_closure`.
+- **`RefundService.confirmDone(refundId, gatewayRefundNo, adminId)`** (STM-10 #2): `requested → done`, ghi `gateway_refund_no` (trim, 1–20 ký tự `[A-Za-z0-9._/-]`, lưu đúng như nhập), `completed_at = now()`. Cùng transaction: `late_refunded_at` (late_payment), `closure_refunded_at` khi refund `account_closure` cuối cùng done, `EInvoiceService.adjustForRefund` (`top_up` / `account_closure`); sau commit `kickAdjust()`. Mã đã ghi cho refund khác → `RefundNoUsed` (kiểm trước trong transaction + UNIQUE cho ca ghi đồng thời). Gọi lại cùng mã trên refund đã done bằng mã đó → trả kết quả cũ (`alreadyDone`), không ghi; khác mã / `failed` → `InvalidTransition`.
+- **`markFailed(refundId, reason, adminId)`** (#3): `requested → failed`, `failure_reason` (trim, 1–1000 ký tự, 0032). Tiền ở lại với yêu cầu hoàn, không trả lại ví.
+- **`redo(refundId, adminId)`** (#4): `failed → requested`, giữ `failure_reason` cũ (lần thất bại sau ghi đè).
+- **Thứ tự khoá `confirmDone`:** đọc refund không khoá (kind / top-up không đổi) → [`top_ups` (`late_payment`) | `credit_accounts` (`account_closure`)] → `refunds FOR UPDATE` → `e_invoices` gốc (`adjustForRefund`). Cùng thứ tự với đường tạo refund, tránh deadlock; khoá `credit_accounts` làm tuần tự việc kiểm "refund closure cuối cùng". `markFailed` / `redo` chỉ khoá `refunds`.
+- Mỗi hành động log có cấu trúc kèm `admin_id`: `refund_requested`, `refund_confirmed`, `refund_confirm_repeated`, `refund_marked_failed`, `refund_redo`. MSG25 (báo tài xế khi done): chưa có kênh, không làm.
+- **Nghĩa của `done`:** Admin đã nhập mã hoàn của cổng; không có nghĩa tiền đã về tài khoản tài xế. `late_refunded_at` / `closure_refunded_at` là lúc Admin ghi nhận.
+- Không gọi VNPay refund, không querydr refund, không retry tự động, không worker refund. Không cần cấu hình VNPay để tạo yêu cầu hoàn (bỏ guard `payment_unconfigured`, Khang chốt 27/11).
 
-**Cùng mẫu:** hoàn khoản trễ (`TopUpService.refundLatePayment`, `kind = late_payment`, **không ghi sổ cái**, không có điều chỉnh hoá đơn); Admin retry refund `failed` (`RefundService.retry(refundId, adminId)`: một lượt thử, không reset bộ đếm).
+Luồng cũ (#208, đã gỡ 27/11), giữ để tra lịch sử:
+- ~~`RefundService.send(refundId)` → `VnpayAdapter.refund(ref, amountVnd)` (timeout 10 s); kết quả không rõ → truy vấn trạng thái trước khi gửi lại.~~
+- ~~**Luồng cũ (#208, sẽ gỡ), không còn là luồng chính:** VNPay xác nhận → `requested → done`; ~~sau đó `EInvoiceService.adjustForRefund(refund)` chạy bất đồng bộ (tạo InvoiceAdjustment `requested → issued`, STM-7)~~ → thay bởi T32 Phần 9b 25/11: **cùng tx2** chuyển `done` gọi `EInvoiceService.adjustForRefund(client, refundId)` tạo InvoiceAdjustment `requested` (`top_up`, `account_closure`; không cho `late_payment`), sau commit chỉ `kickAdjust()`; việc gửi điều chỉnh tới nhà cung cấp (`requested → issued`, STM-7) chạy nền ở worker `invoice-adjustment-issue` (D5). ~~báo tài xế (MSG25)~~ chưa có kênh, không làm.~~
+- ~~Lỗi tạm thời và chưa hết 4 lượt → ghi lỗi, vẫn `requested`, hẹn lại sau 5 phút / 30 phút / 2 giờ.~~
+- ~~Bị từ chối, hoặc lượt thứ 4 lỗi → `requested → failed`, đưa lên Billing Exceptions, báo Admin.~~
 
-⊕ **Cài đặt T32 Phần 9a (Khang chốt 23/11).** Code: `billing/refund.service.ts`, `billing/vnpay.adapter.ts` (`refundRequest`, `classifyRefundResponse`, `classifyRefundQueryResponse`), `TopUpService.refund` / `refundLatePayment`, migration 0028. Chưa có route (Phần 10); điều chỉnh hoá đơn ở Phần 9b.
+⊕ **Điều chỉnh hoá đơn theo hoàn thủ công (27/11, #213):** ~~điều chỉnh hoá đơn (Phần 9b) hiện gắn vào nhánh `done` của luồng cũ `RefundService.applyOutcome` (worker `refund-send`); theo hoàn thủ công sẽ chuyển sang `RefundService.confirmDone` ở PR ghi nhận hoàn thủ công.~~ → thay bởi PR ghi nhận hoàn thủ công: điều chỉnh tạo trong transaction `RefundService.confirmDone`.
+
+**Cùng mẫu:** hoàn khoản trễ (`TopUpService.refundLatePayment`, `kind = late_payment`, **không ghi sổ cái**, không có điều chỉnh hoá đơn); ~~Admin retry refund `failed` (`RefundService.retry(refundId, adminId)`: một lượt thử, không reset bộ đếm)~~ → thay bởi `RefundService.redo` (Phần 2 ở trên); hoàn khi đóng tài khoản (`account_closure`, Phần 11) chờ trong cùng danh sách.
+
+⊕ **Cài đặt T32 Phần 9a (Khang chốt 23/11) — phần gửi VNPay đã gỡ 27/11** (`refundRequest`, `classifyRefundResponse`, `classifyRefundQueryResponse`, `VnpayAdapter.refund` / `queryRefundState`, `planRound`, worker `refund-send`, `onExhausted` của `refunds`). Các mục dưới về tham số gửi, phân loại kết quả, querydr, Admin retry, hết lượt, tắt có kiểm soát chỉ còn giá trị lịch sử; "Ba số khi hoàn top-up" và thứ tự kiểm khi quyết định hoàn vẫn đúng. Code: `billing/refund.service.ts`, `billing/vnpay.adapter.ts` (`refundRequest`, `classifyRefundResponse`, `classifyRefundQueryResponse`), `TopUpService.refund` / `refundLatePayment`, migration 0028. Chưa có route (Phần 10); điều chỉnh hoá đơn ở Phần 9b.
 
 - **Ba số khi hoàn top-up (theo SD-2e):** sổ cái và guard số dư khả dụng dùng `amount_vnd`; VNPay hoàn `amount_paid_vnd` (`refunds.amount_vnd`); điểm trả qua `restoreForTopUp`. Ví dụ: nạp 100.000, điểm 20.000, trả 80.000 → ví −100.000, VNPay hoàn 80.000, điểm được trả lại.
-- **Điều kiện trước khi quyết định hoàn:** VNPay chưa cấu hình → `RefundNotAllowed('payment_unconfigured')` trước khi đổi bất cứ gì, để không có ca trừ ví rồi refund nằm chờ vô hạn. Thứ tự kiểm sau đó: `not_found`, `account_closed`, `not_refundable`, `insufficient_available_balance`. Khang chốt 27/11 (review #212 của Ân): bỏ guard `gateway_transaction_no` NULL đã thêm ở Phần 10a, vì chỉ cần khi gửi lệnh hoàn qua VNPay. Khoản trễ: `not_found`, `no_late_payment`, `already_requested`.
+- **Điều kiện trước khi quyết định hoàn:** ~~VNPay chưa cấu hình → `RefundNotAllowed('payment_unconfigured')` trước khi đổi bất cứ gì, để không có ca trừ ví rồi refund nằm chờ vô hạn.~~ → bỏ 27/11 (hoàn thủ công không gọi VNPay). Thứ tự kiểm: `not_found`, `account_closed`, `not_refundable`, `insufficient_available_balance`. Khang chốt 27/11 (review #212 của Ân): bỏ guard `gateway_transaction_no` NULL đã thêm ở Phần 10a, vì chỉ cần khi gửi lệnh hoàn qua VNPay. Khoản trễ: `not_found`, `no_late_payment`, `already_requested`.
 - **Tham số gửi theo kind:**
 
   | kind | `vnp_TxnRef` | `vnp_TransactionNo` | `vnp_TransactionDate` | `vnp_Amount` | `vnp_TransactionType` |
@@ -82,13 +94,12 @@ STM-4 TopUp, STM-5 CreditAccount, STM-7 EInvoice (cũng dùng cho InvoiceAdjustm
 - **Tắt có kiểm soát:** đã có kết quả từ VNPay thì vẫn chạy tx2 dù signal đã abort, vì bỏ một kết quả `accepted` có thể dẫn tới hoàn hai lần qua Admin retry. Runner chờ lượt đang chạy xong trước khi `DbModule` đóng pool. Lời gọi bị abort giữa chừng tính là lỗi tạm thời một lượt.
 - **Khoá ở tx2 khi `done`:** `top_ups` (`late_payment`) hoặc `credit_accounts` (`account_closure`) rồi mới `lockLeased(refunds)`, cùng thứ tự với đường tạo refund, tránh deadlock; khoá `credit_accounts` cũng làm tuần tự việc kiểm "refund closure cuối cùng".
 
-**STM-10 Refund**
+**STM-10 Refund** (v2.0, 26/11, hoàn thủ công; bản v1.0 có `requested → requested` lỗi tạm thời và retry tự động, đã bỏ)
 ```
-[*] → requested          RefundService.create (cùng transaction với quyết định hoàn)
-requested → requested    lỗi tạm thời: attempt + 1, hẹn retry
-requested → done         VNPay xác nhận
-requested → failed       bị từ chối hoặc hết 4 lượt
-failed → requested       Admin retry (1 lượt, không reset bộ đếm)
+[*] → requested          RefundService.create (cùng transaction với quyết định hoàn / đóng tài khoản)
+requested → done         Admin nhập mã hoàn của cổng [mã chưa ghi lần nào] (confirmDone)
+requested → failed       Admin đánh dấu thất bại [cổng từ chối] / ghi lý do (markFailed)
+failed → requested       Admin làm lại (redo)
 ```
 Không có `failed → done`.
 
@@ -101,24 +112,26 @@ Không có `failed → done`.
 | `kind` | enum `top_up` · `late_payment` · `account_closure` |
 | `amountVnd` | bigint > 0 |
 | `status` | enum `requested` · `done` · `failed` |
-| `attemptCount` | int, mặc định 0 |
+| `attemptCount` | int, mặc định 0 (luồng cũ #208; không dùng từ 0032) |
 | `requestedBy` [0..1] | FK → `admins (user_id)` (ISA của BE-16/0011; chốt 04/11). Thay `top_ups.refunded_by` (bỏ ở 0015, ERD Alignment B5). `top_up` / `late_payment` = `adminId`; `account_closure` = **NULL** (hệ thống tạo lúc tài xế đóng, D6; đúng CHECK `refunds_requested_by_check` của 0015) |
-| `lastErrorKind`, `lastErrorMessage`, `lastAttemptAt` [0..1] | theo mẫu `e_invoices` |
-| `gatewayRefundNo` [0..1] | mã hoàn VNPay trả về trong response của lệnh refund; NULL khi done qua querydr (⊕ 0028) |
-| ⊕ `confirmedViaQuery` | boolean, mặc định false (0028, T32 Phần 9a): done nhờ querydr thấy lệnh hoàn, không có mã lệnh hoàn |
-| `nextAttemptAt` [0..1] | lịch chạy nền (D4) |
+| `lastErrorKind`, `lastErrorMessage`, `lastAttemptAt` [0..1] | theo mẫu `e_invoices` (luồng cũ #208; không dùng từ 0032) |
+| `gatewayRefundNo` [0..1] | ~~mã hoàn VNPay trả về trong response của lệnh refund~~ → mã giao dịch hoàn trên cổng merchant do Admin nhập (0032), UNIQUE; dòng cũ done qua querydr NULL (⊕ 0028) |
+| ⊕ `confirmedViaQuery` | boolean, mặc định false (0028, T32 Phần 9a): done nhờ querydr thấy lệnh hoàn. Luồng cũ; dòng mới luôn false |
+| `nextAttemptAt` [0..1] | lịch chạy nền (D4). Luồng cũ; từ 0032 không DEFAULT, không CHECK, không ghi |
+| ⊕ `failureReason` [0..1] | lý do Admin ghi khi `failed` (0032): bắt buộc khi `failed`, 1–1000 ký tự; làm lại giữ lý do cũ |
 | `createdAt`, `completedAt` [0..1] | |
 
 Ràng buộc / index đề xuất cho migration:
 - Partial unique `(top_up_id, kind) WHERE kind IN ('top_up','late_payment')`.
 - CHECK `kind = 'account_closure' OR requested_by IS NOT NULL` (đã có ở 0015, giữ nguyên).
 - CHECK `(status = 'done') = (completed_at IS NOT NULL)`; ~~`status <> 'done' OR gateway_refund_no IS NOT NULL`~~ → thay bởi 0028 (T32 Phần 9a): `status <> 'done' OR gateway_refund_no IS NOT NULL OR confirmed_via_query`, và `NOT confirmed_via_query OR (status = 'done' AND gateway_refund_no IS NULL)`.
-- Index `(status, next_attempt_at)` cho worker; index `(top_up_id)`.
+- Index `(status, next_attempt_at)` cho worker (từ 0032 chỉ còn cột đầu `status` phục vụ danh sách chờ CSKH); index `(top_up_id)`.
+- ⊕ 0032: `refunds_failure_reason_check` (`status <> 'failed' OR failure_reason IS NOT NULL`), `refunds_failure_reason_length_check` (1–1000); bỏ `refunds_next_attempt_check`.
 
 Nghĩa của cột đã có:
-- `top_ups.late_refunded_at` = lúc refund `late_payment` chuyển `done` (VNPay đã nhận yêu cầu hoàn, xem "Nghĩa của `done`" ở trên).
+- `top_ups.late_refunded_at` = lúc Admin ghi nhận refund `late_payment` là `done` (xem "Nghĩa của `done`" ở Phần 2).
 - `credit_accounts.closure_refunded_at` = lúc tài khoản `closed` không còn refund `account_closure` nào chưa `done` (chốt 09/11, D6). Có hai trường hợp:
-  - refund `account_closure` cuối cùng chuyển `done` (cùng nghĩa `done` ở trên);
+  - Admin ghi nhận refund `account_closure` cuối cùng là `done`;
   - lúc đóng không tạo refund nào (số dư 0, hoặc toàn bộ là phần dư) → `= closed_at`, ghi trong transaction đóng.
   - NULL chỉ còn nghĩa "chưa hoàn xong". COMMENT của 0015 còn ghi "NULL = … không có gì để hoàn" → sửa ở migration Phần 6 (mục "Còn mở").
 
@@ -390,6 +403,20 @@ Cộng tiền, dòng sổ cái và điểm nằm trong **một** DB transaction,
   - Admin retry `needs_review`: một lượt, không reset bộ đếm.
 - Top-up luôn giữ `credited`, dù hoá đơn ra sao.
 - **InvoiceAdjustment**: EInvoice 1 – 0..* InvoiceAdjustment; Refund 1 – 0..1 InvoiceAdjustment. Tạo bởi `adjustForRefund` **sau khi refund `done`**; trạng thái `requested · issued · failed · needs_review` và retry giống EInvoice. Hoàn khoản trễ không có điều chỉnh hoá đơn (không có hoá đơn gốc).
+
+  ⊕ **T32 Phần 9b (Khang chốt 25/11; theo review merge #208 của Trí mục 4 và ghi chú #168):**
+  - **Tạo trong cùng ~~tx2~~ transaction chuyển refund `requested → done`** (~~nhánh `done` của `RefundService.applyOutcome`~~ → thay bởi `RefundService.confirmDone`, hoàn thủ công 27/11), như `requestForTopUp` tạo hoá đơn trong transaction cộng tiền: sập sau commit không làm mất điều chỉnh. `EInvoiceService.adjustForRefund(client, refundId)` nhận client của bên gọi, không tự BEGIN/COMMIT; sau commit chỉ `kickAdjust()`. `RefundService` nhận `EInvoiceService` qua Nest (`@Optional`, như `TopUpService`; BillingModule luôn tiêm, có test); thiếu mà refund `top_up` / `account_closure` done → log error `invoice_adjustment_service_missing`, refund vẫn done.
+  - **Kind nào có:** `top_up` và `account_closure` (hoá đơn gốc = `e_invoices` của `refunds.top_up_id`). `late_payment` không có. Top-up không có dòng `e_invoices` (dữ liệu cũ / ghi ngoài API) → không tạo, log warn `invoice_adjustment_no_original`, refund vẫn done.
+  - **Chỉ ném cho lỗi lập trình** (refund chưa `done`). Ca dữ liệu trả `skipped`: ném trong tx2 làm refund VNPay đã nhận không chuyển được sang `done`.
+  - **Dòng:** `amount_vnd = −refunds.amount_vnd` (số VNPay hoàn, đã gồm VAT); `reason = "Điều chỉnh giảm do hoàn tiền (refund <id>)"`; `adjustment_no = max + 1` theo hoá đơn gốc. `INSERT … ON CONFLICT (refund_id) DO NOTHING`. Hai refund cùng hoá đơn done đồng thời: `adjustForRefund` khoá dòng `e_invoices` gốc `FOR UPDATE` trước khi lấy số; refund sau chờ, câu `MAX` chạy sau khi có khoá nên thấy dòng đã commit → số kế tiếp. Thứ tự khoá tx2: [`top_ups` (`late_payment`) | `credit_accounts` (`account_closure`)] → `refunds` (`lockLeased`) → `e_invoices` → INSERT `invoice_adjustments` (billing/CLAUDE.md).
+  - **Thuế theo hoá đơn gốc:** `vat_rate` của `e_invoices` gốc (0025), không tính lại theo ngày hoàn. Không thêm cột: lúc gửi tính `vatAmountVnd = adjustmentVat(amount_vnd, vat_rate) = −splitVat(|amount_vnd|, vat_rate)` (`billing/e-invoice.ts`).
+  - **Chờ hoá đơn gốc `issued`** (Khang chốt phương án "phát hành gốc rồi điều chỉnh"; trả lời ghi chú #168): **không huỷ hoá đơn gốc**, worker `e-invoice-issue` giữ nguyên việc phát hành hoá đơn cho top-up đã `refunded` (tiền đã thu thật nên phải có hoá đơn; huỷ hoá đơn chưa phát hành là một luồng riêng với nhà cung cấp, và hoá đơn gốc có thể đã được cấp số mà ta chưa ghi được do mất lease). Lúc tới lượt gửi điều chỉnh mà gốc còn `requested` / `failed` / `needs_review` → lỗi tạm thời `original_not_issued` theo lịch retry, **không gọi nhà cung cấp**; hết lượt → `needs_review` như mọi lỗi tạm thời. Admin xử lý hoá đơn gốc trước rồi retry điều chỉnh (route ở PR sau).
+  - **Trần theo hoá đơn gốc** (ghi chú #168, review Trí mục 4): trước khi gọi nhà cung cấp, Σ |`amount_vnd`| của mọi điều chỉnh khác cùng hoá đơn (**mọi trạng thái**: mỗi dòng ứng với một refund đã done, tiền đã trả lại thật) + |dòng này| phải ≤ `e_invoices.amount_vnd`. Vượt → lỗi `data` `adjustment_exceeds_original` → `needs_review`, không gọi nhà cung cấp. Kiểm lúc gửi (hàm thuần `checkAdjustmentSendable`, kiểm trần trước rồi mới tới gốc chưa `issued`), không chặn lúc tạo, để refund done không bao giờ rollback vì hoá đơn.
+  - **Nhà cung cấp:** `EInvoiceProviderAdapter.adjustInvoice(input, signal)`; input: khoá idempotent = `invoice_adjustments.id`, `originalInvoiceNo` (`e_invoices.invoice_no`), `adjustmentNo`, `reason`, `amountVnd` (âm), `vatRate` (gốc), `vatAmountVnd` (âm), `refundedAt` (`refunds.completed_at`). Kết quả `{issued, adjustmentNo}` / `transient` / `data`, idempotent theo khoá như `createInvoice`. `callAdjustProvider` dùng chung lõi timeout 10 s với `callProvider`: adapter ném → `transient`, số rỗng / quá 20 ký tự → `data`. Stub: `STUBADJ-` + base36 của khoá (≤ 20 ký tự, ổn định), cùng `EINVOICE_STUB_MODE` / `EINVOICE_STUB_DELAY_MS`.
+  - ⊕ 27/11: **SePay chưa điều chỉnh:** `SepayEInvoiceProvider.adjustInvoice` không gọi HTTP, trả `data` `sepay_adjustment_not_supported` → điều chỉnh vào `needs_review`. Stub vẫn cấp số giả như trên. Xem "Còn mở".
+  - **Worker `invoice-adjustment-issue`** (`InvoiceAdjustmentService`, service riêng vì mỗi `BackgroundWork` có một tên; luôn đăng ký): đúng mẫu `e-invoice-issue` — `runLeasedBatch` trên `invoice_adjustments` (`status IN ('requested','failed') AND next_attempt_at <= now()`), kiểm trước khi gửi, gọi nhà cung cấp ngoài transaction, tx2 `lockLeased` (`null` → bỏ kết quả, log `invoice_adjustment_lease_lost`), STM-7 → `issued` (`provider_adjustment_no`, `issued_at`) / `failed` + `nextRetry` (5 phút / 30 phút / 2 giờ, `RETRY_LIMIT` như hoá đơn) / `needs_review` (log error `invoice_adjustment_needs_review`). `onExhausted` → `needs_review` (`attempt_count = max(+1, RETRY_LIMIT)`, mẫu 8c). Phần ghi kết quả STM-7 dùng chung với `e_invoices` (`billing/e-invoice-rows.ts`, rút ra từ `EInvoiceService`, không đổi hành vi).
+  - **Admin retry** `InvoiceAdjustmentService.adminRetryAdjustment(adjustmentId, adminId)`: chỉ `needs_review → requested` (#7), giữ `attempt_count`, `unfinished_claims = 0`, `next_attempt_at = now()`, log `invoice_adjustment_admin_retry` có `admin_id`. Không có → `InvoiceAdjustmentNotFound` (404); sai trạng thái → `InvalidTransition('STM-7', …)` (409). Route ở PR sau.
+  - Gửi điều chỉnh cho tài xế (MSG25): chưa có kênh, không làm.
 - Cột thêm cho `invoice_adjustments` (khớp repo): `refund_id` (FK, unique), `status`, `attempt_count`, `last_error_kind`, `last_error_message`, `last_attempt_at`, `next_attempt_at`, `provider_adjustment_no` [0..1]; `issued_at` thành [0..1].
 - Provider là **stub** (T144: thêm SePay eInvoice cho `createInvoice`, xem ⊕ T144 ở trên; điều chỉnh vẫn chưa có bản thật): không gọi HTTP; trả `invoiceNo` / `adjustmentNo` giả theo định dạng ổn định; cấu hình được để giả lập thành công, lỗi `transient`, lỗi `data`, độ trễ; viết qua interface để sau thay provider thật.
 
@@ -445,17 +472,17 @@ Diagram chỉ ghi "job" / "queue" / "after commit". Repo chưa có BullMQ (Redis
   - Giới hạn: hằng `UNFINISHED_CLAIM_LIMIT = 5` (`due-rows.ts`, không qua biến môi trường). Lần giữ chỗ làm bộ đếm **vượt** giới hạn (lần thứ 6 liên tiếp) thì `runLeasedBatch` không gọi `handle` mà gọi `spec.onExhausted` của bảng, trong một tx ngắn riêng tự khoá lại dòng bằng lease (không đặt bộ đếm về 0: dòng giữ số 6 làm dấu vết), không gọi bên ngoài, log error `leased_row_exhausted` (`table`, `id`, `unfinished_claims`). `onExhausted` ném → rollback, log `leased_row_exhausted` kèm `exhaust_failed: true`, dòng giữ lease như trước (không thêm cơ chế lặp: mỗi lần hết lease lại chạy `onExhausted` và log, không gọi bên ngoài).
   - `top_ups`: `pending → expired` (STM-4 #4, `TIMEOUT_NOT_PAID`, đường có sẵn `applyLockedResult`) + `exception_kind = 'retry_exhausted'`, `next_attempt_at = NULL`, `completed_at`. Không giữ `pending` (tài xế sẽ bị chặn `pending_top_up_confirming` tới khi có Admin). IPN thành công tới sau → khoản trễ như `unresolved_04/07`; `recheckTopUp` nhận `retry_exhausted`. Log warn `top_up_retry_exhausted`; `querydr_applied` của đường này có `reason: 'retry_exhausted'` (không có querydr nào ra kết quả).
   - `e_invoices`: `needs_review` qua chuyển có sẵn của STM-7 (`failed` qua #6 trước, rồi `ATTEMPT_FAILED` → #3→#5), không thêm chuyển mới. `attempt_count = max(attempt_count + 1, RETRY_LIMIT)`, guard cùng số, `last_error_kind = 'transient'`, `last_error_message = 'unfinished_claims_exhausted'` (Khang chốt 19/11: guard #5 "lượt thứ RETRY_LIMIT trở đi" giữ nghĩa, Admin retry #7 vẫn là một lượt; đổi lại `attempt_count` có thể lớn hơn số lần gọi thật). Log error `e_invoice_needs_review` `reason: 'unfinished_claims_exhausted'`. Admin retry đặt `unfinished_claims = 0`.
-  - ~~`refunds`, `invoice_adjustments`: chỉ có cột; chưa có `onExhausted` (Phần 9).~~ → thay bởi T32 Phần 9a 23/11: `refunds` hết lượt → `failed` (STM-10 #4, D1). `invoice_adjustments`: chỉ có cột, chưa có `onExhausted` (Phần 9b); tới lúc đó `runLeasedBatch` log error `no_handler` rồi vẫn gọi `handle`.
+  - ~~`refunds`, `invoice_adjustments`: chỉ có cột; chưa có `onExhausted` (Phần 9).~~ → thay bởi T32 Phần 9a 23/11: `refunds` hết lượt → `failed` (STM-10 #4, D1). ~~`invoice_adjustments`: chỉ có cột, chưa có `onExhausted` (Phần 9b); tới lúc đó `runLeasedBatch` log error `no_handler` rồi vẫn gọi `handle`.~~ → thay bởi T32 Phần 9b 25/11: `invoice_adjustments` hết lượt → `needs_review` như `e_invoices` (cùng hàm `exhaustIssueRow`, D5).
   - Staging không gọi ra được VNPay: querydr trả `unresolved` (timeout), tx2 vẫn hẹn mốc kế và commit, nên bộ đếm về 0 mỗi lần, không tích luỹ (có test).
 
   Các điều kiện đến hạn:
-  - `refunds`: `status = 'requested' AND next_attempt_at <= now()` → `RefundService.send`.
-  - `e_invoices`, `invoice_adjustments`: `status IN ('requested','failed') AND next_attempt_at <= now()` → `EInvoiceService.issue` / điều chỉnh.
+  - ~~`refunds`: `status = 'requested' AND next_attempt_at <= now()` → `RefundService.send`.~~ → bỏ 27/11: hoàn thủ công, không có worker refund (`LeasedTable` không còn `refunds`).
+  - `e_invoices`, `invoice_adjustments`: `status IN ('requested','failed') AND next_attempt_at <= now()` → `EInvoiceService.issue` / `InvoiceAdjustmentService.issue` (T32 Phần 9b).
   - ~~`top_ups`: `status = 'pending' AND expires_at <= now()` → `TopUpService.onPendingTimeout` (dùng `expires_at` đã có; D4 09/11: chạy lúc `expires_at + 2 phút`). Không có `next_attempt_at`, nên cách giữ chỗ do Phần 5/8 chọn (interface `BackgroundWork.runDue` không ràng buộc).~~ → thay bởi T32 Phần 6 13/11: `top_ups`: `status = 'pending' AND next_attempt_at <= now()` → `TopUpService.onPendingTimeout` (0021 thêm `next_attempt_at`, D4; giữ chỗ như các bảng khác bằng `runLeasedBatch`).
     - ⊕ Cài ở T32 Phần 8 (14/11): `TopUpService` tự cài `BackgroundWork` tên `top-up-timeout`, đăng ký trong `onModuleInit`; `LeasedTable` thêm `top_ups`, lease = `BILLING_WORKER_LEASE_MS`. Thứ tự: tx1 giữ chỗ → querydr **ngoài transaction** → tx2 `lockLeased` (khoá `top_ups`; `null` = IPN đã chốt / đổi lịch → bỏ kết quả) → khoá `credit_accounts` → state machine → ghi. VNPay chưa cấu hình → `runDue` trả 0, không giữ chỗ dòng nào, warn một lần mỗi tiến trình. Thiếu cấu hình worker → `runDue` ném `top_up_timeout_missing_config`.
     - ⊕ Index partial (14/11): `top_ups_pending_next_attempt_idx` có predicate `status = 'pending'`; câu `status = ANY($1::top_up_status[])` có tham số không khớp được predicate trong generic plan. Nên `due-rows.ts` viết điều kiện **hằng** `status = 'pending'` cho `top_ups` (map cố định `FIXED_DUE_STATUS`, chỉ nhận `statuses = ['pending']`, vẫn không nhận SQL từ bên gọi). `EXPLAIN ANALYZE`: ghi chú 14/11 của plan.
 - `Scheduler` (`src/common/scheduler.ts`) chỉ để **chạy sớm** (ngay sau commit, đúng `expires_at`); mất khi sập cũng được vì vòng quét bắt lại. Lúc khởi động mỗi worker quét một lần.
-- Lịch retry: `next_attempt_at = now() + 5 phút / 30 phút / 2 giờ`; một helper dùng chung cho e-invoice và refund (`nextRetry` trong `retry-schedule.ts`). `RETRY_LIMIT = 4` là hằng số export ở `refund-state-machine.ts` (không phải biến môi trường). `PENDING_TIMEOUT = 15 phút`: hằng số export `PENDING_TIMEOUT_MS` ở `top-up.service.ts` (T32 Phần 5, `expires_at = now() + PENDING_TIMEOUT` bằng đồng hồ DB); Phần 5 không hẹn timeout, vòng quét Phần 8 xử lý. ~~`LATE_WINDOW = 1 giờ`~~ bỏ theo D4; đã bỏ trong code (T117).
+- Lịch retry: `next_attempt_at = now() + 5 phút / 30 phút / 2 giờ`; một helper dùng chung cho e-invoice và điều chỉnh hoá đơn (`nextRetry` trong `retry-schedule.ts`). `RETRY_LIMIT = 4` là hằng số export ở ~~`refund-state-machine.ts`~~ `retry-schedule.ts` (27/11, refund không còn retry; không phải biến môi trường). `PENDING_TIMEOUT = 15 phút`: hằng số export `PENDING_TIMEOUT_MS` ở `top-up.service.ts` (T32 Phần 5, `expires_at = now() + PENDING_TIMEOUT` bằng đồng hồ DB); Phần 5 không hẹn timeout, vòng quét Phần 8 xử lý. ~~`LATE_WINDOW = 1 giờ`~~ bỏ theo D4; đã bỏ trong code (T117).
 - Viết sau interface `BackgroundWork` trong billing để sau đổi sang BullMQ mà không sửa service. ⊕ Runner `BackgroundWorkRunner` (Phần 12): các loại chạy song song, mỗi loại không chạy chồng; `kick` / `kickAt` để chạy sớm; cấu hình `BILLING_WORKER_*` (`infra/.env.example`).
 - Index cần: `(status, next_attempt_at)` trên `e_invoices`, `invoice_adjustments`, `refunds`; `top_ups (status, expires_at)`; ⊕ `top_ups (next_attempt_at) WHERE status = 'pending'` (0021).
 
@@ -512,7 +539,7 @@ Thay bảng mock của `wp4/fe-01-dashboard-shell` (dashboard chưa gọi API bi
 
 **Tên lỗi giữ đúng DB: `last_error_kind` là `transient | data`** (đã chốt; không ánh xạ sang `temporary | rejected` của mock).
 
-**Chưa có bảng audit:** mỗi hành động Admin ghi một log có cấu trúc kèm `admin_id`: `e_invoice_admin_retry`, `top_up_admin_recheck`, `top_up_exception_reviewed`, `payment_conflict_reviewed`.
+**Chưa có bảng audit:** mỗi hành động Admin ghi một log có cấu trúc kèm `admin_id`: `e_invoice_admin_retry`, `top_up_admin_recheck`, `top_up_exception_reviewed`, `payment_conflict_reviewed`; hoàn thủ công: `refund_requested`, `refund_confirmed`, `refund_confirm_repeated`, `refund_marked_failed`, `refund_redo`.
 
 | Route | Thành công | Lỗi |
 |---|---|---|
@@ -521,6 +548,16 @@ Thay bảng mock của `wp4/fe-01-dashboard-shell` (dashboard chưa gọi API bi
 | `POST /billing/top-ups/{id}/recheck` | 200 `{top_up_id, result}`, `result` ∈ `late_payment_recorded` / `already_recorded` / `conflicting_result` / `not_paid`; `still_unresolved` có thêm `reason`, `response_code?`, `transaction_status?`, `retry_after_minutes: 15`, `hint` | 404 `not_found`; 409 `not_eligible` kèm `reason` (`not_expired` / `no_unresolved_exception` / `already_reviewed`); 503 `payment_unconfigured` |
 | `POST /billing/top-ups/{id}/exception-reviewed` | 200 `{top_up_id, exception_kind, exception_reviewed_at, already_reviewed}`; lần lặp cũng 200, trả mốc cũ, `already_reviewed: true` | 404 `not_found`; 409 `no_exception` |
 | `POST /billing/payment-conflicts/{id}/review`, body `{"note": "<…>"}` (trim, 1–1000 ký tự) | 200 `{conflict_id, reviewed_at, reviewed_by, review_note}` (`reviewed_by` = admin của token) | 400 note rỗng / quá dài; 404 `not_found`; 409 `already_reviewed` |
+| ⊕ `POST /billing/top-ups/{id}/refund` (không body) | 202 `{refund_id, status: "requested", amount_vnd}` | 404 `not_found`; 409 `not_refundable` / `account_closed`; 422 `insufficient_available_balance` |
+| ⊕ `POST /billing/top-ups/{id}/late-refund` (không body) | 202 như trên (`amount_vnd` = `late_amount_vnd`) | 404 `not_found`; 409 `no_late_payment` / `already_requested` |
+| ⊕ `GET /billing/refunds[?status=requested\|failed]` | 200 `{generated_at, limit: 200, total, items}`, xem bên dưới | 400 `status` lạ, tham số khác, lặp |
+| ⊕ `POST /billing/refunds/{id}/confirm`, body `{"gateway_refund_no": "<…>"}` (trim, 1–20 ký tự `[A-Za-z0-9._/-]`) | 200 `{refund_id, status: "done", gateway_refund_no, completed_at, already_done}`; gọi lại cùng mã → 200 `already_done: true` | 400; 404 `not_found`; 409 `refund_no_used`; 409 `invalid_transition` (kèm `from`) |
+| ⊕ `POST /billing/refunds/{id}/fail`, body `{"reason": "<…>"}` (trim, 1–1000 ký tự) | 200 `{refund_id, status: "failed", failure_reason}` | 400; 404; 409 `invalid_transition` |
+| ⊕ `POST /billing/refunds/{id}/redo` (không body) | 200 `{refund_id, status: "requested"}` | 404; 409 `invalid_transition` |
+
+⊕ **Hoàn tiền thủ công (27/11).** Sáu route trên dùng tên đã có trong hợp đồng (#70, #72, #75) + ba route ghi nhận. CD-2 v3.0 đặt tên method controller `createRefund` / `confirmRefund` / `markRefundFailed` / `retryRefund`; repo không có controller Nest nên chỉ giữ tên service (`TopUpService.refund`, `RefundService.confirmDone` / `markFailed` / `redo`). `Idempotency-Key` nhận nhưng không lưu (như `operator-pricing`): gửi lại bị chặn bởi STM-4 / STM-10 và UNIQUE mã hoàn (Khang chốt 27/11). `insufficient_available_balance` → 422 theo SD-2e "409 / 422" (Khang chốt 27/11).
+
+**`GET /billing/refunds`** (danh sách chờ CSKH, `BillingExceptionsQuery.listRefunds`): mặc định `requested` + `failed`, gồm `account_closure`; **cũ nhất trước** (CSKH hoàn trong 7 ngày làm việc, BR-P51); tối đa 200 dòng, `total` là số dòng thật. Item: `refund_id, kind, top_up_id, amount_vnd, status, requested_by (null = hệ thống), created_at, updated_at, failure_reason, gateway_reference (vnp_TxnRef), gateway_transaction_no (top_up / account_closure: mã giao dịch gốc; late_payment: mã của khoản trễ), paid_at, driver`. `GET /admin/v1/summary` (FE-14) giữ `billing_exceptions.failed_refunds` = số refund `failed` (vẫn đúng nghĩa).
 
 **`GET /billing/exceptions`.** Trả `{generated_at, limit: 200, late_payments, invoices_needs_review, top_up_exceptions, payment_conflicts}`. Mỗi mục có dạng `{total, items}`: tối đa 200 dòng, mới nhất trước, `total` là số dòng thật của mục. Cả bốn mục đọc trong cùng một snapshot. Không có mục refund `failed` (hoàn thủ công, D1). Mỗi item có `driver: {driver_id, full_name, phone_number}`.
 - `late_payments`: `late_gateway_ref IS NOT NULL` và chưa có dòng `refunds` `late_payment` của top-up (kể cả dòng đó `failed`). Không lọc `status`: có cả `failed` / `credited` / `refunded` / `expired` (D4). Trường: `top_up_id, gateway_reference, status, late_amount_vnd, late_gateway_ref, late_paid_at`.
@@ -532,7 +569,7 @@ Thay bảng mock của `wp4/fe-01-dashboard-shell` (dashboard chưa gọi API bi
 
 **App tài xế.** `GET /api/driver/v1/billing/top-ups/{id}` có trường tuỳ chọn `refund_status` (`requested` / `done` / `failed`, của refund `kind = top_up`). Không có key nghĩa là chưa có refund kind top_up. Trường này chỉ ở GET, không có ở POST. App hiện "Đang hoàn tiền" khi `status = refunded` mà `refund_status` khác `done` (`docs/api/DRIVER-API-HOP-DONG.md` §14).
 
-**Còn mở — ghi nhận hoàn thủ công (PR sau):** route tạo yêu cầu hoàn, confirm / fail / redo và danh sách refund chờ CSKH; xem mục cùng tên ở "Còn mở". Không có route Admin hoàn tài khoản đóng: hệ thống tự hoàn lúc tài xế đóng (D6, chốt 09/11).
+~~**Còn mở — ghi nhận hoàn thủ công (PR sau):** route tạo yêu cầu hoàn, confirm / fail / redo và danh sách refund chờ CSKH; xem mục cùng tên ở "Còn mở".~~ → đã làm 27/11 (bảng trên). Không có route Admin hoàn tài khoản đóng: hệ thống tự hoàn lúc tài xế đóng (D6, chốt 09/11).
 
 ## D11. Hết hạn điểm (BR-P36, SRS job #18) ⊕
 
@@ -574,6 +611,8 @@ Chốt 09/11: WP5 làm job hết hạn điểm.
   - Ân / Nghĩa: `docs/UC-ADM-08-BILLING-EXCEPTIONS.md` (tab 2 ghi "after `LATE_WINDOW` (1 h)", lọc `status = expired`; dòng TC-STM4-06 "after window") → lọc ~~`late_gateway_ref IS NOT NULL AND late_refunded_at IS NULL`~~ (→ thay bởi T32 Phần 8b 16/11: `late_gateway_ref IS NOT NULL` và chưa có dòng `refunds` `late_payment`, gồm `failed`, D4), bỏ chữ cửa sổ.
 - ~~**Lịch querydr lại của D4 ⊕ ĐIỀU KIỆN** (hẹn querydr lại lùi dần khi chưa ngã ngũ) cần lưu lần hỏi kế tiếp cho từng top-up, nhưng `top_ups` chưa có `next_attempt_at` / `attempt_count` (D7, dòng điều kiện quét `top_ups`). Chốt trước khi viết migration của Phần 6/8 (~~0017~~: 0017 đã dùng cho BE-30, 0018 cho BE-34, 0019 cho Phần 5): thêm cột vào migration đó, hay suy lịch từ `expires_at`. Khi chốt thì sửa luôn điều kiện quét ở D7 thành `expires_at + 2 phút <= now()`.~~ Đã chốt (T127, T32 Phần 6): cột `top_ups.next_attempt_at` (0021), D4 / D7.
 - ~~**COMMENT `credit_accounts.closure_refunded_at` của 0015** ghi "NULL = chưa xong / không có gì để hoàn", lệch D1 (không tạo refund nào → `= closed_at`). Sửa ở migration Phần 6, cùng migration nới `top_ups_late_payment_status_check` và COMMENT `late_gateway_ref`. Trí review.~~ Đã sửa ở 0021 (Trí review).
+- **SePay eInvoice — hoá đơn điều chỉnh giảm chưa kiểm** (T32 Phần 9b, 25/11): `adjustInvoice` viết chung (khoá idempotent, số hoá đơn gốc, số tiền / thuế âm, thuế suất gốc) để adapter SePay (task riêng, Ân duyệt 19/11) cài sau; chưa kiểm SePay có API điều chỉnh giảm không, cần trường gì (mẫu số / ký hiệu, biên bản điều chỉnh), có idempotent theo khoá không, và giới hạn độ dài số điều chỉnh (`provider_adjustment_no varchar(20)`). ⊕ 27/11: SePay `adjustInvoice` tạm trả `data` `sepay_adjustment_not_supported` (không gọi HTTP → `needs_review`); cần kiểm API điều chỉnh giảm của SePay (trường bắt buộc, idempotent, độ dài số điều chỉnh) trước khi cài thật.
+- **Điều chỉnh hoá đơn `needs_review`: route và màn ở PR sau** (T32 Phần 9b): `POST …/invoice-adjustments/{id}/retry` gọi `adminRetryAdjustment`, mục `adjustments_needs_review` trong `GET …/billing/exceptions`. Từ PR ghi nhận hoàn thủ công đã có refund `done` thật (qua `confirmDone`), nên điều chỉnh `needs_review` (vd. SePay `sepay_adjustment_not_supported`) có thể xuất hiện trước khi có route này.
 - **Physical ERD v1.1 lệch 0015:** enum `refund_error_kind` riêng (0015 dùng lại `e_invoice_error_kind`); unique đầy đủ thay partial unique `(top_up_id, kind)`; `invoice_adjustments.refund_id` NOT NULL (0015 nullable); thiếu `next_attempt_at`; thiếu `refunds_requested_by_check`. Báo Ân.
 - AD-9 và Physical ERD dẫn BR-P45 cho refund, trong khi BR-P45 là làm tròn tiền phiên. Hỏi Ân.
 - ~~**Lần trả thứ hai cho cùng top-up** (D3 ⊕: thành công với `transactionNo` khác trên `credited` / `refunded` → `conflicting_result`): tiền đã vào VNPay nhưng không có cột để ghi (`late_*` chỉ dành cho top-up chưa cộng, `gateway_transaction_no` đã có giá trị). Cần chốt cách ghi và cách Admin hoàn (cột mới? bảng riêng? `refunds.kind` mới?) trước Phần 6.~~ Đã chốt (T116, Ân 12/11): ghi vào `late_*` như khoản trễ, Admin hoàn `late_payment` (D4).
@@ -637,12 +676,12 @@ Chốt 09/11: WP5 làm job hết hạn điểm.
 
   **Khang quyết định 24/11:** không thêm `vnp_TransactionNo` vào `queryRefundState`, giữ nguyên code.
 - **Phần 10a** (route Admin billing, D10): PR #212, nhánh `wp5/t32-api-admin-billing`. Sửa 27/11 theo review của Ân: bỏ route retry refund, mục `failed_refunds` và guard thiếu mã giao dịch (hoàn thủ công, D1).
-- **Còn mở — ghi nhận hoàn thủ công (PR sau)** (D-AC, SRS BR-P51; dự kiến, chưa chốt tên route / method):
-  - tạo yêu cầu hoàn top-up / khoản trễ: top-up trừ credit, trả điểm như `TopUpService.refund` hiện có; khoản trễ không trừ credit, không trả điểm; danh sách "top-up có thể hoàn" loại top-up của tài khoản `closed` (D6);
-  - confirm: nhập mã hoàn của cổng (duy nhất) → `done`, kích hoạt hoá đơn điều chỉnh của #213, báo tài xế MSG25; fail: lý do → `failed`; redo: `failed` → `requested`;
-  - danh sách refund đang chờ CSKH (`requested` + `failed`) thay cho `failed_refunds`;
-  - gỡ worker `refund-send`, `RefundService.send` / `retry`, `VnpayAdapter.refund`.
-  - Hợp đồng operator-admin (`docs/api/OPERATOR-ADMIN-API-HOP-DONG.md`, `operator-admin-api.openapi.yaml`) đã bỏ route retry refund và `failed_refunds` (27/11); `GET /admin/v1/billing/refunds?status=failed` định nghĩa lại ở PR này. `GET /api/admin/v1/summary` (FE-14, `operator-api/admin-platform.ts`) vẫn đếm `billing_exceptions.failed_refunds` (`refunds.status = 'failed'`): giữ nguyên vì refund `failed` vẫn có trong luồng thủ công; PR này xem lại có đổi sang `requested` + `failed` không.
+- ~~**Còn mở — ghi nhận hoàn thủ công (PR sau)**~~ → đã làm 27/11 (D1 Phần 2, D10, migration 0032): route tạo yêu cầu hoàn top-up / khoản trễ, confirm / fail / redo, danh sách chờ CSKH, gỡ worker `refund-send` / `RefundService.send` / `retry` / `VnpayAdapter.refund`. `GET /api/admin/v1/summary` giữ `failed_refunds` (đếm `failed`, vẫn đúng nghĩa). Còn lại:
+  - **Danh sách "top-up có thể hoàn"** (`GET /admin/v1/billing/top-ups?status=credited`, hợp đồng #69, loại top-up của tài khoản `closed`, D6): chưa làm; Admin tìm top-up ở màn giao dịch.
+  - **MSG25** (báo tài xế khi refund done): chưa có kênh thông báo.
+  - **Mã hoàn của cổng merchant chưa kiểm**: độ dài / định dạng thật chưa đối chiếu; tạm nhận 1–20 ký tự `[A-Za-z0-9._/-]` (cột `varchar(20)`), lưu đúng như nhập.
+  - **Route Admin retry điều chỉnh hoá đơn**: PR sau (mục "Điều chỉnh hoá đơn `needs_review`" ở trên).
+  - **Hợp đồng chưa có route của 10a** (`GET …/exceptions`, `recheck`, `exception-reviewed`, `payment-conflicts/{id}/review`; `e-invoices/{id}/retry` còn `planned`): báo Ân.
   - **Staging không gọi được VNPay sandbox** (Trí đo 25/11): hết áp dụng cho refund, vì luồng thủ công không gọi VNPay; vẫn đúng cho querydr / recheck.
   - **Trần tổng refund mỗi giao dịch** (review Trí mục 3): vẫn cần khi có nhiều refund cùng `vnp_TxnRef` (`top_up`, `late_payment`, `account_closure`), tổng không vượt số đã trả; kiểm lúc tạo yêu cầu hoàn và ở Phần 11.
 - Cách tạo `CreditAccount` + `LoyaltyAccount` khi tài xế đăng ký (WF-05 gọi billing hay billing nghe event).

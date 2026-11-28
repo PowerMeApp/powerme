@@ -19,7 +19,7 @@ class HeroCard extends StatelessWidget {
   Widget build(BuildContext context) => Container(
     padding: padding,
     decoration: BoxDecoration(
-      borderRadius: BorderRadius.circular(14),
+      borderRadius: BorderRadius.circular(PowerMeRadii.card),
       gradient: LinearGradient(
         begin: Alignment.topLeft,
         end: Alignment.bottomRight,
@@ -36,7 +36,7 @@ class HeroCard extends StatelessWidget {
           PowerMeColors.graphite,
         ],
       ),
-      border: Border.all(color: accent.withValues(alpha: .42)),
+      border: Border.all(color: accent.withValues(alpha: .3)),
     ),
     child: child,
   );
@@ -104,10 +104,8 @@ class MetricGrid extends StatelessWidget {
               padding: const EdgeInsets.all(14),
               decoration: BoxDecoration(
                 color: PowerMeColors.black.withValues(alpha: .62),
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(
-                  color: PowerMeColors.outline.withValues(alpha: .42),
-                ),
+                borderRadius: BorderRadius.circular(PowerMeRadii.tile),
+                border: Border.all(color: PowerMeColors.hairline),
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -187,11 +185,18 @@ class QuickActions extends StatelessWidget {
                 color: action.selected
                     ? PowerMeColors.teal.withValues(alpha: .12)
                     : PowerMeColors.graphite,
-                borderRadius: BorderRadius.circular(12),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(16),
+                  side: BorderSide(
+                    color: action.selected
+                        ? PowerMeColors.teal.withValues(alpha: .4)
+                        : PowerMeColors.hairline,
+                  ),
+                ),
                 child: InkWell(
                   key: action.key,
                   onTap: action.onTap,
-                  borderRadius: BorderRadius.circular(12),
+                  borderRadius: BorderRadius.circular(16),
                   child: Padding(
                     padding: const EdgeInsets.symmetric(
                       horizontal: 8,
@@ -232,7 +237,9 @@ class MenuRow extends StatelessWidget {
   Widget build(BuildContext context) => ListTile(
     contentPadding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
     minTileHeight: 56,
-    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+    shape: RoundedRectangleBorder(
+      borderRadius: BorderRadius.circular(PowerMeRadii.tile),
+    ),
     leading: Container(
       width: 36,
       height: 36,
