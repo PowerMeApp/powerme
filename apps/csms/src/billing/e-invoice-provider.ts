@@ -79,7 +79,7 @@ export interface EInvoiceAdjustmentInput {
   vatRate: number;
   /** Phần thuế nằm trong `amountVnd`, âm (`adjustmentVat`). */
   vatAmountVnd: number;
-  /** Lúc VNPay nhận yêu cầu hoàn (`refunds.completed_at`). */
+  /** Lúc Admin ghi nhận hoàn xong trên cổng (`refunds.completed_at`). */
   refundedAt: Date;
 }
 

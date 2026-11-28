@@ -17,15 +17,13 @@
  *   #7 needs_review → requested Admin retry: một lượt, KHÔNG reset bộ đếm
  * `issued` là trạng thái cuối.
  *
- * Khác STM-10 (refund): lỗi tạm thời của hoá đơn sang `failed` (STM-10 giữ `requested`), và hết lượt
- * thì sang `needs_review` (STM-10 sang `failed`). Lịch retry là `nextRetry` (retry-schedule.ts),
- * `RETRY_LIMIT` lấy từ STM-10, không định nghĩa lại.
+ * Lịch retry là `nextRetry`, `RETRY_LIMIT` lấy từ `retry-schedule.ts`, không định nghĩa lại.
  *
  * Bộ 4 × 4 = 16 cặp (trạng thái, event): 4 được nhận (5 chuyển, vì ATTEMPT_FAILED có hai đích tuỳ
  * guard) · 12 ném InvalidTransition.
  */
 import { InvalidTransition, MissingGuard } from './invalid-transition.js';
-import { RETRY_LIMIT } from './refund-state-machine.js';
+import { RETRY_LIMIT } from './retry-schedule.js';
 
 export const E_INVOICE_STATUSES = ['requested', 'issued', 'failed', 'needs_review'] as const;
 export type EInvoiceStatus = (typeof E_INVOICE_STATUSES)[number];

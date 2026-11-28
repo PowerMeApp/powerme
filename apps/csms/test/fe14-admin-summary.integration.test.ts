@@ -148,9 +148,9 @@ describeDb('FE-14 admin platform summary (screen 27, UC-ADM-07)', () => {
       [credited, other],
     );
     await q(
-      `INSERT INTO refunds(top_up_id,kind,amount_vnd,status,completed_at,gateway_refund_no) VALUES
-         ($1,'account_closure',5000,'failed',NULL,NULL),
-         ($2,'account_closure',5000,'done',now(),'FE14-REFUND-1')`,
+      `INSERT INTO refunds(top_up_id,kind,amount_vnd,status,completed_at,gateway_refund_no,failure_reason) VALUES
+         ($1,'account_closure',5000,'failed',NULL,NULL,'cổng từ chối'),
+         ($2,'account_closure',5000,'done',now(),'FE14-REFUND-1',NULL)`,
       [credited, other],
     );
 

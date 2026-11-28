@@ -6,7 +6,7 @@
  *   Retry tính bằng phút; việc cần đúng giờ thì dùng `kickAt`.
  * - `batchSize`: số việc tối đa một loại xử lý trong một lần `runDue`.
  * - `leaseMs`: thời gian giữ chỗ một dòng. Phải dài hơn hẳn các lời gọi ngoài của một dòng
- *   (querydr + refund, mỗi lời gọi 10 s). Mỗi lease chỉ giữ một dòng (`due-rows.ts`).
+ *   (querydr, gọi nhà cung cấp hoá đơn, mỗi lời gọi 10 s). Mỗi lease chỉ giữ một dòng (`due-rows.ts`).
  */
 export const BACKGROUND_WORK_CONFIG = Symbol('BILLING_BACKGROUND_WORK_CONFIG');
 

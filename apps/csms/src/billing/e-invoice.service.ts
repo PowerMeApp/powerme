@@ -153,8 +153,8 @@ export class EInvoiceService implements BackgroundWork, OnModuleInit {
   }
 
   /**
-   * SD-2e / D5 (T32 Phần 9b): tạo điều chỉnh giảm `requested` cho refund vừa `done`, trong tx2 của
-   * worker `refund-send` (nhánh `done` của `RefundService.applyOutcome`), giống `requestForTopUp`
+   * SD-2e / D5 (T32 Phần 9b): tạo điều chỉnh giảm `requested` cho refund vừa `done`, trong
+   * transaction Admin ghi nhận hoàn (`RefundService.confirmDone`, hoàn thủ công D1), giống `requestForTopUp`
    * trong transaction cộng tiền: sập sau commit không làm mất điều chỉnh. Không tự BEGIN/COMMIT.
    *
    * - `late_payment` → `skipped` (khoản trễ không có hoá đơn gốc, D5);
@@ -166,10 +166,10 @@ export class EInvoiceService implements BackgroundWork, OnModuleInit {
    *
    * Thứ tự khoá (billing/CLAUDE.md): bên gọi đã khoá [`top_ups` | `credit_accounts`] → `refunds`;
    * ở đây khoá `e_invoices` sau cùng. Không kiểm trần / trạng thái hoá đơn gốc ở đây (kiểm lúc gửi):
-   * refund đã được VNPay nhận không bao giờ rollback vì hoá đơn.
+   * refund Admin đã ghi nhận không bao giờ rollback vì hoá đơn.
    *
    * @throws Error('invoice_adjustment_refund_not_done') chỉ cho lỗi lập trình (refund chưa `done`);
-   *   mọi ca dữ liệu trả `skipped`, không ném (ném trong tx2 làm refund không chuyển được sang done).
+   *   mọi ca dữ liệu trả `skipped`, không ném (ném làm refund không chuyển được sang done).
    */
   async adjustForRefund(
     c: LedgerClient,
