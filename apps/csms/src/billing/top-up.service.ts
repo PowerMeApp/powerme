@@ -249,10 +249,15 @@ interface Applied {
   conflictLog?: ConflictLog;
 }
 
-/** Kết quả quyết định hoàn (D1): refund đã tạo, worker gửi sau. Route Phần 10 trả 202. */
+/**
+ * Kết quả quyết định hoàn (D1): refund đã tạo `requested`, chờ CSKH hoàn trên cổng merchant rồi Admin
+ * ghi nhận (`RefundService.confirmDone`). Route trả 202.
+ */
 export interface RefundDecision {
   refundId: number;
   status: 'requested';
+  /** `refunds.amount_vnd`: số CSKH hoàn trên cổng (`amount_paid_vnd` hoặc `late_amount_vnd`). */
+  amountVnd: number;
 }
 
 /** Kết quả `recheckTopUp` (nút "Kiểm tra lại" của Admin, route ở Phần 10). */
@@ -372,7 +377,7 @@ export class TopUpService implements BackgroundWork, OnModuleInit {
     // Phần 7. Tuỳ chọn để test Phần 5–8b dựng service như cũ (không tạo hoá đơn); BillingModule luôn
     // tiêm (test đăng ký `e-invoice-issue` kiểm việc này).
     @Optional() private readonly eInvoices?: EInvoiceService,
-    // Phần 9a. Tuỳ chọn để test cũ dựng service như trước; thiếu thì `refund` /
+    // Phần 9a. Tuỳ chọn để test dựng service không cần hoàn tiền; thiếu thì `refund` /
     // `refundLatePayment` ném `refund_service_unavailable` trước khi mở transaction.
     @Optional() private readonly refunds?: RefundService,
   ) {}
@@ -493,20 +498,22 @@ export class TopUpService implements BackgroundWork, OnModuleInit {
   /**
    * Admin hoàn top-up (SD-2e phần 1, D1; route ở Phần 10). Một transaction, khoá `top_ups` →
    * `credit_accounts`. Theo SD-2e (Khang chốt 23/11): sổ cái và guard dùng `amount_vnd` (số đã cộng
-   * vào ví), VNPay hoàn `amount_paid_vnd` (tiền thật), điểm trả lại riêng; nên ví về đúng như trước
+   * vào ví), CSKH hoàn `amount_paid_vnd` (tiền thật) trên cổng merchant, điểm trả lại riêng; nên ví về đúng như trước
    * khi nạp, tài xế không giữ phần giảm giá.
    *
    * `amount_paid_vnd` luôn > 0 với top-up tạo qua API: BR-P35 giảm tối đa 50 % (`computeQuote`, đường
    * duy nhất có điểm) và BR-P22 nạp tối thiểu 50.000, nên số trả ≥ 25.000. CHECK `top_ups_amount_check`
    * tự nó cho phép 0, nên dòng ghi ngoài API có số 0 → ném `refund_invalid_paid_amount`, rollback.
    *
-   * @throws RefundNotAllowed `payment_unconfigured` / `not_found` / `account_closed` /
-   *   `not_refundable` / `insufficient_available_balance`, không ghi gì
+   * Hoàn tiền thủ công (D1): không cần cấu hình VNPay, không gọi VNPay.
+   *
+   * @throws RefundNotAllowed `not_found` / `account_closed` / `not_refundable` /
+   *   `insufficient_available_balance`, không ghi gì
    * @throws Error `refund_invalid_paid_amount` — dữ liệu sai, không ghi gì
    */
   async refund(topUpId: number, adminId: number): Promise<RefundDecision> {
     const refunds = this.requireRefundable();
-    const refundId = await this.transaction(async (c) => {
+    const created = await this.transaction(async (c) => {
       const top = (
         await c.query<LockedTopUpRow>(
           `SELECT ${LOCKED_COLS} FROM top_ups WHERE id = $1 FOR UPDATE`,
@@ -543,29 +550,31 @@ export class TopUpService implements BackgroundWork, OnModuleInit {
       await this.ledger.post(c, Number(account.id), 'refund', -amountVnd, { topUpId });
       if (Number(top.points_redeemed) > 0)
         await this.loyalty.restoreForTopUp(c, Number(account.driver_id), topUpId);
-      return refunds.create(c, {
+      const refundAmountVnd = Number(top.amount_paid_vnd);
+      const refundId = await refunds.create(c, {
         topUpId,
         kind: 'top_up',
-        amountVnd: Number(top.amount_paid_vnd),
+        amountVnd: refundAmountVnd,
         requestedBy: adminId,
       });
+      return { refundId, amountVnd: refundAmountVnd };
     });
-    this.afterRefundCommitted(refunds, refundId, topUpId, adminId, 'top_up');
-    return { refundId, status: 'requested' };
+    this.logRefundRequested(created.refundId, topUpId, adminId, 'top_up');
+    return { refundId: created.refundId, status: 'requested', amountVnd: created.amountVnd };
   }
 
   /**
    * Admin hoàn khoản trễ (D1, D4; route ở Phần 10): không ghi sổ cái, không đụng điểm, không đổi
    * `top_ups.status`; cho phép cả tài khoản `closed`. Số tiền = `late_amount_vnd`.
    *
-   * @throws RefundNotAllowed `payment_unconfigured` / `not_found` / `no_late_payment` /
+   * @throws RefundNotAllowed `not_found` / `no_late_payment` /
    *   `already_requested`, không ghi gì
    */
   async refundLatePayment(topUpId: number, adminId: number): Promise<RefundDecision> {
     const refunds = this.requireRefundable();
-    let refundId: number;
+    let created: { refundId: number; amountVnd: number };
     try {
-      refundId = await this.transaction(async (c) => {
+      created = await this.transaction(async (c) => {
         const top = (
           await c.query<LockedTopUpRow>(
             `SELECT ${LOCKED_COLS} FROM top_ups WHERE id = $1 FOR UPDATE`,
@@ -575,35 +584,35 @@ export class TopUpService implements BackgroundWork, OnModuleInit {
         if (!top) throw new RefundNotAllowed('not_found');
         if (top.late_gateway_ref === null || top.late_amount_vnd === null)
           throw new RefundNotAllowed('no_late_payment');
-        return refunds.create(c, {
+        const amountVnd = Number(top.late_amount_vnd);
+        const refundId = await refunds.create(c, {
           topUpId,
           kind: 'late_payment',
-          amountVnd: Number(top.late_amount_vnd),
+          amountVnd,
           requestedBy: adminId,
         });
+        return { refundId, amountVnd };
       });
     } catch (error) {
       if (uniqueViolation(error) === 'refunds_one_per_top_up_and_kind')
         throw new RefundNotAllowed('already_requested');
       throw error;
     }
-    this.afterRefundCommitted(refunds, refundId, topUpId, adminId, 'late_payment');
-    return { refundId, status: 'requested' };
+    this.logRefundRequested(created.refundId, topUpId, adminId, 'late_payment');
+    return { refundId: created.refundId, status: 'requested', amountVnd: created.amountVnd };
   }
 
   /**
-   * Điều kiện trước khi mở transaction. Thiếu RefundService là lỗi lắp ghép, không được bỏ qua im
-   * lặng. Chưa cấu hình VNPay thì từ chối: nếu không, ví bị trừ mà refund nằm chờ vô hạn.
+   * Điều kiện trước khi mở transaction: thiếu RefundService là lỗi lắp ghép, không được bỏ qua im
+   * lặng. Không kiểm cấu hình VNPay: hoàn tiền thủ công không gọi VNPay (D1).
    */
   private requireRefundable(): RefundService {
     if (!this.refunds) throw new Error('refund_service_unavailable');
-    if (!this.vnpay.configured) throw new RefundNotAllowed('payment_unconfigured');
     return this.refunds;
   }
 
-  /** Sau commit: log + chạy sớm worker. Lỗi chỉ log, vòng quét vẫn bắt dòng đến hạn. */
-  private afterRefundCommitted(
-    refunds: RefundService,
+  /** Sau commit: log có cấu trúc kèm `admin_id` (chưa có bảng audit). */
+  private logRefundRequested(
     refundId: number,
     topUpId: number,
     adminId: number,
@@ -615,14 +624,6 @@ export class TopUpService implements BackgroundWork, OnModuleInit {
       admin_id: adminId,
       kind,
     });
-    try {
-      refunds.kickSend();
-    } catch (error) {
-      this.log('error', 'refund_kick_failed', {
-        refund_id: refundId,
-        error: error instanceof Error ? error.message : String(error),
-      });
-    }
   }
 
   /**

@@ -133,7 +133,7 @@ describeDb('T108a revenue routes (UC-OPS-09, UC-ADM-10; BR-P16, K9)', () => {
     expect(locked.body.error).toBe('account_locked');
   });
 
-  it('scopes the operator route to the token’s Operator, from the DB', async () => {
+  it('TC-F16-02 scopes the operator route to the token’s Operator, from the DB', async () => {
     const a = await call(`/operator/v1/revenue?${NOV}&group_by=site`, tokens['staffa']);
     expect(a.status).toBe(200);
     expect(a.headers.get('cache-control')).toBe('no-store');
@@ -161,7 +161,7 @@ describeDb('T108a revenue routes (UC-OPS-09, UC-ADM-10; BR-P16, K9)', () => {
     expect(op.body.error).toBe('invalid_input');
   });
 
-  it('gives the admin the whole platform, and operator_id=A equals what staff A sees', async () => {
+  it('TC-F16-02 gives the admin the whole platform, and operator_id=A equals what staff A sees', async () => {
     const all = await call(`/admin/v1/revenue?${NOV}`, tokens['admin']);
     expect(all.body.group_by).toBe('operator');
     expect(all.body.operator_id).toBeNull();

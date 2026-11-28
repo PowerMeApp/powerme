@@ -31,12 +31,12 @@
  *       khi đã cộng (không `reason`). Có `reason` → service ghi dòng `top_up_payment_conflicts`
  *       (0024); không `reason` → chỉ log error.
  *   - `stale`: timeout đến khi đã rời `pending` (đua với IPN qua Scheduler); bỏ qua.
- *   - `rejected`: guard số dư của #7 sai (TC-STM4-12/13); service đổi thành RefundNotAllowed → 422.
+ *   - `rejected`: guard số dư của #7 sai; service đổi thành RefundNotAllowed → 422.
  *   - `not_creditable` (#8): thành công tới khi còn `pending` nhưng không cộng được — số VNPay trừ
  *       khác `amount_paid_vnd` (`amountMismatch`, kiểm TRƯỚC) hoặc tài khoản `closed`
  *       (`accountClosed`). Chuyển sang `failed` và ghi khoản trễ; không cộng, không trừ điểm, không
  *       hoá đơn. Chọn `failed` vì đã có kết quả thanh toán (không phải hết hạn chờ).
- * Chỉ ADMIN_REFUND khi không ở `credited` mới ném `InvalidTransition` (vd. hoàn hai lần, TC-STM4-14).
+ * Chỉ ADMIN_REFUND khi không ở `credited` mới ném `InvalidTransition` (vd. hoàn hai lần).
  *
  * Bổ sung ⊕ chưa có trong diagram (decisions D4, chốt 04/11; T116 12/11):
  *   - Thành công tới khi đã `failed` → `late_payment`, giữ `failed`.

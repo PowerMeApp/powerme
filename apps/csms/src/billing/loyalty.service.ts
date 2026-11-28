@@ -14,8 +14,15 @@
  * Chạy trong transaction của bên gọi, không tự BEGIN. Khoá `loyalty_accounts` → gọi **sau**
  * `CreditLedgerService.post` (thứ tự khoá `top_ups` → `credit_accounts` → `loyalty_accounts`).
  * Lỗi nghiệp vụ ném trước mọi câu ghi.
+ *
+ * Phần 13 (D11): `expireDue` lặp qua các tài khoản, mỗi tài khoản một transaction riêng (ngoại lệ
+ * duy nhất tự BEGIN, cần `DB`); việc nền `loyalty-expire` gọi nó mỗi vòng quét của
+ * `BackgroundWorkRunner`.
  */
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Logger, OnModuleInit, Optional } from '@nestjs/common';
+import type { PoolClient } from 'pg';
+import { DB, Db } from '../db/db.module.js';
+import { BackgroundWork, BackgroundWorkRunner } from './background-work.js';
 import {
   LedgerEntryExists,
   LedgerPostRejected,
@@ -80,6 +87,26 @@ export interface ExpireResult {
   entries: LoyaltyEntry[];
 }
 
+/** Tên việc nền hết hạn điểm (Phần 13, D11). */
+export const LOYALTY_EXPIRE_WORK = 'loyalty-expire';
+
+/** Kết quả một lượt `expireDue`. */
+export interface ExpireDueResult {
+  /** Số tài khoản đã ghi ít nhất một dòng `expire`. */
+  accounts: number;
+  points: number;
+  /** Số dòng `expire` đã ghi (mỗi lô một dòng). */
+  lots: number;
+  /** Đang bị khoá (lượt / luồng khác giữ) hoặc vừa `closed`: vòng quét sau bắt lại. */
+  skipped: number;
+  /** Lỗi (vd. `LoyaltyLedgerCorrupt`), đã rollback. */
+  failed: number;
+}
+
+/** Không khoá `credit_accounts`: chỉ đọc (thứ tự khoá `credit_accounts` → `loyalty_accounts`). */
+const NOT_CLOSED = `NOT EXISTS (SELECT 1 FROM credit_accounts c
+  WHERE c.driver_id = a.driver_id AND c.status = 'closed')`;
+
 /** Tóm tắt điểm cho màn Loyalty (T149, UC-PAY-04, SRS màn hình 15). */
 export interface LoyaltySummary {
   /** `none` = tài xế chưa có `loyalty_accounts` (đọc không tạo). */
@@ -143,8 +170,87 @@ interface Locked {
 }
 
 @Injectable()
-export class LoyaltyService {
-  constructor(@Inject(LOYALTY_POLICY) private readonly policy: LoyaltyPolicy) {}
+export class LoyaltyService implements BackgroundWork, OnModuleInit {
+  readonly name = LOYALTY_EXPIRE_WORK;
+  private readonly logger = new Logger(LoyaltyService.name);
+
+  constructor(
+    @Inject(LOYALTY_POLICY) private readonly policy: LoyaltyPolicy,
+    // Chỉ `expireDue` / việc nền cần; các hàm khác chạy trên client của bên gọi.
+    @Optional() @Inject(DB) private readonly db?: Db,
+    @Optional() private readonly runner?: BackgroundWorkRunner,
+  ) {}
+
+  /** Luôn đăng ký, kể cả khi `BILLING_WORKER_ENABLED=false` (billing/CLAUDE.md). */
+  onModuleInit(): void {
+    this.runner?.register(this);
+  }
+
+  /** Việc nền `loyalty-expire`: mỗi vòng quét (D11, Phần 13). Chỉ đếm tài khoản đã ghi expire. */
+  async runDue(limit: number, signal: AbortSignal): Promise<number> {
+    return (await this.expireDue(undefined, limit, signal)).accounts;
+  }
+
+  /**
+   * Ghi `expire` cho phần còn sống của các lô đã hết hạn tới `now` (mặc định `now()` của DB), tối đa
+   * `limit` tài khoản, bỏ qua tài khoản có `credit_accounts.status = 'closed'` (D11, CD-2).
+   *
+   * Chọn: tài khoản có Σ points > 0 trên các dòng `expires_at <= now`. Mỗi dòng earn / redeem /
+   * restore / expire theo hạn mang `expires_at` của đúng một lô, nên Σ theo lô = phần còn lại (≥ 0);
+   * lô đã expire xong có Σ = 0, không bị chọn lại. Dòng `expire` lúc đóng tài khoản (`expires_at`
+   * NULL, D6 g) làm Σ này sai, nhưng chỉ có ở tài khoản `closed`, đã bị loại.
+   *
+   * Mỗi tài khoản một transaction: `FOR UPDATE SKIP LOCKED` (đang bận → bỏ qua, vòng sau bắt lại)
+   * rồi `expireDueForAccount` phát lại sổ **dưới khoá**, nên hai lượt / hai instance chạy chồng không
+   * trừ hai lần. Lỗi một tài khoản → rollback, log, chạy tiếp.
+   */
+  async expireDue(now?: Date, limit = 100, signal?: AbortSignal): Promise<ExpireDueResult> {
+    if (!this.db) throw new Error('loyalty_expire_missing_db');
+    const pool = this.db.$client;
+    const asOf = now ?? (await this.dbNow(pool));
+    const ids = (
+      await pool.query<{ id: string }>(
+        `SELECT t.loyalty_account_id AS id
+         FROM loyalty_transactions t JOIN loyalty_accounts a ON a.id = t.loyalty_account_id
+         WHERE t.expires_at <= $1 AND ${NOT_CLOSED}
+         GROUP BY t.loyalty_account_id HAVING sum(t.points) > 0
+         ORDER BY t.loyalty_account_id LIMIT $2`,
+        [asOf, limit],
+      )
+    ).rows.map((r) => Number(r.id));
+
+    const res: ExpireDueResult = { accounts: 0, points: 0, lots: 0, skipped: 0, failed: 0 };
+    for (const id of ids) {
+      if (signal?.aborted) break;
+      try {
+        const r = await this.inTransaction(async (tx) => {
+          const got = await tx.query(
+            `SELECT a.id FROM loyalty_accounts a WHERE a.id = $1 AND ${NOT_CLOSED}
+             FOR UPDATE SKIP LOCKED`,
+            [id],
+          );
+          return got.rowCount ? this.expireDueForAccount(tx, id, asOf) : null;
+        });
+        if (!r) {
+          res.skipped++;
+        } else if (r.entries.length) {
+          res.accounts++;
+          res.points += r.expiredPoints;
+          res.lots += r.entries.length;
+          this.log('log', 'loyalty_expired', {
+            loyalty_account_id: id,
+            points: r.expiredPoints,
+            lots: r.entries.length,
+          });
+        }
+      } catch (err) {
+        res.failed++;
+        this.log('error', 'loyalty_expire_failed', { loyalty_account_id: id, error: String(err) });
+      }
+    }
+    if (res.accounts > 0) this.log('log', 'loyalty_expire_run', { ...res });
+    return res;
+  }
 
   /**
    * Ghi điểm `earn` cho một phiên sạc (một lần cho mỗi phiên).
@@ -453,8 +559,8 @@ export class LoyaltyService {
 
   /**
    * Ghi `expire` cho phần còn sống của các lô đã hết hạn tới `asOf` của MỘT tài khoản (D11), mỗi lô
-   * một dòng mang `expires_at` của lô. Chạy lại không trừ hai lần. Job hằng ngày (chống chạy chồng,
-   * bỏ qua tài khoản `closed`) là Phần 13.
+   * một dòng mang `expires_at` của lô. Chạy lại không trừ hai lần. Lặp qua mọi tài khoản (chống chạy
+   * chồng, bỏ qua tài khoản `closed`): `expireDue` (Phần 13).
    *
    * @throws LoyaltyAccountNotFound
    * @throws LoyaltyLedgerCorrupt
@@ -634,6 +740,25 @@ export class LoyaltyService {
 
   private async dbNow(exec: LedgerClient): Promise<Date> {
     return (await exec.query<{ now: Date }>('SELECT now() AS now')).rows[0]!.now;
+  }
+
+  private async inTransaction<T>(work: (c: PoolClient) => Promise<T>): Promise<T> {
+    const client = await this.db!.$client.connect();
+    try {
+      await client.query('BEGIN');
+      const result = await work(client);
+      await client.query('COMMIT');
+      return result;
+    } catch (err) {
+      await client.query('ROLLBACK').catch(() => undefined);
+      throw err;
+    } finally {
+      client.release();
+    }
+  }
+
+  private log(level: 'log' | 'error', event: string, fields: Record<string, unknown>) {
+    this.logger[level](JSON.stringify({ event, ...fields }));
   }
 }
 

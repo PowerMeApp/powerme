@@ -1,46 +1,56 @@
 /**
- * RefundService — gửi hoàn tiền về VNPay chạy nền (T32 Phần 9a; SD-2e phần 2, STM-10, decisions D1).
+ * RefundService — hoàn tiền thủ công (D-AC, SRS BR-P51; SD-2e v3.0, STM-10 v2.0, CD-2 v3.0, decisions D1).
  *
- * Việc nền `refund-send` theo lease (D7): tx1 giữ chỗ một dòng `requested` → gọi VNPay NGOÀI
- * transaction → tx2 khoá theo thứ tự `top_ups` / `credit_accounts` → `refunds` (`lockLeased`,
- * `null` = mất lease, bỏ kết quả) → STM-10 → ghi. Đây là chỗ DUY NHẤT gọi `VnpayAdapter.refund`.
+ * CSKH hoàn trên cổng merchant VNPay (ngoài PowerMe); Admin ghi nhận kết quả ở đây:
+ * - `create`: refund `requested`, trong transaction quyết định hoàn của bên gọi (TopUpService, Phần 11);
+ * - `confirmDone`: `requested → done` khi Admin nhập mã hoàn của cổng (UNIQUE), kích hoạt hoá đơn
+ *   điều chỉnh cùng transaction (Phần 9b, D5);
+ * - `markFailed`: `requested → failed` kèm lý do (cổng từ chối);
+ * - `redo`: `failed → requested`.
+ * PowerMe không gọi VNPay refund, không querydr refund, không retry tự động, không worker refund.
  *
- * Chống hoàn hai lần (`planRound`): chỉ gửi không cần hỏi ở lượt đầu thật sự. `unfinished_claims > 1`
- * nghĩa là lượt trước đã giữ chỗ mà chưa ghi được kết quả, có thể đã gửi rồi sập. Lượt nào cũng
- * querydr trước khi gửi lại, và querydr thấy giao dịch trả 01 / 00 chỉ được gửi ở lượt ngay sau
- * Admin retry: tài liệu VNPay không ghi querydr có đổi sang 02 / 03 sau khi hoàn, nên 01 / 00 không
- * chứng minh là chưa hoàn. Thà hết lượt rồi `failed` để Admin xem, còn hơn hoàn hai lần.
+ * Thứ tự khoá của `confirmDone` (billing/CLAUDE.md): [`top_ups` (`late_payment`) | `credit_accounts`
+ * (`account_closure`)] → `refunds` → `e_invoices` gốc (`adjustForRefund`). Khoá bảng cha TRƯỚC
+ * `refunds`: `refundLatePayment` giữ `top_ups` rồi INSERT `refunds`, đóng tài khoản giữ
+ * `credit_accounts` rồi INSERT `refunds`; ngược thứ tự sẽ deadlock. Khoá `credit_accounts` cũng làm
+ * tuần tự việc kiểm "refund closure cuối cùng".
  *
- * Điều chỉnh hoá đơn khi `done` (Phần 9b, D5): cùng tx2, sau khi ghi `done`, gọi
- * `EInvoiceService.adjustForRefund` cho `top_up` / `account_closure` (khoá `e_invoices` sau
- * `refunds`); `late_payment` không có hoá đơn gốc. Sau commit chỉ `kickAdjust`. Thiếu hoá đơn gốc →
- * warn, refund vẫn done; thiếu `EInvoiceService` (lắp ghép Nest sai) → log error.
+ * Chưa có bảng audit: mỗi hành động Admin ghi một log có cấu trúc kèm `admin_id`. MSG25 (báo tài xế
+ * khi done) chưa có kênh, chưa làm.
  */
-import { Inject, Injectable, Logger, OnModuleInit, Optional } from '@nestjs/common';
+import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import type { PoolClient } from 'pg';
 import { DB, Db } from '../db/db.module.js';
-import { BackgroundWork, BackgroundWorkRunner } from './background-work.js';
-import { BACKGROUND_WORK_CONFIG, BackgroundWorkConfig } from './background-work.config.js';
-import { RefundNotFound } from './billing-errors.js';
+import { RefundNoUsed, RefundNotFound } from './billing-errors.js';
 import type { LedgerClient } from './credit-ledger.service.js';
-import { LeasedRow, lockLeased, runLeasedBatch } from './due-rows.js';
-import {
-  RefundErrorKind,
-  RefundStateMachine,
-  RefundStatus,
-  RETRY_LIMIT,
-} from './refund-state-machine.js';
 import { EInvoiceService } from './e-invoice.service.js';
-import { nextRetry } from './retry-schedule.js';
-import { RefundInput, RefundResult, VnpayAdapter } from './vnpay.adapter.js';
-
-/** `BackgroundWork.name` của việc gửi hoàn (D7). */
-export const REFUND_SEND_WORK = 'refund-send';
-
-/** `last_error_message` cắt còn chừng này ký tự. */
-const LAST_ERROR_MESSAGE_MAX = 500;
+import { RefundStateMachine, RefundStatus } from './refund-state-machine.js';
 
 export type RefundKind = 'top_up' | 'late_payment' | 'account_closure';
+
+/** `refunds.gateway_refund_no` là varchar(20). */
+export const GATEWAY_REFUND_NO_MAX = 20;
+/** CHECK `refunds_failure_reason_length_check` (0032). */
+export const FAILURE_REASON_MAX = 1000;
+
+const GATEWAY_REFUND_NO = /^[A-Za-z0-9._/-]+$/;
+
+/**
+ * Mã hoàn Admin nhập: trim, 1–20 ký tự, chỉ chữ / số ASCII và `.` `_` `/` `-`. Lưu đúng như nhập
+ * (không đổi hoa / thường). `null` = sai dạng. Định dạng thật của cổng chưa kiểm (D1 "Còn mở").
+ */
+export function parseGatewayRefundNo(raw: unknown): string | null {
+  if (typeof raw !== 'string') return null;
+  const v = raw.trim();
+  return v.length <= GATEWAY_REFUND_NO_MAX && GATEWAY_REFUND_NO.test(v) ? v : null;
+}
+
+/** Lý do thất bại: trim, 1–1000 ký tự. `null` = sai dạng. */
+export function parseFailureReason(raw: unknown): string | null {
+  if (typeof raw !== 'string') return null;
+  const v = raw.trim();
+  return v.length >= 1 && v.length <= FAILURE_REASON_MAX ? v : null;
+}
 
 export interface CreateRefundInput {
   topUpId: number;
@@ -50,50 +60,30 @@ export interface CreateRefundInput {
   requestedBy: number | null;
 }
 
-export interface RefundRetryResult {
+export interface RefundConfirmed {
   refundId: number;
-  status: RefundStatus;
-  attemptCount: number;
+  status: 'done';
+  gatewayRefundNo: string;
+  completedAt: Date;
+  /** true = refund đã `done` bằng đúng mã này từ trước: không ghi gì thêm. */
+  alreadyDone: boolean;
 }
 
-/**
- * Cách chạy một lượt:
- * - `send`: lượt đầu thật sự, gửi luôn;
- * - `query_then_send`: lượt ngay sau Admin retry, querydr trước, thấy 01 / 00 thì gửi đúng một lần;
- * - `query_only`: mọi lượt khác, querydr và không bao giờ gửi.
- *
- * Dòng `requested` có `last_error_kind = 'data'` hoặc `attempt_count >= RETRY_LIMIT` chỉ có thể do
- * Admin retry (hai ca đó đều đã `failed`); `unfinished_claims = 1` bảo đảm lượt đó chưa chạy dở.
- */
-export type RefundRoundPlan = 'send' | 'query_then_send' | 'query_only';
-
-export function planRound(row: {
-  attemptCount: number;
-  lastErrorKind: RefundErrorKind | null;
-  unfinishedClaims: number;
-}): RefundRoundPlan {
-  if (row.unfinishedClaims !== 1) return 'query_only';
-  if (row.attemptCount === 0 && row.lastErrorKind === null) return 'send';
-  if (row.lastErrorKind === 'data' || row.attemptCount >= RETRY_LIMIT) return 'query_then_send';
-  return 'query_only';
+export interface RefundMarkedFailed {
+  refundId: number;
+  status: 'failed';
+  failureReason: string;
 }
 
-type SendRow = {
-  id: string;
-  status: RefundStatus;
-  kind: RefundKind;
-  top_up_id: string;
-  amount_vnd: string;
-  attempt_count: number;
-  last_error_kind: RefundErrorKind | null;
-  requested_by: string | null;
-  credit_account_id: string;
-  gateway_reference: string;
-  gateway_transaction_no: string | null;
-  amount_paid_vnd: string;
-  late_gateway_ref: string | null;
-  late_amount_vnd: string | null;
-  created_at: Date;
+export interface RefundRedone {
+  refundId: number;
+  status: 'requested';
+}
+
+type RefundLog = {
+  level: 'log' | 'warn' | 'error';
+  event: string;
+  fields: Record<string, unknown>;
 };
 
 type LockedRefund = {
@@ -101,123 +91,35 @@ type LockedRefund = {
   status: RefundStatus;
   kind: RefundKind;
   top_up_id: string;
-  attempt_count: number;
-  unfinished_claims?: number;
+  gateway_refund_no: string | null;
+  completed_at: Date | null;
 };
 
-/** Kết quả một lượt, đã quy về thứ STM-10 cần. */
-type RoundOutcome =
-  | {
-      kind: 'done';
-      refundNo: string | null;
-      viaQuery: boolean;
-      transactionType?: string;
-      transactionStatus: string;
-    }
-  | { kind: RefundErrorKind; message: string; fields?: Record<string, unknown> };
-
-type RefundLog = {
-  level: 'log' | 'warn' | 'error';
-  event: string;
-  fields: Record<string, unknown>;
-  /** Log phụ ghi sau commit (điều chỉnh hoá đơn, Phần 9b). */
-  after?: RefundLog[];
-  /** Vừa tạo điều chỉnh hoá đơn: `kickAdjust` sau commit. */
-  kickAdjust?: boolean;
+/** Phần cần sau commit của `confirmDone`. */
+type ConfirmOutcome = {
+  result: RefundConfirmed;
+  kind: RefundKind;
+  topUpId: number;
+  after: RefundLog[];
+  kickAdjust: boolean;
 };
 
-/** Tham số gửi VNPay theo kind (bảng 2.1); `null` + lý do khi dòng không gửi được. */
-function refundInput(r: SendRow): { input: RefundInput } | { invalid: string } {
-  const late = r.kind === 'late_payment';
-  const transactionNo = late ? r.late_gateway_ref : r.gateway_transaction_no;
-  const original = late ? r.late_amount_vnd : r.amount_paid_vnd;
-  if (!transactionNo || original === null) return { invalid: 'missing_gateway_transaction_no' };
-  const amountVnd = Number(r.amount_vnd);
-  const originalAmountVnd = Number(original);
-  if (amountVnd > originalAmountVnd) return { invalid: 'amount_exceeds_original' };
-  return {
-    input: {
-      refundId: Number(r.id),
-      gatewayReference: r.gateway_reference,
-      originalTransactionNo: transactionNo,
-      originalAmountVnd,
-      createdAt: r.created_at,
-      amountVnd,
-      requestedBy: r.requested_by === null ? null : Number(r.requested_by),
-    },
-  };
-}
-
-function fromSend(result: RefundResult): RoundOutcome {
-  switch (result.kind) {
-    case 'accepted':
-      return {
-        kind: 'done',
-        refundNo: result.refundNo,
-        viaQuery: false,
-        transactionStatus: result.transactionStatus,
-      };
-    case 'rejected':
-      return {
-        kind: 'data',
-        message: `vnpay_rejected rc=${result.responseCode} ts=${result.transactionStatus ?? '-'}`,
-      };
-    case 'in_progress':
-      return {
-        kind: 'transient',
-        message: 'vnpay_in_progress rc=94',
-        fields: {
-          verified: result.verified,
-          ...(result.unverified && {
-            unverified_response_code: result.unverified.responseCode ?? null,
-            has_secure_hash: result.unverified.hasSecureHash,
-          }),
-        },
-      };
-    case 'unknown':
-      return {
-        kind: 'transient',
-        message: `vnpay_unknown ${result.reason} rc=${result.responseCode ?? '-'}`,
-        fields: unverifiedFields(result.unverified),
-      };
-  }
-}
-
-/** Mã thô CHƯA xác thực, chỉ để đọc log (như `querydr_result` của 8b). */
-function unverifiedFields(
-  u: { responseCode?: string; message?: string; hasSecureHash: boolean } | undefined,
-): Record<string, unknown> {
-  if (!u) return {};
-  return {
-    unverified_response_code: u.responseCode ?? null,
-    unverified_message: u.message ?? null,
-    has_secure_hash: u.hasSecureHash,
-  };
+function uniqueViolation(error: unknown): string | null {
+  const e = error as { code?: string; constraint?: string } | null;
+  return e && e.code === '23505' ? (e.constraint ?? '') : null;
 }
 
 @Injectable()
-export class RefundService implements BackgroundWork, OnModuleInit {
-  readonly name = REFUND_SEND_WORK;
+export class RefundService {
   private readonly stm = new RefundStateMachine();
   private readonly logger = new Logger(RefundService.name);
-  private warnedUnconfigured = false;
 
   constructor(
     @Inject(DB) private readonly db: Db,
-    private readonly vnpay: VnpayAdapter,
-    @Optional() private readonly runner?: BackgroundWorkRunner,
-    @Optional()
-    @Inject(BACKGROUND_WORK_CONFIG)
-    private readonly workConfig?: BackgroundWorkConfig,
-    // Phần 9b. Tuỳ chọn để test cũ dựng service như trước; BillingModule luôn tiêm (có test). Thiếu
-    // mà refund `top_up` / `account_closure` done → log error `invoice_adjustment_service_missing`.
+    // Phần 9b. Tuỳ chọn để test dựng service không cần hoá đơn; BillingModule luôn tiêm (có test).
+    // Thiếu mà refund `top_up` / `account_closure` done → log error `invoice_adjustment_service_missing`.
     @Optional() private readonly eInvoices?: EInvoiceService,
   ) {}
-
-  /** Luôn đăng ký, kể cả khi `BILLING_WORKER_ENABLED=false` (billing/CLAUDE.md). */
-  onModuleInit(): void {
-    this.runner?.register(this);
-  }
 
   /** STM-10 #1: tạo refund `requested` trong transaction quyết định hoàn của bên gọi. */
   async create(c: LedgerClient, input: CreateRefundInput): Promise<number> {
@@ -231,338 +133,245 @@ export class RefundService implements BackgroundWork, OnModuleInit {
     return Number(row.id);
   }
 
-  /** Chạy sớm việc gửi hoàn (gọi SAU commit). Không có runner (test dựng tay) → bỏ qua. */
-  kickSend(): void {
-    this.runner?.kick(this.name);
-  }
-
   /**
-   * Vòng quét (D7): `status = 'requested' AND next_attempt_at <= now()`. VNPay chưa cấu hình → không
-   * giữ chỗ dòng nào, trả 0, warn một lần mỗi tiến trình.
+   * STM-10 #2 (SD-2e phần 3): Admin nhập mã hoàn của cổng → `done`, `completed_at = now()`; cùng
+   * transaction ghi `late_refunded_at` (late_payment) / `closure_refunded_at` (refund closure cuối
+   * cùng) và tạo hoá đơn điều chỉnh (`top_up` / `account_closure`). Sau commit chỉ `kickAdjust`.
+   *
+   * Gọi lại với đúng mã trên refund đã `done` bằng mã đó → trả kết quả cũ (`alreadyDone`), không ghi.
+   *
+   * @throws RefundNotFound — không có refund
+   * @throws RefundNoUsed — mã đã ghi cho refund khác
+   * @throws InvalidTransition('STM-10', from, 'ADMIN_CONFIRMED') — `failed`, hoặc `done` bằng mã khác
+   * @throws Error('refund_invalid_gateway_refund_no') — mã sai dạng (route phải kiểm trước)
    */
-  async runDue(limit: number, signal: AbortSignal): Promise<number> {
-    if (!this.workConfig) throw new Error('refund_send_missing_config');
-    if (!this.vnpay.configured) {
-      if (!this.warnedUnconfigured) {
-        this.warnedUnconfigured = true;
-        this.log('warn', 'refund_send_unconfigured', {
-          detail: 'thiếu VNPAY_TMN_CODE / VNPAY_HASH_SECRET, refund requested giữ nguyên',
-        });
-      }
-      return 0;
+  async confirmDone(
+    refundId: number,
+    gatewayRefundNo: string,
+    adminId: number,
+  ): Promise<RefundConfirmed> {
+    const refundNo = parseGatewayRefundNo(gatewayRefundNo);
+    if (refundNo === null) throw new Error('refund_invalid_gateway_refund_no');
+    let out: ConfirmOutcome;
+    try {
+      out = await this.transaction((c) => this.confirmLocked(c, refundId, refundNo));
+    } catch (error) {
+      // Hai refund khác nhau cùng mã ghi đồng thời: kiểm trước trong tx không thấy nhau.
+      if (uniqueViolation(error) === 'refunds_gateway_refund_no_key')
+        throw new RefundNoUsed(refundNo);
+      throw error;
     }
-    return runLeasedBatch(
-      this.db.$client,
-      {
-        table: 'refunds',
-        statuses: ['requested'],
-        leaseMs: this.workConfig.leaseMs,
-        limit,
-        onExhausted: (locked, c) => this.onClaimsExhausted(c, locked as LockedRefund),
-      },
-      (row) => this.send(row, signal),
-      signal,
-      this.logger,
-    );
-  }
-
-  /** SD-2e `send` cho MỘT dòng đã giữ chỗ: gọi VNPay ngoài transaction → tx2 → STM-10 → ghi. */
-  async send(row: LeasedRow, signal?: AbortSignal): Promise<void> {
-    const r = (
-      await this.db.$client.query<SendRow>(
-        `SELECT f.id, f.status, f.kind, f.top_up_id, f.amount_vnd, f.attempt_count,
-                f.last_error_kind, f.requested_by, t.credit_account_id, t.gateway_reference,
-                t.gateway_transaction_no, t.amount_paid_vnd, t.late_gateway_ref, t.late_amount_vnd,
-                t.created_at
-         FROM refunds f JOIN top_ups t ON t.id = f.top_up_id WHERE f.id = $1`,
-        [row.id],
-      )
-    ).rows[0];
-    if (!r || r.status !== 'requested') return;
-
-    const outcome = await this.callGateway(r, row, signal);
-    // `null` = shutdown giữa querydr và gửi: chưa gửi gì. Đã có kết quả thì vẫn chạy tx2 dù signal đã
-    // abort: bỏ một kết quả `accepted` có thể dẫn tới hoàn hai lần qua Admin retry. Runner chờ lượt
-    // này xong trước khi DbModule đóng pool; pool đã đóng thì tx2 lỗi, dòng giữ lease như khi sập.
-    if (outcome === null) return;
-
-    const log = await this.transaction(async (c) => {
-      // Khoá bảng cha TRƯỚC `refunds`: `refundLatePayment` giữ `top_ups` rồi INSERT `refunds`, đóng
-      // tài khoản giữ `credit_accounts` rồi INSERT `refunds`; ngược thứ tự sẽ deadlock.
-      if (outcome.kind === 'done') {
-        if (r.kind === 'late_payment')
-          await c.query('SELECT 1 FROM top_ups WHERE id = $1 FOR UPDATE', [r.top_up_id]);
-        else if (r.kind === 'account_closure')
-          await c.query('SELECT 1 FROM credit_accounts WHERE id = $1 FOR UPDATE', [
-            r.credit_account_id,
-          ]);
-      }
-      const locked = await lockLeased<LockedRefund>(c, 'refunds', row);
-      if (!locked) {
-        return {
-          level: 'log',
-          event: 'refund_lease_lost',
-          fields: { refund_id: row.id, outcome: outcome.kind },
-        } as RefundLog;
-      }
-      return this.applyOutcome(c, locked, r, outcome);
-    });
-    this.log(log.level, log.event, log.fields);
-    for (const extra of log.after ?? []) this.log(extra.level, extra.event, extra.fields);
-    if (log.kickAdjust) {
+    const base = {
+      refund_id: refundId,
+      top_up_id: out.topUpId,
+      kind: out.kind,
+      admin_id: adminId,
+      gateway_refund_no: refundNo,
+    };
+    if (out.result.alreadyDone) {
+      this.log('log', 'refund_confirm_repeated', base);
+      return out.result;
+    }
+    this.log('log', 'refund_confirmed', base);
+    for (const extra of out.after) this.log(extra.level, extra.event, extra.fields);
+    if (out.kickAdjust) {
       try {
         this.eInvoices?.kickAdjust();
       } catch (error) {
         // Đã commit: chạy sớm chỉ là tối ưu, vòng quét vẫn bắt điều chỉnh đến hạn.
         this.log('error', 'invoice_adjustment_kick_failed', {
-          refund_id: row.id,
+          refund_id: refundId,
           error: error instanceof Error ? error.message : String(error),
         });
       }
     }
+    return out.result;
   }
 
   /**
-   * Admin retry (STM-10 #5; route, phân quyền ở Phần 10): `failed → requested`, GIỮ `attempt_count`,
-   * `unfinished_claims = 0`, đến hạn ngay. Lượt kế luôn querydr trước.
-   *
-   * **Admin retry là khẳng định "đã kiểm trên cổng VNPay là chưa hoàn"**: nếu querydr thấy giao dịch
-   * trả 01 / 00, lượt này được gửi đúng một lần. Phần 10 phải hiện cảnh báo này trên nút retry.
+   * STM-10 #3: cổng từ chối → `failed`, ghi `failure_reason`. Tiền ở lại với yêu cầu hoàn, không
+   * trả lại ví (STM-10 ghi chú).
    *
    * @throws RefundNotFound — không có refund
-   * @throws InvalidTransition('STM-10', from, 'ADMIN_RETRY') — trạng thái khác `failed`
+   * @throws InvalidTransition('STM-10', from, 'ADMIN_MARKED_FAILED') — không ở `requested`
+   * @throws Error('refund_invalid_failure_reason') — lý do sai dạng (route phải kiểm trước)
    */
-  async retry(refundId: number, adminId: number): Promise<RefundRetryResult> {
-    const out = await this.transaction(async (c) => {
-      const row = (
-        await c.query<LockedRefund>(
-          'SELECT id, status, kind, top_up_id, attempt_count FROM refunds WHERE id = $1 FOR UPDATE',
-          [refundId],
-        )
-      ).rows[0];
-      if (!row) throw new RefundNotFound(refundId);
-      const step = this.stm.apply(row.status, 'ADMIN_RETRY');
+  async markFailed(refundId: number, reason: string, adminId: number): Promise<RefundMarkedFailed> {
+    const failureReason = parseFailureReason(reason);
+    if (failureReason === null) throw new Error('refund_invalid_failure_reason');
+    const row = await this.transaction(async (c) => {
+      const locked = await this.lockRefund(c, refundId);
+      const step = this.stm.apply(locked.status, 'ADMIN_MARKED_FAILED');
       await c.query(
-        `UPDATE refunds SET status = $2::refund_status, next_attempt_at = now(),
-           unfinished_claims = 0, updated_at = now() WHERE id = $1`,
+        `UPDATE refunds SET status = $2::refund_status, failure_reason = $3, updated_at = now()
+         WHERE id = $1`,
+        [refundId, step.to, failureReason],
+      );
+      return locked;
+    });
+    this.log('log', 'refund_marked_failed', {
+      refund_id: refundId,
+      top_up_id: Number(row.top_up_id),
+      kind: row.kind,
+      admin_id: adminId,
+      reason: failureReason,
+    });
+    return { refundId, status: 'failed', failureReason };
+  }
+
+  /**
+   * STM-10 #4: Admin làm lại → `requested`, chờ CSKH hoàn lại trên cổng. Giữ `failure_reason` của
+   * lần thất bại trước (dấu vết cho CSKH; lần thất bại sau ghi đè).
+   *
+   * @throws RefundNotFound — không có refund
+   * @throws InvalidTransition('STM-10', from, 'ADMIN_REDO') — không ở `failed`
+   */
+  async redo(refundId: number, adminId: number): Promise<RefundRedone> {
+    const row = await this.transaction(async (c) => {
+      const locked = await this.lockRefund(c, refundId);
+      const step = this.stm.apply(locked.status, 'ADMIN_REDO');
+      await c.query(
+        `UPDATE refunds SET status = $2::refund_status, updated_at = now() WHERE id = $1`,
         [refundId, step.to],
       );
-      return { refundId, status: step.to, attemptCount: Number(row.attempt_count) };
+      return locked;
     });
-    this.log('log', 'refund_admin_retry', {
-      refund_id: out.refundId,
+    this.log('log', 'refund_redo', {
+      refund_id: refundId,
+      top_up_id: Number(row.top_up_id),
+      kind: row.kind,
       admin_id: adminId,
-      attempt_count: out.attemptCount,
     });
-    try {
-      this.kickSend();
-    } catch (error) {
-      // Đã commit: chạy sớm chỉ là tối ưu, vòng quét vẫn bắt dòng đến hạn.
-      this.log('error', 'refund_admin_retry_kick_failed', {
-        refund_id: out.refundId,
-        error: error instanceof Error ? error.message : String(error),
-      });
-    }
-    return out;
+    return { refundId, status: 'requested' };
   }
 
-  /** Gọi VNPay theo `planRound`. `null` = đang shutdown giữa querydr và gửi. */
-  private async callGateway(
-    r: SendRow,
-    row: LeasedRow,
-    signal?: AbortSignal,
-  ): Promise<RoundOutcome | null> {
-    const built = refundInput(r);
-    if ('invalid' in built) return { kind: 'data', message: built.invalid };
-    const plan = planRound({
-      attemptCount: Number(r.attempt_count),
-      lastErrorKind: r.last_error_kind,
-      unfinishedClaims: row.unfinishedClaims,
-    });
-    if (plan === 'send') return fromSend(await this.vnpay.refund(built.input, signal));
-
-    const q = await this.vnpay.queryRefundState(built.input, signal);
-    switch (q.kind) {
-      case 'refunded':
-        return {
-          kind: 'done',
-          refundNo: null,
-          viaQuery: true,
-          transactionType: q.transactionType,
-          transactionStatus: q.transactionStatus,
-        };
-      case 'refund_rejected':
-        return { kind: 'data', message: `vnpay_refund_rejected ts=${q.transactionStatus}` };
-      case 'payment_only':
-        if (plan === 'query_only') return { kind: 'transient', message: 'querydr_payment_only' };
-        if (signal?.aborted) return null;
-        return fromSend(await this.vnpay.refund(built.input, signal));
-      case 'unresolved':
-        return {
-          kind: 'transient',
-          message: `querydr_unresolved ${q.reason} rc=${q.responseCode ?? '-'}`,
-          fields: unverifiedFields(q.unverified),
-        };
-    }
-  }
-
-  /**
-   * Hết lượt giữ chỗ (D7): tx riêng của `runLeasedBatch`, dòng đã khoá bằng lease, KHÔNG gọi VNPay.
-   * `requested → failed` (#4), `attempt_count = max(+1, RETRY_LIMIT)`. Log sau commit.
-   */
-  private async onClaimsExhausted(
-    c: LedgerClient,
-    locked: LockedRefund,
-  ): Promise<() => Promise<void>> {
-    const id = Number(locked.id);
-    const attemptCount = Math.max(Number(locked.attempt_count) + 1, RETRY_LIMIT);
-    const step = this.stm.apply(locked.status, 'ATTEMPT_FAILED', {
-      errorKind: 'transient',
-      attemptCount,
-    });
-    await c.query(
-      `UPDATE refunds SET status = $2::refund_status, attempt_count = $3,
-         last_error_kind = 'transient', last_error_message = 'retry_exhausted',
-         last_attempt_at = now(), next_attempt_at = NULL, updated_at = now()
-       WHERE id = $1`,
-      [id, step.to, attemptCount],
-    );
-    const fields = {
-      refund_id: id,
-      top_up_id: Number(locked.top_up_id),
-      attempt_count: attemptCount,
-      reason: 'retry_exhausted',
-      unfinished_claims: locked.unfinished_claims ?? null,
-    };
-    return async () => this.log('error', 'refund_failed', fields);
-  }
-
-  /** tx2: áp kết quả lên dòng đã khoá theo lease. */
-  private async applyOutcome(
+  private async confirmLocked(
     c: PoolClient,
-    locked: LockedRefund,
-    r: SendRow,
-    outcome: RoundOutcome,
-  ): Promise<RefundLog> {
-    const id = Number(locked.id);
-    const attemptCount = Number(locked.attempt_count) + 1;
-    const base = {
-      refund_id: id,
-      top_up_id: Number(locked.top_up_id),
-      attempt_count: attemptCount,
-    };
-
-    if (outcome.kind === 'done') {
-      const step = this.stm.apply(locked.status, 'GATEWAY_CONFIRMED');
-      await c.query(
+    refundId: number,
+    refundNo: string,
+  ): Promise<ConfirmOutcome> {
+    // 1. Đọc không khoá: kind / top_up_id / tài khoản không đổi sau khi tạo.
+    const head = (
+      await c.query<{ kind: RefundKind; top_up_id: string; credit_account_id: string }>(
+        `SELECT f.kind, f.top_up_id, t.credit_account_id
+         FROM refunds f JOIN top_ups t ON t.id = f.top_up_id WHERE f.id = $1`,
+        [refundId],
+      )
+    ).rows[0];
+    if (!head) throw new RefundNotFound(refundId);
+    // 2. Bảng cha trước `refunds` (thứ tự khoá ở đầu file).
+    if (head.kind === 'late_payment')
+      await c.query('SELECT 1 FROM top_ups WHERE id = $1 FOR UPDATE', [head.top_up_id]);
+    else if (head.kind === 'account_closure')
+      await c.query('SELECT 1 FROM credit_accounts WHERE id = $1 FOR UPDATE', [
+        head.credit_account_id,
+      ]);
+    // 3. Khoá refund, kiểm trạng thái.
+    const locked = await this.lockRefund(c, refundId);
+    const topUpId = Number(locked.top_up_id);
+    if (locked.status === 'done' && locked.gateway_refund_no === refundNo) {
+      return {
+        result: {
+          refundId,
+          status: 'done',
+          gatewayRefundNo: refundNo,
+          completedAt: locked.completed_at!,
+          alreadyDone: true,
+        },
+        kind: locked.kind,
+        topUpId,
+        after: [],
+        kickAdjust: false,
+      };
+    }
+    const step = this.stm.apply(locked.status, 'ADMIN_CONFIRMED');
+    // 4. Guard STM-10 "mã chưa ghi lần nào"; ca đua hai refund do UNIQUE bắt (confirmDone).
+    const used = await c.query('SELECT 1 FROM refunds WHERE gateway_refund_no = $1 AND id <> $2', [
+      refundNo,
+      refundId,
+    ]);
+    if (used.rowCount) throw new RefundNoUsed(refundNo);
+    // 5. Ghi done.
+    const done = (
+      await c.query<{ completed_at: Date }>(
         `UPDATE refunds SET status = $2::refund_status, gateway_refund_no = $3,
-           confirmed_via_query = $4, completed_at = now(), next_attempt_at = NULL,
-           attempt_count = $5, last_attempt_at = now(), updated_at = now()
-         WHERE id = $1`,
-        [id, step.to, outcome.refundNo, outcome.viaQuery, attemptCount],
-      );
-      if (r.kind === 'late_payment')
-        await c.query(
-          `UPDATE top_ups t SET late_refunded_at = f.completed_at, updated_at = now()
-           FROM refunds f WHERE f.id = $1 AND t.id = f.top_up_id`,
-          [id],
-        );
-      else if (r.kind === 'account_closure')
-        await c.query(
-          `UPDATE credit_accounts a SET closure_refunded_at = now(), updated_at = now()
-           WHERE a.id = $1 AND a.status = 'closed' AND a.closure_refunded_at IS NULL
-             AND NOT EXISTS (
-               SELECT 1 FROM refunds f JOIN top_ups t ON t.id = f.top_up_id
-               WHERE t.credit_account_id = a.id AND f.kind = 'account_closure'
-                 AND f.status <> 'done')`,
-          [r.credit_account_id],
-        );
-      const adjustment = await this.requestAdjustment(c, id, r);
-      const doneLog: RefundLog = outcome.viaQuery
-        ? {
-            level: 'log',
-            event: 'refund_done_via_query',
-            fields: {
-              ...base,
-              vnp_TransactionType: outcome.transactionType,
-              vnp_TransactionStatus: outcome.transactionStatus,
-            },
-          }
-        : {
-            level: 'log',
-            event: 'refund_done',
-            fields: {
-              ...base,
-              gateway_refund_no: outcome.refundNo,
-              vnp_TransactionStatus: outcome.transactionStatus,
-            },
-          };
-      return { ...doneLog, ...adjustment };
-    }
-
-    const step = this.stm.apply(locked.status, 'ATTEMPT_FAILED', {
-      errorKind: outcome.kind,
-      attemptCount,
-    });
-    const message = outcome.message.slice(0, LAST_ERROR_MESSAGE_MAX);
-    let delayMs: number | null = null;
-    if (step.retry) {
-      const next = nextRetry(attemptCount);
-      if (next.exhausted) throw new Error('refund_retry_schedule_mismatch');
-      delayMs = next.delayMs;
-    }
-    const updated = (
-      await c.query<{ next_attempt_at: string | null }>(
-        `UPDATE refunds SET status = $2::refund_status, attempt_count = $3,
-           last_error_kind = $4::e_invoice_error_kind, last_error_message = $5,
-           last_attempt_at = now(),
-           next_attempt_at = CASE WHEN $6::bigint IS NULL THEN NULL
-                                  ELSE now() + $6::bigint * interval '1 millisecond' END,
-           updated_at = now()
-         WHERE id = $1
-         RETURNING next_attempt_at::text AS next_attempt_at`,
-        [id, step.to, attemptCount, outcome.kind, message, delayMs],
+           completed_at = now(), updated_at = now()
+         WHERE id = $1 RETURNING completed_at`,
+        [refundId, step.to, refundNo],
       )
     ).rows[0]!;
-    const fields = {
-      ...base,
-      last_error_kind: outcome.kind,
-      last_error_message: message,
-      ...outcome.fields,
+    // 6. Mốc trên bảng cha.
+    if (locked.kind === 'late_payment')
+      await c.query(
+        `UPDATE top_ups t SET late_refunded_at = f.completed_at, updated_at = now()
+         FROM refunds f WHERE f.id = $1 AND t.id = f.top_up_id`,
+        [refundId],
+      );
+    else if (locked.kind === 'account_closure')
+      await c.query(
+        `UPDATE credit_accounts a SET closure_refunded_at = now(), updated_at = now()
+         WHERE a.id = $1 AND a.status = 'closed' AND a.closure_refunded_at IS NULL
+           AND NOT EXISTS (
+             SELECT 1 FROM refunds f JOIN top_ups t ON t.id = f.top_up_id
+             WHERE t.credit_account_id = a.id AND f.kind = 'account_closure'
+               AND f.status <> 'done')`,
+        [head.credit_account_id],
+      );
+    // 7. Hoá đơn điều chỉnh (khoá `e_invoices` gốc sau `refunds`).
+    const adjustment = await this.requestAdjustment(c, refundId, locked.kind, topUpId);
+    return {
+      result: {
+        refundId,
+        status: 'done',
+        gatewayRefundNo: refundNo,
+        completedAt: done.completed_at,
+        alreadyDone: false,
+      },
+      kind: locked.kind,
+      topUpId,
+      ...adjustment,
     };
-    return step.to === 'failed'
-      ? { level: 'error', event: 'refund_failed', fields }
-      : {
-          level: 'warn',
-          event: 'refund_attempt_failed',
-          fields: { ...fields, next_attempt_at: updated.next_attempt_at },
-        };
+  }
+
+  private async lockRefund(c: PoolClient, refundId: number): Promise<LockedRefund> {
+    const row = (
+      await c.query<LockedRefund>(
+        `SELECT id, status, kind, top_up_id, gateway_refund_no, completed_at
+         FROM refunds WHERE id = $1 FOR UPDATE`,
+        [refundId],
+      )
+    ).rows[0];
+    if (!row) throw new RefundNotFound(refundId);
+    return row;
   }
 
   /**
-   * Phần 9b, trong tx2 sau khi ghi `done`: điều chỉnh hoá đơn cho `top_up` / `account_closure`
+   * Phần 9b, trong transaction ghi `done`: điều chỉnh hoá đơn cho `top_up` / `account_closure`
    * (`late_payment` không có hoá đơn gốc, D5). `adjustForRefund` chỉ ném cho lỗi lập trình; ca dữ liệu
    * trả `skipped` nên refund luôn chuyển được sang `done`. Trả log phụ + cờ kick để ghi sau commit.
    */
   private async requestAdjustment(
     c: PoolClient,
     refundId: number,
-    r: SendRow,
-  ): Promise<Pick<RefundLog, 'after' | 'kickAdjust'>> {
-    if (r.kind !== 'top_up' && r.kind !== 'account_closure') return {};
-    const fields = { refund_id: refundId, top_up_id: Number(r.top_up_id), kind: r.kind };
+    kind: RefundKind,
+    topUpId: number,
+  ): Promise<{ after: RefundLog[]; kickAdjust: boolean }> {
+    if (kind !== 'top_up' && kind !== 'account_closure') return { after: [], kickAdjust: false };
+    const fields = { refund_id: refundId, top_up_id: topUpId, kind };
     if (!this.eInvoices) {
       return {
         after: [{ level: 'error', event: 'invoice_adjustment_service_missing', fields }],
+        kickAdjust: false,
       };
     }
     const adj = await this.eInvoices.adjustForRefund(c, refundId);
     if ('skipped' in adj) {
       return {
         after: [{ level: 'warn', event: `invoice_adjustment_${adj.skipped}`, fields }],
+        kickAdjust: false,
       };
     }
-    if (!adj.created) return {};
+    if (!adj.created) return { after: [], kickAdjust: false };
     return {
       after: [
         {

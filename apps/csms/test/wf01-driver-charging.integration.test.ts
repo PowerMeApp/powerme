@@ -1019,7 +1019,7 @@ describeDb('WP3/T31 WF-01 service journey with real OCPP + Postgres', () => {
     await q(`INSERT INTO tariff_periods(operator_id,band,time_start,time_end,price_per_kwh_vnd,effective_from)
       SELECT operator_id,'peak','12:00','24:00',1,current_date-2 FROM sites LIMIT 1`);
   }
-  it('T72 two 0.4 VND portions sum to 1 VND, not two independently rounded zeroes', async () => {
+  it('TC-F11-02 T72 two 0.4 VND portions sum to 1 VND, not two independently rounded zeroes', async () => {
     await twoBands();
     const sid = await pricingFixture(utcTime(4, 59), utcTime(5, 1), 800);
     const op = await operator();
@@ -1046,7 +1046,7 @@ describeDb('WP3/T31 WF-01 service journey with real OCPP + Postgres', () => {
       )[0],
     ).toEqual({ exact: '800', rounded: '1' });
   });
-  it('T72 same daily tariff survives midnight as two distinct segments', async () => {
+  it('TC-F11-01 T72 same daily tariff survives midnight as two distinct segments', async () => {
     await q('UPDATE tariff_periods SET price_per_kwh_vnd=1');
     const sid = await pricingFixture(utcTime(16, 59), utcTime(17, 1), 800, {
       boundary: utcTime(17, 0),
@@ -2431,7 +2431,7 @@ describeDb('WP3/T31 WF-01 service journey with real OCPP + Postgres', () => {
     );
     expect(startCount).toBe(0);
   });
-  it('another driver cannot read progress/intent/statement or stop a session', async () => {
+  it('TC-F07-03 another driver cannot read progress/intent/statement or stop a session', async () => {
     const sid = await observedStart();
     await expect(service.progress(other, sid)).rejects.toThrow('not_found');
     await expect(service.getStart(other, 'start')).rejects.toThrow('not_found');

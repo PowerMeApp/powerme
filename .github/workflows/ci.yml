@@ -83,6 +83,12 @@ jobs:
           MB03_TEST_ADMIN_DATABASE_URL: postgresql://powerme:powerme@127.0.0.1:5432/postgres
           MB03_ALLOW_CREATE_TEST_DATABASE: 'true'
 
+      # Chưa đặt --min nên bước này không làm CI đỏ; bật --min 73 qua PR riêng khi đủ ca.
+      - name: Đếm test case Report 5 (T112)
+        run: |
+          node --test scripts/tc-coverage.test.mjs
+          npm run tc:coverage
+
       - name: Build
         run: npm run build
 
