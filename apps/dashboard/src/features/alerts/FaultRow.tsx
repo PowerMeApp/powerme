@@ -244,7 +244,7 @@ export function FaultRow({ fault }: { fault: OperatorFault }) {
                 </fieldset>
                 <p className="muted">
                   Lệnh này khởi động lại cả trụ sạc. Sự cố chuyển sang "Đang khởi động lại" cho tới
-                  khi connector hoạt động lại hoặc hết hạn chờ.
+                  khi súng hoạt động lại hoặc hết hạn chờ.
                 </p>
               </>
             )}

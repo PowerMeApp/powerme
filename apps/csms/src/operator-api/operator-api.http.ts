@@ -12,10 +12,12 @@
  *   GET  /api/operator/v1/sessions?queue=, POST …/sessions/{id}/assign|close|resolve  (FE-12, screen 23,
  *        operator-sessions.ts; logic in Trí's SessionReviewService / UnattributedSessionService)
  *   GET  /api/operator/v1/revenue[.csv], GET /api/admin/v1/revenue[.csv]  (T108a, revenue-report.ts)
+ *   GET  /api/operator/v1/faults/stats, GET /api/admin/v1/faults/stats  (home page charts, fault-stats.ts)
  *   GET  /api/admin/v1/transactions[.csv]  (T108b, admin-transactions.ts)
  *   GET  /api/admin/v1/billing/exceptions, POST …/billing/e-invoices/{id}/retry,
  *        …/billing/top-ups/{id}/recheck|exception-reviewed, …/billing/payment-conflicts/{id}/review
- *        (T32 Phần 10a, admin-billing.ts)
+ *        (T32 Phần 10a, admin-billing.ts); …/billing/top-ups/{id}/refund|late-refund,
+ *        GET …/billing/refunds, POST …/billing/refunds/{id}/confirm|fail|redo (hoàn thủ công)
  *   GET  /api/admin/v1/me     admin
  *   GET  /api/admin/v1/summary  admin  (FE-14, screen 27, admin-platform.ts)
  *   GET  /api/admin/v1/users?role=driver&q=  admin  (T161 driver search for screen 30, admin-users.ts)
@@ -46,6 +48,7 @@ import {
   runBillingRoute,
   type AdminBillingDeps,
 } from './admin-billing.js';
+import { faultStats, matchFaultStatsRoute } from './fault-stats.js';
 import { matchFaultRoute, runFaultRoute } from './operator-faults.js';
 import { matchSessionRoute, runSessionRoute, type SessionQueueDeps } from './operator-sessions.js';
 import {
@@ -89,7 +92,7 @@ export const OPERATOR_API_PATH = /^\/api\/(auth|operator|admin)\/v1(?:\/|\?|$)/;
 
 /** Paths that take a query string (contract §2.2a: RolesGuard runs first, then the parameters). */
 const QUERY_PATHS =
-  /^\/api\/(?:operator\/v1\/(?:faults|charge-points|sessions|sites|tariffs|promotions|revenue(?:\.csv)?)|admin\/v1\/(?:(?:revenue|transactions)(?:\.csv)?|users|operators|network\/charge-points))$/;
+  /^\/api\/(?:operator\/v1\/(?:faults(?:\/stats)?|charge-points|sessions|sites|tariffs|promotions|revenue(?:\.csv)?)|admin\/v1\/(?:(?:revenue|transactions)(?:\.csv)?|faults\/stats|users|operators|network\/charge-points|billing\/refunds))$/;
 const LOCAL_ORIGIN = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/;
 const BODY_LIMIT = 16 * 1024;
 
@@ -133,7 +136,7 @@ export function createOperatorApiListener(
     }
     if (req.method === 'OPTIONS') {
       res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
-      res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type');
+      res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type, Idempotency-Key');
       res.writeHead(204).end();
       return;
     }
@@ -175,7 +178,8 @@ export function createOperatorApiListener(
       return send(res, result.status, result.body);
     }
     const [, surface, rest] = /^\/api\/(auth|operator|admin)\/v1(\/.*)?$/.exec(url.pathname) ?? [];
-    // Only the fault, charge point, session, site, revenue, transactions and users routes take a query; elsewhere it is 400.
+    // Only the fault, charge point, session, site, revenue, transactions, users and billing refund
+    // list routes take a query; elsewhere it is 400.
     if (url.search && !QUERY_PATHS.test(url.pathname)) throw new AuthError(400, 'invalid_input');
 
     if (surface === 'auth') {
@@ -194,6 +198,21 @@ export function createOperatorApiListener(
     if (surface !== 'operator' && surface !== 'admin') throw new AuthError(404, 'not_found');
     const role = surface === 'operator' ? 'operator_staff' : 'admin';
     const principal = await rolesGuard(req, role, db, config, driverConfig);
+    // Before the fault list: `/faults/stats` is not a fault id.
+    const faultStatsRoute = matchFaultStatsRoute(surface, rest ?? '', url.searchParams);
+    if (faultStatsRoute) {
+      allow(req, res, 'GET');
+      // Operator scope from RolesGuard's DB read, never from the request (BR-P16).
+      return send(
+        res,
+        200,
+        await faultStats(db, {
+          ...faultStatsRoute,
+          operatorId: surface === 'operator' ? principal.operatorId! : faultStatsRoute.operatorId,
+          realOnly: surface === 'admin',
+        }),
+      );
+    }
     const faultRoute =
       surface === 'operator' ? matchFaultRoute(rest ?? '', url.searchParams) : null;
     if (faultRoute) {
@@ -324,7 +343,8 @@ export function createOperatorApiListener(
       send(res, 200, await runAdminSummary(db, monitoring.thresholds));
       return;
     }
-    const billingRoute = surface === 'admin' ? matchBillingRoute(rest ?? '') : null;
+    const billingRoute =
+      surface === 'admin' ? matchBillingRoute(rest ?? '', url.searchParams) : null;
     if (billingRoute) {
       allow(req, res, billingRouteMethod(billingRoute));
       if (!billing)

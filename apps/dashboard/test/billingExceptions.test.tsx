@@ -66,7 +66,9 @@ describe('Ngoại lệ thanh toán (màn 32 / 33)', () => {
     const tabs = within(screen.getByRole('group', { name: 'Danh sách' }));
     expect(tabs.getByRole('button', { name: /Trả muộn/ })).toHaveAttribute('aria-pressed', 'true');
     expect(tabs.getAllByLabelText('1 mục')).toHaveLength(3);
-    expect(screen.getByText(/luồng hoàn tiền thủ công \(T152\)/)).toBeInTheDocument();
+    expect(screen.getByText(/không cộng vào tín dụng sạc/)).toBeInTheDocument();
+    // No internal task / rule codes on screen.
+    expect(document.body.textContent).not.toMatch(/BR-P\d|T1\d\d/);
     expect(screen.getByRole('link', { name: 'Ngoại lệ thanh toán' })).toHaveAttribute(
       'href',
       '/admin/billing',

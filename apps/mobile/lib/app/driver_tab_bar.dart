@@ -33,9 +33,7 @@ class DriverTabBar extends StatelessWidget {
     final largeLabels = MediaQuery.textScalerOf(context).scale(11.5) > 17;
     return Material(
       color: PowerMeColors.graphite,
-      shape: Border(
-        top: BorderSide(color: PowerMeColors.outline.withValues(alpha: .45)),
-      ),
+      shape: const Border(top: BorderSide(color: PowerMeColors.hairline)),
       child: SafeArea(
         top: false,
         child: Padding(

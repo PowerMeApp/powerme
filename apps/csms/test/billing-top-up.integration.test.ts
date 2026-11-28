@@ -374,7 +374,7 @@ describeDb('billing: tạo top-up VNPay — TopUpService (T32 Phần 5, SD-2a)',
 
   // ---------------------------------------------------------------------------------------------
   describe('dùng điểm (BR-P35)', () => {
-    it('dùng 600 điểm → giảm 6.000, trả 194.000; điểm CHƯA bị trừ (chỉ trừ lúc cộng tiền, SD-2b)', async () => {
+    it('TC-F08-02 dùng 600 điểm → giảm 6.000, trả 194.000; điểm CHƯA bị trừ (chỉ trừ lúc cộng tiền, SD-2b)', async () => {
       const d = await driverWith(0);
       await earn(d, 1_000, '30 days');
       const before = await counts();

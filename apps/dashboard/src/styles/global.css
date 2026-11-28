@@ -397,6 +397,10 @@ p {
   background: var(--graphite);
   border-color: var(--line-soft);
 }
+.table-scroll {
+  max-height: var(--table-max-h, 640px);
+  overflow-y: auto;
+}
 .table-toolbar {
   padding: 16px;
   border-bottom: 1px solid var(--line);
@@ -452,6 +456,11 @@ p {
 .data-table .num-col {
   text-align: right;
   white-space: nowrap;
+}
+.data-table tfoot {
+  position: sticky;
+  bottom: 0;
+  z-index: 1;
 }
 .data-table tfoot th,
 .data-table tfoot td {
@@ -906,4 +915,115 @@ textarea.input {
   justify-content: space-between;
   align-items: center;
   gap: 8px;
+}
+
+/* ---- home page statistics (features/insights) ---- */
+.insight-kpis {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
+}
+.insights-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  margin-top: 16px;
+}
+@media (max-width: 900px) {
+  .insights-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .insights-grid .tile-wide {
+    grid-column: auto;
+  }
+}
+.chart-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+}
+.chart-head p {
+  margin: 0;
+}
+.delta {
+  margin: 0;
+}
+.delta[data-trend='up'] > span[aria-hidden] {
+  color: var(--teal);
+}
+.delta[data-trend='down'] > span[aria-hidden] {
+  color: var(--danger);
+}
+.inline-stats {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 20px;
+  font-size: var(--text-sm);
+}
+.rank-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 12px;
+}
+.rank-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  font-size: var(--text-sm);
+}
+.rank-name {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.rank-bar {
+  margin-top: 6px;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--line-soft);
+  overflow: hidden;
+}
+.rank-bar > span {
+  display: block;
+  height: 100%;
+  border-radius: 3px;
+  background: #00b39b;
+}
+.kind-bar {
+  display: flex;
+  gap: 2px;
+  height: 12px;
+  border-radius: 6px;
+  overflow: hidden;
+}
+.kind-bar > span {
+  flex-basis: 0;
+  min-width: 4px;
+}
+.kind-legend {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+  font-size: var(--text-sm);
+}
+.kind-legend li {
+  display: grid;
+  grid-template-columns: 12px 1fr auto 40px;
+  align-items: center;
+  gap: 10px;
+}
+.kind-legend .small {
+  text-align: right;
+}
+.swatch {
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
 }

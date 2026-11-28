@@ -30,6 +30,21 @@ import { onlineBadge } from '../../ui/tones';
 
 export const DETAIL_POLL_MS = 5000;
 
+/** Remote command names in Vietnamese; the OCPP action name stays in the tooltip. */
+const COMMAND_ACTION: Record<string, string> = {
+  RemoteStartTransaction: 'Bắt đầu sạc từ xa',
+  RemoteStopTransaction: 'Dừng sạc từ xa',
+  Reset: 'Khởi động lại',
+  ChangeAvailability: 'Đổi trạng thái súng',
+  ChangeConfiguration: 'Đổi cấu hình trụ',
+  GetConfiguration: 'Đọc cấu hình trụ',
+  TriggerMessage: 'Yêu cầu trụ gửi bản tin',
+  SetChargingProfile: 'Đặt giới hạn công suất',
+  ReserveNow: 'Giữ chỗ súng',
+  CancelReservation: 'Huỷ giữ chỗ',
+  UnlockConnector: 'Mở khoá súng',
+};
+
 const COMMAND_STATUS: Record<RemoteCommandRow['status'], [string, string]> = {
   pending: ['Chờ gửi', 'muted'],
   sent: ['Đã gửi', ''],
@@ -106,7 +121,7 @@ export function ChargePointDetailPage() {
           className="note"
         >
           {OFFLINE_CARD_RISK[data.offline_card_risk_reason ?? 'not_checked']}. Khi trụ mất mạng, thẻ
-          lạ hoặc thẻ đã khoá có thể vẫn sạc được và chỉ bị phát hiện khi trụ nối lại (BR-P52).
+          lạ hoặc thẻ đã khoá có thể vẫn sạc được và chỉ bị phát hiện khi trụ nối lại.
           {data.offline_auth_check
             ? ` Lần kiểm cuối: ${time(data.offline_auth_check.checked_at)}.`
             : ''}
@@ -208,7 +223,9 @@ export function ChargePointDetailPage() {
                 const [label, tone] = COMMAND_STATUS[cmd.status];
                 return (
                   <Table.Tr key={cmd.id} data-tone={tone || undefined}>
-                    <Table.Td className="cell-title">{cmd.action}</Table.Td>
+                    <Table.Td className="cell-title">
+                      <span title={cmd.action}>{COMMAND_ACTION[cmd.action] ?? cmd.action}</span>
+                    </Table.Td>
                     <Table.Td>{cmd.connector_no ? `Súng ${cmd.connector_no}` : 'Cả trụ'}</Table.Td>
                     <Table.Td>
                       <StatusBadge tone={tone}>{label}</StatusBadge>

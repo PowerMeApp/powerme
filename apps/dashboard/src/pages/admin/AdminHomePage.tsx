@@ -1,10 +1,11 @@
 import { RfidProtection } from '../../components/RfidProtection';
 /**
  * Screen 27 — Admin Dashboard (hub, FE-14, UC-ADM-07). Greeting from /me, then:
- *   - platform statistics (20/11): revenue of the current month from T108's
- *     GET /api/admin/v1/revenue (group_by=operator, top 3 Operators), the charge point network
+ *   - platform statistics (20/11): the charge point network
  *     (in service online / offline, connectors in the driver groups, open faults) and the
  *     Operators / Charging Stations — from GET /api/admin/v1/summary;
+ *   - revenue and faults of the whole platform (features/insights: today / 7 days / months, trends,
+ *     top 5 Operators, faults per day) from T108's revenue and GET /api/admin/v1/faults/stats;
  *   - the SRS counts: user accounts by role, charge points by lifecycle, RFID cards by status.
  * A group that is 0 is hidden — never a placeholder (D36). The billing exceptions tile (FE-09) shows
  * only when there is work, highlighted, and opens screen 32. Polled every 10 s.
@@ -18,7 +19,6 @@ import {
   IconCircleCheck,
   IconCreditCard,
   IconPlug,
-  IconReportMoney,
   IconTopologyStar3,
   IconBuildingCommunity,
   IconUsers,
@@ -26,20 +26,10 @@ import {
 import { Link } from 'react-router';
 import type { AdminSummary, ChargePointLifecycle } from '@powerme/shared';
 import { CountBadge } from '../../components/CountBadge';
-import {
-  errorMessage,
-  useAdminMeQuery,
-  useAdminSummaryQuery,
-  useRevenueQuery,
-} from '../../core/api/api';
+import { errorMessage, useAdminMeQuery, useAdminSummaryQuery } from '../../core/api/api';
 import { LIFECYCLE } from '../../features/chargePoints/format';
-import {
-  defaultPeriod,
-  formatCount,
-  formatDay,
-  formatKwh,
-  formatVnd,
-} from '../../features/revenue/revenueModel';
+import { HomeInsights } from '../../features/insights/HomeInsights';
+import { formatCount } from '../../features/revenue/revenueModel';
 import { CountList } from '../../ui/CountList';
 import { Notice } from '../../ui/Notice';
 import { PageHeader, Section } from '../../ui/PageHeader';
@@ -86,55 +76,6 @@ const LIFECYCLE_ORDER: ChargePointLifecycle[] = [
   'disabled',
   'decommissioned',
 ];
-
-/** Revenue of the current month, all Operators, with the top three (T108 report). */
-function MonthRevenue() {
-  const { from, to } = defaultPeriod();
-  const { data, error } = useRevenueQuery(
-    { scope: 'admin', from, to, group_by: 'operator' },
-    { pollingInterval: 60_000, skipPollingIfUnfocused: true },
-  );
-  const top = data
-    ? [...data.rows]
-        .filter((r) => r.csms_billed_revenue_vnd > 0)
-        .sort((a, b) => b.csms_billed_revenue_vnd - a.csms_billed_revenue_vnd)
-        .slice(0, 3)
-    : [];
-  return (
-    <StatCard
-      label="Doanh thu tháng này"
-      icon={<IconReportMoney size={18} />}
-      to="/admin/revenue"
-      wide
-    >
-      {error && !data ? (
-        <p role="alert">{errorMessage(error)}</p>
-      ) : !data ? (
-        <p className="muted">Đang tải…</p>
-      ) : (
-        <>
-          <Figure value={formatVnd(data.totals.csms_billed_revenue_vnd)} />
-          <p className="muted small">
-            {formatDay(from)} – {formatDay(to)} ·{' '}
-            {formatCount(data.totals.csms_billed_session_count)} phiên tính tiền ·{' '}
-            {formatKwh(data.totals.csms_billed_energy_wh)}
-            {data.totals.unattributed_session_count > 0 &&
-              ` · ${formatCount(data.totals.unattributed_session_count)} phiên không định danh`}
-          </p>
-          {top.length > 0 && (
-            <ol className="top-list" aria-label="Đơn vị vận hành dẫn đầu">
-              {top.map((r) => (
-                <li key={r.key}>
-                  {r.operator_name ?? r.key} <b>{formatVnd(r.csms_billed_revenue_vnd)}</b>
-                </li>
-              ))}
-            </ol>
-          )}
-        </>
-      )}
-    </StatCard>
-  );
-}
 
 export function AdminHomePage() {
   const me = useAdminMeQuery();
@@ -225,7 +166,6 @@ export function AdminHomePage() {
           )}
           <Section label="Thống kê chung">
             <div className="tiles">
-              <MonthRevenue />
               {inService > 0 && net && (
                 <StatCard
                   label="Mạng lưới trụ sạc"
@@ -282,6 +222,8 @@ export function AdminHomePage() {
               )}
             </div>
           </Section>
+
+          <HomeInsights scope="admin" />
 
           {users + chargePoints + cards > 0 && (
             <Section label="Tài khoản, trụ sạc, thẻ">

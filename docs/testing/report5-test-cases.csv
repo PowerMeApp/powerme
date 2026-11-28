@@ -1,0 +1,120 @@
+id,sheet,owner,run,title
+TC-F01-01,Features,Sơn,Man,Register with consent in ≤ 3 screens
+TC-F01-02,Features,Sơn,Man,Add a vehicle with connector type
+TC-F01-03,Features,Sơn,CI,Closure refused while a top-up is open
+TC-F02-01,Features,Trí,CI,Search groups compatible guns per station with status metadata
+TC-F02-02,Features,Trí,CI,Stale/offline/unknown never shown as Available
+TC-F02-03,Features,Trí,CI,VinFast-only stations hidden by default (BR-P03)
+TC-F03-01,Features,Nghĩa,Stg,Up to 3 suggestions in ≤ 2 s for 50 stations
+TC-F03-02,Features,Nghĩa,CI,Order matches the time-until-charged formula
+TC-F03-03,Features,Nghĩa,CI,Routing failure falls back to straight-line estimate
+TC-F04-01,Features,Sơn,CI,App start → progress → energy limit → statement (DS-01)
+TC-F04-02,Features,Sơn,CI,Concurrent retries with the same key start once
+TC-F04-03,Features,Sơn,CI,Insufficient credit refused (DS-02)
+TC-F05-01,Features,Nghĩa,CI,Driver reports a fault
+TC-F05-02,Features,Nghĩa,CI,Repeated reports label the connector
+TC-F05-03,Features,Nghĩa,CI,Operator of another operator cannot see the report
+TC-F06-01,Features,Khang,CI,Credit after a verified IPN (STM-4 #2)
+TC-F06-02,Features,Khang,CI,Duplicate IPN credits once
+TC-F06-03,Features,Khang,CI,DB refuses one VNPay transaction on two top-ups
+TC-F07-01,Features,Khang,CI,Balance equals the ledger sum
+TC-F07-02,Features,Khang,Man,History lists top-ups and charges with e-invoice link
+TC-F07-03,Features,Khang,CI,Another driver cannot read a statement
+TC-F08-01,Features,Khang,CI,Points earned once per settled session (BR-P34)
+TC-F08-02,Features,Khang,CI,Redeem points at top-up (BR-P35)
+TC-F08-03,Features,Khang,CI,Points expire after 12 months
+TC-F09-01,Features,Ân,CI,Operator onboards a registered charge point
+TC-F09-02,Features,Ân,CI,Concurrent onboardings get distinct display codes
+TC-F09-03,Features,Ân,CI,Onboarding rejections
+TC-F10-01,Features,Nghĩa,CI,Monitoring summary reflects live data
+TC-F10-02,Features,Nghĩa,CI,Remote stop of an active session
+TC-F10-03,Features,Nghĩa,CI,Remote reset refused by the charge point
+TC-F11-01,Features,Khang,CI,Daily tariff split at midnight
+TC-F11-02,Features,Khang,CI,Round once per session (BR-P45)
+TC-F11-03,Features,Khang,CI,Operator cannot edit another operator's tariff
+TC-F12-01,Features,Trí,CI,"Unknown tag → unattributed, not billed"
+TC-F12-02,Features,Trí,CI,"Blocked/unlinked card start still recorded, unattributed"
+TC-F12-03,Features,Trí,CI,Operator resolves a review session
+TC-F13-01,Features,Nghĩa,CI,Endpoint × role matrix
+TC-F13-02,Features,Nghĩa,CI,Admin and another driver's vehicle cannot start
+TC-F13-03,Features,Nghĩa,CI,Locked account cannot log in
+TC-F14-01,Features,Ân,CI,Only an Admin registers a serial
+TC-F14-02,Features,Ân,CI,Authorize follows card status (STM-8)
+TC-F14-03,Features,Ân,CI,Free-vend card never debits
+TC-F15-01,Features,Trí,CI,Disconnect trace: no duplicate or lost transactions
+TC-F15-02,Features,Trí,CI,Duplicate StartTransaction returns the same id (ADR-0010)
+TC-F15-03,Features,Trí,CI,"Stale meterStop conflict → review, billing held"
+TC-F16-01,Features,Khang,CI,Revenue total = sum of reconciled sessions
+TC-F16-02,Features,Khang,CI,Operator sees only own stations; Admin sees all Operators
+TC-F16-03,Features,Khang,Man,CSV export matches the screen
+TC-WF01,Workflows,Sơn,CI,WF-01 find and charge end to end
+TC-WF02,Workflows,Khang,Man,WF-02 top up with points on the VNPay sandbox
+TC-WF03,Workflows,Trí,CI,WF-03 disconnect and reconnect
+TC-WF04,Workflows,Nghĩa,CI,WF-04 fault → acknowledge → remote reset → resolved
+TC-WF05,Workflows,Ân,CI,WF-05 onboard and bring into service
+TC-STM1-1,STM-1 Session,Sơn,CI,Session [*] → pending on REMOTE_START_ACCEPTED
+TC-STM1-2,STM-1 Session,Sơn,CI,Session [*] → active on START_TRANSACTION
+TC-STM1-3,STM-1 Session,Sơn,CI,Session pending → active on START_TRANSACTION
+TC-STM1-4,STM-1 Session,Trí,CI,Session pending → failed on START_TIMEOUT
+TC-STM1-5,STM-1 Session,Sơn,CI,Session active → paused on STATUS_SUSPENDED
+TC-STM1-6,STM-1 Session,Sơn,CI,Session paused → active on STATUS_CHARGING
+TC-STM1-7,STM-1 Session,Sơn,CI,Session active → stopping on STOP_REQUESTED
+TC-STM1-8,STM-1 Session,Sơn,CI,Session paused → stopping on STOP_REQUESTED
+TC-STM1-9a,STM-1 Session,Trí,CI,Session stopping → active on REMOTE_STOP_REJECTED
+TC-STM1-9,STM-1 Session,Trí,CI,Session stopping → closed on STOP_TRANSACTION
+TC-STM1-10,STM-1 Session,Trí,CI,Session active → closed on STOP_TRANSACTION
+TC-STM1-11,STM-1 Session,Trí,CI,Session paused → closed on STOP_TRANSACTION
+TC-STM1-12,STM-1 Session,Sơn,CI,Session closed → reconciled on RECONCILE_OK
+TC-STM1-12a,STM-1 Session,Trí,CI,Session closed → review on RECONCILE_CONFLICT
+TC-STM1-13,STM-1 Session,Trí,CI,Session active → orphaned on STATION_OFFLINE
+TC-STM1-14,STM-1 Session,Trí,CI,Session paused → orphaned on STATION_OFFLINE
+TC-STM1-15,STM-1 Session,Trí,CI,Session stopping → orphaned on STATION_OFFLINE
+TC-STM1-16,STM-1 Session,Trí,CI,Session orphaned → reconciled on RECONCILE_OK
+TC-STM1-16a,STM-1 Session,Trí,CI,Session orphaned → review on RECONCILE_CONFLICT or HARD_CAP_EXCEEDED
+TC-STM1-17,STM-1 Session,Trí,CI,Session review → reconciled on OPERATOR_RESOLVED
+TC-STM1-18,STM-1 Session,Trí,CI,Session orphaned → active on LIVE_MESSAGE
+TC-STM1-19,STM-1 Session,Trí,CI,Session reconciled → review on LATE_SAMPLE_CONFLICT
+TC-STM2-01,STM-2 Connector,Ân,CI,Connector Available → Preparing
+TC-STM2-02,STM-2 Connector,Ân,CI,Connector Preparing → Available
+TC-STM2-03,STM-2 Connector,Ân,CI,Connector Preparing → Charging
+TC-STM2-04,STM-2 Connector,Ân,CI,Connector Charging → SuspendedEV
+TC-STM2-05,STM-2 Connector,Ân,CI,Connector SuspendedEV → Charging
+TC-STM2-06,STM-2 Connector,Ân,CI,Connector Charging → SuspendedEVSE
+TC-STM2-07,STM-2 Connector,Ân,CI,Connector SuspendedEVSE → Charging
+TC-STM2-08,STM-2 Connector,Ân,CI,Connector Charging → Finishing
+TC-STM2-09,STM-2 Connector,Ân,CI,Connector SuspendedEV → Finishing
+TC-STM2-10,STM-2 Connector,Ân,CI,Connector SuspendedEVSE → Finishing
+TC-STM2-11,STM-2 Connector,Trí,CI,Connector Finishing → Available
+TC-STM2-12,STM-2 Connector,Trí,CI,Connector Unavailable → Available
+TC-STM2-13,STM-2 Connector,Nghĩa,CI,Connector Available → Unavailable
+TC-STM2-14,STM-2 Connector,Nghĩa,CI,Connector Charging → Faulted
+TC-STM2-15,STM-2 Connector,Nghĩa,CI,Connector Faulted → Available
+TC-STM2-16,STM-2 Connector,Nghĩa,CI,Connector Faulted → Unavailable
+TC-STM2-17,STM-2 Connector,Trí,CI,Connector Available → Reserved → Preparing / Available [Should]
+TC-STM3-1,STM-3 Charge Point,Ân,CI,Charge Point [*] → registered (REGISTER)
+TC-STM3-2,STM-3 Charge Point,Ân,CI,registered → awaiting_connection (ONBOARD)
+TC-STM3-3,STM-3 Charge Point,Ân,CI,awaiting_connection → in_service (FIRST_CONNECT)
+TC-STM3-4,STM-3 Charge Point,Ân,CI,in_service → disabled (DISABLE)
+TC-STM3-5,STM-3 Charge Point,Ân,CI,disabled → in_service (ENABLE)
+TC-STM3-6,STM-3 Charge Point,Ân,CI,disabled → decommissioned (DECOMMISSION)
+TC-STM4-01,STM-4 TopUp,Khang,CI,TopUp [*] → pending (create)
+TC-STM4-02,STM-4 TopUp,Khang,CI,pending → credited (IPN success)
+TC-STM4-03,STM-4 TopUp,Khang,CI,pending → failed (IPN failure/cancel)
+TC-STM4-04,STM-4 TopUp,Khang,CI,"pending → expired (15 min, not paid)"
+TC-STM4-05,STM-4 TopUp,Khang,CI,failed → late payment (IPN success after the top-up failed)
+TC-STM4-06,STM-4 TopUp,Khang,CI,expired is final; a later payment is a late payment for Admin refund
+TC-STM4-07,STM-4 TopUp,Khang,CI,credited → refunded (Admin)
+TC-STM4-08,STM-4 TopUp,Khang,CI,pending → credited after 15 min when the gateway query says paid
+TC-STM6-t1,STM-6 Fault,Nghĩa,CI,FaultEvent [*] → raised (first Faulted)
+TC-STM6-t2,STM-6 Fault,Nghĩa,CI,FaultEvent raised → acknowledged on ACKNOWLEDGE
+TC-STM6-t3,STM-6 Fault,Nghĩa,CI,FaultEvent raised → resolved on CONNECTOR_AVAILABLE
+TC-STM6-t4,STM-6 Fault,Nghĩa,CI,FaultEvent acknowledged → resetting on RESET_SENT
+TC-STM6-t5,STM-6 Fault,Nghĩa,CI,FaultEvent resetting → resolved on CONNECTOR_AVAILABLE
+TC-STM6-t6,STM-6 Fault,Nghĩa,CI,FaultEvent resetting → acknowledged on RESET_FAILED
+TC-STM6-t7,STM-6 Fault,Nghĩa,CI,FaultEvent acknowledged → resolved (Available or operator close)
+TC-NFR-01,NFR,Trí,CI,Reliability: 0 acknowledged messages lost (NFR-OCPP-03)
+TC-NFR-02,NFR,Ân,Stg,Data completeness RQ1 (NFR-REC-01)
+TC-NFR-03,NFR,Trí,Stg,Performance p95 ≤ 1 s with 50 charge points (NFR-OCPP-01)
+TC-NFR-04,NFR,Sơn,Stg,QR to session started p95 ≤ 10 s (NFR-US-01)
+TC-NFR-05,NFR,Ân,CI,Endpoint × role matrix 100% (NFR-SEC-01)
+TC-NFR-06,NFR,Nghĩa,CI,Offline alert within 900 s (NFR-OCPP-07)
