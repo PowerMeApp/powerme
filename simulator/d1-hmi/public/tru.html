@@ -809,6 +809,27 @@
         }
       }
 
+      /* ── QA-11: trụ một súng — ẩn súng B, panel súng A rộng ra ──────────── */
+      .one-gun #gun2,
+      .one-gun #jr2 {
+        display: none;
+      }
+      @media (min-width: 1280px) {
+        .one-gun main {
+          grid-template-columns: minmax(0, 2fr) minmax(0, 27rem);
+        }
+      }
+      @media (min-width: 768px) {
+        .one-gun #phien .grid {
+          grid-template-columns: minmax(0, 1fr);
+        }
+      }
+      @media (min-width: 768px) and (max-width: 1279px) {
+        .one-gun main {
+          grid-template-columns: minmax(0, 1fr);
+        }
+      }
+
       /* ── Màn vừa: hai cột, khối mạng/nhật ký xuống dưới ─────────────────── */
       @media (max-width: 1279px) {
         main {
