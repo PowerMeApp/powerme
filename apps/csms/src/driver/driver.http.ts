@@ -61,13 +61,15 @@ const BASE = '/api/driver/v1';
 const LOCAL_ORIGIN = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/;
 /** BE-21/BE-22: body JSON của /auth/* và POST /charges tối đa 16 KiB (refresh token ≤ 8192 ký tự, form đăng ký). */
 const AUTH_BODY_LIMIT = 16 * 1024;
-// BE-49: logout thu hồi mọi token của tài xế (tăng users.token_version, migration 0033).
+// BE-49: logout = đăng xuất THIẾT BỊ NÀY (thu hồi refresh token đó, migration 0033).
 const AUTH_ROUTES = ['register', 'login', 'refresh', 'logout'] as const;
 /**
  * BE-49 (UC-ACC-02, màn 13): hồ sơ có email / số điện thoại tách khỏi `GET /me` — `/me` là bootstrap
  * app gọi thường xuyên và cố ý không trả trường riêng tư (test MB03 driver-smart).
  */
 const PROFILE_PATH = `${BASE}/me/profile`;
+/** BE-49: đăng xuất MỌI thiết bị (Cài đặt → Bảo mật), cần access token; tăng users.token_version. */
+const LOGOUT_ALL_PATH = `${BASE}/me/logout-all`;
 
 export function createDriverListener(
   db: Db,
@@ -108,7 +110,8 @@ export function createDriverListener(
         const write =
           chargeRouteMethod(preflightPath) === 'POST' ||
           topUpRouteMethod(preflightPath) === 'POST' ||
-          FAULT_REPORT_PATH.test(preflightPath);
+          FAULT_REPORT_PATH.test(preflightPath) ||
+          preflightPath === LOGOUT_ALL_PATH;
         // BE-49: PATCH /me/profile cần Content-Type như route xe.
         const vehicleAllow =
           preflightPath === PROFILE_PATH ? 'GET, PATCH, OPTIONS' : vehicleRouteAllow(preflightPath);
@@ -239,6 +242,17 @@ export function createDriverListener(
           setAllow: (methods) => res.setHeader('Allow', methods),
         });
         send(res, result.status, result.body);
+        return;
+      }
+      if (path === LOGOUT_ALL_PATH) {
+        if (req.method !== 'POST') {
+          res.setHeader('Allow', 'POST, OPTIONS');
+          throw new DriverApiError(405, 'method_not_allowed');
+        }
+        if (url.search) throw new DriverApiError(400, 'invalid_input');
+        await drainBody(req, res);
+        await accounts.logoutAll(driverId);
+        send(res, 204, null);
         return;
       }
       if (path === PROFILE_PATH) {

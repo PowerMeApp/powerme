@@ -13,15 +13,20 @@
  *   nên từ chối refresh token; `refresh()` đòi `typ: refresh+jwt` và `token_use: refresh` nên từ
  *   chối access token. Sống `DRIVER_API_REFRESH_TTL_S` (mặc định 30 ngày).
  *
- * BE-49 — thu hồi: mọi token mang claim `ver` = `users.token_version` lúc phát (migration 0033;
- * token cũ không có `ver` coi là 0). `authenticateDriver` và `refresh()` so lại với DB mỗi lần.
- * `logout()` tăng `token_version` → mọi access + refresh token đã phát cho tài xế đó bị từ chối ngay
- * (đăng xuất mọi thiết bị; không có bảng refresh token nên không thu hồi riêng từng máy). Khoá tài
- * khoản (account_status ≠ active) cũng có hiệu lực ngay vì mọi request kiểm lại DB. Refresh không
- * xoay vòng (không phát refresh token mới), nên hết 30 ngày phải đăng nhập lại.
+ * BE-49 — đăng xuất, hai mức (migration 0033):
+ * - Mỗi lần đăng nhập là một "phiên thiết bị": jti (UUID) của refresh token, chép vào claim `sid`
+ *   của mọi access token phát từ nó. `logout()` (thiết bị này) ghi jti vào
+ *   `driver_refresh_revocations` → refresh token đó và access token mang `sid` đó bị từ chối; thiết
+ *   bị khác không ảnh hưởng.
+ * - Mọi token mang claim `ver` = `users.token_version` lúc phát. `logoutAll()` (Cài đặt → đăng xuất
+ *   mọi thiết bị) tăng số này → mọi token cũ bị từ chối.
+ * `authenticateDriver` và `refresh()` kiểm cả hai với DB mỗi lần. Token phát trước BE-49 không có
+ * `ver` (coi là 0) và không có `sid` (chỉ chết khi refresh token của nó bị thu hồi, hoặc khi đăng xuất
+ * mọi thiết bị, hoặc hết 15 phút). Khoá tài khoản (account_status ≠ active) cũng có hiệu lực ngay.
+ * Refresh không xoay vòng (không phát refresh token mới), nên hết 30 ngày phải đăng nhập lại.
  *
- * BE-49 — `updateProfile()` (UC-ACC-02, PATCH /me): đổi họ tên và số điện thoại; email là định danh
- * đăng nhập, chưa có luồng xác minh nên không đổi qua API này.
+ * BE-49 — `updateProfile()` (UC-ACC-02, PATCH /me/profile): đổi họ tên và số điện thoại; email là
+ * định danh đăng nhập, chưa có luồng xác minh nên không đổi qua API này.
  *
  * Mật khẩu băm bằng scrypt dùng lại `charge-point-credential.ts` (định dạng `scrypt$N$r$p$salt$hash`,
  * ADR-0011). Không log mật khẩu, hash hay token; response không bao giờ chứa hash.
@@ -41,6 +46,7 @@ import {
   DEFAULT_DRIVER_REFRESH_TTL_S,
   DriverApiConfig,
   DriverApiError,
+  isSessionId,
   tokenVersionClaim,
 } from './driver-auth.js';
 import { normalizePhoneNumber } from './phone-number.js';
@@ -302,43 +308,60 @@ export class DriverAccounts {
   /** Refresh token → access token mới (không phát refresh mới). Kiểm lại DB mỗi lần. */
   async refresh(body: Record<string, unknown>): Promise<DriverTokens> {
     this.assertConfigured();
-    const { subject, version } = await this.verifyRefresh(body);
+    const { subject, version, sessionId } = await this.verifyRefresh(body);
     const row = (
       await this.db.$client.query<{
         role: string;
         account_status: string;
         is_driver: boolean;
         token_version: number;
+        revoked: boolean;
       }>(
-        `SELECT u.role,u.account_status,u.token_version,(d.user_id IS NOT NULL) AS is_driver
+        `SELECT u.role,u.account_status,u.token_version,(d.user_id IS NOT NULL) AS is_driver,
+           EXISTS(SELECT 1 FROM driver_refresh_revocations r WHERE r.jti=$2::uuid) AS revoked
          FROM users u LEFT JOIN drivers d ON d.user_id=u.id WHERE u.id=$1`,
-        [subject],
+        [subject, sessionId],
       )
     ).rows[0];
     if (!row) throw new DriverApiError(401, 'invalid_refresh_token');
-    // BE-49: đã đăng xuất (token_version tăng) → refresh token cũ chết như hết hạn.
-    if (row.token_version !== version) throw new DriverApiError(401, 'invalid_refresh_token');
+    // BE-49: thiết bị này đã đăng xuất (jti bị thu hồi), hoặc đã "đăng xuất mọi thiết bị"
+    // (token_version tăng) → refresh token cũ chết như hết hạn.
+    if (row.revoked || row.token_version !== version)
+      throw new DriverApiError(401, 'invalid_refresh_token');
     if (row.role !== 'driver' || !row.is_driver) throw new DriverApiError(403, 'forbidden');
     if (row.account_status !== 'active') throw new DriverApiError(403, 'account_locked');
-    return this.issue(subject, row.token_version, false);
+    // Access token mới mang cùng `sid` = jti của refresh token → đăng xuất thiết bị này chặn được cả nó.
+    return this.issue(subject, row.token_version, sessionId);
   }
 
   /**
-   * BE-49 (UC-ACC-05). Body `{refresh_token}` — dùng refresh token chứ không phải access token vì
-   * lúc đăng xuất access token (15 phút) thường đã hết hạn. Token hợp lệ → tăng `token_version`:
-   * mọi token đã phát cho tài xế này (mọi thiết bị) bị từ chối từ request kế tiếp.
-   * Idempotent: token đúng chữ ký nhưng đã bị thu hồi (đăng xuất rồi, gửi lại) → vẫn thành công,
-   * không tăng thêm. Token sai chữ ký / sai dạng / hết hạn → 401 `invalid_refresh_token` (app vẫn
-   * xoá token cục bộ). Không kiểm account_status: tài khoản bị khoá vẫn đăng xuất được.
+   * BE-49 (UC-ACC-05) — đăng xuất **thiết bị này**. Body `{refresh_token}` (không dùng access token vì
+   * lúc đăng xuất nó thường đã hết hạn 15 phút). Ghi jti của refresh token vào
+   * `driver_refresh_revocations` (migration 0033): refresh token đó và mọi access token mang
+   * `sid` = jti đó bị từ chối từ request kế tiếp; thiết bị khác của tài xế không bị ảnh hưởng.
+   * Idempotent: gửi lại (kể cả token đã chết vì "đăng xuất mọi thiết bị") → vẫn thành công.
+   * Token sai chữ ký / sai dạng / hết hạn / thiếu jti → 401 `invalid_refresh_token` (app vẫn xoá token
+   * cục bộ). Không kiểm account_status: tài khoản bị khoá vẫn đăng xuất được.
    */
   async logout(body: Record<string, unknown>): Promise<void> {
     this.assertConfigured();
-    const { subject, version } = await this.verifyRefresh(body);
-    // Điều kiện `token_version=$2`: gửi lại / hai lần song song bằng cùng token chỉ tăng một lần.
+    const { subject, sessionId, expiresAt } = await this.verifyRefresh(body);
     await this.db.$client.query(
-      `UPDATE users SET token_version=token_version+1,updated_at=now()
-       WHERE id=$1 AND token_version=$2`,
-      [subject, version],
+      `INSERT INTO driver_refresh_revocations(jti,user_id,expires_at) VALUES($1,$2,$3)
+       ON CONFLICT (jti) DO NOTHING`,
+      [sessionId, subject, expiresAt],
+    );
+  }
+
+  /**
+   * BE-49 — "đăng xuất mọi thiết bị" (Cài đặt → Bảo mật; vd mất điện thoại). Gọi với access token
+   * của tài xế đang đăng nhập (route `POST /me/logout-all`). Tăng `users.token_version` → mọi access
+   * và refresh token đã phát, trên mọi thiết bị kể cả thiết bị đang gọi, bị từ chối ngay.
+   */
+  async logoutAll(driverId: string): Promise<void> {
+    await this.db.$client.query(
+      'UPDATE users SET token_version=token_version+1,updated_at=now() WHERE id=$1',
+      [driverId],
     );
   }
 
@@ -378,10 +401,16 @@ export class DriverAccounts {
     }
   }
 
-  /** Kiểm chữ ký + claim của refresh token; trả `sub` và `ver`. Sai bất cứ gì → 401. */
-  private async verifyRefresh(
-    body: Record<string, unknown>,
-  ): Promise<{ subject: string; version: number }> {
+  /**
+   * Kiểm chữ ký + claim của refresh token; trả `sub`, `ver`, `jti` (= mã phiên thiết bị, UUID) và
+   * `exp`. Sai bất cứ gì → 401. Mọi refresh token CSMS từng phát đều có jti UUID (BE-21).
+   */
+  private async verifyRefresh(body: Record<string, unknown>): Promise<{
+    subject: string;
+    version: number;
+    sessionId: string;
+    expiresAt: Date;
+  }> {
     onlyKeys(body, ['refresh_token']);
     const token = body['refresh_token'];
     if (
@@ -409,19 +438,30 @@ export class DriverAccounts {
         !/^[1-9][0-9]{0,18}$/.test(payload.sub) ||
         !Number.isSafeInteger(payload.exp) ||
         !Number.isSafeInteger(payload.iat) ||
-        payload.exp! - payload.iat! > ttl
+        payload.exp! - payload.iat! > ttl ||
+        !isSessionId(payload.jti)
       )
         throw new Error('claims');
-      return { subject: payload.sub, version: tokenVersionClaim(payload['ver']) };
+      return {
+        subject: payload.sub,
+        version: tokenVersionClaim(payload['ver']),
+        sessionId: payload.jti,
+        expiresAt: new Date(payload.exp! * 1000),
+      };
     } catch {
       throw new DriverApiError(401, 'invalid_refresh_token');
     }
   }
 
-  private async issue(subject: string, version: number, withRefresh = true): Promise<DriverTokens> {
+  /**
+   * `sessionId` có → chỉ phát access token (refresh) mang `sid` đó. Không có → đăng nhập mới: tạo mã
+   * phiên thiết bị mới, dùng làm jti của refresh token và `sid` của access token.
+   */
+  private async issue(subject: string, version: number, sessionId?: string): Promise<DriverTokens> {
     const secret = this.config.secret!;
     const now = Math.floor(this.now() / 1000);
-    const access = await new SignJWT({ role: 'driver', ver: version })
+    const sid = sessionId ?? randomUUID();
+    const access = await new SignJWT({ role: 'driver', ver: version, sid })
       .setProtectedHeader({ alg: 'HS256', typ: 'JWT' })
       .setSubject(subject)
       .setIssuer(this.config.issuer!)
@@ -435,7 +475,7 @@ export class DriverAccounts {
       token_type: 'Bearer',
       expires_in: DRIVER_ACCESS_TTL_S,
     };
-    if (!withRefresh) return tokens;
+    if (sessionId) return tokens;
     const ttl = this.config.refreshTtlS ?? DEFAULT_DRIVER_REFRESH_TTL_S;
     tokens.refresh_token = await new SignJWT({ token_use: 'refresh', ver: version })
       .setProtectedHeader({ alg: 'HS256', typ: REFRESH_TYP })
@@ -444,7 +484,7 @@ export class DriverAccounts {
       .setAudience(this.config.audience!)
       .setIssuedAt(now)
       .setExpirationTime(now + ttl)
-      .setJti(randomUUID())
+      .setJti(sid)
       .sign(secret);
     tokens.refresh_expires_in = ttl;
     return tokens;

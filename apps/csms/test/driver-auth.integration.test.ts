@@ -5,7 +5,7 @@ import { LoyaltyService } from '../src/billing/loyalty.service.js';
  * BE-30 — đăng ký có số điện thoại (chuẩn hoá E.164, 409 `phone_taken`) và đăng nhập bằng số.
  * Chạy bằng `npm run test:driver-discovery -w @powerme/csms` (runner tạo DB mới cho mỗi suite).
  */
-import { randomBytes } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import { SignJWT } from 'jose';
 import { Logger } from '@nestjs/common';
 import { loadConfig, type CsmsConfig } from '../src/config.js';
@@ -522,7 +522,7 @@ describeDb('BE-21 driver register / login / refresh over HTTP and dedicated Post
     });
   });
 
-  describe('BE-49 — đăng xuất thu hồi token (UC-ACC-05) và sửa profile (UC-ACC-02)', () => {
+  describe('BE-49 — đăng xuất một thiết bị / mọi thiết bị (UC-ACC-05) và sửa profile (UC-ACC-02)', () => {
     const PROFILE = '/api/driver/v1/me/profile';
     async function getProfile(token: string) {
       const response = await fetch(`${base}${PROFILE}`, {
@@ -541,61 +541,129 @@ describeDb('BE-21 driver register / login / refresh over HTTP and dedicated Post
     }
     const version = async (email: string) =>
       (await q('SELECT token_version FROM users WHERE email=$1', [email]))[0]!.token_version;
+    async function logoutAll(token: string, method = 'POST') {
+      const response = await fetch(`${base}/api/driver/v1/me/logout-all`, {
+        method,
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const text = await response.text();
+      return { response, text, body: text ? (JSON.parse(text) as any) : null };
+    }
+    const dead = async (device: { body: { access_token: string; refresh_token: string } }) => {
+      const res = await me(device.body.access_token);
+      expect([res.response.status, res.body.error]).toEqual([401, 'unauthorized']);
+      const refresh = await post('refresh', { refresh_token: device.body.refresh_token });
+      expect([refresh.response.status, refresh.body.error]).toEqual([401, 'invalid_refresh_token']);
+    };
+    const alive = async (device: { body: { access_token: string; refresh_token: string } }) => {
+      expect((await me(device.body.access_token)).response.status).toBe(200);
+      const refresh = await post('refresh', { refresh_token: device.body.refresh_token });
+      expect(refresh.response.status).toBe(200);
+      // Access token mới từ refresh vẫn thuộc phiên thiết bị đó.
+      expect((await me(refresh.body.access_token)).response.status).toBe(200);
+      return refresh.body.access_token as string;
+    };
 
-    it('logout revokes every access and refresh token of the driver, on every device', async () => {
+    it('logout ends only this device: its access and refresh tokens die, other devices stay', async () => {
       const email = 'dang.xuat@example.invalid';
       await post('register', registration(email));
-      expect(await version(email)).toBe(0);
       const phoneA = await post('login', { email, password: PASSWORD });
       const phoneB = await post('login', { email, password: PASSWORD });
-      expect((await me(phoneA.body.access_token)).response.status).toBe(200);
-      expect((await me(phoneB.body.access_token)).response.status).toBe(200);
+      // Access token đã làm mới trên A trước khi đăng xuất cũng phải chết theo (cùng sid).
+      const refreshedA = await alive(phoneA);
+      await alive(phoneB);
 
       const out = await post('logout', { refresh_token: phoneA.body.refresh_token });
-      expect(out.response.status).toBe(204);
-      expect(out.text).toBe('');
-      expect(await version(email)).toBe(1);
-      // Thiết bị A và B: access token chết ngay (không đợi hết 15 phút), refresh token cũng chết.
-      for (const device of [phoneA, phoneB]) {
-        const res = await me(device.body.access_token);
-        expect([res.response.status, res.body.error]).toEqual([401, 'unauthorized']);
-        const refresh = await post('refresh', { refresh_token: device.body.refresh_token });
-        expect([refresh.response.status, refresh.body.error]).toEqual([
-          401,
-          'invalid_refresh_token',
-        ]);
-      }
-      // Gửi lại cùng token (app thử lại khi rớt mạng) → vẫn 204, không tăng thêm.
+      expect([out.response.status, out.text]).toEqual([204, '']);
+      await dead(phoneA);
+      expect((await me(refreshedA)).response.status).toBe(401);
+      await alive(phoneB);
+      expect(await version(email)).toBe(0);
+      const rows = await q(
+        `SELECT r.user_id::text AS user_id,r.expires_at>now()+interval '29 days' AS long_lived
+         FROM driver_refresh_revocations r JOIN users u ON u.id=r.user_id WHERE u.email=$1`,
+        [email],
+      );
+      expect(rows).toHaveLength(1);
+      expect(rows[0]!.long_lived).toBe(true);
+      // Gửi lại cùng token (app thử lại khi rớt mạng) → vẫn 204, không thêm dòng.
       expect(
         (await post('logout', { refresh_token: phoneA.body.refresh_token })).response.status,
       ).toBe(204);
       expect(
-        (await post('logout', { refresh_token: phoneB.body.refresh_token })).response.status,
-      ).toBe(204);
-      expect(await version(email)).toBe(1);
-      // Đăng nhập lại: token mới mang ver 1 và dùng được; refresh của nó cũng được.
-      const again = await post('login', { email, password: PASSWORD });
-      expect((await me(again.body.access_token)).response.status).toBe(200);
-      expect(
-        (await post('refresh', { refresh_token: again.body.refresh_token })).response.status,
-      ).toBe(200);
+        await q(
+          'SELECT 1 FROM driver_refresh_revocations r JOIN users u ON u.id=r.user_id WHERE u.email=$1',
+          [email],
+        ),
+      ).toHaveLength(1);
+      // Đăng nhập lại trên A: phiên mới, dùng được.
+      await alive(await post('login', { email, password: PASSWORD }));
     });
 
-    it('keeps tokens issued before BE-49 (no ver claim) valid until the first logout', async () => {
+    it('logout-all from settings ends every device, including the calling one', async () => {
+      const email = 'dang.xuat.het@example.invalid';
+      await post('register', registration(email));
+      const phoneA = await post('login', { email, password: PASSWORD });
+      const phoneB = await post('login', { email, password: PASSWORD });
+      expect(await version(email)).toBe(0);
+
+      const out = await logoutAll(phoneB.body.access_token);
+      expect([out.response.status, out.text]).toEqual([204, '']);
+      expect(await version(email)).toBe(1);
+      await dead(phoneA);
+      await dead(phoneB);
+      // Token đã chết thì không gọi lại được (401), nên không tăng hai lần.
+      expect((await logoutAll(phoneB.body.access_token)).response.status).toBe(401);
+      expect(await version(email)).toBe(1);
+      // Đăng xuất thiết bị bằng refresh token đã chết vì logout-all → vẫn 204 (app thử lại).
+      expect(
+        (await post('logout', { refresh_token: phoneA.body.refresh_token })).response.status,
+      ).toBe(204);
+      // Đăng nhập lại: token mới mang ver 1, dùng được.
+      const again = await post('login', { email, password: PASSWORD });
+      await alive(again);
+      // Chỉ POST; không nhận query; preflight cho phép POST.
+      const get = await logoutAll(again.body.access_token, 'GET');
+      expect([get.response.status, get.response.headers.get('allow')]).toEqual([
+        405,
+        'POST, OPTIONS',
+      ]);
+      const query = await fetch(`${base}/api/driver/v1/me/logout-all?all=1`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${again.body.access_token}` },
+      });
+      expect(query.status).toBe(400);
+      const noAuth = await fetch(`${base}/api/driver/v1/me/logout-all`, { method: 'POST' });
+      expect(noAuth.status).toBe(401);
+      const preflight = await fetch(`${base}/api/driver/v1/me/logout-all`, {
+        method: 'OPTIONS',
+        headers: { Origin: 'http://localhost:5173' },
+      });
+      expect([preflight.status, preflight.headers.get('access-control-allow-methods')]).toEqual([
+        204,
+        'POST, OPTIONS',
+      ]);
+      expect(await version(email)).toBe(1);
+    });
+
+    it('keeps tokens issued before BE-49 (no ver, no sid) working until they are revoked', async () => {
       const email = 'token.cu@example.invalid';
       await post('register', registration(email));
       const id = String(
         (await q('SELECT id::text AS id FROM users WHERE email=$1', [email]))[0]!.id,
       );
       const now = Math.floor(Date.now() / 1000);
-      const legacyAccess = await new SignJWT({ role: 'driver' })
-        .setProtectedHeader({ alg: 'HS256', typ: 'JWT' })
-        .setSubject(id)
-        .setIssuer(issuer)
-        .setAudience(audience)
-        .setIssuedAt(now)
-        .setExpirationTime(now + 900)
-        .sign(secret);
+      const legacyAccess = () =>
+        new SignJWT({ role: 'driver' })
+          .setProtectedHeader({ alg: 'HS256', typ: 'JWT' })
+          .setSubject(id)
+          .setIssuer(issuer)
+          .setAudience(audience)
+          .setIssuedAt(now)
+          .setExpirationTime(now + 900)
+          .setJti(randomUUID())
+          .sign(secret);
+      // Refresh token cũ (BE-21) luôn có jti UUID nhưng không có ver.
       const legacyRefresh = await new SignJWT({ token_use: 'refresh' })
         .setProtectedHeader({ alg: 'HS256', typ: 'refresh+jwt' })
         .setSubject(id)
@@ -603,15 +671,22 @@ describeDb('BE-21 driver register / login / refresh over HTTP and dedicated Post
         .setAudience(audience)
         .setIssuedAt(now)
         .setExpirationTime(now + 3600)
+        .setJti(randomUUID())
         .sign(secret);
-      expect((await me(legacyAccess)).response.status).toBe(200);
+      const access = await legacyAccess();
+      expect((await me(access)).response.status).toBe(200);
       expect((await post('refresh', { refresh_token: legacyRefresh })).response.status).toBe(200);
+      // Đăng xuất thiết bị: refresh cũ chết. Access cũ không có sid nên sống tới khi hết 15 phút.
       expect((await post('logout', { refresh_token: legacyRefresh })).response.status).toBe(204);
-      expect((await me(legacyAccess)).response.status).toBe(401);
       expect((await post('refresh', { refresh_token: legacyRefresh })).response.status).toBe(401);
-      // ver sai kiểu (chuỗi, âm) → như token giả.
-      for (const ver of ['1', -1, 1.5]) {
-        const bad = await new SignJWT({ role: 'driver', ver })
+      expect((await me(access)).response.status).toBe(200);
+      // Đăng xuất mọi thiết bị: access cũ (ver coi là 0) chết.
+      expect((await logoutAll(access)).response.status).toBe(204);
+      expect((await me(access)).response.status).toBe(401);
+      expect((await me(await legacyAccess())).response.status).toBe(401);
+      // Claim sai kiểu → như token giả: ver chuỗi / âm / lẻ, sid không phải UUID.
+      for (const claims of [{ ver: '1' }, { ver: -1 }, { ver: 1.5 }, { ver: 1, sid: 'abc' }]) {
+        const bad = await new SignJWT({ role: 'driver', ...claims })
           .setProtectedHeader({ alg: 'HS256', typ: 'JWT' })
           .setSubject(id)
           .setIssuer(issuer)
@@ -620,6 +695,19 @@ describeDb('BE-21 driver register / login / refresh over HTTP and dedicated Post
           .setExpirationTime(now + 900)
           .sign(secret);
         expect((await me(bad)).response.status).toBe(401);
+      }
+      // Refresh token thiếu jti → không thu hồi được, nên coi là token giả.
+      const noJti = await new SignJWT({ token_use: 'refresh', ver: 1 })
+        .setProtectedHeader({ alg: 'HS256', typ: 'refresh+jwt' })
+        .setSubject(id)
+        .setIssuer(issuer)
+        .setAudience(audience)
+        .setIssuedAt(now)
+        .setExpirationTime(now + 3600)
+        .sign(secret);
+      for (const route of ['refresh', 'logout']) {
+        const res = await post(route, { refresh_token: noJti });
+        expect([res.response.status, res.body.error]).toEqual([401, 'invalid_refresh_token']);
       }
     });
 
@@ -632,17 +720,32 @@ describeDb('BE-21 driver register / login / refresh over HTTP and dedicated Post
       }
       const extra = await post('logout', { refresh_token: reg.body.refresh_token, all: true });
       expect([extra.response.status, extra.body.error]).toEqual([400, 'invalid_input']);
-      expect(await version(email)).toBe(0);
+      expect(
+        await q(
+          'SELECT 1 FROM driver_refresh_revocations r JOIN users u ON u.id=r.user_id WHERE u.email=$1',
+          [email],
+        ),
+      ).toHaveLength(0);
       // Tài khoản bị khoá vẫn đăng xuất được (thu hồi token là việc an toàn).
       await q("UPDATE users SET account_status='suspended' WHERE email=$1", [email]);
       expect(
         (await post('logout', { refresh_token: reg.body.refresh_token })).response.status,
       ).toBe(204);
-      expect(await version(email)).toBe(1);
-      // 0033: CHECK token_version >= 0.
+      // 0033: CHECK token_version >= 0; jti là khoá chính.
       await expect(
         q('UPDATE users SET token_version=-1 WHERE email=$1', [email]),
       ).rejects.toMatchObject({ constraint: 'users_token_version_check' });
+      const [row] = await q(
+        'SELECT r.jti::text AS jti,r.user_id,r.expires_at FROM driver_refresh_revocations r JOIN users u ON u.id=r.user_id WHERE u.email=$1',
+        [email],
+      );
+      await expect(
+        q('INSERT INTO driver_refresh_revocations(jti,user_id,expires_at) VALUES($1,$2,$3)', [
+          row!.jti,
+          row!.user_id,
+          row!.expires_at,
+        ]),
+      ).rejects.toMatchObject({ constraint: 'driver_refresh_revocations_pkey' });
     });
 
     it('GET/PATCH /me/profile shows and updates name and phone, and validates input', async () => {

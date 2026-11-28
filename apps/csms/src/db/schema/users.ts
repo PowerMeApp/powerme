@@ -15,6 +15,7 @@ import {
   text,
   timestamp,
   unique,
+  uuid,
   varchar,
 } from 'drizzle-orm/pg-core';
 import { staffRoleEnum, userAccountStatusEnum, userRoleEnum } from './enums.js';
@@ -78,4 +79,22 @@ export const operatorStaff = pgTable(
     staffRole: staffRoleEnum('staff_role').notNull(),
   },
   (t) => [index('operator_staff_operator_id_idx').on(t.operatorId)],
+);
+
+/**
+ * BE-49 (migration 0033): refresh token đã bị thu hồi khi tài xế "đăng xuất thiết bị này". `jti` là
+ * mã phiên thiết bị (jti của refresh token = claim `sid` của access token). Chỉ ghi thêm; dòng quá
+ * `expires_at` vô hại (token đã hết hạn) và có thể dọn sau.
+ */
+export const driverRefreshRevocations = pgTable(
+  'driver_refresh_revocations',
+  {
+    jti: uuid('jti').primaryKey(),
+    userId: bigint('user_id', { mode: 'number' })
+      .notNull()
+      .references(() => drivers.userId),
+    revokedAt: timestamp('revoked_at', { withTimezone: true }).notNull().defaultNow(),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  },
+  (t) => [index('driver_refresh_revocations_user_id_idx').on(t.userId)],
 );

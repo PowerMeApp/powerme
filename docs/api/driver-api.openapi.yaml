@@ -159,7 +159,8 @@ paths:
         không có `role`), sống `DRIVER_API_REFRESH_TTL_S` (mặc định 30 ngày) tính từ lúc đăng nhập.
         Access token không dùng làm refresh và ngược lại. Mỗi lần refresh kiểm lại DB: role driver,
         có dòng `drivers`, `account_status = active`, và claim `ver` khớp `users.token_version`
-        (BE-49: đã đăng xuất → 401 `invalid_refresh_token`). Hết hạn refresh → đăng nhập lại.
+        (BE-49: thiết bị này đã đăng xuất hoặc đã đăng xuất mọi thiết bị → 401 `invalid_refresh_token`).
+        Access token mới mang cùng `sid` (phiên thiết bị) với refresh token. Hết hạn refresh → đăng nhập lại.
       security: []
       requestBody:
         required: true
@@ -191,17 +192,18 @@ paths:
       tags: [auth]
       operationId: logoutDriver
       x-status: implemented — BE-49
-      summary: Đăng xuất — thu hồi mọi token của tài xế trên mọi thiết bị (UC-ACC-05)
+      summary: Đăng xuất thiết bị này (UC-ACC-05)
       description: |
-        Body là refresh token (không dùng access token vì lúc đăng xuất access token 15 phút thường đã
-        hết hạn). Token hợp lệ → CSMS tăng `users.token_version` (migration 0033); mọi access token và
-        refresh token đã phát cho tài xế này, **trên mọi thiết bị**, bị từ chối từ request kế tiếp
-        (401 `unauthorized` / `invalid_refresh_token`). Không có bảng refresh token nên không đăng xuất
-        riêng một máy.
+        Body là refresh token đang lưu trên máy (không dùng access token vì lúc đăng xuất access token
+        15 phút thường đã hết hạn). Mỗi lần đăng nhập là một phiên thiết bị: jti của refresh token, chép
+        vào claim `sid` của mọi access token phát từ nó. CSMS ghi jti vào `driver_refresh_revocations`
+        (migration 0033) → refresh token đó và access token của máy đó bị từ chối từ request kế tiếp
+        (401 `unauthorized` / `invalid_refresh_token`). **Thiết bị khác của tài xế không bị ảnh hưởng**;
+        muốn thoát mọi máy dùng `POST /me/logout-all`.
 
-        Idempotent: gửi lại cùng refresh token (đã bị thu hồi) → vẫn 204, không thu hồi thêm. Tài khoản
-        bị khoá vẫn đăng xuất được. **App luôn xoá token cục bộ**, kể cả khi nhận 401 hay lỗi mạng.
-        Token phát trước BE-49 không có claim `ver` được coi là `ver = 0` nên deploy không đăng xuất ai.
+        Idempotent: gửi lại cùng refresh token → vẫn 204. Tài khoản bị khoá vẫn đăng xuất được.
+        **App luôn xoá token cục bộ**, kể cả khi nhận 401 hay lỗi mạng. Access token phát trước BE-49
+        không có `sid` nên sống tới khi hết 15 phút.
       security: []
       requestBody:
         required: true
@@ -212,7 +214,7 @@ paths:
         '204': { description: Đã thu hồi (hoặc đã thu hồi từ trước) }
         '400': { $ref: '#/components/responses/AuthBadRequest' }
         '401':
-          description: '`invalid_refresh_token` — sai chữ ký, sai dạng, hết hạn hoặc là access token'
+          description: '`invalid_refresh_token` — sai chữ ký, sai dạng, hết hạn, thiếu jti hoặc là access token'
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
@@ -345,6 +347,25 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/DriverBootstrap' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+        '503': { $ref: '#/components/responses/AuthUnavailable' }
+        '500': { $ref: '#/components/responses/InternalError' }
+  /me/logout-all:
+    post:
+      tags: [auth]
+      operationId: logoutDriverEverywhere
+      x-status: implemented — BE-49
+      summary: Đăng xuất mọi thiết bị (Cài đặt → Bảo mật; vd mất điện thoại)
+      description: |
+        Cần access token (tài xế đang đăng nhập trên một máy). Không có body, không nhận query.
+        CSMS tăng `users.token_version` (migration 0033) → mọi access và refresh token đã phát cho tài
+        xế, **kể cả máy đang gọi**, bị từ chối từ request kế tiếp. App: sau 204 xoá token cục bộ và về
+        màn đăng nhập. Gọi lại bằng token cũ → 401 (token đã chết), không thu hồi thêm.
+      responses:
+        '204': { description: Đã đăng xuất mọi thiết bị }
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
