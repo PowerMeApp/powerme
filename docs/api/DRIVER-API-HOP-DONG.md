@@ -140,13 +140,21 @@ bearer, chỉ nhận `application/json` ≤ 16 KiB, trường lạ → 400:
 | `/auth/register` | `email`, `password` (8–128), `full_name`, `phone_number?` (chuẩn hoá E.164, §6a), `consent_version`, `consent: true` | 201 + token như login | 400 `consent_required` (không ghi gì, BR-P05), `invalid_email`, `invalid_password`, `invalid_input`; 409 `email_taken`, `phone_taken` |
 | `/auth/login` | `email` **hoặc** `phone_number` (đúng một), `password` | 200 `{access_token, token_type: Bearer, expires_in: 900, refresh_token, refresh_expires_in}` | 400 `invalid_input` (cả hai / không có định danh); 401 `invalid_credentials` (sai định danh = sai mật khẩu); 403 `account_locked`; 429 `too_many_attempts` |
 | `/auth/refresh` | `refresh_token` | 200 `{access_token, token_type, expires_in}` | 401 `invalid_refresh_token`; 403 `account_locked` / `forbidden` |
+| `/auth/logout` (BE-49, thiết bị này) | `refresh_token` | 204, không có body | 400 `invalid_input` (khoá lạ); 401 `invalid_refresh_token` (sai chữ ký / hết hạn / thiếu jti / là access token) |
 
 - Access token đúng chuẩn verify ở trên (HS256, `typ: JWT`, `role: driver`, 900 s), nên dùng ngay với
   `/me`, `/stations`. Refresh token cùng khoá nhưng `typ: refresh+jwt`, `token_use: refresh`, không có
   `role`: không dùng làm access token và ngược lại. Sống `DRIVER_API_REFRESH_TTL_S` (mặc định 30 ngày,
   1 giờ–90 ngày), không xoay vòng: hết hạn thì đăng nhập lại.
-- Không có bảng refresh token: không thu hồi từng token, logout = app xoá token. Khoá tài khoản
-  (`account_status` ≠ `active`) có hiệu lực ngay vì refresh và mọi request đều kiểm DB.
+- **Đăng xuất, hai mức (BE-49, UC-ACC-05, migration 0033):**
+  - *Thiết bị này* — `POST /auth/logout {refresh_token}`. Mỗi lần đăng nhập là một phiên thiết bị (jti
+    của refresh token = claim `sid` của access token). CSMS thu hồi đúng phiên đó: refresh token và
+    access token của máy này bị từ chối ngay; máy khác vẫn dùng bình thường.
+  - *Mọi thiết bị* — `POST /me/logout-all` (Bearer, Cài đặt → Bảo mật). CSMS tăng
+    `users.token_version`; mọi token mang claim `ver` cũ, kể cả máy đang gọi, bị từ chối ngay.
+  - Token phát trước BE-49 (không có `ver`, `sid`) coi là `ver = 0`, nên deploy không đăng xuất ai.
+    Khoá tài khoản (`account_status` ≠ `active`) cũng có hiệu lực ngay vì refresh và mọi request đều
+    kiểm DB.
 - Tài khoản khoá: 403 `account_locked` (F-13 "tài khoản khoá không đăng nhập được"), chỉ trả khi mật
   khẩu đúng — để app hiện "tài khoản bị khoá, liên hệ hỗ trợ" mà người dò mật khẩu không biết được.
 - Giới hạn thử sai: 5 lần / 60 s theo định danh đã chuẩn hoá (email lowercase, hoặc số E.164) + IP,
@@ -197,6 +205,45 @@ Content-Type: application/json
 - **Ngoài phạm vi:** OTP/SMS (không có nhà cung cấp SMS, không xác minh số là của người đăng ký) và
   Google/Firebase — để sau Defense 1.1 (ADR-0017). Số điện thoại hiện chỉ là định danh đăng nhập
   thay email, không chứng minh sở hữu số. Chưa có route đổi số / đổi mật khẩu.
+
+### 6b. Sửa hồ sơ và đăng xuất (BE-49, cho Sơn — màn hình 13 và nút Đăng xuất)
+
+**`GET /api/driver/v1/me/profile`** (Bearer) → 200 `{user_id, full_name, email, phone_number}`
+(`phone_number` E.164 hoặc `null`). Tách khỏi `GET /me` vì `/me` là bootstrap app gọi thường xuyên và
+cố ý không có trường riêng tư.
+
+**`PATCH /api/driver/v1/me/profile`** (Bearer, `Content-Type: application/json`) — UC-ACC-02.
+
+| Khoá | Luật |
+|---|---|
+| `full_name` | trim, 1–100 ký tự, không ký tự điều khiển |
+| `phone_number` | chuẩn hoá E.164 như đăng ký (§6a: `0912 345 678` → `+84912345678`); `null` = gỡ số |
+
+- Ít nhất một khoá; khoá khác (kể cả `email`) → 400 `invalid_input`. Email là định danh đăng nhập và
+  chưa có luồng xác minh nên không đổi được.
+- 200 trả hồ sơ sau khi sửa (cùng hình dạng `GET /me/profile`). `full_name` mới cũng hiện ở `GET /me`.
+- 409 `phone_taken`: số thuộc tài khoản khác; không trường nào bị đổi (gửi kèm `full_name` cũng không).
+  Gửi lại đúng số của chính mình → 200.
+- Sau khi gỡ số, đăng nhập bằng số đó không còn được; email vẫn được.
+
+**Đăng xuất (nút ở menu chính) — `POST /api/driver/v1/auth/logout`**, UC-ACC-05. Body
+`{"refresh_token": "…"}`, không cần header `Authorization`. 204 = đã thu hồi **thiết bị này**; máy khác
+của tài xế vẫn đăng nhập.
+
+1. Gọi `logout` với refresh token đang lưu (bỏ qua kết quả: 204, 401 hay lỗi mạng đều đi tiếp).
+2. **Luôn** xoá access + refresh token cục bộ, về màn đăng nhập.
+
+**Đăng xuất mọi thiết bị (Cài đặt → Bảo mật) — `POST /api/driver/v1/me/logout-all`**, Bearer, không
+body. Dùng khi mất điện thoại hoặc nghi lộ mật khẩu: đăng nhập trên máy khác rồi bấm.
+
+1. Hỏi xác nhận ("Bạn sẽ bị đăng xuất khỏi mọi thiết bị, kể cả máy này").
+2. Gọi `logout-all`; 204 → xoá token cục bộ, về màn đăng nhập.
+3. Máy khác nhận 401 ở request kế tiếp; refresh cũng 401 → về màn đăng nhập như khi refresh hết hạn
+   (app đã xử lý ca này).
+
+**Đóng tài khoản** (UC-ACC-02, `GET /me/account/close-preview` + `POST /me/account/close`) **chưa có**:
+Khang làm theo SD-2f / D6 (`docs/spec/WF-02_decisions.md`, T32 Phần 11) sau khi PR hoàn tiền thủ công
+merge.
 
 ## 7. Lỗi: từ `ChargingError.code` sang HTTP
 
@@ -586,3 +633,37 @@ Security giữ owner/vehicle/connector validation, khóa phiên, epoch fencing, 
 idempotency hiện có. Dữ liệu meter/clock không chắc chắn không được coi là tiền đã trả; cận trên
 chỉ bảo vệ credit. Hai dự án có scope/stack khác nên implementation giữ kiến trúc hiện tại,
 không port source; attribution bằng URL/commit/license trên, không phát sinh mã sao chép cần header.
+
+## 18. BE-50 — giá trước khi sạc (cho Sơn, Screen 5 và Screen 8)
+
+OpenAPI 0.18.0. Mỗi item của `GET /stations` và response `GET /connectors/by-code/{code}/{no}` có thêm
+trường `tariff` (schema `DriverTariffPreview`): biểu giá **hôm nay** của operator sở hữu trạm. Không có
+route mới; client cũ bỏ qua trường lạ nên không vỡ.
+
+```json
+"tariff": {
+  "currency": "VND", "unit": "kWh", "timezone": "Asia/Ho_Chi_Minh",
+  "effective_date": "2026-11-28",
+  "current": { "band": "normal", "time_start": "11:30", "time_end": "17:00", "price_per_kwh_vnd": 3800 },
+  "max_price_per_kwh_vnd": 5500,
+  "periods": [
+    { "band": "off_peak", "time_start": "00:00", "time_end": "04:00", "price_per_kwh_vnd": 2800 },
+    { "band": "normal", "time_start": "04:00", "time_end": "09:30", "price_per_kwh_vnd": 3800 }
+  ]
+}
+```
+
+- `periods` là danh sách khoảng giờ `[time_start, time_end)` theo giờ VN, phủ 00:00–24:00. Một band có
+  thể lặp lại (seed: `normal` ×3, `peak` ×2), nên app **không** gộp thành map band → giá khi hiển thị
+  lịch; gộp chỉ để in "Cao điểm 5.500 đ/kWh: 09:30–11:30, 17:00–20:00".
+- `current` là khung lúc CSMS trả lời. App không tự tính lại khung theo giờ điện thoại; khi qua
+  `current.time_end` thì gọi lại API (hoặc làm mới khi mở lại màn).
+- `max_price_per_kwh_vnd` dùng **cùng điều kiện SQL** với `POST /charges` khi giữ tạm credit
+  (BR-P18/P19), nên con số hiển thị luôn bằng con số giữ tiền. Câu gợi ý trên sheet Start: "Giữ tạm theo
+  giá cao nhất hôm nay X đ/kWh; tiền thực tế tính theo khung giờ lúc sạc, xem ở bảng kê."
+- `tariff: null` = operator chưa có biểu giá → `POST /charges` sẽ trả `tariff_unavailable`; app tắt nút
+  Start sớm và hiện câu chữ đã có cho mã đó.
+- Chỉ để hiển thị. Tiền thật do quyết toán tính theo khung giờ lúc sạc (đồng hồ trụ, dung sai 300 s,
+  `reconciliation/tariff-clock.ts`); khuyến mãi chưa áp vào quyết toán (K6) nên không hiện ở đây. Giá hiện
+  trên màn hình trụ (HMI) không có giá trị: OCPP 1.6 không gửi giá xuống trụ, CSMS là nguồn sự thật.
+- VAT: câu chữ "đã gồm VAT" chờ WP5 (Khang) chốt; trước đó app ghi "Giá do đơn vị vận hành niêm yết".

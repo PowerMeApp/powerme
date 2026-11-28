@@ -27,7 +27,7 @@ DOMAIN = {  # domain -> (colour, label, logical entities)
  "charging": ("#D68910", "Charging sessions", ["Reservation", "ChargingSession", "SessionPause", "SessionStatusChange",
                                               "MeterReading", "SessionTariffSegment", "ReconciliationRecord"]),
  "billing":  ("#7D3C98", "Billing & loyalty", ["CreditAccount", "CreditTransaction", "TopUp", "EInvoice", "InvoiceAdjustment", "Refund",
-                                              "LoyaltyAccount", "LoyaltyTransaction", "TopUpPaymentConflict"]),
+                                              "LoyaltyAccount", "LoyaltyTransaction", "TopUpPaymentConflict", "RfidCreditHold"]),
  "technical": ("#6C7A89", "Technical (operation only)", []),
 }
 COL = {n: c for _, (c, _, ns) in DOMAIN.items() for n in ns}

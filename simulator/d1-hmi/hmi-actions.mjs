@@ -197,7 +197,7 @@ export function makeHmiActions(s) {
       if (c.tx) return fail('Không đổi chế độ khi đang sạc');
       const type = a.type;
       const value = Number(a.value);
-      if (!['full', 'time', 'kwh', 'money'].includes(type)) return fail('Chế độ không hợp lệ');
+      if (!['full', 'time', 'kwh'].includes(type)) return fail('Chế độ không hợp lệ');
       if (type !== 'full' && !(value > 0)) return fail('Giá trị phải > 0');
       c.readerGeneration++;
       c.mode = { type, value: type === 'full' ? null : value };
