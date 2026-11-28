@@ -12,6 +12,7 @@
  *   GET  /api/operator/v1/sessions?queue=, POST …/sessions/{id}/assign|close|resolve  (FE-12, screen 23,
  *        operator-sessions.ts; logic in Trí's SessionReviewService / UnattributedSessionService)
  *   GET  /api/operator/v1/revenue[.csv], GET /api/admin/v1/revenue[.csv]  (T108a, revenue-report.ts)
+ *   GET  /api/operator/v1/faults/stats, GET /api/admin/v1/faults/stats  (home page charts, fault-stats.ts)
  *   GET  /api/admin/v1/transactions[.csv]  (T108b, admin-transactions.ts)
  *   GET  /api/admin/v1/billing/exceptions, POST …/billing/e-invoices/{id}/retry,
  *        …/billing/top-ups/{id}/recheck|exception-reviewed, …/billing/payment-conflicts/{id}/review
@@ -46,6 +47,7 @@ import {
   runBillingRoute,
   type AdminBillingDeps,
 } from './admin-billing.js';
+import { faultStats, matchFaultStatsRoute } from './fault-stats.js';
 import { matchFaultRoute, runFaultRoute } from './operator-faults.js';
 import { matchSessionRoute, runSessionRoute, type SessionQueueDeps } from './operator-sessions.js';
 import {
@@ -89,7 +91,7 @@ export const OPERATOR_API_PATH = /^\/api\/(auth|operator|admin)\/v1(?:\/|\?|$)/;
 
 /** Paths that take a query string (contract §2.2a: RolesGuard runs first, then the parameters). */
 const QUERY_PATHS =
-  /^\/api\/(?:operator\/v1\/(?:faults|charge-points|sessions|sites|tariffs|promotions|revenue(?:\.csv)?)|admin\/v1\/(?:(?:revenue|transactions)(?:\.csv)?|users|operators|network\/charge-points))$/;
+  /^\/api\/(?:operator\/v1\/(?:faults(?:\/stats)?|charge-points|sessions|sites|tariffs|promotions|revenue(?:\.csv)?)|admin\/v1\/(?:(?:revenue|transactions)(?:\.csv)?|faults\/stats|users|operators|network\/charge-points))$/;
 const LOCAL_ORIGIN = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/;
 const BODY_LIMIT = 16 * 1024;
 
@@ -194,6 +196,21 @@ export function createOperatorApiListener(
     if (surface !== 'operator' && surface !== 'admin') throw new AuthError(404, 'not_found');
     const role = surface === 'operator' ? 'operator_staff' : 'admin';
     const principal = await rolesGuard(req, role, db, config, driverConfig);
+    // Before the fault list: `/faults/stats` is not a fault id.
+    const faultStatsRoute = matchFaultStatsRoute(surface, rest ?? '', url.searchParams);
+    if (faultStatsRoute) {
+      allow(req, res, 'GET');
+      // Operator scope from RolesGuard's DB read, never from the request (BR-P16).
+      return send(
+        res,
+        200,
+        await faultStats(db, {
+          ...faultStatsRoute,
+          operatorId: surface === 'operator' ? principal.operatorId! : faultStatsRoute.operatorId,
+          realOnly: surface === 'admin',
+        }),
+      );
+    }
     const faultRoute =
       surface === 'operator' ? matchFaultRoute(rest ?? '', url.searchParams) : null;
     if (faultRoute) {

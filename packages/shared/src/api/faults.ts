@@ -85,3 +85,40 @@ export interface ResetResponse {
 export interface SessionsActiveError {
   sessions: { connector_no: number; session_id: string }[];
 }
+
+/** Faults of each severity. */
+export interface FaultSeverityCounts {
+  critical: number;
+  major: number;
+  minor: number;
+  none: number;
+}
+
+/**
+ * GET /api/operator/v1/faults/stats?from=&to= and GET /api/admin/v1/faults/stats?from=&to=&operator_id=
+ * (home page charts). FaultEvents raised in the period; days in Asia/Ho_Chi_Minh.
+ * Source: apps/csms/src/operator-api/fault-stats.ts.
+ */
+export interface FaultStats {
+  from: string;
+  to: string;
+  generated_at: string;
+  totals: {
+    raised: number;
+    /** Of those raised in the period, how many are resolved now. */
+    resolved: number;
+    by_severity: FaultSeverityCounts;
+    by_kind: Record<FaultKind, number>;
+    /** Mean of resolved_at − raised_at over the resolved ones, in seconds; null when none. */
+    mean_time_to_resolve_s: number | null;
+  };
+  /** Days with at least one fault, in order (the dashboard fills the others). */
+  days: (FaultSeverityCounts & { day: string; total: number })[];
+  /** Charge points with the most faults in the period (at most 5). */
+  top_charge_points: {
+    charge_point_id: string;
+    serial_number: string;
+    station_name: string | null;
+    count: number;
+  }[];
+}

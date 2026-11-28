@@ -1,6 +1,6 @@
 /** Screen 27 — Admin Dashboard (FE-14) against a fake CSMS. */
 import { screen, waitFor, within } from '@testing-library/react';
-import type { AdminSummary, RevenueReport, RevenueRow } from '@powerme/shared';
+import type { AdminSummary, FaultStats, RevenueReport, RevenueRow } from '@powerme/shared';
 import { defaultPeriod } from '../src/features/revenue/revenueModel';
 import { ADMIN, fakeCsms, renderApp, session } from './render';
 
@@ -54,6 +54,22 @@ const REVENUE: RevenueReport = {
   pending_reconciliation: { session_count: 0 },
   unsettled: { session_count: 0, by_reason: {} },
   generated_at: new Date().toISOString(),
+};
+const FAULT_STATS: FaultStats = {
+  from: '2026-10-29',
+  to: '2026-11-27',
+  generated_at: new Date().toISOString(),
+  totals: {
+    raised: 5,
+    resolved: 3,
+    by_severity: { critical: 1, major: 3, minor: 1, none: 0 },
+    by_kind: { faulted: 2, offline: 2, driver_report: 1 },
+    mean_time_to_resolve_s: 5400,
+  },
+  days: [{ day: '2026-11-20', critical: 1, major: 3, minor: 1, none: 0, total: 5 }],
+  top_charge_points: [
+    { charge_point_id: '9', serial_number: 'CP-01', station_name: 'Trạm A', count: 3 },
+  ],
 };
 const routes = (summary: AdminSummary) => ({
   'GET /api/admin/v1/me': { status: 200, body: ADMIN },
@@ -128,25 +144,22 @@ describe('Tổng quan nền tảng (màn 27)', () => {
     expect(screen.queryByRole('region')).toBeNull();
   });
 
-  it('platform statistics: month revenue with top Operators, network, Operators and stations', async () => {
-    const seen = fakeCsms(routes(SUMMARY));
+  it('platform statistics: top Operators of the month, faults, network, Operators and stations', async () => {
+    const seen = fakeCsms({
+      ...routes(SUMMARY),
+      'GET /api/admin/v1/faults/stats': { status: 200, body: FAULT_STATS },
+    });
     renderApp('/admin', session(ADMIN));
-    const rev = within(await screen.findByRole('region', { name: 'Doanh thu tháng này' }));
-    expect(await rev.findByText('1.700.000 ₫')).toBeInTheDocument();
-    expect(
-      rev.getByText(/40 phiên tính tiền · 400 kWh · 2 phiên không định danh/),
-    ).toBeInTheDocument();
-    // Top 3 by revenue, Operators without revenue left out.
-    const top = within(rev.getByRole('list', { name: 'Đơn vị vận hành dẫn đầu' }));
-    expect(top.getAllByRole('listitem').map((li) => li.textContent)).toEqual([
-      'B Operator 900.000 ₫',
-      'D Operator 500.000 ₫',
-      'A Operator 300.000 ₫',
-    ]);
-    expect(rev.getByRole('link', { name: 'Xem chi tiết →' })).toHaveAttribute(
-      'href',
-      '/admin/revenue',
+    // Top 5 by revenue this month, Operators without revenue left out.
+    const rev = within(
+      await screen.findByRole('region', { name: 'Top đơn vị vận hành theo doanh thu' }),
     );
+    const top = within(rev.getByRole('list', { name: 'Top đơn vị vận hành' }));
+    expect(top.getAllByRole('listitem').map((li) => li.textContent)).toEqual([
+      'B Operator · 10 phiên900.000 ₫',
+      'D Operator · 10 phiên500.000 ₫',
+      'A Operator · 10 phiên300.000 ₫',
+    ]);
     const { from, to } = defaultPeriod();
     await waitFor(() =>
       expect(
@@ -157,6 +170,20 @@ describe('Tổng quan nền tảng (màn 27)', () => {
         ),
       ).toBe(true),
     );
+    expect(seen.some((r) => r.path === '/api/admin/v1/faults/stats')).toBe(true);
+    const faults = within(screen.getByRole('region', { name: 'Sự cố theo ngày' }));
+    expect(faults.getByText('5')).toBeInTheDocument();
+    expect(faults.getByText('1 giờ 30 phút')).toBeInTheDocument();
+    const kinds = within(screen.getByRole('region', { name: 'Nguồn sự cố' }));
+    expect(kinds.getAllByRole('listitem').map((li) => li.textContent)).toEqual([
+      'Trụ báo lỗi (OCPP)240%',
+      'Mất kết nối240%',
+      'Tài xế báo120%',
+    ]);
+    const worst = within(screen.getByRole('list', { name: 'Trụ sạc nhiều sự cố' }));
+    expect(worst.getByText('CP-01')).toBeInTheDocument();
+    // Admin has no charge point page: the serial is plain text.
+    expect(worst.queryByRole('link')).toBeNull();
     const net = within(screen.getByRole('region', { name: 'Mạng lưới trụ sạc' }));
     expect(net.getByText(/\/ 10 trụ đang hoạt động, đang kết nối/)).toBeInTheDocument();
     expect(net.getByText('Sẵn sàng')).toBeInTheDocument();

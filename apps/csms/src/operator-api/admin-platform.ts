@@ -44,7 +44,7 @@ const TEST_EMAIL = (col: string) =>
   `(${col} LIKE '%@load.powerme.test' OR ${col} LIKE '%@rq1.powerme.test')`;
 const REAL_OPERATOR = `o.tax_code<>'${TEST_OPERATOR_TAX_CODE}'`;
 /** Charge point `cp` not on a lab station (a charge point without a station is real). */
-const REAL_CP = `NOT EXISTS (SELECT 1 FROM sites ts JOIN operators tos ON tos.id=ts.operator_id
+export const REAL_CP = `NOT EXISTS (SELECT 1 FROM sites ts JOIN operators tos ON tos.id=ts.operator_id
   WHERE ts.id=cp.site_id AND tos.tax_code='${TEST_OPERATOR_TAX_CODE}')`;
 /** User id column `col` is a lab driver. */
 const LAB_USER = (col: string) =>
