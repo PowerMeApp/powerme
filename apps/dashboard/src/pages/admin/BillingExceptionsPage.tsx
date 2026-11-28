@@ -173,7 +173,7 @@ export function BillingExceptionsPage() {
         <>
           <p className="muted small">
             Khoản trả sau khi lần nạp đã hết hạn hoặc thất bại: không cộng vào ví, Admin tạo yêu cầu
-            hoàn, CSKH hoàn trên cổng VNPay (BR-P13, BR-P51).
+            hoàn, CSKH hoàn trên cổng VNPay.
           </p>
           {data.late_payments.items.length === 0 ? (
             empty
@@ -373,7 +373,7 @@ function RefundTab({
     <>
       <p className="muted small">
         CSKH hoàn đúng số tiền trên cổng merchant VNPay trong 7 ngày làm việc, rồi Admin ghi nhận mã
-        hoàn. Cũ nhất ở trên (BR-P51).
+        hoàn. Cũ nhất ở trên.
       </p>
       {data.items.length === 0 ? (
         <EmptyState>Không có yêu cầu hoàn nào đang chờ.</EmptyState>

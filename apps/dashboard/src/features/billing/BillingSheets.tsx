@@ -148,7 +148,7 @@ export function ConflictReviewSheet({
         {vnd(item.amount_vnd)} · mã giao dịch {item.gateway_transaction_no} · {item.reason}
       </p>
       <p className="muted small">
-        Việc xử lý (hoàn tiền, liên hệ VNPay) làm ngoài hệ thống (BR-P13).
+        Việc xử lý (hoàn tiền, liên hệ VNPay) làm ngoài hệ thống.
       </p>
       <Field label="Ghi chú xử lý (bắt buộc)" error={errors.note?.message}>
         {(a11y) => (
@@ -213,7 +213,7 @@ export function CreateTopUpRefundSheet({
     >
       <p>
         Số đã nạp bị trừ khỏi ví của tài xế ngay và điểm đã dùng cho lần nạp được trả lại. CSKH hoàn
-        tiền trên cổng merchant VNPay, sau đó ghi nhận mã hoàn ở mục Hoàn tiền (BR-P51).
+        tiền trên cổng merchant VNPay, sau đó ghi nhận mã hoàn ở mục Hoàn tiền.
       </p>
       <p className="muted small">
         Chỉ hoàn được khi số dư khả dụng của tài xế (số dư trừ tiền đang giữ cho phiên sạc) còn đủ.
