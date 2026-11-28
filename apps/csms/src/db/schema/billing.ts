@@ -324,8 +324,9 @@ export const eInvoices = pgTable(
 );
 
 /**
- * Hoàn tiền về nguồn thanh toán (STM-10, migration 0015). Tạo cùng transaction với quyết định hoàn
- * (D1 phần 1); `RefundService.send` gọi VNPay từ worker quét DB (D1 phần 2, D7).
+ * Hoàn tiền về nguồn thanh toán (STM-10 v2.0, migration 0015, 0032). Tạo cùng transaction với quyết
+ * định hoàn (D1 phần 1); CSKH hoàn trên cổng merchant, Admin ghi nhận qua `RefundService.confirmDone` /
+ * `markFailed` / `redo` (hoàn thủ công, D-AC). Cột của luồng gửi tự động cũ (#208) giữ, không ghi.
  */
 export const refunds = pgTable(
   'refunds',
@@ -337,24 +338,27 @@ export const refunds = pgTable(
     kind: refundKindEnum('kind').notNull(),
     /** VND > 0; không vượt số đã trả của top-up (RefundService kiểm, DB không kiểm chéo bảng). */
     amountVnd: bigint('amount_vnd', { mode: 'number' }).notNull(),
-    /** `done` = VNPay đã nhận yêu cầu hoàn, không có nghĩa tiền đã về tài xế (D1). */
+    /** `done` = Admin đã nhập mã hoàn của cổng; không có nghĩa tiền đã về tài xế (D1). */
     status: refundStatusEnum('status').notNull().default('requested'),
-    /** Số lần đã gọi VNPay refund; tối đa 4, Admin retry không reset. */
+    /** Luồng gửi tự động cũ (#208), không dùng từ 0032. */
     attemptCount: integer('attempt_count').notNull().default(0),
     /**
      * admins.user_id của Admin quyết định hoàn (thay top_ups.refunded_by, B5);
      * NULL = hệ thống tạo (account_closure, SD-2f).
      */
     requestedBy: bigint('requested_by', { mode: 'number' }).references(() => admins.userId),
-    /** Dùng chung enum với e_invoices: transient = hẹn thử lại · data = bị từ chối → failed. */
+    /** Luồng gửi tự động cũ (#208), không dùng từ 0032 (lý do thất bại ở `failureReason`). */
     lastErrorKind: eInvoiceErrorKindEnum('last_error_kind'),
     lastErrorMessage: text('last_error_message'),
     lastAttemptAt: timestamp('last_attempt_at', { withTimezone: true }),
-    /** Mã hoàn trong response của lệnh refund; UNIQUE. Done qua querydr thì NULL (0028). */
+    /** Mã hoàn trên cổng merchant do Admin nhập khi done; UNIQUE. Dòng cũ done qua querydr: NULL (0028). */
     gatewayRefundNo: varchar('gateway_refund_no', { length: 20 }),
-    /** Done nhờ querydr thấy lệnh hoàn, không có mã lệnh hoàn (0028, D1). */
+    /** Luồng cũ (#208, 0028): done nhờ querydr. Dòng mới luôn false. */
     confirmedViaQuery: boolean('confirmed_via_query').notNull().default(false),
-    nextAttemptAt: timestamp('next_attempt_at', { withTimezone: true }).defaultNow(),
+    /** Luồng cũ (#208): lịch worker refund-send. Từ 0032 không DEFAULT, không CHECK, không ghi. */
+    nextAttemptAt: timestamp('next_attempt_at', { withTimezone: true }),
+    /** Lý do Admin ghi khi failed (1–1000 ký tự); làm lại giữ lý do cũ (0032). */
+    failureReason: text('failure_reason'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true })
       .notNull()
@@ -362,7 +366,7 @@ export const refunds = pgTable(
       .$onUpdate(() => new Date()),
     /** Có giá trị ⇔ status = done. */
     completedAt: timestamp('completed_at', { withTimezone: true }),
-    /** Lần giữ chỗ liên tiếp chưa ra kết quả (0027, D7); > 1 thì phải querydr trước (Phần 9a). */
+    /** Luồng cũ (#208, 0027): bộ đếm lease của worker refund-send. Không dùng từ 0032. */
     unfinishedClaims: integer('unfinished_claims').notNull().default(0),
   },
   (t) => [
@@ -394,8 +398,12 @@ export const refunds = pgTable(
       sql`${t.lastErrorKind} IS NULL OR ${t.lastAttemptAt} IS NOT NULL`,
     ),
     check(
-      'refunds_next_attempt_check',
-      sql`${t.status} <> 'requested' OR ${t.nextAttemptAt} IS NOT NULL`,
+      'refunds_failure_reason_length_check',
+      sql`${t.failureReason} IS NULL OR char_length(${t.failureReason}) BETWEEN 1 AND 1000`,
+    ),
+    check(
+      'refunds_failure_reason_check',
+      sql`${t.status} <> 'failed' OR ${t.failureReason} IS NOT NULL`,
     ),
     check('refunds_unfinished_claims_check', sql`${t.unfinishedClaims} >= 0`),
   ],

@@ -15,17 +15,17 @@ export const STATUSES = [
   'Reserved',
 ];
 
-// Mặc định = bảng màu trong public/bevel-tokens.css (QA-06)
+// Mặc định = bảng màu trong public/bevel-tokens.css (QA-10: bộ màu PowerMe, bản tối)
 const FALLBACK = {
-  Available: '#415eee',
-  Preparing: '#b9a6ff',
-  Charging: '#31ce01',
-  SuspendedEV: '#ffca00',
-  SuspendedEVSE: '#ffca00',
-  Finishing: '#ffab94',
-  Faulted: '#e5484d',
-  Unavailable: '#a5a7ab',
-  Reserved: '#2cc3b8',
+  Available: '#00e0c2',
+  Preparing: '#7db7ff',
+  Charging: '#00e0c2',
+  SuspendedEV: '#ffc857',
+  SuspendedEVSE: '#ffc857',
+  Finishing: '#d4af37',
+  Faulted: '#ff6b6b',
+  Unavailable: '#7e8481',
+  Reserved: '#b39dff',
 };
 
 export const VI = {

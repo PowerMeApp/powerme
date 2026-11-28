@@ -39,7 +39,7 @@ import {
   ERROR_CODES,
   CARDS,
   BATTERY_KWH,
-  STATION_KW,
+  parseSpec,
   sleep,
   taper,
   summarize,
@@ -56,9 +56,10 @@ export function createStation(options = {}) {
   const opt = {
     csmsUrl: 'ws://localhost:9000/ocpp',
     cpId: 'RH24D1-00001',
-    // đ/kWh GIẢ ĐỊNH, chỉ dùng cho chế độ "Theo số tiền" (trụ tự dừng). HMI KHÔNG hiện tiền: tiền thật
-    // do CSMS tính theo biểu giá từng khung giờ khi quyết toán (QA-09) — OCPP 1.6 không gửi giá xuống trụ.
-    unitPrice: 3500,
+    // QA-11: trụ KHÔNG biết giá (OCPP 1.6 không gửi giá xuống trụ) — tiền do CSMS tính khi quyết toán,
+    // tài xế xem giá trên app (BE-50). Vì vậy HMI không có chế độ "Theo số tiền" và không có đơn giá.
+    // spec: cấu hình phần cứng (parseSpec trong model.mjs) — số súng, kW, AC/DC, có gửi SoC không.
+    spec: undefined,
     password: '123456', // mật khẩu HMI mẫu (giả) — KHÁC credential OCPP bên dưới
     authPassword: undefined, // CP_PASSWORD: mật khẩu Basic Auth gửi CSMS khi nối (OCPP Security Profile 2); bỏ trống = không gửi
     retryMs: 30_000, // EXP-01: thử lại cố định 30 s
@@ -76,6 +77,10 @@ export function createStation(options = {}) {
     throw new Error(
       `OFFLINE_AUTH không hợp lệ: "${opt.offlineAuth}" (normal | rejected | notsupported)`,
     );
+  const spec = opt.spec && typeof opt.spec === 'object' ? opt.spec : parseSpec(opt.spec);
+  /** SoC chỉ trụ DC biết (giao tiếp với BMS xe); trụ AC hiện/gửi null. */
+  const socOut = (c) =>
+    !spec.reportsSoc || c.vehicleSoc == null ? null : Math.round(c.vehicleSoc * 10) / 10;
   const events = new EventEmitter();
   const log = [];
   const timeline = [];
@@ -98,9 +103,12 @@ export function createStation(options = {}) {
       { value: String(options.pingSec ?? 30), readonly: false, numeric: true },
     ],
     ['ConnectionTimeOut', { value: '120', readonly: false, numeric: true }],
-    ['NumberOfConnectors', { value: '2', readonly: true }],
+    ['NumberOfConnectors', { value: String(spec.guns.length), readonly: true }],
     ['SupportedFeatureProfiles', { value: 'Core,RemoteTrigger,SmartCharging', readonly: true }],
-    ['ConnectorPhaseRotation', { value: '0.RST,1.RST,2.RST', readonly: true }],
+    [
+      'ConnectorPhaseRotation',
+      { value: ['0.RST', ...spec.guns.map((g) => `${g.id}.RST`)].join(','), readonly: true },
+    ],
     ['AuthorizationCacheEnabled', { value: 'true', readonly: false, bool: true }],
     ['LocalAuthListEnabled', { value: 'true', readonly: false, bool: true }],
   ]);
@@ -181,10 +189,7 @@ export function createStation(options = {}) {
     journeys: [], // tối đa 2: [phiên trước, phiên hiện tại]
     last: { kw: 0, v: 0, a: 0 },
   });
-  const conns = new Map([
-    [1, mkConn(1)],
-    [2, mkConn(2)],
-  ]);
+  const conns = new Map(spec.guns.map((g) => [g.id, { ...mkConn(g.id), maxKw: g.maxKw }]));
 
   // ── Mạng ──────────────────────────────────────────────────────────────────
   const net = {
@@ -262,7 +267,7 @@ export function createStation(options = {}) {
       r: Math.round((now - tx.startReal) / 1000),
       kwh: Math.round(tx.wh / 10) / 100,
       kw: Math.round(c.last.kw * 10) / 10,
-      soc: c.vehicleSoc == null ? null : Math.round(c.vehicleSoc * 10) / 10,
+      soc: socOut(c),
     };
     j.series.push(p);
     if (j.series.length > 400) j.series = j.series.filter((_, i) => i % 2 === 0 || i === 400);
@@ -439,7 +444,7 @@ export function createStation(options = {}) {
       'BootNotification',
       {
         chargePointVendor: 'Ruihua',
-        chargePointModel: 'D1-120',
+        chargePointModel: spec.model,
         chargePointSerialNumber: opt.cpId,
         firmwareVersion: 'sim-hmi-0.1',
       },
@@ -530,8 +535,15 @@ export function createStation(options = {}) {
         continue;
       }
       const tx = c.tx;
-      const kw = Math.min((STATION_KW / active.length) * taper(c.vehicleSoc), profileCapKw(c));
-      const v = 350 + c.vehicleSoc * 0.7;
+      // Công suất trụ chia đều cho súng đang sạc, không vượt trần của súng (connectors.max_power_kw)
+      // và profile Smart Charging. AC: bộ sạc trên xe nhận công suất cố định (không giảm theo SoC).
+      const dc = spec.kind === 'dc';
+      const kw = Math.min(
+        (spec.ratedKw / active.length) * (dc ? taper(c.vehicleSoc) : 1),
+        c.maxKw,
+        profileCapKw(c),
+      );
+      const v = dc ? 350 + c.vehicleSoc * 0.7 : spec.ratedKw > 7.4 ? 400 : 230;
       const dWh = (kw * 1000 * dtSim) / 3600;
       tx.whF += dWh;
       c.vehicleSoc = Math.min(100, c.vehicleSoc + (dWh / (BATTERY_KWH * 1000)) * 100);
@@ -562,7 +574,10 @@ export function createStation(options = {}) {
             timestamp: simIso(),
             sampledValue: [
               { value: String(reg), measurand: 'Energy.Active.Import.Register', unit: 'Wh' },
-              { value: String(Math.round(c.vehicleSoc)), measurand: 'SoC', unit: 'Percent' },
+              // Trụ AC không biết SoC của xe (reports_soc = false ở CSMS).
+              ...(spec.reportsSoc
+                ? [{ value: String(Math.round(c.vehicleSoc)), measurand: 'SoC', unit: 'Percent' }]
+                : []),
               {
                 value: String(Math.round(c.last.kw * 1000)),
                 measurand: 'Power.Active.Import',
@@ -660,7 +675,6 @@ export function createStation(options = {}) {
     // QA-09: giữ cả thời lượng phiên vừa xong (trước đây HMI về 00:00 trong khi kWh còn).
     tx.final = {
       wh: tx.wh,
-      cost: (tx.wh / 1000) * opt.unitPrice,
       elapsed: Math.floor((sim.ms - tx.startSim) / 1000),
     };
     c.lastSession = { ...tx.final, reason, idTag: tx.idTag };
@@ -779,15 +793,12 @@ export function createStation(options = {}) {
   function connSnap(c) {
     const tx = c.tx;
     const wh = tx ? tx.wh : (c.lastSession?.wh ?? 0);
-    const cost = tx ? (tx.wh / 1000) * opt.unitPrice : (c.lastSession?.cost ?? 0);
     const elapsed = tx ? Math.floor((sim.ms - tx.startSim) / 1000) : (c.lastSession?.elapsed ?? 0);
     let limitHit = false;
     if (tx) {
       const { type, value } = c.mode;
       limitHit =
-        (type === 'time' && elapsed >= value * 60) ||
-        (type === 'kwh' && tx.wh >= value * 1000) ||
-        (type === 'money' && cost >= value);
+        (type === 'time' && elapsed >= value * 60) || (type === 'kwh' && tx.wh >= value * 1000);
     }
     return {
       id: c.id,
@@ -795,13 +806,13 @@ export function createStation(options = {}) {
       status: c.status,
       errorCode: c.errorCode,
       plugged: c.plugged,
-      soc: c.vehicleSoc == null ? null : Math.round(c.vehicleSoc * 10) / 10,
+      soc: socOut(c),
       voltage: Math.round(c.last.v),
       current: Math.round(c.last.a * 10) / 10,
       kw: Math.round(c.last.kw * 10) / 10,
       wh,
       kwh: Math.round(wh / 10) / 100,
-      cost: Math.round(cost),
+      maxKw: Number.isFinite(c.maxKw) ? c.maxKw : null,
       elapsed,
       mode: c.mode,
       limitHit,
@@ -832,7 +843,13 @@ export function createStation(options = {}) {
     return {
       cpId: opt.cpId,
       csmsUrl: opt.csmsUrl,
-      unitPrice: opt.unitPrice,
+      spec: {
+        kind: spec.kind,
+        ratedKw: spec.ratedKw,
+        model: spec.model,
+        reportsSoc: spec.reportsSoc,
+        guns: spec.guns.length,
+      },
       speed: opt.speed,
       simTime: simIso(),
       // Đồng hồ trụ (mô phỏng) đi trước giờ thật bao nhiêu giây — tăng dần khi chạy ×10/×20.

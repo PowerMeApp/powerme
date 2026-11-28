@@ -40,6 +40,47 @@ export const CARDS = {
 export const FREE_VEND_TAG = 'HMI-FREEVEND';
 export const BATTERY_KWH = 75;
 export const STATION_KW = 120;
+
+/**
+ * QA-11 — cấu hình phần cứng của một trụ, khớp `charge_points` / `connectors` ở CSMS (seed-app.sql):
+ *   "dc120:120/60" = trụ DC 120 kW, súng 1 tối đa 120 kW, súng 2 tối đa 60 kW
+ *   "ac22:22"      = trụ AC 22 kW, một súng 22 kW
+ * Trống → trụ D1 gốc: DC 120 kW, hai súng chia đều, không trần riêng (hành vi trước QA-11).
+ * Trụ AC không biết SoC của xe nên KHÔNG gửi measurand SoC (charge_points.reports_soc = false).
+ */
+export function parseSpec(raw) {
+  const text = String(raw ?? '').trim();
+  if (!text)
+    return {
+      kind: 'dc',
+      ratedKw: STATION_KW,
+      model: 'D1-120',
+      reportsSoc: true,
+      guns: [
+        { id: 1, maxKw: Infinity },
+        { id: 2, maxKw: Infinity },
+      ],
+    };
+  const m =
+    /^(ac|dc)(\d{1,4}(?:\.\d{1,2})?):(\d{1,4}(?:\.\d{1,2})?)(?:\/(\d{1,4}(?:\.\d{1,2})?))?$/i.exec(
+      text,
+    );
+  if (!m) throw new Error(`cấu hình trụ không hợp lệ: "${text}" (vd. dc120:120/60, ac22:22)`);
+  const kind = m[1].toLowerCase();
+  const ratedKw = Number(m[2]);
+  const guns = [m[3], m[4]]
+    .filter((v) => v !== undefined)
+    .map((v, i) => ({ id: i + 1, maxKw: Number(v) }));
+  if (!(ratedKw > 0) || guns.some((g) => !(g.maxKw > 0)))
+    throw new Error(`công suất phải > 0: "${text}"`);
+  return {
+    kind,
+    ratedKw,
+    model: `${kind.toUpperCase()}-${m[2]}`,
+    reportsSoc: kind === 'dc',
+    guns,
+  };
+}
 export const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 export const taper = (soc) => (soc <= 80 ? 1 : Math.max(0.05, 1 - ((soc - 80) / 20) * 0.95));

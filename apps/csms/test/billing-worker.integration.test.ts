@@ -4,7 +4,7 @@
  *
  * Vì sao tồn tại: "đúng một lần khi hai worker chạy song song" và "sập giữa chừng thì hết lease dòng quay
  * lại" chỉ kiểm được với khoá dòng thật. Chưa có việc nghiệp vụ (Phần 7/9), nên dùng một BackgroundWork
- * giả trên `e_invoices` / `refunds` dựng bằng SQL: `handle` đếm số lần gọi theo id rồi ghi `issued` ở tx2.
+ * giả trên `e_invoices` dựng bằng SQL: `handle` đếm số lần gọi theo id rồi ghi `issued` ở tx2.
  *
  * Ca chồng nhau ép như `overlap` của billing-ledger / billing-loyalty: A giữ khoá chưa COMMIT, B phải đi
  * qua mà không chờ khoá. Bỏ `SKIP LOCKED` hoặc `FOR UPDATE` trong `claimDue` thì ca đó fail.
@@ -338,32 +338,19 @@ describeDb('billing: worker quét DB dùng chung — lease, SKIP LOCKED, runner 
     }
   });
 
-  it('refunds: dùng enum refund_status, chỉ lấy dòng requested đến hạn', async () => {
-    const topUp = Number(
-      (
-        await one(
-          `INSERT INTO top_ups(gateway_reference,credit_account_id,amount_vnd,amount_paid_vnd,
-           idempotency_key,expires_at,status)
-         VALUES('GW-T32P12-R',$1,100000,100000,'idem-t32p12-r',now()+interval '15 minutes','credited') RETURNING id`,
-          [creditAccountId],
-        )
-      )['id'],
-    );
-    const insert = (status: string, extra = 'NULL, NULL') =>
-      one(
-        `INSERT INTO refunds(top_up_id,kind,amount_vnd,status,next_attempt_at,completed_at,gateway_refund_no)
-         VALUES($1,'account_closure',1000,$2,now() - interval '1 second',${extra}) RETURNING id`,
-        [topUp, status],
-      ).then((r) => Number(r['id']));
-    const requested = await insert('requested');
-    await insert('failed');
-    await insert('done', "now(), 'RF-T32P12'");
+  it('refunds không còn là bảng quét (hoàn tiền thủ công, D1): claimDue từ chối', async () => {
     const c = await db.$client.connect();
     try {
-      const rows = await inTx(c, () =>
-        claimDue(c, { table: 'refunds', statuses: ['requested'], leaseMs: LEASE_MS, limit: 10 }),
-      );
-      expect(rows.map((r) => r.id)).toEqual([requested]);
+      await expect(
+        inTx(c, () =>
+          claimDue(c, {
+            table: 'refunds' as never,
+            statuses: ['requested'],
+            leaseMs: LEASE_MS,
+            limit: 10,
+          }),
+        ),
+      ).rejects.toThrow('due_rows_unknown_table');
     } finally {
       c.release();
     }
