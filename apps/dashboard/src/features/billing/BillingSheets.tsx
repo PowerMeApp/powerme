@@ -138,9 +138,7 @@ export function ConflictReviewSheet({
       <p>
         {vnd(item.amount_vnd)} · mã giao dịch {item.gateway_transaction_no} · {item.reason}
       </p>
-      <p className="muted small">
-        Việc xử lý (hoàn tiền, liên hệ VNPay) làm ngoài hệ thống (BR-P13).
-      </p>
+      <p className="muted small">Việc xử lý (hoàn tiền, liên hệ VNPay) làm ngoài hệ thống.</p>
       <Field label="Ghi chú xử lý (bắt buộc)" error={errors.note?.message}>
         {(a11y) => (
           <textarea {...a11y} {...register('note')} className="input" rows={3} maxLength={1000} />
