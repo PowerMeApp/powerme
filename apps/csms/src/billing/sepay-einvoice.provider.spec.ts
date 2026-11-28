@@ -1,9 +1,10 @@
 /**
  * Unit test adapter SePay eInvoice (T144, D5): dựng body, giờ Việt Nam, token, luồng tra trước → tạo →
- * hỏi trạng thái, bảng phân loại lỗi, không lộ mật khẩu / token. Fetch, đồng hồ, sleep đều giả: không
+ * hỏi trạng thái, bảng phân loại lỗi, không lộ mật khẩu / token; `adjustInvoice` chưa hỗ trợ (T32
+ * Phần 9b) trả `data`, không gọi fetch. Fetch, đồng hồ, sleep đều giả: không
  * gọi mạng, không chờ thật.
  */
-import type { EInvoiceInput } from './e-invoice-provider.js';
+import type { EInvoiceAdjustmentInput, EInvoiceInput } from './e-invoice-provider.js';
 import type { SepayEInvoiceConfig } from './sepay-einvoice.config.js';
 import {
   buildCreateInvoiceBody,
@@ -39,6 +40,17 @@ const INPUT: EInvoiceInput = {
   vatRate: 8,
   vatAmountVnd: 7_407,
   paidAt: new Date('2026-11-20T08:00:00+07:00'),
+};
+
+const ADJ_INPUT: EInvoiceAdjustmentInput = {
+  idempotencyKey: '7',
+  originalInvoiceNo: 'C26TSE-357431',
+  adjustmentNo: 1,
+  reason: 'Điều chỉnh giảm do hoàn tiền (refund 9)',
+  amountVnd: -100_000,
+  vatRate: 8,
+  vatAmountVnd: -7_407,
+  refundedAt: new Date('2026-11-26T10:00:00+07:00'),
 };
 
 type Reply = { status: number; json?: unknown; text?: string } | Error;
@@ -396,6 +408,17 @@ describe('SepayEInvoiceProvider.createInvoice', () => {
     const r = await h.provider.createInvoice(INPUT, ctrl.signal);
     expect(r.kind).toBe('transient');
     expect(h.paths().filter((p) => p.includes('/check/'))).toHaveLength(1);
+  });
+});
+
+describe('SepayEInvoiceProvider.adjustInvoice', () => {
+  it('chưa hỗ trợ → data sepay_adjustment_not_supported, không gọi fetch', async () => {
+    const h = harness(() => {
+      throw new Error('không được gọi fetch');
+    });
+    const r = await h.provider.adjustInvoice(ADJ_INPUT, new AbortController().signal);
+    expect(r).toEqual({ kind: 'data', message: 'sepay_adjustment_not_supported' });
+    expect(h.calls).toHaveLength(0);
   });
 });
 

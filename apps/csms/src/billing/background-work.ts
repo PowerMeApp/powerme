@@ -1,7 +1,7 @@
 /**
  * Việc nền của billing chạy bằng quét DB (decisions D7, T32 Phần 12).
  *
- * Vì sao tồn tại: refund (Phần 9), e-invoice / điều chỉnh (Phần 7) và timeout top-up (Phần 8) cùng cần
+ * Vì sao tồn tại: e-invoice / điều chỉnh (Phần 7, 9b) và timeout top-up (Phần 8) cùng cần
  * một chỗ quét lúc khởi động, quét định kỳ, chạy sớm sau commit và dừng sạch. DB là nguồn sự thật
  * (`status` + `next_attempt_at`, cả `top_ups` từ 0021); hẹn giờ trong RAM chỉ để đánh thức,
  * mất khi sập cũng được vì vòng quét bắt lại.
@@ -31,7 +31,7 @@ import { ScheduledTask, Scheduler, TimeoutScheduler } from '../common/scheduler.
 import { BACKGROUND_WORK_CONFIG, BackgroundWorkConfig } from './background-work.config.js';
 
 export interface BackgroundWork {
-  /** Tên duy nhất, dùng cho `kick` và log (vd. `refund-send`, `e-invoice-issue`, `top-up-timeout`). */
+  /** Tên duy nhất, dùng cho `kick` và log (vd. `e-invoice-issue`, `invoice-adjustment-issue`, `top-up-timeout`). */
   readonly name: string;
   /**
    * Xử lý tối đa `limit` việc đến hạn; trả số việc đã xử lý (kể cả việc lỗi). Trả `limit` nghĩa là có
@@ -104,7 +104,7 @@ export class BackgroundWorkRunner implements OnApplicationBootstrap, BeforeAppli
 
   onApplicationBootstrap(): void {
     if (!this.config.enabled || this.stopped) return;
-    // Không chờ: một lô refund có thể mất vài phút, không được chặn ứng dụng khởi động.
+    // Không chờ: một lô querydr / hoá đơn có thể mất vài phút, không được chặn ứng dụng khởi động.
     this.sweepThenReschedule();
   }
 

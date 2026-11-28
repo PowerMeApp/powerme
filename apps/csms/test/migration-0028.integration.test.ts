@@ -137,7 +137,12 @@ describeDb('migration 0028 — confirmed_via_query (T32 Phần 9a)', () => {
       await refund('done', 'M28-RF-2', false);
       await refund('done', null, true);
       await refund('requested', null);
-      await refund('failed', null);
+      // Từ 0032 refund failed phải có failure_reason.
+      await q(
+        `INSERT INTO refunds (top_up_id, kind, amount_vnd, status, failure_reason)
+         VALUES ($1, 'account_closure', 1000, 'failed', 'cổng từ chối')`,
+        [await topUp()],
+      );
     });
 
     it('bị chặn: done không mã, không cờ', async () => {

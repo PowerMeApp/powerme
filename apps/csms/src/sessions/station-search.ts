@@ -1,6 +1,11 @@
 import type { PoolClient } from 'pg';
 import { ChargingError } from './charging-error.js';
 import {
+  CURRENT_TARIFF_WHERE,
+  type DriverTariffPreview,
+  driverTariffPreviews,
+} from './tariff-preview.js';
+import {
   DEFAULT_SMART_SEARCH,
   EMPTY_SMART_FIELDS,
   SmartFields,
@@ -53,6 +58,8 @@ export interface SearchStation extends SmartFields {
   distance_m: number | null;
   road_estimate?: RoadEstimate;
   connectors: SearchConnector[];
+  /** BE-50: biểu giá hôm nay của Operator; null = Operator chưa có biểu giá. */
+  tariff: DriverTariffPreview | null;
 }
 export interface RoadEstimate {
   distance_m: number;
@@ -245,8 +252,7 @@ export async function searchStations(
         'vinfast_only',vinfast_only,'latitude',latitude::text,'longitude',longitude::text,
         'distance_m',distance_m,'connectors',connectors,
         'max_tariff_vnd',(SELECT max(t.price_per_kwh_vnd)::text FROM tariff_periods t
-          WHERE t.operator_id=page.operator_id AND t.effective_from<=(now() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date
-          AND (t.effective_to IS NULL OR t.effective_to>=(now() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date))) ORDER BY
+          WHERE t.operator_id=page.operator_id AND ${CURRENT_TARIFF_WHERE})) ORDER BY
           CASE WHEN $10='distance' THEN distance_m END ASC NULLS LAST,
           powerme_search_text(site_name) COLLATE "C",site_id) FROM page),'[]'::jsonb) AS items
     `,
@@ -273,7 +279,13 @@ export async function searchStations(
       ],
     )
   ).rows[0]!;
-  const items = row.items.map(({ max_tariff_vnd, ...station }) => {
+  // BE-50: biểu giá hôm nay theo Operator (một truy vấn cho cả trang), cùng nguồn với max_tariff_vnd.
+  const tariffs = await driverTariffPreviews(
+    c,
+    row.items.map((s) => s.operator_id),
+  );
+  const items = row.items.map(({ max_tariff_vnd, ...rest }) => {
+    const station = { ...rest, tariff: tariffs.get(String(rest.operator_id)) ?? null };
     const fields = { ...EMPTY_SMART_FIELDS };
     if (!estimate || station.distance_m === null) return { ...station, ...fields };
     const roadKm = (station.distance_m / 1000) * settings.road_factor;

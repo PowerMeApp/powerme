@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: PowerMe CSMS — Driver API
-  version: 0.16.0
+  version: 0.18.0
   summary: Hợp đồng REST cho app tài xế (T77, phiếu v1.3 §3.2g)
   description: |
     Hợp đồng giữa CSMS (WP2) và app tài xế Flutter (WP3) cho trạng thái súng sạc, thời gian còn lại,
@@ -1771,7 +1771,7 @@ components:
 
     Station:
       type: object
-      required: [site_id, site_code, site_name, operator_id, operator_name, vinfast_only, connectors]
+      required: [site_id, site_code, site_name, operator_id, operator_name, vinfast_only, connectors, tariff]
       properties:
         site_id: { $ref: '#/components/schemas/Id' }
         site_code: { type: string }
@@ -1807,6 +1807,43 @@ components:
         connectors:
           type: array
           items: { $ref: '#/components/schemas/Connector' }
+        tariff:
+          description: BE-50 — biểu giá hôm nay của operator sở hữu trạm (Screen 5 pricing preview); null = operator chưa có biểu giá.
+          oneOf: [{ $ref: '#/components/schemas/DriverTariffPreview' }, { type: 'null' }]
+
+    DriverTariffPeriod:
+      type: object
+      additionalProperties: false
+      required: [band, time_start, time_end, price_per_kwh_vnd]
+      properties:
+        band: { type: string, enum: [off_peak, normal, peak] }
+        time_start: { type: string, pattern: '^([01][0-9]|2[0-3]):[0-5][0-9]$', description: 'Giờ VN, gồm' }
+        time_end: { type: string, pattern: '^(([01][0-9]|2[0-3]):[0-5][0-9]|24:00)$', description: 'Giờ VN, không gồm; 24:00 = hết ngày' }
+        price_per_kwh_vnd: { type: integer, minimum: 1 }
+    DriverTariffPreview:
+      type: object
+      additionalProperties: false
+      required: [currency, unit, timezone, effective_date, current, max_price_per_kwh_vnd, periods]
+      description: |
+        BE-50 (UC-CHG-02, BR-P02, BR-P18). Chỉ để hiển thị: tiền thật do quyết toán tính theo khung giờ
+        lúc sạc (đồng hồ trụ, dung sai 300 s). Giá trên màn hình trụ không có giá trị (OCPP 1.6 không gửi
+        giá xuống trụ).
+      properties:
+        currency: { type: string, enum: [VND] }
+        unit: { type: string, enum: [kWh] }
+        timezone: { type: string, enum: [Asia/Ho_Chi_Minh] }
+        effective_date: { type: string, format: date, description: Ngày (giờ VN) áp dụng biểu giá }
+        current:
+          description: Khung đang áp dụng lúc CSMS trả lời; null chỉ khi biểu giá thủng giờ (FE-06 không cho lưu).
+          oneOf: [{ $ref: '#/components/schemas/DriverTariffPeriod' }, { type: 'null' }]
+        max_price_per_kwh_vnd:
+          type: integer
+          minimum: 1
+          description: Giá cao nhất hôm nay — đúng giá `POST /charges` dùng để giữ tạm Charging Credit (BR-P18/P19).
+        periods:
+          type: array
+          description: Mọi khung trong ngày theo giờ bắt đầu, phủ 00:00–24:00; một band có thể lặp lại.
+          items: { $ref: '#/components/schemas/DriverTariffPeriod' }
 
     SmartSearchAssumptions:
       type: object
@@ -1850,7 +1887,7 @@ components:
 
     ResolvedConnector:
       type: object
-      required: [connector_id, connector_no, status, serial_number, lifecycle, is_online, site_name, vinfast_only]
+      required: [connector_id, connector_no, status, serial_number, lifecycle, is_online, site_name, vinfast_only, tariff]
       properties:
         connector_id: { $ref: '#/components/schemas/Id' }
         connector_no: { type: integer, enum: [1, 2] }
@@ -1868,6 +1905,9 @@ components:
           description: |
             FE-17, BR-P42: súng có báo cáo của tài xế gắn vào một sự cố đang mở. App hiện nhãn
             "reported issue"; súng này không có trong `/stations`.
+        tariff:
+          description: BE-50 — biểu giá hôm nay của operator sở hữu trụ, cho sheet Start (Screen 8); null → app tắt nút Start (sẽ gặp `tariff_unavailable`).
+          oneOf: [{ $ref: '#/components/schemas/DriverTariffPreview' }, { type: 'null' }]
 
     FaultReportRequest:
       type: object

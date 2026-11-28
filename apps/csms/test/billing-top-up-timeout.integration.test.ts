@@ -96,7 +96,7 @@ describeDb('billing: quét top-up quá hạn + querydr (T32 Phần 8, SD-2d)', (
       undefined,
       WORK,
       // Phần 7: hoá đơn tạo trong transaction cộng tiền (không runner: không kick).
-      new EInvoiceService(d, { createInvoice: jest.fn() }),
+      new EInvoiceService(d, { createInvoice: jest.fn(), adjustInvoice: jest.fn() }),
     );
 
   /** Response querydr đã ký (mặc định: RC 00, TS 00, giao dịch thanh toán, đúng số tiền). */
@@ -1382,7 +1382,10 @@ describeDb('billing: quét top-up quá hạn + querydr (T32 Phần 8, SD-2d)', (
                gateway_transaction_no=$3, next_attempt_at=NULL, updated_at=now() WHERE id=$1`,
             [t.topUpId, completedAt, nextTxn()],
           );
-          await new EInvoiceService(db, { createInvoice: jest.fn() }).requestForTopUp(c, t.topUpId);
+          await new EInvoiceService(db, {
+            createInvoice: jest.fn(),
+            adjustInvoice: jest.fn(),
+          }).requestForTopUp(c, t.topUpId);
           await c.query('COMMIT');
         } finally {
           c.release();
