@@ -1,27 +1,32 @@
 /**
- * Test tích hợp hoàn tiền (T32 Phần 9a; SD-2e, STM-10, decisions D1 / D7) trên Postgres thật, VNPay
- * giả tiêm qua `fetch`.
+ * Test tích hợp hoàn tiền thủ công (D-AC, SRS BR-P51; SD-2e v3.0, STM-10 v2.0, decisions D1) trên
+ * Postgres thật: quyết định hoàn (`TopUpService.refund` / `refundLatePayment`) và Admin ghi nhận
+ * (`RefundService.confirmDone` / `markFailed` / `redo`). Không gọi VNPay.
  *
- * Vì sao tồn tại: hỏng ở đây là mất tiền thật và refund không thử được trên sandbox. Hỏng âm thầm có
- * thể là: hoàn hai lần (gửi lại sau kết quả không rõ, sập giữa chừng, hai worker), trừ ví sai số khi
- * top-up có dùng điểm, hoàn khoản trễ bằng mã giao dịch gốc, trừ ví rồi refund nằm chờ vô hạn.
+ * Vì sao tồn tại: hỏng ở đây là mất tiền thật. Hỏng âm thầm có thể là: một mã hoàn của cổng ghi cho
+ * hai refund, ghi nhận hai lần, trừ ví sai số khi top-up có dùng điểm, `late_refunded_at` /
+ * `closure_refunded_at` lệch với lúc ghi nhận, deadlock với đường tạo refund.
+ * Hoá đơn điều chỉnh khi done: `billing-invoice-adjustment.integration.test.ts`.
  *
  * Cần DATABASE_URL (DB test riêng — test DROP SCHEMA public); thiếu thì cả describe bị skip.
  */
-import { createHmac } from 'node:crypto';
 import { Logger, Module } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { BackgroundWorkRunner } from '../src/billing/background-work.js';
 import type { BackgroundWorkConfig } from '../src/billing/background-work.config.js';
-import { RefundNotAllowed, RefundNotFound } from '../src/billing/billing-errors.js';
+import { RefundNoUsed, RefundNotAllowed, RefundNotFound } from '../src/billing/billing-errors.js';
 import { BillingModule } from '../src/billing/billing.module.js';
 import { CreditLedgerService } from '../src/billing/credit-ledger.service.js';
 import { InvalidTransition } from '../src/billing/invalid-transition.js';
 import { LoyaltyService } from '../src/billing/loyalty.service.js';
-import { REFUND_SEND_WORK, RefundService } from '../src/billing/refund.service.js';
+import {
+  parseFailureReason,
+  parseGatewayRefundNo,
+  RefundService,
+} from '../src/billing/refund.service.js';
 import { TopUpService } from '../src/billing/top-up.service.js';
 import { VnpayAdapter } from '../src/billing/vnpay.adapter.js';
-import type { VnpayApiConfig, VnpayConfig } from '../src/billing/vnpay.config.js';
+import type { VnpayConfig } from '../src/billing/vnpay.config.js';
 import { ConfigModule } from '../src/config.js';
 import { createDb, Db } from '../src/db/db.module.js';
 import { resetAndMigrate } from './helpers/apply-migrations.js';
@@ -29,15 +34,13 @@ import { resetAndMigrate } from './helpers/apply-migrations.js';
 const DATABASE_URL = process.env['DATABASE_URL'];
 const describeDb = DATABASE_URL ? describe : describe.skip;
 
-const SECRET = 'TESTSECRETNOTREAL';
 const VNPAY: VnpayConfig = {
   configured: true,
   tmnCode: 'TESTTMN1',
-  hashSecret: SECRET,
+  hashSecret: 'TESTSECRETNOTREAL',
   payUrl: 'https://sandbox.vnpayment.vn/paymentv2/vpcpay.html',
   returnUrl: 'http://localhost:3000/billing/vnpay/return',
 };
-const API: VnpayApiConfig = { apiUrl: 'https://vnpay.test/api', serverIp: '127.0.0.1' };
 const WORK: BackgroundWorkConfig = {
   enabled: true,
   intervalMs: 30_000,
@@ -45,115 +48,35 @@ const WORK: BackgroundWorkConfig = {
   leaseMs: 120_000,
 };
 
-const RESPONSE_ORDER = [
-  'vnp_ResponseId',
-  'vnp_Command',
-  'vnp_ResponseCode',
-  'vnp_Message',
-  'vnp_TmnCode',
-  'vnp_TxnRef',
-  'vnp_Amount',
-  'vnp_BankCode',
-  'vnp_PayDate',
-  'vnp_TransactionNo',
-  'vnp_TransactionType',
-  'vnp_TransactionStatus',
-  'vnp_OrderInfo',
-];
-const QUERY_ORDER = [...RESPONSE_ORDER, 'vnp_PromotionCode', 'vnp_PromotionAmount'];
+describe('parseGatewayRefundNo / parseFailureReason', () => {
+  it.each([
+    ['15747269', '15747269'],
+    ['  RF-2026/11.27_a  ', 'RF-2026/11.27_a'],
+    ['x'.repeat(20), 'x'.repeat(20)],
+  ])('mã %p hợp lệ → %p', (raw, out) => {
+    expect(parseGatewayRefundNo(raw)).toBe(out);
+  });
 
-type Req = Record<string, string>;
-type Step = (req: Req) => Response | Promise<Response>;
-
-const json = (b: unknown, status = 200) => new Response(JSON.stringify(b), { status });
-
-function sign(order: string[], r: Record<string, string>): Record<string, string> {
-  const data = order.map((k) => r[k] ?? '').join('|');
-  return {
-    ...r,
-    vnp_SecureHash: createHmac('sha512', SECRET).update(data, 'utf8').digest('hex'),
-  };
-}
-
-let refundNoSeq = 0;
-/** Response lệnh refund, mặc định RC 00 + TS 00. */
-const refundOk =
-  (over: Record<string, string> = {}): Step =>
-  (req) => {
-    refundNoSeq += 1;
-    return json(
-      sign(RESPONSE_ORDER, {
-        vnp_ResponseId: 'R',
-        vnp_Command: 'refund',
-        vnp_ResponseCode: '00',
-        vnp_Message: 'ok',
-        vnp_TmnCode: req['vnp_TmnCode']!,
-        vnp_TxnRef: req['vnp_TxnRef']!,
-        vnp_Amount: req['vnp_Amount']!,
-        vnp_BankCode: 'NCB',
-        vnp_PayDate: '20261123100000',
-        vnp_TransactionNo: String(80_000_000 + refundNoSeq),
-        vnp_TransactionType: req['vnp_TransactionType']!,
-        vnp_TransactionStatus: '00',
-        vnp_OrderInfo: req['vnp_OrderInfo']!,
-        ...over,
-      }),
-    );
-  };
-const refundRc = (rc: string): Step => refundOk({ vnp_ResponseCode: rc });
-const RC94_UNSIGNED: Step = () => json({ vnp_ResponseCode: '94', vnp_Message: 'dup' });
-const HTTP_500: Step = () => json({}, 500);
-
-/** Response querydr. `amount` = số trong response, mặc định số của refund đang xét. */
-const queryReply =
-  (type: string, ts: string, transactionNo: string, amountVnd: number): Step =>
-  (req) =>
-    json(
-      sign(QUERY_ORDER, {
-        vnp_ResponseId: 'Q',
-        vnp_Command: 'querydr',
-        vnp_ResponseCode: '00',
-        vnp_Message: 'ok',
-        vnp_TmnCode: req['vnp_TmnCode']!,
-        vnp_TxnRef: req['vnp_TxnRef']!,
-        vnp_Amount: String(amountVnd * 100),
-        vnp_BankCode: 'NCB',
-        vnp_PayDate: '20261123100000',
-        vnp_TransactionNo: transactionNo,
-        vnp_TransactionType: type,
-        vnp_TransactionStatus: ts,
-        vnp_OrderInfo: 'x',
-      }),
-    );
-const QUERY_99: Step = (req) =>
-  json(
-    sign(QUERY_ORDER, {
-      vnp_ResponseId: 'Q',
-      vnp_Command: 'querydr',
-      vnp_ResponseCode: '99',
-      vnp_TmnCode: req['vnp_TmnCode']!,
-      vnp_TxnRef: req['vnp_TxnRef']!,
-    }),
+  it.each(['', '   ', 'x'.repeat(21), 'AB 12', 'mã', 'a;b', 12345, null, undefined])(
+    'mã %p sai dạng → null',
+    (raw) => {
+      expect(parseGatewayRefundNo(raw)).toBeNull();
+    },
   );
-const QUERY_UNSIGNED: Step = () => json({ vnp_ResponseCode: '94' });
 
-describeDb('billing: hoàn tiền VNPay (T32 Phần 9a, SD-2e, STM-10)', () => {
+  it('lý do: trim, 1–1000 ký tự', () => {
+    expect(parseFailureReason('  Cổng báo thẻ đã đóng  ')).toBe('Cổng báo thẻ đã đóng');
+    expect(parseFailureReason('x'.repeat(1000))).toHaveLength(1000);
+    expect(parseFailureReason('x'.repeat(1001))).toBeNull();
+    expect(parseFailureReason('   ')).toBeNull();
+    expect(parseFailureReason(1)).toBeNull();
+  });
+});
+
+describeDb('billing: hoàn tiền thủ công (SD-2e, STM-10, BR-P51)', () => {
   let db: Db;
   let seq = 0;
-  let refundSteps: Step[] = [];
-  let querySteps: Step[] = [];
-  let calls: Req[] = [];
-  const sent = (cmd: string) => calls.filter((c) => c['vnp_Command'] === cmd);
-
-  const fakeFetch = (async (_url: string, init: RequestInit) => {
-    const req = JSON.parse(String(init.body)) as Req;
-    calls.push(req);
-    if (req['vnp_Command'] === 'refund') return (refundSteps.shift() ?? refundOk())(req);
-    return (querySteps.shift() ?? QUERY_99)(req);
-  }) as unknown as typeof fetch;
-
-  const kick = jest.fn();
-  const runner = { register: jest.fn(), kick } as unknown as BackgroundWorkRunner;
+  const runner = { register: jest.fn(), kick: jest.fn() } as unknown as BackgroundWorkRunner;
   let vnpay: VnpayAdapter;
   let ledger: CreditLedgerService;
   let loyalty: LoyaltyService;
@@ -163,8 +86,6 @@ describeDb('billing: hoàn tiền VNPay (T32 Phần 9a, SD-2e, STM-10)', () => {
   const q = async (sql: string, params: unknown[] = []) =>
     (await db.$client.query(sql, params)).rows as Record<string, unknown>[];
   const one = async (sql: string, params: unknown[] = []) => (await q(sql, params))[0]!;
-  const run = (s: RefundService = refunds, signal = new AbortController().signal) =>
-    s.runDue(20, signal);
 
   let errorSpy: jest.SpyInstance;
   let logSpy: jest.SpyInstance;
@@ -180,7 +101,7 @@ describeDb('billing: hoàn tiền VNPay (T32 Phần 9a, SD-2e, STM-10)', () => {
       (
         await one(
           `INSERT INTO users (email, full_name, role) VALUES ($1, 'A', 'admin') RETURNING id`,
-          [`p9a-admin-${seq}@t32.test`],
+          [`mr-admin-${seq}@t32.test`],
         )
       )['id'],
     );
@@ -195,7 +116,7 @@ describeDb('billing: hoàn tiền VNPay (T32 Phần 9a, SD-2e, STM-10)', () => {
       (
         await one(
           `INSERT INTO users (email, full_name, role) VALUES ($1, 'X', 'driver') RETURNING id`,
-          [`p9a-${seq}@t32.test`],
+          [`mr-${seq}@t32.test`],
         )
       )['id'],
     );
@@ -235,7 +156,7 @@ describeDb('billing: hoàn tiền VNPay (T32 Phần 9a, SD-2e, STM-10)', () => {
     const { amount = 100_000, discount = 0, points = 0, status = 'credited', late } = opts;
     const owner = opts.owner ?? (await newDriver());
     seq += 1;
-    const ref = `P9AREF${seq}`;
+    const ref = `MRREF${seq}`;
     const paidStates = status === 'credited' || status === 'refunded';
     const txn = String(70_000_000 + seq);
     const lateTxn = late === undefined ? null : String(75_000_000 + seq);
@@ -262,7 +183,7 @@ describeDb('billing: hoàn tiền VNPay (T32 Phần 9a, SD-2e, STM-10)', () => {
             amount - discount,
             status,
             paidStates ? txn : null,
-            `p9a-key-${seq}`,
+            `mr-key-${seq}`,
             lateTxn,
             late ?? null,
           ],
@@ -302,7 +223,7 @@ describeDb('billing: hoàn tiền VNPay (T32 Phần 9a, SD-2e, STM-10)', () => {
     seq += 1;
     const cp = (
       await one(`INSERT INTO charge_points (serial_number) VALUES ($1) RETURNING id`, [
-        `P9A-CP-${seq}`,
+        `MR-CP-${seq}`,
       ])
     )['id'];
     const conn = (
@@ -327,21 +248,17 @@ describeDb('billing: hoàn tiền VNPay (T32 Phần 9a, SD-2e, STM-10)', () => {
       `INSERT INTO driver_charge_intents (driver_id, vehicle_id, connector_id, id_tag,
          idempotency_key, request_hash, energy_limit_wh, reserved_vnd, state)
        VALUES ($1, $2, $3, $4, $5, 'h', 1000, $6, 'accepted')`,
-      [driver, veh, conn, `P9A${seq}`, `k-${seq}`, reservedVnd],
+      [driver, veh, conn, `MR${seq}`, `k-${seq}`, reservedVnd],
     );
   }
 
   const refundRow = (id: number) =>
     one(
-      `SELECT status::text, kind::text, amount_vnd::int, attempt_count, unfinished_claims,
-              last_error_kind::text, last_error_message, gateway_refund_no, confirmed_via_query,
-              completed_at IS NOT NULL AS completed, next_attempt_at IS NULL AS no_next,
-              round(extract(epoch FROM next_attempt_at - last_attempt_at))::int AS delay_s
+      `SELECT status::text, kind::text, amount_vnd::int, gateway_refund_no, failure_reason,
+              confirmed_via_query, completed_at IS NOT NULL AS completed
        FROM refunds WHERE id=$1`,
       [id],
     );
-  const makeDue = (id: number) =>
-    q("UPDATE refunds SET next_attempt_at = now() - interval '1 second' WHERE id=$1", [id]);
   const balance = async (account: number) =>
     Number(
       (await one('SELECT balance_vnd FROM credit_accounts WHERE id=$1', [account]))['balance_vnd'],
@@ -369,61 +286,24 @@ describeDb('billing: hoàn tiền VNPay (T32 Phần 9a, SD-2e, STM-10)', () => {
     const { refundId } = await topUps.refund(t.id, admin);
     return { t, refundId };
   }
-  /** Giả lập sập sau khi VNPay đã trả lời: tx2 kế tiếp lỗi và rollback, dòng giữ lease và bộ đếm. */
-  const failNextTx2 = () =>
-    jest
-      .spyOn(refunds as unknown as { applyOutcome: () => Promise<unknown> }, 'applyOutcome')
-      .mockRejectedValueOnce(new Error('crash_before_tx2_commit'));
-
-  /** Refund bị từ chối ở lượt 1 → `failed` (data). */
-  async function rejectedRefund() {
-    const made = await requested();
-    refundSteps = [refundRc('95')];
-    await run();
-    expect(await refundRow(made.refundId)).toMatchObject({
-      status: 'failed',
-      last_error_kind: 'data',
-      attempt_count: 1,
-    });
-    calls = [];
-    return made;
-  }
-  /** Refund hết 4 lượt tạm thời → `failed`. */
-  async function exhaustedRefund() {
-    const made = await requested();
-    refundSteps = [HTTP_500];
-    await run();
-    for (let i = 0; i < 3; i++) {
-      await makeDue(made.refundId);
-      await run();
-    }
-    expect(await refundRow(made.refundId)).toMatchObject({ status: 'failed', attempt_count: 4 });
-    calls = [];
-    return made;
-  }
+  let codeSeq = 0;
+  /** Mã hoàn của cổng chưa dùng. */
+  const code = () => `RF${Date.now() % 1_000_000}N${(codeSeq += 1)}`;
 
   beforeAll(async () => {
     db = createDb(DATABASE_URL as string);
     await resetAndMigrate(db.$client);
     ledger = new CreditLedgerService(db);
     loyalty = new LoyaltyService({ pointsExpiryMonths: 12 });
-    vnpay = new VnpayAdapter(VNPAY, API, fakeFetch);
-    refunds = new RefundService(db, vnpay, runner, WORK);
+    vnpay = new VnpayAdapter(VNPAY);
+    refunds = new RefundService(db);
     topUps = new TopUpService(db, ledger, loyalty, vnpay, runner, WORK, undefined, refunds);
     admin = await newAdmin();
   });
-  beforeEach(async () => {
+  beforeEach(() => {
     errorSpy = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
     jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
     logSpy = jest.spyOn(Logger.prototype, 'log').mockImplementation(() => undefined);
-    // Cô lập: refund còn chờ của ca trước không tới hạn trong ca sau.
-    await q(
-      `UPDATE refunds SET next_attempt_at = now() + interval '1 day' WHERE status = 'requested'`,
-    );
-    refundSteps = [];
-    querySteps = [];
-    calls = [];
-    kick.mockClear();
   });
   afterEach(() => {
     jest.restoreAllMocks();
@@ -433,307 +313,142 @@ describeDb('billing: hoàn tiền VNPay (T32 Phần 9a, SD-2e, STM-10)', () => {
   });
 
   // ---------------------------------------------------------------------------------------------
-  describe('TC-STM10: một lượt gửi', () => {
-    it('TC-STM10-01 accepted → done, gateway_refund_no, completed_at; tham số đúng bảng 2.1', async () => {
+  describe('confirmDone (STM-10 #2)', () => {
+    it('top_up: requested → done, mã + completed_at, log admin_id; thiếu EInvoiceService → log error', async () => {
       const { t, refundId } = await requested();
-      expect(await run()).toBe(1);
-      const r = await refundRow(refundId);
-      expect(r).toMatchObject({
+      const no = code();
+      const out = await refunds.confirmDone(refundId, `  ${no} `, admin);
+      expect(out).toEqual({
+        refundId,
         status: 'done',
-        attempt_count: 1,
+        gatewayRefundNo: no,
+        completedAt: expect.any(Date),
+        alreadyDone: false,
+      });
+      expect(await refundRow(refundId)).toMatchObject({
+        status: 'done',
+        gateway_refund_no: no,
         completed: true,
-        no_next: true,
         confirmed_via_query: false,
       });
-      expect(String(r['gateway_refund_no'])).toMatch(/^\d+$/);
-      expect(sent('querydr')).toHaveLength(0);
-      expect(sent('refund')).toHaveLength(1);
-      expect(sent('refund')[0]).toMatchObject({
-        vnp_TxnRef: t.ref,
-        vnp_TransactionNo: t.txn,
-        vnp_Amount: '10000000',
-        vnp_TransactionType: '02',
-        vnp_CreateBy: `admin:${admin}`,
-        vnp_OrderInfo: `Hoan tien PowerMe ${refundId}`,
-      });
-    });
-
-    it.each(['05', '06'])('RC 00 + TS %s → done', async (ts) => {
-      const { refundId } = await requested();
-      refundSteps = [refundOk({ vnp_TransactionStatus: ts })];
-      await run();
-      expect(await refundRow(refundId)).toMatchObject({ status: 'done' });
-    });
-
-    it('TC-STM10-02 rejected → failed ngay, last_error_kind = data', async () => {
-      const { refundId } = await requested();
-      refundSteps = [refundRc('95')];
-      await run();
-      expect(await refundRow(refundId)).toMatchObject({
-        status: 'failed',
-        attempt_count: 1,
-        last_error_kind: 'data',
-        no_next: true,
-      });
-      expect(logged(errorSpy, 'refund_failed')).toHaveLength(1);
-    });
-
-    it('TC-STM10-03 unknown → vẫn requested, attempt_count 1, hẹn +5 phút', async () => {
-      const { refundId } = await requested();
-      refundSteps = [HTTP_500];
-      await run();
-      expect(await refundRow(refundId)).toMatchObject({
-        status: 'requested',
-        attempt_count: 1,
-        last_error_kind: 'transient',
-        delay_s: 300,
-        unfinished_claims: 0,
-      });
-    });
-
-    it('TC-STM10-04 bốn lượt tạm thời (+5, +30, +2 giờ) → failed', async () => {
-      const { refundId } = await requested();
-      refundSteps = [HTTP_500];
-      await run();
-      for (const [attempt, delay] of [
-        [2, 1800],
-        [3, 7200],
-      ] as const) {
-        await makeDue(refundId);
-        await run();
-        expect(await refundRow(refundId)).toMatchObject({
-          status: 'requested',
-          attempt_count: attempt,
-          delay_s: delay,
-        });
-      }
-      await makeDue(refundId);
-      await run();
-      expect(await refundRow(refundId)).toMatchObject({
-        status: 'failed',
-        attempt_count: 4,
-        last_error_kind: 'transient',
-        no_next: true,
-      });
-      expect(sent('refund')).toHaveLength(1);
-    });
-
-    it('thiếu mã giao dịch gốc → failed (data), không gọi HTTP', async () => {
-      const { t, refundId } = await requested();
-      await q('UPDATE top_ups SET gateway_transaction_no = NULL WHERE id=$1', [t.id]);
-      await run();
-      expect(await refundRow(refundId)).toMatchObject({
-        status: 'failed',
-        last_error_kind: 'data',
-        last_error_message: 'missing_gateway_transaction_no',
-      });
-      expect(calls).toHaveLength(0);
-    });
-
-    it('VNPay chưa cấu hình: worker không giữ chỗ, không gọi HTTP, warn một lần', async () => {
-      const { refundId } = await requested();
-      const warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
-      const off = new RefundService(
-        db,
-        new VnpayAdapter({ ...VNPAY, configured: false }, API, fakeFetch),
-        runner,
-        WORK,
-      );
-      await makeDue(refundId);
-      expect(await run(off)).toBe(0);
-      expect(await run(off)).toBe(0);
-      expect(calls).toHaveLength(0);
-      expect(logged(warn, 'refund_send_unconfigured')).toHaveLength(1);
-      expect(await refundRow(refundId)).toMatchObject({
-        status: 'requested',
-        unfinished_claims: 0,
-      });
-    });
-  });
-
-  // ---------------------------------------------------------------------------------------------
-  describe('truy vấn trước khi gửi lại (mục 2.3)', () => {
-    async function afterUnknown(first: Step = HTTP_500) {
-      const made = await requested();
-      refundSteps = [first];
-      await run();
-      await makeDue(made.refundId);
-      calls = [];
-      return made;
-    }
-
-    it('querydr thấy lệnh hoàn TS 00 → done, không gửi lần 2; confirmed_via_query, mã NULL, có log', async () => {
-      const { t, refundId } = await afterUnknown();
-      querySteps = [queryReply('02', '00', t.txn, 100_000)];
-      await run();
-      expect(await refundRow(refundId)).toMatchObject({
-        status: 'done',
-        confirmed_via_query: true,
-        gateway_refund_no: null,
-        completed: true,
-      });
-      expect(sent('refund')).toHaveLength(0);
-      expect(logged(logSpy, 'refund_done_via_query')).toEqual([
-        expect.objectContaining({
+      expect(logged(logSpy, 'refund_confirmed')).toEqual([
+        {
+          event: 'refund_confirmed',
           refund_id: refundId,
-          vnp_TransactionType: '02',
-          vnp_TransactionStatus: '00',
-        }),
-      ]);
-    });
-
-    it.each(['05', '06'])('querydr thấy lệnh hoàn TS %s → done', async (ts) => {
-      const { t, refundId } = await afterUnknown();
-      querySteps = [queryReply('03', ts, t.txn, 100_000)];
-      await run();
-      expect(await refundRow(refundId)).toMatchObject({ status: 'done' });
-      expect(sent('refund')).toHaveLength(0);
-    });
-
-    it('querydr thấy TS 09 → failed (data), không gửi', async () => {
-      const { t, refundId } = await afterUnknown();
-      querySteps = [queryReply('02', '09', t.txn, 100_000)];
-      await run();
-      expect(await refundRow(refundId)).toMatchObject({
-        status: 'failed',
-        last_error_kind: 'data',
-      });
-      expect(sent('refund')).toHaveLength(0);
-    });
-
-    it('querydr thấy 02 nhưng sai số tiền → không done, không gửi, hẹn lượt sau', async () => {
-      const { t, refundId } = await afterUnknown();
-      querySteps = [queryReply('02', '00', t.txn, 99_000)];
-      await run();
-      expect(await refundRow(refundId)).toMatchObject({ status: 'requested', attempt_count: 2 });
-      expect(sent('refund')).toHaveLength(0);
-    });
-
-    it('lượt tự động sau unknown, querydr 01 / 00 → KHÔNG gửi, hẹn lượt sau', async () => {
-      const { t, refundId } = await afterUnknown();
-      querySteps = [queryReply('01', '00', t.txn, 100_000)];
-      await run();
-      expect(sent('querydr')).toHaveLength(1);
-      expect(sent('refund')).toHaveLength(0);
-      expect(await refundRow(refundId)).toMatchObject({
-        status: 'requested',
-        attempt_count: 2,
-        last_error_message: 'querydr_payment_only',
-      });
-    });
-
-    it('RC 94 lượt 1 → lượt 2 chỉ truy vấn; querydr 01 / 00 → KHÔNG gửi', async () => {
-      const { t, refundId } = await afterUnknown(RC94_UNSIGNED);
-      expect(await refundRow(refundId)).toMatchObject({ status: 'requested', attempt_count: 1 });
-      querySteps = [queryReply('01', '00', t.txn, 100_000)];
-      await run();
-      expect(sent('querydr')).toHaveLength(1);
-      expect(sent('refund')).toHaveLength(0);
-    });
-
-    it.each([
-      ['RC 99', () => QUERY_99],
-      ['không xác thực được', () => QUERY_UNSIGNED],
-    ])('querydr %s → không gửi, hẹn lượt sau', async (_n, step) => {
-      const { refundId } = await afterUnknown();
-      querySteps = [step()];
-      await run();
-      expect(sent('refund')).toHaveLength(0);
-      expect(await refundRow(refundId)).toMatchObject({ status: 'requested', attempt_count: 2 });
-    });
-
-    it('querydr TransactionNo khác → không gửi, hẹn lượt sau', async () => {
-      const { refundId } = await afterUnknown();
-      querySteps = [queryReply('02', '00', '99999999', 100_000)];
-      await run();
-      expect(sent('refund')).toHaveLength(0);
-      expect(await refundRow(refundId)).toMatchObject({ status: 'requested', attempt_count: 2 });
-    });
-
-    it('abort ngay sau khi VNPay trả accepted → vẫn ghi done, có mã hoàn, không gọi VNPay lần nữa', async () => {
-      const { refundId } = await requested();
-      const ac = new AbortController();
-      refundSteps = [
-        (req) => {
-          ac.abort();
-          return refundOk()(req);
+          top_up_id: t.id,
+          kind: 'top_up',
+          admin_id: admin,
+          gateway_refund_no: no,
         },
-      ];
-      await run(refunds, ac.signal);
-      const r = await refundRow(refundId);
-      expect(r).toMatchObject({
-        status: 'done',
-        attempt_count: 1,
-        completed: true,
-        confirmed_via_query: false,
-      });
-      expect(String(r['gateway_refund_no'])).toMatch(/^\d+$/);
-      expect(calls).toHaveLength(1);
-      expect(await run()).toBe(0);
-      expect(calls).toHaveLength(1);
+      ]);
+      expect(logged(errorSpy, 'invoice_adjustment_service_missing')).toHaveLength(1);
     });
 
-    it('sập sau khi gửi, trước tx2 (lượt đầu) → lượt sau chỉ truy vấn, không gửi lại', async () => {
-      const { t, refundId } = await requested();
-      failNextTx2();
-      await run();
-      expect(await refundRow(refundId)).toMatchObject({
-        status: 'requested',
-        attempt_count: 0,
-        last_error_kind: null,
-        unfinished_claims: 1,
-      });
-      expect(sent('refund')).toHaveLength(1);
-      await makeDue(refundId);
-      calls = [];
-      querySteps = [queryReply('01', '00', t.txn, 100_000)];
-      await run();
-      expect(sent('querydr')).toHaveLength(1);
-      expect(sent('refund')).toHaveLength(0);
-    });
-  });
-
-  // ---------------------------------------------------------------------------------------------
-  describe('late_payment', () => {
-    it('gửi late_gateway_ref, số late_amount_vnd; done → late_refunded_at = completed_at', async () => {
+    it('late_payment: late_refunded_at = completed_at; không đụng ví / trạng thái top-up', async () => {
       const t = await topUp({ late: 90_000 });
       const { refundId } = await topUps.refundLatePayment(t.id, admin);
-      await run();
-      expect(sent('refund')[0]).toMatchObject({
-        vnp_TxnRef: t.ref,
-        vnp_TransactionNo: t.lateTxn,
-        vnp_Amount: '9000000',
-        vnp_TransactionType: '02',
-      });
-      expect(await refundRow(refundId)).toMatchObject({ status: 'done', amount_vnd: 90_000 });
-      expect(
-        await one(
-          `SELECT t.late_refunded_at = f.completed_at AS same
-           FROM top_ups t JOIN refunds f ON f.top_up_id = t.id WHERE f.id = $1`,
-          [refundId],
-        ),
-      ).toEqual({ same: true });
-    });
-
-    it('lượt 2 querydr trả giao dịch đầu (mã gốc) → không gửi, hẹn lượt sau', async () => {
-      const t = await topUp({ late: 90_000 });
-      const { refundId } = await topUps.refundLatePayment(t.id, admin);
-      refundSteps = [HTTP_500];
-      await run();
-      await makeDue(refundId);
-      calls = [];
-      querySteps = [queryReply('01', '00', t.txn, 100_000)];
-      await run();
-      expect(sent('refund')).toHaveLength(0);
-      expect(await refundRow(refundId)).toMatchObject({ status: 'requested', attempt_count: 2 });
       expect(await one('SELECT late_refunded_at FROM top_ups WHERE id=$1', [t.id])).toEqual({
         late_refunded_at: null,
       });
+      await refunds.confirmDone(refundId, code(), admin);
+      expect(
+        await one(
+          `SELECT t.late_refunded_at = f.completed_at AS same, t.status::text
+           FROM top_ups t JOIN refunds f ON f.top_up_id = t.id WHERE f.id = $1`,
+          [refundId],
+        ),
+      ).toEqual({ same: true, status: 'credited' });
+      expect(await balance(t.account)).toBe(100_000);
+      // late_payment không có hoá đơn gốc: không đòi EInvoiceService.
+      expect(logged(errorSpy, 'invoice_adjustment_service_missing')).toHaveLength(0);
+    });
+
+    it('cùng mã gọi lại → kết quả cũ (alreadyDone), không ghi thêm, log refund_confirm_repeated', async () => {
+      const { refundId } = await requested();
+      const no = code();
+      const first = await refunds.confirmDone(refundId, no, admin);
+      const before = await one('SELECT updated_at FROM refunds WHERE id=$1', [refundId]);
+      const again = await refunds.confirmDone(refundId, no, admin);
+      expect(again).toEqual({ ...first, alreadyDone: true });
+      expect(await one('SELECT updated_at FROM refunds WHERE id=$1', [refundId])).toEqual(before);
+      expect(logged(logSpy, 'refund_confirmed')).toHaveLength(1);
+      expect(logged(logSpy, 'refund_confirm_repeated')).toHaveLength(1);
+    });
+
+    it('done bằng mã khác → InvalidTransition, giữ mã cũ', async () => {
+      const { refundId } = await requested();
+      const no = code();
+      await refunds.confirmDone(refundId, no, admin);
+      await expect(refunds.confirmDone(refundId, code(), admin)).rejects.toBeInstanceOf(
+        InvalidTransition,
+      );
+      expect(await refundRow(refundId)).toMatchObject({ gateway_refund_no: no });
+    });
+
+    it('failed → InvalidTransition (không có failed → done)', async () => {
+      const { refundId } = await requested();
+      await refunds.markFailed(refundId, 'cổng từ chối', admin);
+      await expect(refunds.confirmDone(refundId, code(), admin)).rejects.toMatchObject({
+        machine: 'STM-10',
+        from: 'failed',
+        event: 'ADMIN_CONFIRMED',
+      });
+    });
+
+    it('mã đã ghi cho refund khác → RefundNoUsed, refund vẫn requested', async () => {
+      const a = await requested();
+      const b = await requested();
+      const no = code();
+      await refunds.confirmDone(a.refundId, no, admin);
+      await expect(refunds.confirmDone(b.refundId, no, admin)).rejects.toBeInstanceOf(RefundNoUsed);
+      expect(await refundRow(b.refundId)).toMatchObject({
+        status: 'requested',
+        gateway_refund_no: null,
+        completed: false,
+      });
+    });
+
+    it('hai refund cùng mã ghi đồng thời → một done, một RefundNoUsed', async () => {
+      const a = await requested();
+      const b = await requested();
+      const no = code();
+      const results = await Promise.allSettled([
+        refunds.confirmDone(a.refundId, no, admin),
+        refunds.confirmDone(b.refundId, no, admin),
+      ]);
+      expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
+      const failed = results.find((r) => r.status === 'rejected') as PromiseRejectedResult;
+      expect(failed.reason).toBeInstanceOf(RefundNoUsed);
+      expect(
+        await one('SELECT count(*)::int AS n FROM refunds WHERE gateway_refund_no=$1', [no]),
+      ).toEqual({ n: 1 });
+    });
+
+    it('hai connection ghi nhận cùng refund, cùng mã → ghi một lần, lần sau alreadyDone', async () => {
+      const { refundId } = await requested();
+      const no = code();
+      const out = await Promise.all([
+        refunds.confirmDone(refundId, no, admin),
+        refunds.confirmDone(refundId, no, admin),
+      ]);
+      expect(out.map((o) => o.alreadyDone).sort()).toEqual([false, true]);
+      expect(logged(logSpy, 'refund_confirmed')).toHaveLength(1);
+    });
+
+    it('không có refund → RefundNotFound; mã sai dạng → ném trước khi mở transaction', async () => {
+      await expect(refunds.confirmDone(999_999_999, code(), admin)).rejects.toBeInstanceOf(
+        RefundNotFound,
+      );
+      const connect = jest.spyOn(db.$client, 'connect');
+      await expect(refunds.confirmDone(1, 'AB 12', admin)).rejects.toThrow(
+        'refund_invalid_gateway_refund_no',
+      );
+      expect(connect).not.toHaveBeenCalled();
     });
   });
 
   // ---------------------------------------------------------------------------------------------
-  describe('account_closure (seed)', () => {
+  describe('account_closure (seed, Phần 11 chưa có)', () => {
     async function closedWithTwo() {
       const owner = await newDriver();
       const a = await topUp({ owner, status: 'refunded' });
@@ -751,226 +466,117 @@ describeDb('billing: hoàn tiền VNPay (T32 Phần 9a, SD-2e, STM-10)', () => {
             )
           )['id'],
         );
-      return { owner, ra: await mk(a.id), rb: await mk(b.id), a };
+      return { owner, ra: await mk(a.id), rb: await mk(b.id) };
     }
     const closure = async (account: number) =>
       (await one('SELECT closure_refunded_at FROM credit_accounts WHERE id=$1', [account]))[
         'closure_refunded_at'
       ];
 
-    it('còn refund chưa done → NULL; refund cuối done → closure_refunded_at; gửi system, 03', async () => {
-      const { owner, ra, rb, a } = await closedWithTwo();
-      await q(`UPDATE refunds SET next_attempt_at = now() + interval '1 day' WHERE id=$1`, [rb]);
-      await run();
-      expect(await refundRow(ra)).toMatchObject({ status: 'done' });
+    it('còn refund chưa done → NULL; refund cuối done → closure_refunded_at', async () => {
+      const { owner, ra, rb } = await closedWithTwo();
+      await refunds.confirmDone(ra, code(), admin);
       expect(await closure(owner.account)).toBeNull();
-      expect(sent('refund')[0]).toMatchObject({
-        vnp_TransactionNo: a.txn,
-        vnp_Amount: '4000000',
-        vnp_TransactionType: '03',
-        vnp_CreateBy: 'system',
-      });
-      await makeDue(rb);
-      await run();
+      await refunds.markFailed(rb, 'tài khoản ngân hàng đã đóng', admin);
+      expect(await closure(owner.account)).toBeNull();
+      await refunds.redo(rb, admin);
+      await refunds.confirmDone(rb, code(), admin);
       expect(await closure(owner.account)).not.toBeNull();
     });
 
-    it('hai refund cuối xong song song → closure_refunded_at vẫn được ghi', async () => {
-      const { owner } = await closedWithTwo();
-      const other = new RefundService(db, vnpay, runner, WORK);
-      await Promise.all([run(), run(other)]);
-      expect(await closure(owner.account)).not.toBeNull();
-    });
-  });
-
-  // ---------------------------------------------------------------------------------------------
-  describe('onExhausted và Admin retry', () => {
-    async function nearExhausted(attempts = 0) {
-      const made = await requested();
-      await q('UPDATE refunds SET unfinished_claims = 5, attempt_count = $2 WHERE id=$1', [
-        made.refundId,
-        attempts,
+    it('hai refund cuối ghi nhận song song → closure_refunded_at vẫn được ghi', async () => {
+      const { owner, ra, rb } = await closedWithTwo();
+      await Promise.all([
+        refunds.confirmDone(ra, code(), admin),
+        refunds.confirmDone(rb, code(), admin),
       ]);
-      return made;
-    }
-
-    it('unfinished_claims = 6 → failed, attempt_count = 4, retry_exhausted, không gọi VNPay', async () => {
-      const { refundId } = await nearExhausted();
-      await run();
-      expect(await refundRow(refundId)).toMatchObject({
-        status: 'failed',
-        attempt_count: 4,
-        last_error_kind: 'transient',
-        last_error_message: 'retry_exhausted',
-        unfinished_claims: 6,
-        no_next: true,
-      });
-      expect(calls).toHaveLength(0);
-      expect(logged(errorSpy, 'refund_failed')).toHaveLength(1);
-    });
-
-    it('attempt_count đã 5 → max(+1, 4) = 6', async () => {
-      const { refundId } = await nearExhausted(5);
-      await run();
-      expect(await refundRow(refundId)).toMatchObject({ status: 'failed', attempt_count: 6 });
-    });
-
-    it('Admin retry: requested, unfinished_claims = 0, giữ attempt_count; lượt kế truy vấn trước', async () => {
-      const { t, refundId } = await nearExhausted();
-      await run();
-      calls = [];
-      expect(await refunds.retry(refundId, admin)).toEqual({
-        refundId,
-        status: 'requested',
-        attemptCount: 4,
-      });
-      expect(await refundRow(refundId)).toMatchObject({
-        status: 'requested',
-        unfinished_claims: 0,
-        attempt_count: 4,
-      });
-      expect(kick).toHaveBeenCalledWith(REFUND_SEND_WORK);
-      querySteps = [queryReply('02', '00', t.txn, 100_000)];
-      await run();
-      expect(sent('querydr')).toHaveLength(1);
-      expect(sent('refund')).toHaveLength(0);
-      expect(await refundRow(refundId)).toMatchObject({ status: 'done' });
-    });
-
-    it('sau Admin retry, querydr 01 / 00 → gửi đúng một lần', async () => {
-      const { t, refundId } = await exhaustedRefund();
-      await refunds.retry(refundId, admin);
-      querySteps = [queryReply('01', '00', t.txn, 100_000)];
-      await run();
-      expect(sent('querydr')).toHaveLength(1);
-      expect(sent('refund')).toHaveLength(1);
-      expect(await refundRow(refundId)).toMatchObject({
-        status: 'done',
-        confirmed_via_query: false,
-      });
-    });
-
-    it('(a) hết lượt, Admin retry, lượt retry lỗi tạm thời → failed ngay, không lượt tự động nào gửi tiếp', async () => {
-      const { t, refundId } = await exhaustedRefund();
-      await refunds.retry(refundId, admin);
-      querySteps = [queryReply('01', '00', t.txn, 100_000)];
-      refundSteps = [HTTP_500];
-      await run();
-      expect(sent('refund')).toHaveLength(1);
-      expect(await refundRow(refundId)).toMatchObject({
-        status: 'failed',
-        attempt_count: 5,
-        no_next: true,
-      });
-      calls = [];
-      expect(await run()).toBe(0);
-      expect(calls).toHaveLength(0);
-    });
-
-    it('(b) bị từ chối, Admin retry, lượt retry lỗi tạm thời → requested; lượt tự động querydr 01 / 00 không gửi', async () => {
-      const { t, refundId } = await rejectedRefund();
-      await refunds.retry(refundId, admin);
-      querySteps = [queryReply('01', '00', t.txn, 100_000)];
-      refundSteps = [HTTP_500];
-      await run();
-      expect(sent('refund')).toHaveLength(1);
-      expect(await refundRow(refundId)).toMatchObject({
-        status: 'requested',
-        attempt_count: 2,
-        last_error_kind: 'transient',
-      });
-      await makeDue(refundId);
-      calls = [];
-      querySteps = [queryReply('01', '00', t.txn, 100_000)];
-      await run();
-      expect(sent('querydr')).toHaveLength(1);
-      expect(sent('refund')).toHaveLength(0);
-    });
-
-    it('sập sau khi gửi ở lượt Admin retry → lượt sau chỉ truy vấn, không gửi lại', async () => {
-      const { t, refundId } = await exhaustedRefund();
-      await refunds.retry(refundId, admin);
-      querySteps = [queryReply('01', '00', t.txn, 100_000)];
-      failNextTx2();
-      await run();
-      expect(sent('refund')).toHaveLength(1);
-      expect(await refundRow(refundId)).toMatchObject({
-        status: 'requested',
-        attempt_count: 4,
-        unfinished_claims: 1,
-      });
-      await makeDue(refundId);
-      calls = [];
-      querySteps = [queryReply('01', '00', t.txn, 100_000)];
-      await run();
-      expect(sent('querydr')).toHaveLength(1);
-      expect(sent('refund')).toHaveLength(0);
-    });
-
-    it('Admin retry mà querydr trả 99 → không gửi, về failed', async () => {
-      const { refundId } = await exhaustedRefund();
-      await refunds.retry(refundId, admin);
-      querySteps = [QUERY_99];
-      await run();
-      expect(sent('querydr')).toHaveLength(1);
-      expect(sent('refund')).toHaveLength(0);
-      expect(await refundRow(refundId)).toMatchObject({
-        status: 'failed',
-        attempt_count: 5,
-        last_error_kind: 'transient',
-        no_next: true,
-      });
-    });
-
-    it('retry: không có dòng → RefundNotFound; sai trạng thái → InvalidTransition', async () => {
-      await expect(refunds.retry(999_999_999, admin)).rejects.toBeInstanceOf(RefundNotFound);
-      const { refundId } = await requested();
-      await expect(refunds.retry(refundId, admin)).rejects.toBeInstanceOf(InvalidTransition);
+      expect(await closure(owner.account)).not.toBeNull();
     });
   });
 
   // ---------------------------------------------------------------------------------------------
-  describe('lease', () => {
-    it('mất lease giữa chừng → bỏ kết quả, không ghi, log refund_lease_lost', async () => {
-      const { refundId } = await requested();
-      refundSteps = [
-        async (req) => {
-          await q(`UPDATE refunds SET next_attempt_at = now() + interval '7 minutes' WHERE id=$1`, [
-            refundId,
-          ]);
-          return refundOk()(req);
-        },
-      ];
-      await run();
-      expect(await refundRow(refundId)).toMatchObject({
-        status: 'requested',
-        attempt_count: 0,
-        gateway_refund_no: null,
-        unfinished_claims: 1,
+  describe('markFailed (STM-10 #3) và redo (STM-10 #4)', () => {
+    it('requested → failed kèm lý do (trim), log admin_id; ví không được trả lại', async () => {
+      const { t, refundId } = await requested();
+      const out = await refunds.markFailed(refundId, '  Cổng từ chối: quá hạn hoàn  ', admin);
+      expect(out).toEqual({
+        refundId,
+        status: 'failed',
+        failureReason: 'Cổng từ chối: quá hạn hoàn',
       });
-      expect(logged(logSpy, 'refund_lease_lost')).toHaveLength(1);
+      expect(await refundRow(refundId)).toMatchObject({
+        status: 'failed',
+        failure_reason: 'Cổng từ chối: quá hạn hoàn',
+        completed: false,
+      });
+      expect(await balance(t.account)).toBe(0);
+      expect(logged(logSpy, 'refund_marked_failed')).toEqual([
+        {
+          event: 'refund_marked_failed',
+          refund_id: refundId,
+          top_up_id: t.id,
+          kind: 'top_up',
+          admin_id: admin,
+          reason: 'Cổng từ chối: quá hạn hoàn',
+        },
+      ]);
     });
 
-    it('hai worker song song: mỗi refund gọi VNPay đúng một lần', async () => {
-      const a = await requested();
-      const b = await requested();
-      const other = new RefundService(db, vnpay, runner, WORK);
-      await Promise.all([run(), run(other)]);
-      const orders = sent('refund').map((c) => c['vnp_OrderInfo']);
-      expect(orders.sort()).toEqual(
-        [`Hoan tien PowerMe ${a.refundId}`, `Hoan tien PowerMe ${b.refundId}`].sort(),
+    it('redo: failed → requested, giữ lý do cũ; fail lần sau ghi đè; rồi confirm được', async () => {
+      const { refundId } = await requested();
+      await refunds.markFailed(refundId, 'lần 1', admin);
+      expect(await refunds.redo(refundId, admin)).toEqual({ refundId, status: 'requested' });
+      expect(await refundRow(refundId)).toMatchObject({
+        status: 'requested',
+        failure_reason: 'lần 1',
+      });
+      expect(logged(logSpy, 'refund_redo')).toHaveLength(1);
+      await refunds.markFailed(refundId, 'lần 2', admin);
+      expect(await refundRow(refundId)).toMatchObject({ failure_reason: 'lần 2' });
+      await refunds.redo(refundId, admin);
+      await refunds.confirmDone(refundId, code(), admin);
+      expect(await refundRow(refundId)).toMatchObject({ status: 'done', failure_reason: 'lần 2' });
+    });
+
+    it.each([
+      ['markFailed trên failed', 'failed', 'fail'],
+      ['markFailed trên done', 'done', 'fail'],
+      ['redo trên requested', 'requested', 'redo'],
+      ['redo trên done', 'done', 'redo'],
+    ] as const)('%s → InvalidTransition', async (_name, state, action) => {
+      const { refundId } = await requested();
+      if (state === 'failed') await refunds.markFailed(refundId, 'x', admin);
+      if (state === 'done') await refunds.confirmDone(refundId, code(), admin);
+      const call =
+        action === 'fail'
+          ? refunds.markFailed(refundId, 'y', admin)
+          : refunds.redo(refundId, admin);
+      await expect(call).rejects.toBeInstanceOf(InvalidTransition);
+      expect(await refundRow(refundId)).toMatchObject({ status: state });
+    });
+
+    it('không có refund → RefundNotFound; lý do sai dạng → ném', async () => {
+      await expect(refunds.markFailed(999_999_999, 'x', admin)).rejects.toBeInstanceOf(
+        RefundNotFound,
       );
-      expect(await refundRow(a.refundId)).toMatchObject({ status: 'done', attempt_count: 1 });
-      expect(await refundRow(b.refundId)).toMatchObject({ status: 'done', attempt_count: 1 });
+      await expect(refunds.redo(999_999_999, admin)).rejects.toBeInstanceOf(RefundNotFound);
+      await expect(refunds.markFailed(1, '   ', admin)).rejects.toThrow(
+        'refund_invalid_failure_reason',
+      );
     });
   });
 
+  // ---------------------------------------------------------------------------------------------
   // ---------------------------------------------------------------------------------------------
   describe('TopUpService.refund (TC-STM4-12/13/14)', () => {
-    it('hợp lệ: sổ cái −số tiền, refunded, refund requested, kick sau commit', async () => {
+    it('hợp lệ: sổ cái −số tiền, refunded, refund requested, log admin_id', async () => {
       const t = await topUp();
       const out = await topUps.refund(t.id, admin);
-      expect(out).toEqual({ refundId: expect.any(Number), status: 'requested' });
+      expect(out).toEqual({
+        refundId: expect.any(Number),
+        status: 'requested',
+        amountVnd: 100_000,
+      });
       expect(await balance(t.account)).toBe(0);
       expect(await ledgerRows(t.id)).toEqual([
         { transaction_type: 'refund', amount_vnd: -100_000 },
@@ -987,27 +593,31 @@ describeDb('billing: hoàn tiền VNPay (T32 Phần 9a, SD-2e, STM-10)', () => {
         status: 'requested',
         kind: 'top_up',
         amount_vnd: 100_000,
-        attempt_count: 0,
+        gateway_refund_no: null,
+        failure_reason: null,
       });
-      expect(kick).toHaveBeenCalledWith(REFUND_SEND_WORK);
+      expect(logged(logSpy, 'refund_requested')).toEqual([
+        {
+          event: 'refund_requested',
+          refund_id: out.refundId,
+          top_up_id: t.id,
+          admin_id: admin,
+          kind: 'top_up',
+        },
+      ]);
     });
 
-    it('có điểm (nạp 100.000, điểm 20.000, trả 80.000): ví −100.000, một dòng −100.000, VNPay 80.000 × 100, điểm trả lại', async () => {
+    it('có điểm (nạp 100.000, điểm 20.000, trả 80.000): ví −100.000, một dòng −100.000, CSKH hoàn 80.000, điểm trả lại', async () => {
       const t = await topUpWithPoints();
       expect(await points(t.driver)).toBe(1000);
-      const { refundId } = await topUps.refund(t.id, admin);
+      const { refundId, amountVnd } = await topUps.refund(t.id, admin);
+      expect(amountVnd).toBe(80_000);
       expect(await balance(t.account)).toBe(0);
       expect(await ledgerRows(t.id)).toEqual([
         { transaction_type: 'refund', amount_vnd: -100_000 },
       ]);
       expect(await points(t.driver)).toBe(3000);
-      expect(await refundRow(refundId)).toMatchObject({ amount_vnd: 80_000 });
-      await run();
-      expect(sent('refund')[0]).toMatchObject({
-        vnp_Amount: String(80_000 * 100),
-        vnp_TransactionType: '02',
-      });
-      expect(await refundRow(refundId)).toMatchObject({ status: 'done' });
+      expect(await refundRow(refundId)).toMatchObject({ status: 'requested', amount_vnd: 80_000 });
     });
 
     it('có điểm, số dư khả dụng 90.000 (đủ 80.000, thiếu 100.000) → insufficient_available_balance', async () => {
@@ -1088,30 +698,24 @@ describeDb('billing: hoàn tiền VNPay (T32 Phần 9a, SD-2e, STM-10)', () => {
       expect(await refundCount(t.id)).toBe(0);
     });
 
-    it('VNPay chưa cấu hình → payment_unconfigured, không đổi gì', async () => {
-      const t = await topUp();
+    it('VNPay chưa cấu hình vẫn hoàn được (hoàn thủ công không gọi VNPay)', async () => {
+      const t = await topUp({ late: 50_000 });
       const off = new TopUpService(
         db,
         ledger,
         loyalty,
-        new VnpayAdapter({ ...VNPAY, configured: false }, API, fakeFetch),
+        new VnpayAdapter({ ...VNPAY, configured: false }),
         runner,
         WORK,
         undefined,
         refunds,
       );
-      await expect(off.refund(t.id, admin)).rejects.toMatchObject({
-        reason: 'payment_unconfigured',
+      await expect(off.refund(t.id, admin)).resolves.toMatchObject({ status: 'requested' });
+      await expect(off.refundLatePayment(t.id, admin)).resolves.toMatchObject({
+        status: 'requested',
+        amountVnd: 50_000,
       });
-      await expect(off.refundLatePayment(t.id, admin)).rejects.toMatchObject({
-        reason: 'payment_unconfigured',
-      });
-      expect(await balance(t.account)).toBe(100_000);
-      expect(await ledgerRows(t.id)).toEqual([]);
-      expect(await one('SELECT status::text FROM top_ups WHERE id=$1', [t.id])).toEqual({
-        status: 'credited',
-      });
-      expect(await refundCount(t.id)).toBe(0);
+      expect(await refundCount(t.id)).toBe(2);
     });
 
     it('thiếu RefundService → ném rõ ràng trước khi mở transaction, không đổi gì', async () => {
@@ -1181,6 +785,7 @@ describeDb('billing: hoàn tiền VNPay (T32 Phần 9a, SD-2e, STM-10)', () => {
     it('hợp lệ: không sổ cái, trạng thái top-up giữ, amount = late_amount_vnd', async () => {
       const t = await topUp({ late: 90_000 });
       const out = await topUps.refundLatePayment(t.id, admin);
+      expect(out).toEqual({ refundId: expect.any(Number), status: 'requested', amountVnd: 90_000 });
       expect(await refundRow(out.refundId)).toMatchObject({
         status: 'requested',
         kind: 'late_payment',
@@ -1191,7 +796,6 @@ describeDb('billing: hoàn tiền VNPay (T32 Phần 9a, SD-2e, STM-10)', () => {
       expect(await one('SELECT status::text FROM top_ups WHERE id=$1', [t.id])).toEqual({
         status: 'credited',
       });
-      expect(kick).toHaveBeenCalledWith(REFUND_SEND_WORK);
     });
 
     it('tài khoản closed vẫn được', async () => {
@@ -1228,10 +832,9 @@ describeDb('billing: hoàn tiền VNPay (T32 Phần 9a, SD-2e, STM-10)', () => {
       });
     });
   });
-
   // ---------------------------------------------------------------------------------------------
   describe('BillingModule thật (Nest), BILLING_WORKER_ENABLED=false', () => {
-    it('khởi động được, refund-send được đăng ký, TopUpService được tiêm RefundService', async () => {
+    it('khởi động được, KHÔNG còn việc nền refund-send, TopUpService được tiêm RefundService', async () => {
       const saved = process.env['BILLING_WORKER_ENABLED'];
       process.env['BILLING_WORKER_ENABLED'] = 'false';
       @Module({ imports: [ConfigModule, BillingModule] })
@@ -1242,7 +845,9 @@ describeDb('billing: hoàn tiền VNPay (T32 Phần 9a, SD-2e, STM-10)', () => {
           abortOnError: false,
         });
         try {
-          expect(() => app.get(BackgroundWorkRunner).kick(REFUND_SEND_WORK)).not.toThrow();
+          // `kick` một tên chưa đăng ký thì ném (billing/CLAUDE.md).
+          expect(() => app.get(BackgroundWorkRunner).kick('refund-send')).toThrow();
+          expect(() => app.get(BackgroundWorkRunner).kick('e-invoice-issue')).not.toThrow();
           const svc = app.get(RefundService);
           expect((app.get(TopUpService) as unknown as { refunds: unknown }).refunds).toBe(svc);
         } finally {

@@ -187,7 +187,7 @@ const policy = {
         undefined,
         undefined,
         undefined,
-        new RefundService(db, adapter),
+        new RefundService(db),
       ),
     };
   }

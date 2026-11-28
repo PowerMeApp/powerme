@@ -11,9 +11,13 @@
  * người mua (người tiêu dùng cá nhân, SRS §3.4.1 / UC-PAY-01) và trả kết quả đã phân loại thay vì
  * `string`. Thông tin người bán (MST, mẫu số, ký hiệu) thuộc cấu hình của adapter thật (gắn với tài
  * khoản nhà cung cấp), không truyền theo từng lần gọi; stub không dùng (decisions "Còn mở").
+ *
+ * T32 Phần 9b: `adjustInvoice` (hoá đơn điều chỉnh giảm khi hoàn tiền), cùng yêu cầu idempotent,
+ * cùng timeout 10 s qua `callAdjustProvider`. Viết chung để adapter thật (SePay eInvoice, task riêng)
+ * cài sau; chưa kiểm SePay hỗ trợ điều chỉnh giảm thế nào (decisions "Còn mở").
  */
 import { setTimeout as sleep } from 'node:timers/promises';
-import { stubInvoiceNo } from './e-invoice.js';
+import { stubAdjustmentNo, stubInvoiceNo } from './e-invoice.js';
 
 /** Token Nest của `EInvoiceProviderAdapter` (BillingModule chọn bằng `createEInvoiceProvider`). */
 export const E_INVOICE_PROVIDER = Symbol('BILLING_E_INVOICE_PROVIDER');
@@ -29,6 +33,9 @@ export const E_INVOICE_DESCRIPTION = 'Trả trước dịch vụ sạc xe điệ
 
 /** Độ dài tối đa của `e_invoices.invoice_no` (`varchar(20)`, 0014). */
 export const INVOICE_NO_MAX_LENGTH = 20;
+
+/** Độ dài tối đa của `invoice_adjustments.provider_adjustment_no` (`varchar(20)`, 0015). */
+export const ADJUSTMENT_NO_MAX_LENGTH = 20;
 
 export interface EInvoiceInput {
   /**
@@ -54,6 +61,34 @@ export type EInvoiceResult =
   /** Bị từ chối (dữ liệu / cấu hình sai): sang `needs_review`, Admin xử lý. */
   | { kind: 'data'; message: string };
 
+/** Điều chỉnh giảm cho một hoá đơn gốc đã phát hành (T32 Phần 9b, D5). */
+export interface EInvoiceAdjustmentInput {
+  /**
+   * Khoá idempotent = `invoice_adjustments.id` (chuỗi). Gọi lại cùng khoá PHẢI trả cùng
+   * `adjustmentNo`, không cấp điều chỉnh thứ hai.
+   */
+  idempotencyKey: string;
+  /** Số hoá đơn gốc (`e_invoices.invoice_no`); chỉ gửi khi gốc đã `issued`. */
+  originalInvoiceNo: string;
+  /** Số thứ tự điều chỉnh của ta trên hoá đơn gốc (`invoice_adjustments.adjustment_no`, từ 1). */
+  adjustmentNo: number;
+  reason: string;
+  /** Số điều chỉnh, ĐÃ GỒM VAT, âm = giảm (`invoice_adjustments.amount_vnd`). */
+  amountVnd: number;
+  /** Thuế suất % của hoá đơn gốc (`e_invoices.vat_rate`), không tính lại theo ngày hoàn. */
+  vatRate: number;
+  /** Phần thuế nằm trong `amountVnd`, âm (`adjustmentVat`). */
+  vatAmountVnd: number;
+  /** Lúc Admin ghi nhận hoàn xong trên cổng (`refunds.completed_at`). */
+  refundedAt: Date;
+}
+
+export type EInvoiceAdjustmentResult =
+  /** `adjustmentNo` = số điều chỉnh do nhà cung cấp cấp (`provider_adjustment_no`). */
+  | { kind: 'issued'; adjustmentNo: string }
+  | { kind: 'transient'; message: string }
+  | { kind: 'data'; message: string };
+
 /**
  * Cổng nhà cung cấp hoá đơn điện tử.
  *
@@ -66,6 +101,14 @@ export type EInvoiceResult =
  */
 export interface EInvoiceProviderAdapter {
   createInvoice(input: EInvoiceInput, signal: AbortSignal): Promise<EInvoiceResult>;
+  /**
+   * Phát hành điều chỉnh giảm cho hoá đơn gốc `originalInvoiceNo` (T32 Phần 9b). Cùng các yêu cầu
+   * trên: idempotent theo `idempotencyKey` (= `invoice_adjustments.id`), không ném cho lỗi nghiệp vụ.
+   */
+  adjustInvoice(
+    input: EInvoiceAdjustmentInput,
+    signal: AbortSignal,
+  ): Promise<EInvoiceAdjustmentResult>;
 }
 
 /**
@@ -74,24 +117,58 @@ export interface EInvoiceProviderAdapter {
  * `INVOICE_NO_MAX_LENGTH` → `data` (không ghi được vào DB, ghi lỗi để Admin xem thay vì lặp mãi ở tx2).
  * Không bao giờ ném.
  */
-export async function callProvider(
+export function callProvider(
   adapter: EInvoiceProviderAdapter,
   input: EInvoiceInput,
   signal?: AbortSignal,
   timeoutMs: number = EINVOICE_PROVIDER_TIMEOUT_MS,
 ): Promise<EInvoiceResult> {
+  return callWithTimeout((s) => adapter.createInvoice(input, s), normalize, signal, timeoutMs);
+}
+
+/**
+ * Như `callProvider` cho `adjustInvoice` (T32 Phần 9b): timeout 10 s, adapter ném → `transient`, số
+ * điều chỉnh rỗng / quá `ADJUSTMENT_NO_MAX_LENGTH` → `data` `invalid_adjustment_no`. Không bao giờ ném.
+ */
+export function callAdjustProvider(
+  adapter: EInvoiceProviderAdapter,
+  input: EInvoiceAdjustmentInput,
+  signal?: AbortSignal,
+  timeoutMs: number = EINVOICE_PROVIDER_TIMEOUT_MS,
+): Promise<EInvoiceAdjustmentResult> {
+  return callWithTimeout(
+    (s) => adapter.adjustInvoice(input, s),
+    normalizeAdjustment,
+    signal,
+    timeoutMs,
+  );
+}
+
+type ProviderFailure = { kind: 'transient' | 'data'; message: string };
+
+/**
+ * Lõi chung của `callProvider` / `callAdjustProvider` (rút ra ở Phần 9b, hành vi của `callProvider`
+ * không đổi): signal riêng cho adapter (huỷ khi worker huỷ hoặc hết giờ), đua với hẹn giờ, adapter
+ * ném → `transient` kèm message.
+ */
+async function callWithTimeout<R>(
+  call: (signal: AbortSignal) => Promise<R>,
+  normalizeResult: (r: R) => R,
+  signal: AbortSignal | undefined,
+  timeoutMs: number,
+): Promise<R | ProviderFailure> {
   const ctrl = new AbortController();
   const onAbort = () => ctrl.abort(signal?.reason);
   if (signal?.aborted) ctrl.abort(signal.reason);
   else signal?.addEventListener('abort', onAbort, { once: true });
   let timer: NodeJS.Timeout | undefined;
-  const timedOut = new Promise<EInvoiceResult>((resolve) => {
+  const timedOut = new Promise<ProviderFailure>((resolve) => {
     timer = setTimeout(() => {
       ctrl.abort(new Error('provider_timeout'));
       resolve({ kind: 'transient', message: 'provider_timeout' });
     }, timeoutMs);
   });
-  const called = adapter.createInvoice(input, ctrl.signal).then(normalize, (err: unknown) => ({
+  const called = call(ctrl.signal).then(normalizeResult, (err: unknown) => ({
     kind: 'transient' as const,
     message: err instanceof Error ? err.message : String(err),
   }));
@@ -110,6 +187,21 @@ function normalize(r: EInvoiceResult): EInvoiceResult {
       return { kind: 'data', message: `invalid_invoice_no: '${String(r.invoiceNo)}'` };
     return { kind: 'issued', invoiceNo: no };
   }
+  return normalizeFailure(r);
+}
+
+function normalizeAdjustment(r: EInvoiceAdjustmentResult): EInvoiceAdjustmentResult {
+  if (r?.kind === 'issued') {
+    const no = typeof r.adjustmentNo === 'string' ? r.adjustmentNo.trim() : '';
+    if (no === '' || no.length > ADJUSTMENT_NO_MAX_LENGTH)
+      return { kind: 'data', message: `invalid_adjustment_no: '${String(r.adjustmentNo)}'` };
+    return { kind: 'issued', adjustmentNo: no };
+  }
+  return normalizeFailure(r);
+}
+
+/** Lỗi đã phân loại giữ nguyên; kết quả không đúng dạng → `transient` `provider_invalid_result`. */
+function normalizeFailure(r: { kind?: unknown; message?: unknown } | undefined): ProviderFailure {
   if (r?.kind === 'transient' || r?.kind === 'data')
     return { kind: r.kind, message: String(r.message ?? '') };
   return { kind: 'transient', message: 'provider_invalid_result' };
@@ -152,8 +244,9 @@ export function loadEInvoiceStubConfig(env: NodeJS.ProcessEnv = process.env): EI
 }
 
 /**
- * Nhà cung cấp giả: không gọi HTTP. `success` → số hoá đơn `stubInvoiceNo(khoá)` (ổn định theo khoá,
- * nên tự nhiên idempotent); `transient` / `data` → lỗi tương ứng. Độ trễ dừng sớm khi `signal` huỷ.
+ * Nhà cung cấp giả: không gọi HTTP. `success` → số hoá đơn `stubInvoiceNo(khoá)` / số điều chỉnh
+ * `stubAdjustmentNo(khoá)` (ổn định theo khoá, nên tự nhiên idempotent); `transient` / `data` → lỗi
+ * tương ứng. Độ trễ dừng sớm khi `signal` huỷ. Hai method dùng chung cấu hình.
  */
 export class StubEInvoiceProvider implements EInvoiceProviderAdapter {
   constructor(private readonly config: EInvoiceStubConfig) {}
@@ -163,6 +256,21 @@ export class StubEInvoiceProvider implements EInvoiceProviderAdapter {
     switch (this.config.mode) {
       case 'success':
         return { kind: 'issued', invoiceNo: stubInvoiceNo(input.idempotencyKey) };
+      case 'transient':
+        return { kind: 'transient', message: 'stub: lỗi tạm thời (EINVOICE_STUB_MODE=transient)' };
+      case 'data':
+        return { kind: 'data', message: 'stub: bị từ chối (EINVOICE_STUB_MODE=data)' };
+    }
+  }
+
+  async adjustInvoice(
+    input: EInvoiceAdjustmentInput,
+    signal: AbortSignal,
+  ): Promise<EInvoiceAdjustmentResult> {
+    if (this.config.delayMs > 0) await sleep(this.config.delayMs, undefined, { signal });
+    switch (this.config.mode) {
+      case 'success':
+        return { kind: 'issued', adjustmentNo: stubAdjustmentNo(input.idempotencyKey) };
       case 'transient':
         return { kind: 'transient', message: 'stub: lỗi tạm thời (EINVOICE_STUB_MODE=transient)' };
       case 'data':

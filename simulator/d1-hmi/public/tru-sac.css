@@ -1,10 +1,11 @@
 /*
   tru-sac.css — kiểu dáng của khối "Trụ sạc" minh hoạ trên HMI D1 (QA-02).
 
-  LÀM GÌ: tô màu và làm hoạt ảnh cho hình SVG do tru-sac.js dựng, và khung "Cloudlight Hero" của
-    khối #tru (QA-06). Màu nền/chữ lấy từ token chung /static/bevel-tokens.css (--paper, --cloud,
-    --ink, --gray, --ok, --danger...); bảng màu đèn --lt-* cũng ở đó (dùng chung với bundle 3D và
-    trang tổng). Các biến --tru-* (màu thân trụ, xe của hình 2D) khai báo ở đây, có bản sáng/tối.
+  LÀM GÌ: tô màu và làm hoạt ảnh cho hình SVG do tru-sac.js dựng, và khung hero của khối #tru
+    (QA-10: thẻ Graphite có hairline, bộ màu PowerMe). Màu nền/chữ lấy từ token chung
+    /static/bevel-tokens.css (--ink, --gray, --ok, --danger, --pm-*...); bảng màu đèn --lt-* cũng ở đó
+    (dùng chung với bundle 3D và trang tổng). Các biến --tru-* (màu thân trụ, xe của hình 2D) khai báo
+    ở đây: tối là mặc định, sáng khi ?theme=light.
   VÌ SAO TÁCH FILE: tru.html đã dài; hình + hoạt ảnh là một mảng riêng, dễ đọc khi tách.
   QUY TẮC HOẠT ẢNH: mọi chuyển động nằm trong @keyframes/transition ở file này và bị tắt bởi
     (a) lớp .noanim trên #tru (nút "Tắt hoạt ảnh"), (b) prefers-reduced-motion: reduce.
@@ -12,36 +13,31 @@
 */
 
 :root {
-  /* Màu đèn --lt-*: xem bevel-tokens.css. Thân trụ, xe, cáp của hình 2D: bản sáng */
+  /* Màu đèn --lt-*: xem bevel-tokens.css. Thân trụ, xe, cáp của hình 2D: bản tối (graphite trung tính) */
+  --tru-body: #1f2022;
+  --tru-edge: #4a4e4c;
+  --tru-car: #8b908e;
+  --tru-glass: #2a2d2c;
+  --tru-cable: #b9bcba;
+}
+:root[data-theme='light'] {
   --tru-body: #ffffff;
-  --tru-edge: #9aa3b0;
-  --tru-car: #c9d3e1;
-  --tru-glass: #eef3fa;
-  --tru-cable: #2b2d33;
-}
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme='light']) {
-    --tru-body: #2a3a4e;
-    --tru-edge: #5f738c;
-    --tru-car: #7f9bb8;
-    --tru-glass: #1d2e42;
-    --tru-cable: #9fb0c4;
-  }
-}
-:root[data-theme='dark'] {
-  --tru-body: #2a3a4e;
-  --tru-edge: #5f738c;
-  --tru-car: #7f9bb8;
-  --tru-glass: #1d2e42;
-  --tru-cable: #9fb0c4;
+  --tru-edge: #a3a7a5;
+  --tru-car: #d3d6d4;
+  --tru-glass: #f1f2f0;
+  --tru-cable: #2b2d2c;
 }
 
-/* ── Khung khối: Cloudlight Hero (QA-06) ───────────────────────────────── */
+/* ── Khung khối: thẻ hero Graphite + hairline, ánh teal/gold rất nhạt ở hai góc (QA-10) ── */
 #tru {
   margin: var(--s3, 24px) 0 0;
   padding: var(--s5, 40px) var(--s5, 40px) var(--s3, 24px);
-  border-radius: var(--r-card-lg, 32px);
+  border-radius: var(--r-card, 20px);
   background: var(--hero-sky);
+  box-shadow:
+    var(--inset-hi),
+    0 0 0 1px var(--hairline),
+    var(--shadow-soft);
 }
 #tru .tru-head {
   display: flex;
@@ -54,14 +50,11 @@
   flex-wrap: wrap;
   gap: 8px;
 }
-/* nút phụ trên nền trời sáng: trắng mờ, chữ Ink */
+/* nút phụ trên thẻ hero: kiểu nút mặc định (nền nổi + hairline), cỡ nhỏ hơn */
 #tru .tru-tools button {
-  background: color-mix(in srgb, var(--paper) 72%, transparent);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-}
-#tru .tru-tools button:hover:not(:disabled) {
-  background: var(--paper);
+  min-height: 34px;
+  padding: 6px 14px;
+  font-size: 0.8125rem;
 }
 #tru .tru-body {
   margin-top: var(--s4, 32px);
@@ -143,7 +136,7 @@
   letter-spacing: 1px;
 }
 #tru .lc-ok {
-  fill: #5df0a0;
+  fill: #3ff0d6; /* teal PowerMe trên LCD tối */
 }
 #tru .lc-warn {
   fill: #ffc857;
@@ -281,7 +274,7 @@
 }
 #tru .badge-t1,
 #tru .badge-t2 {
-  fill: var(--ink, #0b1620);
+  fill: var(--ink, #f5f3ec);
   text-anchor: middle;
 }
 #tru .badge-t1 {
@@ -458,7 +451,7 @@
   #tru {
     margin-top: var(--s2, 16px);
     padding: var(--s3, 24px) var(--s2, 16px) var(--s2, 16px);
-    border-radius: var(--r-card, 24px);
+    border-radius: var(--r-card, 20px);
   }
   #tru .tru-body {
     margin-top: var(--s3, 24px);

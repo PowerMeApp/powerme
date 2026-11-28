@@ -492,6 +492,7 @@ function GunHead({ M, tipMat, headRef }) {
 // ── Một khoang súng: khay + vòng đèn + LED viền + cáp + hạt năng lượng + xe ──
 function Bay({ id, store, M }) {
   const sg = id === 1 ? -1 : 1;
+  const bayRef = useRef(); // QA-11: trụ một súng ẩn cả khoang súng B
   const carRef = useRef();
   const wheels = useRef([]);
   const headRef = useRef();
@@ -562,6 +563,7 @@ function Bay({ id, store, M }) {
   useFrame((frame, dt) => {
     const s = store.get();
     const c = s?.connectors?.find((x) => x.id === id);
+    if (bayRef.current) bayRef.current.visible = !!c || !s;
     if (!c) return;
     const S = st8.current;
     const lt = store.lt;
@@ -686,7 +688,7 @@ function Bay({ id, store, M }) {
   });
 
   return (
-    <group>
+    <group ref={bayRef}>
       {/* khay súng ở hông trụ: vỏ, lòng khay tối, vòng đèn */}
       <RBox
         args={[0.16, 0.36, 0.3]}

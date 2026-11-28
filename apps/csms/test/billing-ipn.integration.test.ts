@@ -213,7 +213,7 @@ describeDb('billing: IPN VNPay — TopUpService.applyPaymentResult (T32 Phần 6
     await resetAndMigrate(db.$client);
     const ledger = new CreditLedgerService(db);
     loyalty = new LoyaltyService({ pointsExpiryMonths: 12 });
-    eInvoices = new EInvoiceService(db, { createInvoice: jest.fn() }, {
+    eInvoices = new EInvoiceService(db, { createInvoice: jest.fn(), adjustInvoice: jest.fn() }, {
       register: jest.fn(),
       kick,
     } as unknown as BackgroundWorkRunner);
