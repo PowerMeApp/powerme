@@ -292,6 +292,9 @@ async function run() {
     { loadChargePolicy },
     { ChargeSettlementService },
     { DriverChargingService },
+    { CreditLedgerService },
+    { LoyaltyService },
+    { loadLoyaltyPolicy },
   ] = await Promise.all([
     import('../../dist/config.js'),
     import('../../dist/db/db.module.js'),
@@ -300,6 +303,9 @@ async function run() {
     import('../../dist/sessions/charge-policy.config.js'),
     import('../../dist/sessions/charge-settlement.service.js'),
     import('../../dist/sessions/driver-charging.service.js'),
+    import('../../dist/billing/credit-ledger.service.js'),
+    import('../../dist/billing/loyalty.service.js'),
+    import('../../dist/billing/loyalty-policy.config.js'),
   ]);
 
   mkdirSync(o.out, { recursive: true });
@@ -343,7 +349,12 @@ async function run() {
     const service = new DriverChargingService(
       db,
       new ConnectionRegistry(db),
-      new ChargeSettlementService(db, policy),
+      new ChargeSettlementService(
+        db,
+        new CreditLedgerService(db),
+        new LoyaltyService(loadLoyaltyPolicy({})),
+        policy,
+      ),
       policy,
       config,
     );
