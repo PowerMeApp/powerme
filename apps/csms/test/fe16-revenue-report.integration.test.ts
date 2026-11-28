@@ -51,7 +51,7 @@ describeDb('T108a revenue report (BR-P46, K2, K3, K6, K11)', () => {
     await db?.$client.end();
   });
 
-  it('counts only csms_billed reconciled sessions with a session_debit, once each (§4 scenario)', async () => {
+  it('TC-F16-01 counts only csms_billed reconciled sessions with a session_debit, once each (§4 scenario)', async () => {
     const r = await report({ operatorId: ids['opA']! });
     expect(r.totals).toEqual(OPERATOR_A_NOVEMBER);
     expect(r.pending_reconciliation).toEqual({ session_count: 1 });

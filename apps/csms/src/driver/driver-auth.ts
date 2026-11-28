@@ -32,6 +32,27 @@ export class DriverApiError extends Error {
   }
 }
 
+/**
+ * BE-49: số trong claim `ver` (so với `users.token_version`, migration 0033). Token phát trước BE-49
+ * không có claim → 0, bằng DEFAULT của cột, nên deploy không đăng xuất ai. Sai kiểu → ném lỗi.
+ */
+export function tokenVersionClaim(raw: unknown): number {
+  if (raw === undefined) return 0;
+  if (typeof raw !== 'number' || !Number.isSafeInteger(raw) || raw < 0) throw new Error('ver');
+  return raw;
+}
+
+/**
+ * BE-49: mã phiên thiết bị = jti (UUID) của refresh token, chép vào claim `sid` của access token.
+ * Kiểm dạng trước khi đưa vào SQL `::uuid` để chuỗi lạ không thành lỗi 500.
+ */
+export function isSessionId(raw: unknown): raw is string {
+  return (
+    typeof raw === 'string' &&
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(raw)
+  );
+}
+
 export function databaseId(raw: unknown): string {
   if (
     typeof raw !== 'string' ||
@@ -107,6 +128,10 @@ export async function authenticateDriver(
   ).length;
   const header = req.headers.authorization;
   let subject: string;
+  /** null = đăng nhập dev (X-Driver-Id), không có token để so. */
+  let version: number | null = null;
+  /** BE-49: `sid` của access token; null = token phát trước BE-49 hoặc đăng nhập dev. */
+  let sessionId: string | null = null;
   if (header !== undefined) {
     if (
       authorizationCount !== 1 ||
@@ -135,6 +160,10 @@ export async function authenticateDriver(
       )
         throw new DriverApiError(401, 'unauthorized');
       if (payload.role !== 'driver') throw new DriverApiError(403, 'forbidden');
+      version = tokenVersionClaim(payload['ver']);
+      const sid = payload['sid'];
+      if (sid !== undefined && !isSessionId(sid)) throw new DriverApiError(401, 'unauthorized');
+      sessionId = sid ?? null;
     } catch (error) {
       if (error instanceof DriverApiError && error.status === 403) throw error;
       throw new DriverApiError(401, 'unauthorized');
@@ -149,11 +178,17 @@ export async function authenticateDriver(
   // WP3: roles and account state are checked against DB on every request.
   const row = (
     await db.$client.query(
-      `SELECT u.role,u.account_status,d.user_id FROM users u LEFT JOIN drivers d ON d.user_id=u.id WHERE u.id=$1`,
-      [subject],
+      `SELECT u.role,u.account_status,u.token_version,d.user_id,
+         EXISTS(SELECT 1 FROM driver_refresh_revocations r WHERE r.jti=$2::uuid) AS revoked
+       FROM users u LEFT JOIN drivers d ON d.user_id=u.id WHERE u.id=$1`,
+      [subject, sessionId],
     )
   ).rows[0];
   if (!row) throw new DriverApiError(401, 'unauthorized');
+  // BE-49: thiết bị của token này đã đăng xuất (sid bị thu hồi), hoặc tài xế đã "đăng xuất mọi
+  // thiết bị" sau khi token được phát (token_version khác) → token chết như hết hạn.
+  if (row.revoked || (version !== null && row.token_version !== version))
+    throw new DriverApiError(401, 'unauthorized');
   if (row.role !== 'driver' || row.account_status !== 'active' || !row.user_id)
     throw new DriverApiError(403, 'forbidden');
   return subject;

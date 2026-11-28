@@ -134,8 +134,8 @@ export function BillingExceptionsPage() {
       ) : !data ? null : tab === 'late' ? (
         <>
           <p className="muted small">
-            Khoản trả sau khi lần nạp đã hết hạn hoặc thất bại: không cộng vào ví, Admin hoàn lại số
-            đã trả (BR-P13). Nút hoàn tiền có khi luồng hoàn tiền thủ công (T152) xong.
+            Khoản trả sau khi lần nạp đã hết hạn hoặc thất bại: không cộng vào tín dụng sạc, quản
+            trị viên hoàn lại số đã trả.
           </p>
           {data.late_payments.items.length === 0 ? (
             empty

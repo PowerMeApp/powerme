@@ -477,7 +477,7 @@ describeDb('migration 0003 — billing WF-02 (nâng cấp DB đã có 0002)', ()
       expect(negative.constraint).toBe('top_ups_points_redeemed_check');
     });
 
-    it('gateway_transaction_no UNIQUE khi có (BR-P13): nhiều NULL được, cùng vnp_TransactionNo cho top-up thứ hai bị từ chối', async () => {
+    it('TC-F06-03 gateway_transaction_no UNIQUE khi có (BR-P13): nhiều NULL được, cùng vnp_TransactionNo cho top-up thứ hai bị từ chối', async () => {
       const ins = (ref: string, txnNo: string | null) =>
         q(
           `INSERT INTO top_ups (gateway_reference, credit_account_id, amount_vnd, amount_paid_vnd,
