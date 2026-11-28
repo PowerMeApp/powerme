@@ -1618,6 +1618,35 @@ paths:
   # ============================================================================================
   # REVENUE (operator + admin) — BR-P46
   # ============================================================================================
+  /operator/v1/faults/stats:
+    get:
+      tags: [faults]
+      operationId: getOperatorFaultStats
+      x-roles: [operator_staff]
+      x-status: implemented
+      x-refs: [UC-OPS-02, UC-OPS-03, 'Table 5 #17']
+      summary: Thống kê sự cố của operator trong một kỳ (biểu đồ trang tổng quan)
+      description: |
+        Sự cố (FaultEvent) **phát sinh** (`raised_at`) trong `[from 00:00, to + 1 ngày 00:00)` giờ
+        Việt Nam, của trụ thuộc operator người gọi (lấy từ DB, không nhận `operator_id` — gửi lên là
+        400 `invalid_input`). Mức độ tính từ `error_code` (bảng hướng dẫn mã lỗi, như danh sách sự
+        cố); nguồn theo cùng quy tắc `kind` của danh sách. `resolved` = số sự cố của kỳ đã đóng;
+        `mean_time_to_resolve_s` = trung bình `resolved_at − raised_at` của chúng (null khi chưa có).
+        `days` chỉ có ngày có sự cố, theo thứ tự; giao diện tự điền ngày trống. Kỳ như `revenue`
+        (thiếu / sai ngày → `invalid_input`, `from > to` hoặc quá 366 ngày → `invalid_period`).
+      parameters:
+        - $ref: '#/components/parameters/fromDate'
+        - $ref: '#/components/parameters/toDate'
+      responses:
+        '200':
+          description: Thống kê
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FaultStats' }
+        '400': { $ref: '#/components/responses/RevenueBadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
   /operator/v1/revenue:
     get:
       tags: [revenue]
@@ -1693,6 +1722,33 @@ paths:
           content:
             text/csv:
               schema: { type: string }
+        '400': { $ref: '#/components/responses/RevenueBadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /admin/v1/faults/stats:
+    get:
+      tags: [faults]
+      operationId: getPlatformFaultStats
+      x-roles: [admin]
+      x-status: implemented
+      x-refs: [UC-ADM-07, 'Table 5 #27']
+      summary: Thống kê sự cố toàn nền tảng, lọc theo operator
+      description: >-
+        Cùng định nghĩa với route operator, trên mọi trụ trừ trạm lab (như `/admin/v1/summary`);
+        `operator_id = A` cho đúng số mà nhân viên của A thấy ở `GET /operator/v1/faults/stats`.
+      parameters:
+        - $ref: '#/components/parameters/fromDate'
+        - $ref: '#/components/parameters/toDate'
+        - name: operator_id
+          in: query
+          schema: { $ref: '#/components/schemas/Id' }
+      responses:
+        '200':
+          description: Thống kê
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FaultStats' }
         '400': { $ref: '#/components/responses/RevenueBadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
@@ -3750,6 +3806,60 @@ components:
             serial_number: { type: [string, 'null'] }
             day: { type: [string, 'null'], format: date }
         - $ref: '#/components/schemas/RevenueBucket'
+    FaultSeverityCounts:
+      type: object
+      required: [critical, major, minor, none]
+      properties:
+        critical: { type: integer, minimum: 0 }
+        major: { type: integer, minimum: 0 }
+        minor: { type: integer, minimum: 0 }
+        none: { type: integer, minimum: 0 }
+    FaultStats:
+      type: object
+      required: [from, to, generated_at, totals, days, top_charge_points]
+      properties:
+        from: { type: string, format: date }
+        to: { type: string, format: date }
+        generated_at: { type: string, format: date-time }
+        totals:
+          type: object
+          required: [raised, resolved, by_severity, by_kind, mean_time_to_resolve_s]
+          properties:
+            raised: { type: integer, minimum: 0 }
+            resolved: { type: integer, minimum: 0, description: 'Sự cố của kỳ đã `resolved`' }
+            by_severity: { $ref: '#/components/schemas/FaultSeverityCounts' }
+            by_kind:
+              type: object
+              required: [faulted, offline, driver_report]
+              properties:
+                faulted: { type: integer, minimum: 0 }
+                offline: { type: integer, minimum: 0 }
+                driver_report: { type: integer, minimum: 0 }
+            mean_time_to_resolve_s:
+              type: [integer, 'null']
+              description: Trung bình resolved_at − raised_at (giây) của sự cố đã đóng; null khi chưa có
+        days:
+          type: array
+          description: Ngày (UTC+7) có sự cố, theo thứ tự
+          items:
+            allOf:
+              - $ref: '#/components/schemas/FaultSeverityCounts'
+              - type: object
+                required: [day, total]
+                properties:
+                  day: { type: string, format: date }
+                  total: { type: integer, minimum: 0 }
+        top_charge_points:
+          type: array
+          maxItems: 5
+          items:
+            type: object
+            required: [charge_point_id, serial_number, station_name, count]
+            properties:
+              charge_point_id: { $ref: '#/components/schemas/Id' }
+              serial_number: { type: string }
+              station_name: { type: [string, 'null'] }
+              count: { type: integer, minimum: 1 }
     RevenueReport:
       type: object
       required: [from, to, group_by, currency, rows, totals, pending_reconciliation, unsettled, generated_at]

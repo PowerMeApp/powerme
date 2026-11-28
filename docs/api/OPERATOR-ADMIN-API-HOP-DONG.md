@@ -349,7 +349,7 @@ tách theo bề mặt — refresh token không mang `role`, role đọc lại t�
 | `GET /operator/v1/commands/{id}` | operator_staff | UC-OPS-04 | planned · Trí | đọc `remote_commands` |
 | `GET /operator/v1/ocpp-messages` | operator_staff | FE-08, PKG-2 | **console** `messages` · Nghĩa | chỉ trụ của operator; Table 6 chưa có màn hình này (câu hỏi N3) |
 
-### 3.4 Sự cố (4)
+### 3.4 Sự cố (6)
 
 | Endpoint | Role | UC / FR / BR | Trạng thái · người làm | Ghi chú |
 |---|---|---|---|---|
@@ -357,6 +357,8 @@ tách theo bề mặt — refresh token không mang `role`, role đọc lại t�
 | `POST /operator/v1/faults/{id}/acknowledge` | operator_staff | STM-6 t2 | **console** · Nghĩa | console ghi `acknowledged_by = null`; route mới ghi người gọi |
 | `POST /operator/v1/faults/{id}/reset` | operator_staff | STM-6 t4, BR-P07, WF-04 #12 | **console** `resetFault` · Nghĩa | đồng bộ; `type`/`force` chuyển từ query vào body; Idempotency-Key |
 | `POST /operator/v1/faults/{id}/close` | operator_staff | STM-6 t7, BR-P42 | **console** · Nghĩa | |
+| `GET /operator/v1/faults/stats` | operator_staff | UC-OPS-02, UC-OPS-03 | **đã chạy** (thống kê trang tổng quan, màn 17) | `from`, `to` (ngày, tối đa 366 ngày, như `revenue`); sự cố **phát sinh** trong kỳ của trụ thuộc Operator người gọi: theo ngày (UTC+7) × mức độ, theo nguồn (`faulted` / `offline` / `driver_report`), số đã `resolved`, thời gian xử lý trung bình (giây), 5 trụ nhiều sự cố nhất. Mức độ tính từ `error_code` như danh sách. `operator_id` → 400 |
+| `GET /admin/v1/faults/stats` | admin | UC-ADM-07 | **đã chạy** (thống kê trang tổng quan, màn 27) | như route operator, toàn nền tảng (bỏ trạm lab như `/admin/v1/summary`), lọc `operator_id` |
 
 ### 3.5 Phiên, đối soát, phiên review / unattributed, khôi phục T72 (15)
 
@@ -548,9 +550,10 @@ Cập nhật 23/11/2026 theo x-status của YAML sau T108b (#200) và FE-07: đ�
 BE-44 (25/11): 13 → 16 (onboard, đăng ký serial, sổ trụ — `GET` mới làm một phần bộ lọc).
 27/11 (T32 Phần 10a, review Ân #212): bỏ `POST /admin/v1/billing/refunds/{id}/retry` vì hoàn tiền làm
 thủ công (WF-02 D1, D-AC / SRS BR-P51), 76 → 75.
+28/11 (thống kê trang tổng quan): thêm `GET /operator/v1/faults/stats` và `GET /admin/v1/faults/stats`, 75 → 77.
 
-**75 endpoint** (bản 10/11: 76; bản BE-31 12/11: 73): 2 dưới `/api/auth/v1` (đăng nhập và refresh,
-công khai — hai route công khai duy nhất), 39 dưới `/api/operator/v1`, 34 dưới `/api/admin/v1`. So
+**77 endpoint** (bản 10/11: 76; bản BE-31 12/11: 73): 2 dưới `/api/auth/v1` (đăng nhập và refresh,
+công khai — hai route công khai duy nhất), 40 dưới `/api/operator/v1`, 35 dưới `/api/admin/v1`. So
 với BE-31: +1 refresh (T125), +2 giao dịch Admin (T108).
 
 | Nhóm | Tổng | đã chạy | console | service | in progress | planned |
@@ -558,7 +561,7 @@ với BE-31: +1 refresh (T125), +2 giao dịch Admin (T108).
 | Đăng nhập, refresh & `/me` | 4 | 4 | 0 | 0 | 0 | 0 |
 | Onboarding & sổ trụ | 10 | 3 | 0 | 0 | 0 | 7 |
 | Giám sát & lệnh | 7 | 3 | 2 | 0 | 0 | 2 |
-| Sự cố | 4 | 0 | 4 | 0 | 0 | 0 |
+| Sự cố | 6 | 2 | 4 | 0 | 0 | 0 |
 | Phiên, đối soát, T72 | 15 | 0 | 3 | 9 | 2 | 1 |
 | Biểu giá & khuyến mãi | 6 | 0 | 0 | 0 | 0 | 6 |
 | Doanh thu & giao dịch | 6 | 6 | 0 | 0 | 0 | 0 |
@@ -566,7 +569,7 @@ với BE-31: +1 refresh (T125), +2 giao dịch Admin (T108).
 | Thẻ RFID | 3 | 3 | 0 | 0 | 0 | 0 |
 | Tổng quan nền tảng | 5 | 0 | 5 | 0 | 0 | 0 |
 | Ngoại lệ thanh toán | 7 | 0 | 0 | 0 | 0 | 7 |
-| **Cộng** | **75** | **19** | **14** | **9** | **2** | **31** |
+| **Cộng** | **77** | **21** | **14** | **9** | **2** | **31** |
 
 ## 4. Doanh thu theo BR-P46
 
@@ -952,6 +955,8 @@ trạng thái (2xx/4xx nghiệp vụ khác với 401/403). Ba điều kiện c�
 | 73 | `GET /api/admin/v1/billing/e-invoices` | 401 | 403 | 403 | ✓ | planned |
 | 74 | `POST /api/admin/v1/billing/e-invoices/{invoiceId}/retry` | 401 | 403 | 403 | ✓ | planned |
 | 75 | `GET /api/admin/v1/billing/refunds` | 401 | 403 | 403 | ✓ | planned |
+| 76 | `GET /api/operator/v1/faults/stats` | 401 | 403 | ✓ | 403 | implemented |
+| 77 | `GET /api/admin/v1/faults/stats` | 401 | 403 | 403 | ✓ | implemented |
 
 ## RFID credit protection — 27/11/2026
 
