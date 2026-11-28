@@ -16,6 +16,11 @@ import type {
   BillingExceptions,
   InvoiceRetryResult,
   RecheckResult,
+  RefundConfirmed,
+  RefundFailed,
+  RefundQueue,
+  RefundRedone,
+  RefundRequested,
   ApiErrorBody,
   ChargePointLifecycle,
   ChargePointPage,
@@ -480,6 +485,40 @@ export const api = createApi({
       }),
       invalidatesTags: ['Billing', 'AdminSummary'],
     }),
+    // Manual refunds (Khang's #257, BR-P51): customer service refunds in the VNPay merchant portal,
+    // the Admin asks for the refund and records the outcome here.
+    refundQueue: b.query<RefundQueue, void>({
+      query: () => 'admin/v1/billing/refunds',
+      providesTags: ['Billing'],
+    }),
+    refundTopUp: b.mutation<RefundRequested, string>({
+      query: (id) => ({ url: `admin/v1/billing/top-ups/${id}/refund`, method: 'POST' }),
+      invalidatesTags: ['Billing', 'AdminSummary'],
+    }),
+    refundLatePayment: b.mutation<RefundRequested, string>({
+      query: (id) => ({ url: `admin/v1/billing/top-ups/${id}/late-refund`, method: 'POST' }),
+      invalidatesTags: ['Billing', 'AdminSummary'],
+    }),
+    confirmRefund: b.mutation<RefundConfirmed, { id: string; gateway_refund_no: string }>({
+      query: ({ id, gateway_refund_no }) => ({
+        url: `admin/v1/billing/refunds/${id}/confirm`,
+        method: 'POST',
+        body: { gateway_refund_no },
+      }),
+      invalidatesTags: ['Billing', 'AdminSummary'],
+    }),
+    failRefund: b.mutation<RefundFailed, { id: string; reason: string }>({
+      query: ({ id, reason }) => ({
+        url: `admin/v1/billing/refunds/${id}/fail`,
+        method: 'POST',
+        body: { reason },
+      }),
+      invalidatesTags: ['Billing', 'AdminSummary'],
+    }),
+    redoRefund: b.mutation<RefundRedone, string>({
+      query: (id) => ({ url: `admin/v1/billing/refunds/${id}/redo`, method: 'POST' }),
+      invalidatesTags: ['Billing', 'AdminSummary'],
+    }),
     // Driver picker of screen 30: active drivers by name, email or phone (T161, admin-users.ts).
     driverSearch: b.query<UserAccountPage, string>({
       query: (q) => {
@@ -528,6 +567,12 @@ export const {
   useRecheckTopUpMutation,
   useMarkExceptionReviewedMutation,
   useReviewConflictMutation,
+  useRefundQueueQuery,
+  useRefundTopUpMutation,
+  useRefundLatePaymentMutation,
+  useConfirmRefundMutation,
+  useFailRefundMutation,
+  useRedoRefundMutation,
   useAdminUsersQuery,
   useCreateUserMutation,
   useUpdateUserMutation,
