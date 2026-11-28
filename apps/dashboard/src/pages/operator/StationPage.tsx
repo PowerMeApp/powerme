@@ -16,6 +16,7 @@ import { RevenueReportView } from '../../features/revenue/RevenueReportView';
 import { DataTable } from '../../ui/DataTable';
 import { Notice } from '../../ui/Notice';
 import { PageHeader, Section } from '../../ui/PageHeader';
+import { Pager, useClientPage } from '../../ui/Pager';
 import { StatusBadge } from '../../ui/StatusBadge';
 import { LIST_POLL_MS } from './ChargePointListPage';
 
@@ -32,6 +33,7 @@ export function StationPage() {
   const items = data?.items ?? [];
   const site = items[0]?.site;
   const online = items.filter((cp) => !isOffline(cp)).length;
+  const { pageRows, paged, pagerProps } = useClientPage(items);
 
   if (isLoading) return <Loader size="sm" aria-label="Đang tải…" />;
   if (error && !data) return <Notice tone="error">{errorMessage(error)}</Notice>;
@@ -58,7 +60,10 @@ export function StationPage() {
         subtitle={`Trạm sạc ${site.site_code} · ${online}/${items.length} trụ sạc đang kết nối`}
       />
       <Section label="Trụ sạc của trạm">
-        <DataTable minWidth={680}>
+        <DataTable
+          minWidth={680}
+          footer={paged ? <Pager label="Phân trang trụ sạc" {...pagerProps} /> : undefined}
+        >
           <Table.Thead>
             <Table.Tr>
               <Table.Th scope="col">Trụ sạc</Table.Th>
@@ -68,7 +73,7 @@ export function StationPage() {
             </Table.Tr>
           </Table.Thead>
           <Table.Tbody>
-            {items.map((cp) => (
+            {pageRows.map((cp) => (
               <Table.Tr
                 key={cp.id}
                 aria-label={`Trụ sạc ${cp.display_code ?? cp.serial_number}`}
